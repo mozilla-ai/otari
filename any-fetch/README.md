@@ -48,7 +48,9 @@ A `FetchedPage`: the `url` asked for, the `final_url` after redirects, the `titl
 text hit its own, and the provider's own response as `raw`, which is left out of `repr`.
 
 A failed call raises `ProviderError` with the provider's name, a `tag` and the HTTP `status` when
-there is one. A missing key raises `MissingCredentialError`. All errors derive from
+there is one. A successful answer that lacks a field the provider documents, or carries one of
+the wrong type, raises it with the tag `unexpected_response`, so a change on the provider's side
+fails the call rather than degrading it. A missing key raises `MissingCredentialError`. All errors derive from
 `AnyFetchError`, and none carries a response body, a URL or a key.
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, the provider's
@@ -122,9 +124,17 @@ only, so `text.maxCharacters` is refused. The other native options are `highligh
 
 A page Exa could not fetch comes back as `FetchedPage.error`, with Exa's tag, such as
 `CRAWL_NOT_FOUND`, and the page's HTTP status. A page with no text, which Exa reports as
-`CRAWL_EMPTY_CONTENT`, comes back empty rather than as an error. An answer with no page and no
-reason comes back as the error `no_result`. A failed call raises
+`CRAWL_EMPTY_CONTENT`, comes back empty rather than as an error. A failed call raises
 `ProviderError` with Exa's HTTP status and its `tag`, such as `INVALID_API_KEY`.
+
+Every field read from a successful answer is checked, so a change on Exa's side fails the call
+rather than degrading it. An answer without `results` or a `statuses` entry for the URL whose
+`status` is `success` or `error`, a success without its page's `url`, `title` and `text`, any of
+these or `costDollars.total` of the wrong type, or a `publishedDate` that does not parse, raises
+`ProviderError` with the tag `unexpected_response`. So does an answer with no page and no reason.
+Exa documents its cost as optional, so an answer without one reports none; the live tests check
+that it reports one.
+Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.
 
 ## The fake provider
 
@@ -161,3 +171,8 @@ skipped unless `ANY_FETCH_LIVE=1`:
 ```bash
 ANY_FETCH_LIVE=1 uv run pytest any-fetch/tests/test_live.py
 ```
+
+It checks the data as well as the call, against what its `EXPECTED` table says each provider must
+return, which a production provider joins as it joins the conformance scenarios. CI runs it weekly,
+on demand, and on a pull request that changes either library
+(`.github/workflows/otari-libs-live.yml`), with the keys from repository secrets.

@@ -49,7 +49,9 @@ provider signaled one inside a successful response, and the provider's whole res
 `raw` is left out of `repr`.
 
 A failed call raises `ProviderError` with the provider's name, a `tag` and the HTTP `status` when
-there is one. A missing key raises `MissingCredentialError`. All errors derive from
+there is one. A successful answer that lacks a field the provider documents, or carries one of
+the wrong type, raises it with the tag `unexpected_response`, so a change on the provider's side
+fails the call rather than degrading it. A missing key raises `MissingCredentialError`. All errors derive from
 `AnySearchError`, and none carries a response body, a URL, the query or a key.
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, whether the
@@ -125,6 +127,13 @@ alone, and wins over that option. The other native options are `type`, `category
 A failure raises `ProviderError` with Exa's HTTP status and its `tag`, such as `INVALID_API_KEY`
 or `RATE_LIMIT_EXCEEDED`. Exa signals no error inside a successful search.
 
+Every field read from a successful search is checked, so a change on Exa's side fails the call
+rather than degrading it: an answer without `results` or an item's `url` or `title`, or with any
+of these, `text`, `highlights`, `publishedDate` or `costDollars.total` of the wrong type, or a date
+that does not parse, raises `ProviderError` with the tag `unexpected_response`. Exa documents its
+cost as optional, so an answer without one reports none; the live tests check that it reports
+one. Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.
+
 ## The fake provider
 
 `fake` is a provider like any other, in the `test` tier. It answers from canned data and takes its
@@ -157,3 +166,8 @@ skipped unless `ANY_SEARCH_LIVE=1`:
 ```bash
 ANY_SEARCH_LIVE=1 uv run pytest any-search/tests/test_live.py
 ```
+
+It checks the data as well as the call, against what its `EXPECTED` table says each provider must
+return, which a production provider joins as it joins the conformance scenarios. CI runs it weekly,
+on demand, and on a pull request that changes either library
+(`.github/workflows/otari-libs-live.yml`), with the keys from repository secrets.

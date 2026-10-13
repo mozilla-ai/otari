@@ -35,17 +35,28 @@ context and calls the adapter.
      from the body only when it looks like a code, and never put body text, the URL, the query or
      the key in an error.
    - An error the provider reports inside a 200 is a value, `SearchError` or `FetchError`.
-   - A date without a zone is UTC; one that does not parse is `None`.
+   - Check every field the adapter reads in a successful answer, so a change on the provider's
+     side fails the call rather than degrading it. A field the provider documents as always
+     present and missing, a field of the wrong type, or a date that does not parse raises
+     `ProviderError(provider, status, "unexpected_response")`, with no body text. Ignore the
+     fields the adapter does not read, so a field the provider adds breaks nothing. A body that
+     is not the provider's answer at all, not JSON or not an object, is `invalid_response`.
+   - A date without a zone is UTC.
    - The cost is the provider's reported figure only, as a `Decimal`, with `cost_source` set.
    - `api_base` replaces the endpoint for every provider; strip its trailing slash.
 3. **Record fixtures and test.** Record one fixture per case (below) with
    `uv run python <package>/scripts/record_fixture.py`. Keep them small: ask for few results and
    little text. Check the key is not in them. Then add:
    - the provider's scenarios to `tests/conformance/test_conformance.py`, replaying the fixtures;
-   - `tests/test_<name>.py`, for the request it sends and how it reads each fixture;
-   - the provider to `tests/test_registry.py`.
+   - `tests/test_<name>.py`, for the request it sends, how it reads each fixture, and each field
+     it checks missing, of the wrong type and, for a date, unparsable;
+   - the provider to `tests/test_registry.py`;
+   - the provider to `EXPECTED` in `tests/test_live.py`, saying what its live answers must hold,
+     and its key to `.github/workflows/otari-libs-live.yml` from a repository secret, which a
+     maintainer adds.
 
    Run `make test-libs`, `make lint-python` and `make typecheck-python`, then the live tests once.
+   CI runs them weekly and on every pull request that changes either library.
 4. **Try it from the CLI** against the real account, and note anything surprising. Check that
    `--describe <name>` prints the metadata and options as the documentation gives them.
 5. **In the gateway**, nothing in code, since the catalog routes and the settings validation read
@@ -71,8 +82,11 @@ The four cases a fixture can record:
 - Map `max_results`, and also cut the hits to it, since a replayed fixture does not honor it. A
   native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
   `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
-- A hit needs a URL; drop items without one. `title` and `snippet` are strings, never `None`.
+- A hit needs a URL. Drop an item without one only when the provider's documentation allows such
+  an item; otherwise it is `unexpected_response`. `title` and `snippet` are strings, never `None`.
   `snippet` is the provider's short text; `text` is page text, when it came back.
+- List the fields the adapter checks in the module's docstring and the README's section on the
+  provider.
 - `raw` holds the provider's item and its whole response, untouched.
 
 ## Fetch checklist (any-fetch)
@@ -85,7 +99,9 @@ The four cases a fixture can record:
 - `url` is the URL asked for, `final_url` the one the provider answered for. `content_type` is
   the type the page was served as, or empty when the provider does not say.
 - A page the provider fetched with no text is empty: `text` is `""` and `error` is `None`. An
-  answer with neither a page nor a reason is an error, not an empty page.
+  answer with neither a page nor a reason raises `unexpected_response`; it is not an empty page.
+- List the fields the adapter checks in the module's docstring and the README's section on the
+  provider.
 - `builtin` is not added here: the host registers it (`AnyFetch.register_builtin`).
 
 ## Learnings
@@ -116,3 +132,11 @@ What each adapter does is in its library's README; these are the lessons for the
 - `make lint-python` runs pre-commit over tracked files only, so stage new files first
   (`git add -N`), or they go unchecked.
 - Step 5 for Exa waits for the gateway units that wire the libraries in, since none existed yet.
+
+### 2026-10-13, field checks and the live workflow (both libraries)
+
+- A provider's OpenAPI spec can mark as optional what every answer carries: Exa marks
+  `costDollars` optional on both endpoints, and on `/contents` also `results` and `statuses`.
+  Require what the adapter relies on to tell a page from a failure (`results`, `statuses`), take
+  the rest as optional but type-checked, and let the live tests' `EXPECTED` require what the host relies
+  on, such as a reported cost, so its absence is noticed without failing every call.

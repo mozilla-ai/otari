@@ -162,22 +162,129 @@ async def test_an_empty_answer_reports_its_cost() -> None:
     assert (result.hits, result.cost, result.cost_source) == ([], Decimal(0), "reported")
 
 
-@pytest.mark.asyncio
-async def test_an_item_without_a_url_and_a_missing_field_are_tolerated() -> None:
-    body = {
+SENTINEL = "sentinel-body-text"
+
+
+def _answer() -> dict[str, Any]:
+    """A successful answer with every field the adapter reads, and a sentinel no error may carry."""
+    return {
         "results": [
-            {"title": "no url"},
-            "not an item",
-            {"url": "https://example.com/a", "highlights": [" one ", "", 3, "two"], "publishedDate": "2026-02-03"},
-            {"url": "https://example.com/b", "text": "", "publishedDate": "not a date"},
-        ]
+            {
+                "url": "https://example.com/a",
+                "title": f"A {SENTINEL}",
+                "text": f"page {SENTINEL}",
+                "highlights": [" one ", "", "two"],
+                "publishedDate": "2026-02-03",
+            }
+        ],
+        "costDollars": {"total": 0.005},
     }
+
+
+@pytest.mark.asyncio
+async def test_a_full_answer_is_read() -> None:
+    result, _ = await _search(httpx.Response(200, json=_answer()))
+    (hit,) = result.hits
+    assert (hit.snippet, hit.text) == ("one two", f"page {SENTINEL}")
+    assert hit.published == datetime(2026, 2, 3, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_the_optional_fields_may_be_absent_and_unread_ones_are_ignored() -> None:
+    body = _answer()
+    item = body["results"][0]
+    for name in ("text", "highlights", "publishedDate"):
+        del item[name]
+    item.update(author=None, favicon=7, newField={"any": "thing"})
+    body["costDollars"]["search"] = "unread"
+    body["newTopLevel"] = []
     result, _ = await _search(httpx.Response(200, json=body))
-    assert [hit.url for hit in result.hits] == ["https://example.com/a", "https://example.com/b"]
-    first, second = result.hits
-    assert (first.snippet, first.published) == ("one two", datetime(2026, 2, 3, tzinfo=UTC))
-    assert (second.snippet, second.text, second.published) == ("", None, None)
+    (hit,) = result.hits
+    assert (hit.snippet, hit.text, hit.published) == ("", None, None)
+    assert (result.cost, result.cost_source) == (Decimal("0.005"), "reported")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("total", ["NaN", "Infinity"])
+async def test_a_cost_that_is_not_a_finite_number_raises(total: str) -> None:
+    """Python reads both from JSON, and neither is a cost."""
+    body = '{"results": [], "costDollars": {"total": %s}}' % total
+    with pytest.raises(ProviderError) as raised:
+        await _search(httpx.Response(200, content=body, headers={"content-type": "application/json"}))
+    assert raised.value.tag == "unexpected_response"
+
+
+@pytest.mark.asyncio
+async def test_only_the_items_within_the_count_are_read() -> None:
+    body = _answer()
+    body["results"].append({"url": "https://example.com/past-the-count"})
+    result, _ = await _search(httpx.Response(200, json=body), max_results=1)
+    assert [hit.url for hit in result.hits] == ["https://example.com/a"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cost", [{"search": {"neural": 0.005}}, None])
+async def test_an_answer_without_a_cost_reports_none(cost: Any) -> None:
+    """Exa documents the cost as optional; the live tests are what notice it gone."""
+    body = _answer()
+    if cost is None:
+        del body["costDollars"]
+    else:
+        body["costDollars"] = cost
+    result, _ = await _search(httpx.Response(200, json=body))
     assert (result.cost, result.cost_source) == (None, "none")
+
+
+def _without(*path: str | int) -> Any:
+    def change(body: dict[str, Any]) -> None:
+        parent: Any = body
+        for step in path[:-1]:
+            parent = parent[step]
+        del parent[path[-1]]
+
+    return change
+
+
+def _setting(value: Any, *path: str | int) -> Any:
+    def change(body: dict[str, Any]) -> None:
+        parent: Any = body
+        for step in path[:-1]:
+            parent = parent[step]
+        parent[path[-1]] = value
+
+    return change
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(_without("results"), id="results-missing"),
+        pytest.param(_setting({}, "results"), id="results-not-a-list"),
+        pytest.param(_setting(["an item"], "results"), id="item-not-an-object"),
+        pytest.param(_without("results", 0, "url"), id="url-missing"),
+        pytest.param(_setting("", "results", 0, "url"), id="url-empty"),
+        pytest.param(_setting(7, "results", 0, "url"), id="url-not-a-string"),
+        pytest.param(_without("results", 0, "title"), id="title-missing"),
+        pytest.param(_setting(None, "results", 0, "title"), id="title-null"),
+        pytest.param(_setting(None, "results", 0, "text"), id="text-null"),
+        pytest.param(_setting("one", "results", 0, "highlights"), id="highlights-not-a-list"),
+        pytest.param(_setting(["one", 3], "results", 0, "highlights"), id="highlight-not-a-string"),
+        pytest.param(_setting(20260203, "results", 0, "publishedDate"), id="date-not-a-string"),
+        pytest.param(_setting(f"not a date {SENTINEL}", "results", 0, "publishedDate"), id="date-unparsable"),
+        pytest.param(_setting(0.005, "costDollars"), id="cost-not-an-object"),
+        pytest.param(_setting("0.005", "costDollars", "total"), id="total-a-string"),
+        pytest.param(_setting(True, "costDollars", "total"), id="total-a-boolean"),
+        pytest.param(_setting(-0.005, "costDollars", "total"), id="total-negative"),
+    ],
+)
+async def test_a_field_missing_or_of_the_wrong_type_raises_without_the_body(change: Any) -> None:
+    body = _answer()
+    change(body)
+    with pytest.raises(ProviderError) as raised:
+        await _search(httpx.Response(200, json=body))
+    assert (raised.value.status, raised.value.tag) == (200, "unexpected_response")
+    assert SENTINEL not in str(raised.value) and SENTINEL not in repr(raised.value)
 
 
 @pytest.mark.asyncio
@@ -205,7 +312,7 @@ async def test_a_failure_without_a_usable_tag_is_an_http_error(answer: httpx.Res
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "answer",
-    [httpx.Response(200, text="not json"), httpx.Response(200, json=[]), httpx.Response(200, json={"results": {}})],
+    [httpx.Response(200, text="not json"), httpx.Response(200, json=[])],
 )
 async def test_a_body_that_is_not_a_search_answer_is_refused(answer: httpx.Response) -> None:
     with pytest.raises(ProviderError) as raised:

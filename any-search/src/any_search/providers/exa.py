@@ -9,11 +9,20 @@ none, which leaves only titles and URLs.
 Exa signals every failure with an HTTP status and a ``tag`` in the body; a
 successful search carries no error of its own.
 
+Every field read from a successful answer is checked, so a change on Exa's
+side fails the call rather than degrading it: ``results`` and each item's
+``url`` and ``title`` must be there, and ``text``, ``highlights``,
+``publishedDate`` and ``costDollars.total`` must have the right type when they
+are. Anything else raises ``unexpected_response``. Exa documents the cost as
+optional, so a search without one reports none, and the live tests say so. Fields the adapter does not read
+are ignored, so a field Exa adds breaks nothing.
+
 API: https://exa.ai/docs/reference/search. Pricing, read 2026-10-08:
 https://exa.ai/docs/admin/pricing.
 """
 
 import copy
+import math
 import re
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
@@ -156,11 +165,10 @@ class ExaProvider(AnySearch):
         body = _body(response)
         results = body.get("results")
         if not isinstance(results, list):
-            raise ProviderError(self.METADATA.name, response.status_code, "invalid_response")
-        hits = [_hit(item, url) for item in results if isinstance(item, dict) and (url := _url(item))]
-        if limit is not None:
-            hits = hits[:limit]
-        cost = _cost(body)
+            raise _unexpected(response)
+        # Only the items the caller gets are read, so only they are checked.
+        hits = [_hit(item, response) for item in (results if limit is None else results[:limit])]
+        cost = _cost(body, response)
         return SearchResult(
             provider=self.METADATA.name,
             hits=hits,
@@ -198,24 +206,35 @@ def _tag(value: Any) -> str | None:
     return value if isinstance(value, str) and _TAG.fullmatch(value) else None
 
 
-def _url(item: dict[str, Any]) -> str | None:
-    url = item.get("url")
-    return url if isinstance(url, str) and url else None
+def _unexpected(response: httpx.Response) -> ProviderError:
+    """A successful answer that lacks a field Exa documents, or carries one of the wrong type."""
+    return ProviderError(ExaProvider.METADATA.name, response.status_code, "unexpected_response")
 
 
-def _hit(item: dict[str, Any], url: str) -> SearchHit:
-    title = item.get("title")
-    text = item.get("text")
-    highlights = item.get("highlights")
-    snippet = ""
-    if isinstance(highlights, list):
-        snippet = " ".join(part.strip() for part in highlights if isinstance(part, str) and part.strip())
+def _hit(item: Any, response: httpx.Response) -> SearchHit:
+    # Exa documents url and title on every item, so an item without them is a change on Exa's side.
+    if not isinstance(item, dict):
+        raise _unexpected(response)
+    url, title = item.get("url"), item.get("title")
+    if not isinstance(url, str) or not url or not isinstance(title, str):
+        raise _unexpected(response)
+    text = item.get("text", "")
+    highlights = item.get("highlights", [])
+    if not isinstance(text, str) or not isinstance(highlights, list):
+        raise _unexpected(response)
+    if not all(isinstance(part, str) for part in highlights):
+        raise _unexpected(response)
+    published = None
+    if "publishedDate" in item:
+        published = _published(item["publishedDate"])
+        if published is None:
+            raise _unexpected(response)
     return SearchHit(
         url=url,
-        title=title if isinstance(title, str) else "",
-        snippet=snippet,
-        text=text if isinstance(text, str) and text else None,
-        published=_published(item.get("publishedDate")),
+        title=title,
+        snippet=" ".join(part.strip() for part in highlights if part.strip()),
+        text=text or None,
+        published=published,
         raw=item,
     )
 
@@ -231,9 +250,16 @@ def _published(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _cost(body: dict[str, Any]) -> Decimal | None:
+def _cost(body: dict[str, Any], response: httpx.Response) -> Decimal | None:
+    """Exa's ``costDollars.total``, or ``None`` when it sent none."""
     costs = body.get("costDollars")
-    total = costs.get("total") if isinstance(costs, dict) else None
-    if isinstance(total, bool) or not isinstance(total, int | float):
+    if costs is None:
         return None
+    if not isinstance(costs, dict):
+        raise _unexpected(response)
+    total = costs.get("total")
+    if total is None:
+        return None
+    if isinstance(total, bool) or not isinstance(total, int | float) or not 0 <= total < math.inf:
+        raise _unexpected(response)
     return Decimal(str(total))
