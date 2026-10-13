@@ -26,6 +26,7 @@ from conftest import InstallControlPlane
 from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
+from gateway.models.routing import RoutingConfig
 from gateway.types.moderation import ModerationResponse, ModerationResult
 
 from .conftest import app_for
@@ -550,3 +551,26 @@ def test_a_lone_attempt_naming_an_unknown_provider_is_a_502_not_a_crash(
     assert plane.reports == [
         {"correlation_id": "att-a", "status": "error", "is_final_attempt": True, "error_class": "unsupported_provider"}
     ]
+
+
+def test_a_local_routing_policy_name_is_refused_before_the_control_plane_is_asked(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+    plane = _ControlPlane([_attempt("att-1", "text-embedding-3-small")])
+    control_plane_transport(plane)
+    config = GatewayConfig(
+        mode="hybrid",
+        platform={"base_url": "http://platform.test/api/v1"},
+        routing=RoutingConfig.model_validate({"policies": {"smart": {"select": [{"default": "openai:gpt-4o-mini"}]}}}),
+    )
+
+    with TestClient(app_for(config)) as client:
+        response = client.post(f"{API_ROOT}/embeddings", json={"model": "smart", "input": "hi"}, headers=_AUTH)
+    reset_config()
+    reset_db()
+
+    assert response.status_code == 400
+    assert "cannot be used in hybrid mode" in response.json()["detail"]
+    assert plane.resolves == []

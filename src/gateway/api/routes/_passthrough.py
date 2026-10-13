@@ -55,7 +55,6 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     failure_status_code,
     log_gateway_rejection,
-    policy_in_hybrid_mode_detail,
     provider_error_headers,
     provider_failure_detail,
     rate_limit_headers,
@@ -77,6 +76,7 @@ from gateway.core.error_codes import MODEL_NOT_ALLOWED, PRICING_REQUIRED, PROVID
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.exceptions import TenancyError
+from gateway.exceptions.routing_exceptions import PolicyOnHybridGatewayError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
@@ -127,6 +127,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import ResolvedProvider, missing_credential, resolve_provider_selector
 from gateway.services.providers import unpriced_model_refusal
+from gateway.services.routing import refuse_local_policy
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
@@ -762,8 +763,10 @@ async def _run_platform_passthrough(
     oversized upload, an option the provider does not take) is reported as the
     final attempt and answered as standalone answers it.
     """
-    if model in config.policy_names():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=policy_in_hybrid_mode_detail(model))
+    try:
+        refuse_local_policy(model, config.policy_names())
+    except PolicyOnHybridGatewayError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
     route = await _resolve_platform_credentials(
         config=config,
         user_token=extract_credential_token(raw_request),

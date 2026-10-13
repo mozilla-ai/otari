@@ -21,6 +21,7 @@ a policy, and the harness acts on the answer itself.
 """
 
 from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
+from gateway.services.routing._local_policies import refuse_local_policy
 from gateway.services.routing.backends import (
     KNN_BACKEND,
     NOOP_BACKEND,
@@ -83,6 +84,7 @@ __all__ = [
     "known_backends",
     "needs_budget_state",
     "recommendation_from_decision",
+    "refuse_local_policy",
     "selection_consults_router",
     "unpriced_router_candidates",
 ]

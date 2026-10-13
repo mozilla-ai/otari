@@ -152,6 +152,7 @@ from gateway.core.usage import (
 from gateway.exceptions import TenancyError
 from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError
+from gateway.exceptions.routing_exceptions import PolicyOnHybridGatewayError
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
     CodeExecutionDeclarationError,
@@ -280,6 +281,7 @@ from gateway.services.routing import (
     compile_policy,
     decide_ordering,
     needs_budget_state,
+    refuse_local_policy,
     selection_consults_router,
 )
 from gateway.services.sandbox_backend import (
@@ -1949,15 +1951,6 @@ def budget_exhausted_mid_failover_detail() -> str:
     )
 
 
-def policy_in_hybrid_mode_detail(model_selector: str) -> str:
-    """400 detail for a policy name used against a hybrid-mode gateway."""
-    return (
-        f"Routing policy {model_selector!r} cannot be used in hybrid mode. The connected platform resolves "
-        "the model for every request, so a local policy name is not a model it knows. Name a concrete "
-        "model, or run this gateway in standalone mode where routing policies apply."
-    )
-
-
 async def _compile_request_plan(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -2285,8 +2278,10 @@ async def resolve_request_context(
         # platform owns the decision there, and its resolve response carries the
         # outcome as an ordered ``attempts`` list plus ``fallback_enabled`` for
         # ``run_platform_attempts`` to walk.
-        if model in config.policy_names():
-            raise adapter.error(400, policy_in_hybrid_mode_detail(model), ErrorKind.INVALID_REQUEST)
+        try:
+            refuse_local_policy(model, config.policy_names())
+        except PolicyOnHybridGatewayError as exc:
+            raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from None
         user_token = extract_credential_token(raw_request)
         start_time = time.perf_counter()
         route = await _resolve_platform_credentials(
