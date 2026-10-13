@@ -104,7 +104,6 @@ from gateway.services.providers import (
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
 from gateway.services.runtime_settings_service import apply_overrides_from_db
-from gateway.services.search_backend import close_search_client
 from gateway.services.search_tool_store_service import (
     load_search_tools_at_startup,
     reset_search_tool_cache,
@@ -123,6 +122,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
+from gateway.services.tools import build_web_provider_client
 from gateway.services.traces import RequestTraces, TraceWriter, stored_by
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.version import __version__
@@ -823,6 +823,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         trace_writer: TraceWriter | None = None
         trace_writer_started = False
         try:
+            # First inside the try, after every step that can refuse to start, so a
+            # refused start never leaves one open. One per app, on every plane: the
+            # direct search endpoint, the hop route and the connection tests call
+            # their providers through it (decision 55).
+            app.state.web_provider_client = build_web_provider_client()
             # Inside the try, so a failure here still stops the workers started above.
             # Wired only where create_app set up trace capture, which a bare app has not.
             request_traces: RequestTraces | None = getattr(app.state, "request_traces", None)
@@ -852,10 +857,14 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             if trace_writer is not None and trace_writer_started:
                 app.state.trace_writer = None
                 await trace_writer.stop()
-            # POST /api/v1/search and /api/v1/decisions each dispatch on one pooled
-            # client for the process, so shutdown owns closing them. Each is a no-op
-            # when that endpoint was never served.
-            await close_search_client()
+            # Removed before it closes, so a route served after shutdown fails plainly
+            # rather than on a closed client.
+            web_provider_client = getattr(app.state, "web_provider_client", None)
+            if web_provider_client is not None:
+                del app.state.web_provider_client
+                await web_provider_client.aclose()
+            # POST /api/v1/decisions dispatches on one pooled client for the process,
+            # so shutdown owns closing it. A no-op when that endpoint was never served.
             await close_decision_client()
             rate_limit_store: RateLimitStorePort | None = getattr(app.state, "rate_limit_store", None)
             if rate_limit_store is not None:

@@ -14,6 +14,7 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
 ``run_connection_test`` tests an instance with one search or fetch.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with.
+``build_web_provider_client`` builds the client the web tools' providers are called through, one per app.
 ``WEB_SEARCH_TOOL_NAME``, ``WEB_FETCH_TOOL_NAME`` and the two tool definitions name the web tools to the model.
 """
 
@@ -98,6 +99,7 @@ from gateway.services.tools._web_names import (
     web_fetch_tool_definition,
     web_search_tool_definition,
 )
+from gateway.services.tools._web_provider_client import build_web_provider_client
 from gateway.services.tools._web_search import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
@@ -185,4 +187,5 @@ __all__ = [
     "ResolvedSearch",
     "resolve_fetch",
     "resolve_search",
+    "build_web_provider_client",
 ]

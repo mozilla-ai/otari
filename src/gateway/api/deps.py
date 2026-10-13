@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1163,6 +1164,15 @@ def get_web_search_policy_port(db: PortSessionDep, container: ContainerDep) -> W
     return container.resolve(WebSearchPolicyPort, db)
 
 
+def get_web_provider_client(request: Request) -> httpx.AsyncClient:
+    """The client the web tools' providers are called through, which the app's lifespan builds and closes."""
+    client: httpx.AsyncClient | None = getattr(request.app.state, "web_provider_client", None)
+    if client is None:
+        msg = "No web provider client: the app's lifespan has not started, or has ended"
+        raise RuntimeError(msg)
+    return client
+
+
 def get_overview_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
@@ -1399,6 +1409,7 @@ async def get_organization_trace_scope(
 DeploymentTraceScopeDep = Annotated[TraceScope, Depends(get_deployment_trace_scope)]
 OrganizationTraceScopeDep = Annotated[TraceScope, Depends(get_organization_trace_scope)]
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
+WebProviderClientDep = Annotated[httpx.AsyncClient, Depends(get_web_provider_client)]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1556,6 +1567,7 @@ __all__ = [
     "TelemetryStoragePortDep",
     "ToolPorts",
     "ToolPortsDep",
+    "WebProviderClientDep",
     "WebSearchPolicyPortDep",
     "get_agent_model_recommender_port",
     "get_config",
