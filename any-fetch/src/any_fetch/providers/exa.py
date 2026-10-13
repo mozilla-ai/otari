@@ -14,8 +14,9 @@ Every field read from a successful answer is checked, so a change on Exa's
 side fails the call rather than degrading it: ``results`` and a ``statuses``
 entry for the URL, ``success`` or ``error``, must be there (the only entry when
 its id is not the URL, which Exa may have normalized); a success needs its
-page's ``url``, ``title`` and ``text``; and a ``publishedDate`` must parse and a
-``costDollars.total`` be a number when there is one. Anything else raises
+page's ``url`` and ``title``; and a ``text`` must be a string, a
+``publishedDate`` parse and a ``costDollars.total`` be a number when there is
+one. A page without text, which Exa documents as optional, is an empty page. Anything else raises
 ``unexpected_response``, an answer with no page and no reason included. Exa
 documents the cost as optional, so a fetch without one reports none, and the
 live tests say so. Fields the adapter does not read are ignored, so a field Exa
@@ -133,12 +134,11 @@ class ExaProvider(AnyFetch):
                 error=_page_error(status, response),
                 raw=body,
             )
-        item, published = _page(results, response)
-        text: str = item["text"]
+        final_url, title, text, published = _page(results, response)
         return FetchedPage(
             url=url,
-            final_url=item["url"],
-            title=item["title"],
+            final_url=final_url,
+            title=title,
             text=text[:limit],
             # Exa returns extracted text and does not say what the page was served as.
             content_type="",
@@ -166,6 +166,7 @@ def _body(response: httpx.Response) -> dict[str, Any]:
 
 
 def _tag(value: Any) -> str | None:
+    """Exa's error tag when it looks like a code, else ``None``, so no body text reaches an error."""
     return value if isinstance(value, str) and _TAG.fullmatch(value) else None
 
 
@@ -213,13 +214,17 @@ def _page_error(status: dict[str, Any], response: httpx.Response) -> FetchError 
     return FetchError(tag=_tag(tag) or "fetch_error", status=code)
 
 
-def _page(results: list[Any], response: httpx.Response) -> tuple[dict[str, Any], datetime | None]:
-    """The page Exa fetched, with its date, its url, title and text checked."""
+def _page(results: list[Any], response: httpx.Response) -> tuple[str, str, str, datetime | None]:
+    """The page Exa fetched: its url, title, text and date, each checked.
+
+    Exa documents ``url`` and ``title`` on every result and ``text`` as
+    optional, so a page without text is an empty one.
+    """
     item = results[0] if results else None
     # A success with no page is an answer Exa does not document.
     if not isinstance(item, dict):
         raise _unexpected(response)
-    url, title, text = item.get("url"), item.get("title"), item.get("text")
+    url, title, text = item.get("url"), item.get("title"), item.get("text", "")
     if not isinstance(url, str) or not url or not isinstance(title, str) or not isinstance(text, str):
         raise _unexpected(response)
     published = None
@@ -227,7 +232,7 @@ def _page(results: list[Any], response: httpx.Response) -> tuple[dict[str, Any],
         published = _published(item["publishedDate"])
         if published is None:
             raise _unexpected(response)
-    return item, published
+    return url, title, text, published
 
 
 def _published(value: Any) -> datetime | None:

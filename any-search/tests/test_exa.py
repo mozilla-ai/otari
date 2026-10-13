@@ -236,6 +236,8 @@ async def test_an_answer_without_a_cost_reports_none(cost: Any) -> None:
 
 
 def _without(*path: str | int) -> Any:
+    """A change to an answer that deletes the field at ``path``."""
+
     def change(body: dict[str, Any]) -> None:
         parent: Any = body
         for step in path[:-1]:
@@ -246,6 +248,8 @@ def _without(*path: str | int) -> Any:
 
 
 def _setting(value: Any, *path: str | int) -> Any:
+    """A change to an answer that sets the field at ``path`` to ``value``."""
+
     def change(body: dict[str, Any]) -> None:
         parent: Any = body
         for step in path[:-1]:

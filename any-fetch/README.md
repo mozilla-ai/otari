@@ -129,9 +129,10 @@ A page Exa could not fetch comes back as `FetchedPage.error`, with Exa's tag, su
 
 Every field read from a successful answer is checked, so a change on Exa's side fails the call
 rather than degrading it. An answer without `results` or a `statuses` entry for the URL whose
-`status` is `success` or `error`, a success without its page's `url`, `title` and `text`, any of
-these or `costDollars.total` of the wrong type, or a `publishedDate` that does not parse, raises
+`status` is `success` or `error`, a success without its page's `url` and `title`, any of these,
+`text` or `costDollars.total` of the wrong type, or a `publishedDate` that does not parse, raises
 `ProviderError` with the tag `unexpected_response`. So does an answer with no page and no reason.
+Exa documents a page's `text` as optional, so a success without it is an empty page.
 Exa documents its cost as optional, so an answer without one reports none; the live tests check
 that it reports one.
 Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.

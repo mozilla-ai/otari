@@ -162,6 +162,15 @@ async def test_text_that_fills_exas_own_limit_counts_as_cut() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_success_without_text_is_an_empty_page() -> None:
+    """Exa documents a result's text as optional."""
+    body = _answer()
+    del body["results"][0]["text"]
+    page, _ = await _fetch(httpx.Response(200, json=body))
+    assert (page.text, page.title, page.error, page.text_truncated) == ("", f"Title {SENTINEL}", None, False)
+
+
+@pytest.mark.asyncio
 async def test_a_page_with_no_text_is_empty_not_an_error() -> None:
     page, _ = await _fetch(_recorded("empty"))
     assert (page.text, page.error, page.text_truncated) == ("", None, False)
@@ -222,6 +231,8 @@ async def test_unread_fields_are_ignored() -> None:
 
 
 def _without(*path: str | int) -> Any:
+    """A change to an answer that deletes the field at ``path``."""
+
     def change(body: dict[str, Any]) -> None:
         parent: Any = body
         for step in path[:-1]:
@@ -232,6 +243,8 @@ def _without(*path: str | int) -> Any:
 
 
 def _setting(value: Any, *path: str | int) -> Any:
+    """A change to an answer that sets the field at ``path`` to ``value``."""
+
     def change(body: dict[str, Any]) -> None:
         parent: Any = body
         for step in path[:-1]:
@@ -269,7 +282,7 @@ def _setting(value: Any, *path: str | int) -> Any:
         pytest.param(_without("results", 0, "title"), id="title-missing"),
         pytest.param(_setting(None, "results", 0, "title"), id="title-null"),
         pytest.param(_setting(["Title"], "results", 0, "title"), id="title-not-a-string"),
-        pytest.param(_without("results", 0, "text"), id="text-missing"),
+        pytest.param(_setting(None, "results", 0, "text"), id="text-null"),
         pytest.param(_setting(["page"], "results", 0, "text"), id="text-not-a-string"),
         pytest.param(_setting(None, "results", 0, "publishedDate"), id="date-null"),
         pytest.param(_setting(f"not a date {SENTINEL}", "results", 0, "publishedDate"), id="date-unparsable"),

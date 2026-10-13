@@ -203,6 +203,7 @@ def _body(response: httpx.Response) -> dict[str, Any]:
 
 
 def _tag(value: Any) -> str | None:
+    """Exa's error tag when it looks like a code, else ``None``, so no body text reaches an error."""
     return value if isinstance(value, str) and _TAG.fullmatch(value) else None
 
 
@@ -212,7 +213,7 @@ def _unexpected(response: httpx.Response) -> ProviderError:
 
 
 def _hit(item: Any, response: httpx.Response) -> SearchHit:
-    # Exa documents url and title on every item, so an item without them is a change on Exa's side.
+    """One result as a hit: ``url`` and ``title``, which Exa documents on every result, and the rest when sent."""
     if not isinstance(item, dict):
         raise _unexpected(response)
     url, title = item.get("url"), item.get("title")
