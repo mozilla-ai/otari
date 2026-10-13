@@ -277,7 +277,7 @@ fails the next retry runs in its place.
 - A key belongs to the API key that sent it (or, for the master key, to the
   billed user), so two callers never see each other's responses.
 - A retry has to be the same request: the same body, and the same
-  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Router`,
+  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`,
   `Otari-Router-Task`, `Otari-Conversation-Id` and `anthropic-beta` headers,
   since those change what the request does. The same key with a different body
   or different values for those headers is refused with 422, so send a new key

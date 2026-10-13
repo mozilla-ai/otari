@@ -178,7 +178,7 @@ async def _execute_tool_uses(
     for block in blocks:
         arguments = dict(block.input or {})
         capped = is_capped_call(budget, pool, block.name)
-        if capped and budget is not None and budget.exhausted():
+        if capped and budget is not None and budget.exhausted(block.name):
             out.append(_max_uses_exceeded_result(NativeCall(block.name, block.id, arguments), native))
             continue
         try:
@@ -191,7 +191,7 @@ async def _execute_tool_uses(
             text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
-                budget.record(text)
+                budget.record(block.name, text)
         if native is not None and native.wants(block.name):
             call = NativeCall(block.name, block.id, arguments, failed=is_tool_error(text))
             native.extend(_native_blocks_for_call(pool, call))
@@ -401,7 +401,7 @@ async def _execute_stream_owned_events(
         name = str(spec["name"])
         parsed_input = _parsed_stream_input(state, spec)
         capped = is_capped_call(budget, pool, name)
-        if capped and budget is not None and budget.exhausted():
+        if capped and budget is not None and budget.exhausted(name):
             results.append(_max_uses_exceeded_result(NativeCall(name, spec["id"], parsed_input), native))
             continue
         mcp_backend = _as_mcp_tool_backend(pool)
@@ -426,7 +426,7 @@ async def _execute_stream_owned_events(
             mcp_backend=mcp_backend if server_name is not None else None,
         )
         if capped and budget is not None:
-            budget.record(text)
+            budget.record(name, text)
         if native is not None and native.wants(name):
             call = NativeCall(name, spec["id"], parsed_input, failed=is_error)
             native.extend(_native_blocks_for_call(pool, call))

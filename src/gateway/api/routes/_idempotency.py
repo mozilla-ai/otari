@@ -45,7 +45,7 @@ from gateway.services.inference import (
     Replay,
     keep_claim_alive,
 )
-from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER
+from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_FETCH_HEADER, WEB_SEARCH_HEADER
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"
@@ -66,6 +66,7 @@ _REPLAYED_HEADERS = (
 _REQUEST_SHAPING_HEADERS = (
     CODE_EXECUTION_HEADER,
     WEB_SEARCH_HEADER,
+    WEB_FETCH_HEADER,
     ROUTER_HEADER,
     "anthropic-beta",
     ROUTER_TASK_HEADER,

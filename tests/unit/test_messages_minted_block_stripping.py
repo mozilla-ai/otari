@@ -515,3 +515,35 @@ def test_a_gateway_search_is_dropped_and_a_providers_own_survives() -> None:
     message = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done"}]}
 
     assert strip_gateway_minted_items([providers, gateways, message]) == [providers, message]
+
+
+# --- web fetch ------------------------------------------------------------------
+
+
+def _fetch_pair(tool_use_id: str) -> list[dict[str, Any]]:
+    return [
+        {"type": "server_tool_use", "id": tool_use_id, "name": "web_fetch", "input": {"url": "https://a.test/"}},
+        {
+            "type": "web_fetch_tool_result",
+            "tool_use_id": tool_use_id,
+            "content": {
+                "type": "web_fetch_result",
+                "url": "https://a.test/",
+                "content": {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": "x"}},
+            },
+        },
+    ]
+
+
+def test_a_gateway_fetch_pair_is_dropped_rather_than_folded_into_text() -> None:
+    """Fetched page text is untrusted, so it never comes back as the assistant's own words."""
+    text = {"type": "text", "text": "the page says x"}
+    messages = [{"role": "assistant", "content": [*_fetch_pair(f"{SERVER_TOOL_USE_ID_PREFIX}f"), text]}]
+
+    assert _strip_gateway_minted_blocks(messages) == [{"role": "assistant", "content": [text]}]
+
+
+def test_anthropics_own_fetch_pair_survives() -> None:
+    messages = [{"role": "assistant", "content": _fetch_pair("srvtoolu_prov")}]
+
+    assert _strip_gateway_minted_blocks(messages) == messages

@@ -24,7 +24,9 @@ Unavailable but recognized tools remain in the response with
 
 An `otari_*` type is executed by Otari. A provider-native web-search type is
 forwarded to the provider unless [interception](#web-search-interception) or the
-request's `Otari-Web-Search` header says otherwise.
+request's `Otari-Web-Search` header says otherwise. Anthropic's web-fetch type
+is forwarded unless the request's [`Otari-Web-Fetch`](#anthropics-web-fetch)
+header says otherwise.
 A provider-native code-execution type is decided by the request's
 [executor](#code-execution-executor). Function tools remain the caller's
 responsibility.
@@ -63,6 +65,32 @@ with gateway code execution or `mcp_servers` in one request. All of this
 requires a search backend (`web_search_provider` or `web_search_url`); without
 one, the declaration is forwarded unchanged. A function named `web_search` is
 never claimed.
+
+### Anthropic's web fetch
+
+Anthropic's fetch keyword (`web_fetch_<date>`) is forwarded to the provider by
+default, so a request that falls back to a model with no fetch of its own sends
+it a tool nobody runs. The `Otari-Web-Fetch` header takes it over the same way
+`Otari-Web-Search` does for search, with the same three values:
+
+- `auto` runs the fetch on Otari unless every model the request may reach,
+  fallbacks included, is an Anthropic model on `/api/v1/messages`, the only
+  place the keyword is native. On Messages the result still comes back as
+  `server_tool_use` / `web_fetch_tool_result` blocks.
+- `otari` always runs it on Otari.
+- `provider` always forwards it.
+
+It is a header of its own, not part of `Otari-Web-Search`, because the two
+tools are native in different places and a request may want one taken over and
+not the other. There is no deployment-wide toggle like `web_search_intercept`
+for fetch. A claimed declaration is an [Otari fetch](#web-fetch): it needs
+`web_fetch_enabled` (without it the keyword is forwarded unchanged), follows the
+workspace policy, pricing and the restriction on combining it with code
+execution or `mcp_servers`, and honors the declaration's `max_uses`,
+`allowed_domains` and `blocked_domains`. The URL in the returned blocks omits
+its query string and fragment, as the tool result does. When such a turn is
+echoed back on a later request, Otari drops its own fetch blocks before calling
+the model, as it does for search.
 
 ### Bounding the searches one request runs
 
@@ -360,8 +388,8 @@ model-facing function accepts exactly one field:
 Otari retrieves one public HTTP or HTTPS URL, validates every redirect, and
 extracts HTML, textual formats (including Markdown, JSON, XML, and JavaScript),
 or text-bearing PDF content. Private, loopback, link-local, and otherwise unsafe
-destinations are rejected. Provider-native Fetch declarations are passed
-through unchanged rather than intercepted.
+destinations are rejected. Anthropic's own fetch keyword is passed through
+unchanged unless the request [asks Otari to run it](#anthropics-web-fetch).
 
 The tool result contains the display-safe source URL, the content type, an
 optional requested URL when redirects changed the destination, extracted

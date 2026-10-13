@@ -108,6 +108,7 @@ from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
     SERVER_TOOL_USE_ID_PREFIX,
+    WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
@@ -262,7 +263,7 @@ class CountTokensResponse(BaseModel):
 
 
 def _is_gateway_minted_result(block: Any) -> bool:
-    """Whether a ``web_search_tool_result`` block was minted by this gateway.
+    """Whether a ``web_search_tool_result`` or ``web_fetch_tool_result`` block was minted by this gateway.
 
     Provenance is the reserved id prefix the gateway mints its ``server_tool_use``
     with (:data:`~gateway.services.tools.SERVER_TOOL_USE_ID_PREFIX`), matched here on the
@@ -271,17 +272,19 @@ def _is_gateway_minted_result(block: Any) -> bool:
     whatever they contain, including a ``max_uses_exceeded`` error from its own capped
     search. Same rule as :func:`_is_gateway_minted_mcp_block`.
 
-    The empty ``encrypted_content`` below is the older signal, kept for transcripts
-    minted before the prefix existed: Anthropic always populates that field with a
+    The empty ``encrypted_content`` below is the older signal, kept for search
+    transcripts minted before the prefix existed: Anthropic always populates that field with a
     signed blob and the gateway cannot, so hits that all carry an empty value are
     ours. It only recognizes the success shape, which is why the prefix replaced it.
     An empty ``content`` list counts as ours too: that is what a gateway search with
     no usable hits produces, and a provider reporting no results uses the error shape.
     """
-    if not isinstance(block, dict) or block.get("type") != "web_search_tool_result":
+    if not isinstance(block, dict) or block.get("type") not in {"web_search_tool_result", "web_fetch_tool_result"}:
         return False
     if str(block.get("tool_use_id") or "").startswith(SERVER_TOOL_USE_ID_PREFIX):
         return True
+    if block.get("type") == "web_fetch_tool_result":
+        return False
     hits = block.get("content")
     if not isinstance(hits, list):
         return False
@@ -358,7 +361,8 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
 
     A gateway-minted code-execution pair is not dropped but folded into a text
     block (:func:`_code_execution_pair_as_text`), because its output lives nowhere
-    else in the transcript.
+    else in the transcript. A web-fetch pair is dropped like a search pair: folding
+    it would hand untrusted page text back to the model as its own words.
 
     A message left with no content is dropped: an empty ``content`` array is rejected
     by the API, and a turn that held nothing but our pair has nothing left to say.
@@ -954,6 +958,7 @@ async def create_message(
             max_tool_iterations=request.max_tool_iterations,
             tools_header=request.tools_header,
             code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
             # Anthropic's own field, which is where an Anthropic SDK puts the id it
             # read off the last response. Resolved at admission against this caller's

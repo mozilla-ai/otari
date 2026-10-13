@@ -121,6 +121,27 @@ async def test_fetch_http_failure_is_sanitized_and_not_billed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_fetched_page_is_kept_for_one_native_rendering() -> None:
+    service = AsyncMock(spec=WebFetchService)
+    page = _result()
+    service.fetch.return_value = page
+    async with _backend(service) as backend:
+        await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com/start"})
+        assert backend.take_last_fetch() is page
+        assert backend.take_last_fetch() is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_fetch_does_not_inherit_the_previous_page() -> None:
+    service = AsyncMock(spec=WebFetchService)
+    service.fetch.side_effect = [_result(), WebFetchHTTPStatusError(404)]
+    async with _backend(service) as backend:
+        await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com/start"})
+        await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com/missing"})
+        assert backend.take_last_fetch() is None
+
+
+@pytest.mark.asyncio
 async def test_combined_counter_refuses_the_eleventh_call_before_dispatch() -> None:
     service = AsyncMock(spec=WebFetchService)
     service.fetch.return_value = _result()

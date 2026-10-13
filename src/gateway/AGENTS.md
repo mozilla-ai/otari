@@ -173,7 +173,8 @@ The walker's `admit_attempt` step moves the reservation onto the budgets of each
 An `otari_*` tool type always runs in the gateway. Who runs a provider-native
 web-search type is described in
 [web-search interception](../../docs/tools.md#web-search-interception) and
-decided by `claims_provider_web_search` in `services/tools/_web_declarations.py`.
+decided by `claims_provider_web_search` in `services/tools/_web_declarations.py`;
+Anthropic's web-fetch type by `claims_provider_web_fetch` beside it.
 Each tool's admission step (web, code execution, MCP) lives in `services/tools/`, and
 `prepare_gateway_tools` only calls them and renders their refusals. A provider-native
 code-execution type is decided by the executor (`models/tools.py`,

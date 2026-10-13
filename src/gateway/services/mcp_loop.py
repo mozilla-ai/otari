@@ -207,7 +207,7 @@ async def _execute_mcp_calls(
         except json.JSONDecodeError:
             args = {}
         capped = is_capped_call(budget, pool, name)
-        if capped and budget is not None and budget.exhausted():
+        if capped and budget is not None and budget.exhausted(name):
             out.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": MAX_USES_EXCEEDED_ERROR})
             continue
         try:
@@ -220,7 +220,7 @@ async def _execute_mcp_calls(
             text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
-                budget.record(text)
+                budget.record(name, text)
         out.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
     return out
 

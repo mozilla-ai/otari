@@ -1,4 +1,4 @@
-"""How a request declares the managed web tools, and whether the gateway claims a provider's own search.
+"""How a request declares the managed web tools, and whether the gateway claims a provider's own search or fetch.
 
 The explicit ``otari_web_search`` and ``otari_web_fetch`` types always run on the gateway.
 A provider-native web-search keyword (``web_search`` / ``web_search_<date>``)
@@ -13,19 +13,22 @@ silently takes a search away from a provider that would have run it (see
 *not* claimed even then: that is a caller's own tool, and hijacking it means the
 caller's handler never fires and it never gets back a ``tool_call`` it can
 dispatch.
+
+Anthropic's web-fetch keyword (``web_fetch_<date>``) follows the same rule under
+:data:`WEB_FETCH_HEADER`, with no deployment-wide interception of its own.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from gateway.core.env import otari_env
 from gateway.models.tools import CodeExecutor
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool
 from gateway.services.tools._native import Dialect
-from gateway.services.tools._web_names import WEB_SEARCH_NATIVE_TYPE_PREFIX
+from gateway.services.tools._web_names import WEB_FETCH_NATIVE_TYPE_PREFIX, WEB_SEARCH_NATIVE_TYPE_PREFIX
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -34,6 +37,11 @@ if TYPE_CHECKING:
 # same vocabulary and for the same reason as ``CODE_EXECUTION_HEADER``. It can
 # add a claim but never remove one ``web_search_intercept`` makes.
 WEB_SEARCH_HEADER = "Otari-Web-Search"
+# The same choice for a provider-named web-fetch declaration. A header of its own,
+# because a caller may want the provider's fetch and the gateway's search or the
+# reverse, and because widening the search header would change what an existing
+# ``Otari-Web-Search`` caller's fetch declaration does.
+WEB_FETCH_HEADER = "Otari-Web-Fetch"
 
 
 # The provider-named web-search keywords the gateway claims when interception is
@@ -113,19 +121,41 @@ def provider_runs_web_search_natively(
     return native is not None and native == (provider.lower(), dialect)
 
 
+def _parse_executor_header(value: str | None, header: str) -> CodeExecutor | None:
+    if value is None or not value.strip():
+        return None
+    executor = CodeExecutor.parse(value)
+    if executor is None:
+        msg = f"{header} must be one of {', '.join(e.value for e in CodeExecutor)}"
+        raise ValueError(msg)
+    return executor
+
+
 def parse_web_search_header(value: str | None) -> CodeExecutor | None:
     """Who a request asked to run its web search, ``None`` when it asked for no one.
 
     Raises ``ValueError`` for a value outside the vocabulary, as
     :func:`parse_code_execution_header` does.
     """
-    if value is None or not value.strip():
-        return None
-    executor = CodeExecutor.parse(value)
-    if executor is None:
-        msg = f"{WEB_SEARCH_HEADER} must be one of {', '.join(e.value for e in CodeExecutor)}"
-        raise ValueError(msg)
-    return executor
+    return _parse_executor_header(value, WEB_SEARCH_HEADER)
+
+
+def _claims_provider_keyword(
+    tool_entry: dict[str, Any] | None,
+    *,
+    requested: CodeExecutor | None,
+    intercept: bool,
+    backend_configured: bool,
+    providers: Sequence[str | None],
+    runs_natively: Callable[[str | None], bool],
+) -> bool:
+    if tool_entry is None or not backend_configured:
+        return False
+    if intercept:
+        return True
+    if requested is CodeExecutor.AUTO:
+        return not providers or not all(runs_natively(provider) for provider in providers)
+    return requested is CodeExecutor.OTARI
 
 
 def claims_provider_web_search(
@@ -147,15 +177,16 @@ def claims_provider_web_search(
     so a chain that falls back to a model with no search of its own never
     forwards it a search nobody will run.
     """
-    if tool_entry is None or not backend_configured:
-        return False
-    if intercept:
-        return True
-    if requested is CodeExecutor.AUTO:
-        return not providers or not all(
-            provider_runs_web_search_natively(tool_entry, provider=provider, dialect=dialect) for provider in providers
-        )
-    return requested is CodeExecutor.OTARI
+    return _claims_provider_keyword(
+        tool_entry,
+        requested=requested,
+        intercept=intercept,
+        backend_configured=backend_configured,
+        providers=providers,
+        runs_natively=lambda provider: provider_runs_web_search_natively(
+            tool_entry, provider=provider, dialect=dialect
+        ),
+    )
 
 
 def web_search_header_conflicts(requested: CodeExecutor | None, *, intercept: bool) -> bool:
@@ -170,6 +201,73 @@ def web_search_header_conflicts(requested: CodeExecutor | None, *, intercept: bo
 def _is_web_fetch_tool_type(type_value: Any) -> bool:
     """Recognize only the canonical gateway-managed Fetch declaration."""
     return isinstance(type_value, str) and type_value == Tool.WEB_FETCH
+
+
+def is_provider_web_fetch_tool_type(type_value: Any) -> bool:
+    """Recognize a provider-named web-fetch keyword, any ``"web_fetch_<suffix>"``."""
+    return isinstance(type_value, str) and type_value.startswith(WEB_FETCH_NATIVE_TYPE_PREFIX)
+
+
+def _is_any_web_fetch_tool_type(type_value: Any) -> bool:
+    """The gateway-managed type or a provider-named keyword."""
+    return _is_web_fetch_tool_type(type_value) or is_provider_web_fetch_tool_type(type_value)
+
+
+# Anthropic is the only provider with a fetch tool of its own, and only on Messages.
+_ANTHROPIC_WEB_FETCH_TYPE = re.compile(r"web_fetch_\d{8}")
+
+
+def first_provider_web_fetch_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """The first provider-named web-fetch declaration in ``tools``, if any."""
+    for entry in tools or []:
+        if isinstance(entry, dict) and is_provider_web_fetch_tool_type(entry.get("type")):
+            return entry
+    return None
+
+
+def provider_runs_web_fetch_natively(
+    tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect
+) -> bool:
+    """Whether the dispatched provider would run this web-fetch declaration itself."""
+    if provider is None or tool_entry is None:
+        return False
+    type_value = tool_entry.get("type")
+    return (
+        isinstance(type_value, str)
+        and _ANTHROPIC_WEB_FETCH_TYPE.fullmatch(type_value) is not None
+        and (provider.lower(), dialect) == ("anthropic", Dialect.MESSAGES)
+    )
+
+
+def parse_web_fetch_header(value: str | None) -> CodeExecutor | None:
+    """Who a request asked to run its web fetch, ``None`` when it asked for no one.
+
+    Raises ``ValueError`` for a value outside the vocabulary.
+    """
+    return _parse_executor_header(value, WEB_FETCH_HEADER)
+
+
+def claims_provider_web_fetch(
+    tool_entry: dict[str, Any] | None,
+    *,
+    requested: CodeExecutor | None,
+    fetch_enabled: bool,
+    providers: Sequence[str | None],
+    dialect: Dialect,
+) -> bool:
+    """Whether the gateway runs a provider-named web-fetch declaration itself.
+
+    :func:`claims_provider_web_search`'s rule under :data:`WEB_FETCH_HEADER`, without
+    interception: nothing is claimed without the header or with fetch disabled.
+    """
+    return _claims_provider_keyword(
+        tool_entry,
+        requested=requested,
+        intercept=False,
+        backend_configured=fetch_enabled,
+        providers=providers,
+        runs_natively=lambda provider: provider_runs_web_fetch_natively(tool_entry, provider=provider, dialect=dialect),
+    )
 
 
 def extract_web_search_tool(
@@ -194,9 +292,12 @@ def extract_web_search_tool(
 
 def extract_web_fetch_tool(
     tools: list[dict[str, Any]] | None,
+    *,
+    claim: bool = False,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
-    """Pull the first canonical Fetch declaration, leaving native types alone."""
-    return extract_first_matching_tool(tools, _is_web_fetch_tool_type)
+    """Pull the first gateway-run Fetch declaration, leaving a provider's keyword alone unless ``claim``."""
+    predicate = _is_any_web_fetch_tool_type if claim else _is_web_fetch_tool_type
+    return extract_first_matching_tool(tools, predicate)
 
 
 def web_search_intercept_enabled(config: GatewayConfig | None = None) -> bool:

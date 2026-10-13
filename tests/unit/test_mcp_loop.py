@@ -39,7 +39,7 @@ from gateway.services.tools import WEB_SEARCH_TOOL_NAME, ToolUseBudget
 
 def _use_budget(max_uses: int) -> ToolUseBudget:
     """A cap on the gateway's own searches, which is the tool these loops run."""
-    return ToolUseBudget(WEB_SEARCH_TOOL_NAME, max_uses)
+    return ToolUseBudget({WEB_SEARCH_TOOL_NAME: max_uses})
 
 
 _FinishReason = Literal["stop", "length", "tool_calls", "content_filter", "function_call"]

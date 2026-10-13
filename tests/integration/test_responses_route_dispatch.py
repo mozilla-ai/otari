@@ -535,10 +535,10 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
     budget = budgets_seen[0]
     assert budget is not None, "the cap never reached the loop"
     # Arrived by value, not just as "some budget": spending it exactly twice exhausts it.
-    budget.record("results")
-    assert not budget.exhausted()
-    budget.record("results")
-    assert budget.exhausted()
+    budget.record("web_search", "results")
+    assert not budget.exhausted("web_search")
+    budget.record("web_search", "results")
+    assert budget.exhausted("web_search")
 
 
 def test_invalid_web_search_max_uses_is_rejected_by_this_format(

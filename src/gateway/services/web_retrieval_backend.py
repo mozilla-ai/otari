@@ -216,6 +216,8 @@ class WebRetrievalBackend:
         # already flattened them. Safe as single-slot state because every tool loop
         # awaits its calls one at a time.
         self._last_results: list[dict[str, Any]] = []
+        # The page the most recent fetch retrieved, kept for the same reason.
+        self._last_fetch: WebFetchResult | None = None
 
     @property
     def trace(self) -> RequestTrace | None:
@@ -285,6 +287,11 @@ class WebRetrievalBackend:
         self._last_results = []
         return results
 
+    def take_last_fetch(self) -> WebFetchResult | None:
+        """The page the last ``call_tool`` fetched, clearing it; ``None`` when it fetched none."""
+        fetched, self._last_fetch = self._last_fetch, None
+        return fetched
+
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Run a search and record it on the request's tally.
 
@@ -319,6 +326,7 @@ class WebRetrievalBackend:
             self._trace.record_tool_call(tool_name=tool_name, tool_type=tool_type, started=started, ok=ok)
 
     async def _call_fetch(self, arguments: dict[str, Any]) -> str:
+        self._last_fetch = None
         try:
             result = await self._fetch_tool(arguments)
         except WebRetrievalLimitExceededError:
@@ -353,7 +361,9 @@ class WebRetrievalBackend:
             return "[tool error] URL invalid or disallowed by gateway safety policy"
         except (httpx.HTTPError, WebFetchError):
             return "[tool error] Web Fetch network failure"
-        return _format_fetch_result(fetched)
+        formatted = _format_fetch_result(fetched)
+        self._last_fetch = fetched
+        return formatted
 
     async def _search_tool(self, arguments: dict[str, Any]) -> str:
         if self._client is None:

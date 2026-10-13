@@ -118,7 +118,7 @@ async def _execute_function_calls(
         args = _parsed_arguments(item.arguments)
         call = NativeCall(str(item.name or ""), str(item.call_id or ""), args)
         capped = is_capped_call(budget, pool, item.name)
-        if capped and budget is not None and budget.exhausted():
+        if capped and budget is not None and budget.exhausted(item.name):
             if native_items is not None:
                 native_items.extend(_native_items(call, pool, tools, refused=True))
             out.append({"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR})
@@ -133,7 +133,7 @@ async def _execute_function_calls(
             text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
-                budget.record(text)
+                budget.record(item.name, text)
         if native_items is not None:
             native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), pool, tools, refused=False))
         out.append({"type": "function_call_output", "call_id": item.call_id, "output": text})
@@ -271,7 +271,7 @@ async def _execute_stream_owned(
         args = _parsed_arguments(spec.get("arguments"))
         call = NativeCall(str(spec["name"]), str(spec.get("call_id") or ""), args)
         capped = is_capped_call(budget, pool, call.name)
-        if capped and budget is not None and budget.exhausted():
+        if capped and budget is not None and budget.exhausted(call.name):
             state.native_items.extend(_native_items(call, pool, tools, refused=True))
             results.append({"type": "function_call_output", "call_id": call.id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
@@ -285,7 +285,7 @@ async def _execute_stream_owned(
             text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
-                budget.record(text)
+                budget.record(call.name, text)
         state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), pool, tools, refused=False))
         results.append({"type": "function_call_output", "call_id": call.id, "output": text})
     return results

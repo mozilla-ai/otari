@@ -311,6 +311,7 @@ from gateway.services.tools import (
     DeclaredWebTools,
     Dialect,
     ToolUseBudget,
+    WebClaims,
     admit_code_execution,
     admit_mcp_servers,
     admit_web_access,
@@ -319,6 +320,7 @@ from gateway.services.tools import (
     declares_code_execution,
     extract_web_tools,
     native_rendering,
+    read_web_fetch_max_uses,
     read_web_search_max_uses,
     web_search_intercept_enabled,
 )
@@ -2928,9 +2930,16 @@ class ToolContext:
         self.tally = ToolUsageTally()
         # The request's trace, handed to each backend beside the tally for the same reasons.
         self.trace = trace
-        # Successful Search calls spend the caller's cap across all routing attempts.
-        cap = self.max_web_search_uses
-        self.use_budget = ToolUseBudget(WEB_SEARCH_TOOL_NAME, cap) if cap is not None else None
+        # Successful Search and Fetch calls spend the caller's caps across all routing attempts.
+        caps = {
+            name: cap
+            for name, cap in (
+                (WEB_SEARCH_TOOL_NAME, self.max_web_search_uses),
+                (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(self.web_fetch_tool_entry)),
+            )
+            if cap is not None
+        }
+        self.use_budget = ToolUseBudget(caps) if caps else None
         # Search and Fetch share a separate attempted-call cap across routing attempts.
         self.web_retrieval_counter = WebRetrievalCounter()
 
@@ -3275,6 +3284,7 @@ class DeclaredTools:
     mcp_servers: list[McpServerConfig] | None
     tools: list[dict[str, Any]] | None
     tools_header: str | None
+    web_fetch_header: str | None = None
     web_search_header: str | None = None
 
 
@@ -3304,13 +3314,11 @@ async def prepare_gateway_tools(
     NOTE: callers must not release the budget reservation after a refusal from here.
     """
     try:
-        claim_web_search = _admit_web_declarations(adapter, ctx, declared)
+        web_claims = _admit_web_declarations(adapter, ctx, declared)
         await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         code = await _admit_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
-        web = _extract_web_tools(
-            adapter, ctx, code, claim_web_search=claim_web_search, mcp_servers_declared=bool(mcp_servers)
-        )
+        web = _extract_web_tools(adapter, ctx, code, claims=web_claims, mcp_servers_declared=bool(mcp_servers))
         web_access = await _admit_web_access(adapter, ctx, web, backends.ports.web_search_policy)
         await _require_tool_pricing(
             adapter,
@@ -3422,12 +3430,15 @@ async def _admit_mcp_servers(
         raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
 
-def _admit_web_declarations(adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools) -> bool:
-    """Refuse an ambiguous managed web declaration, and say whether the gateway claims a provider's search keyword."""
+def _admit_web_declarations(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools
+) -> WebClaims:
+    """Refuse an ambiguous managed web declaration, and say which provider web keywords the gateway claims."""
     try:
         return claim_web_declarations(
             declared.tools,
             web_search_header=declared.web_search_header,
+            web_fetch_header=declared.web_fetch_header,
             config=ctx.config,
             providers=_candidate_provider_names(ctx),
             dialect=adapter.name,
@@ -3441,12 +3452,12 @@ def _extract_web_tools(
     ctx: RequestContext,
     code: AdmittedCodeExecution,
     *,
-    claim_web_search: bool,
+    claims: WebClaims,
     mcp_servers_declared: bool,
 ) -> DeclaredWebTools:
     """Take the managed web tools out of what code execution left, refusing one this deployment cannot serve."""
     try:
-        web = extract_web_tools(code.tools_after_sandbox, config=ctx.config, claim_web_search=claim_web_search)
+        web = extract_web_tools(code.tools_after_sandbox, config=ctx.config, claims=claims)
         check_web_tools_alone(web, use_sandbox=code.use_sandbox, mcp_servers_declared=mcp_servers_declared)
     except WebToolDeclarationError as exc:
         raise domain_error(adapter, exc) from exc

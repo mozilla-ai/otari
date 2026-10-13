@@ -15,6 +15,8 @@ WEB_SEARCH_TOOL_NAME = WebTool.SEARCH.value
 # the provider's own vocabulary rather than the gateway's.
 WEB_SEARCH_NATIVE_TYPE_PREFIX = "web_search_"
 WEB_FETCH_TOOL_NAME = WebTool.FETCH.value
+# The dated spellings of Anthropic's own web-fetch tool type (``web_fetch_20250910``).
+WEB_FETCH_NATIVE_TYPE_PREFIX = "web_fetch_"
 WEB_RETRIEVAL_RESULT_MAX_BYTES = 50 * 1024
 
 

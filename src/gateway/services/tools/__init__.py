@@ -2,7 +2,7 @@
 
 ``BUILTIN_TOOLS`` lists every such tool, and ``BuiltinTool`` is the shape of one entry.
 ``native_rendering`` answers how one tool's calls are announced in a given wire dialect,
-and ``ToolUseBudget`` is the per-request cap on one tool's gateway-run calls.
+and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``Tool`` names the ``tools[].type`` values the gateway runs itself.
 ``claim_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
 ``admit_code_execution`` admits its code execution, ``admit_mcp_servers`` its MCP servers,
@@ -71,13 +71,16 @@ from gateway.services.tools._use_budget import MAX_USES_EXCEEDED_ERROR, ToolUseB
 from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy
 from gateway.services.tools._web_admission import (
     DeclaredWebTools,
+    WebClaims,
     admit_web_access,
     check_web_tools_alone,
     claim_web_declarations,
     extract_web_tools,
+    read_web_fetch_max_uses,
     read_web_search_max_uses,
 )
 from gateway.services.tools._web_declarations import (
+    WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
     web_search_declaration_forms,
     web_search_intercept_enabled,
@@ -111,6 +114,7 @@ __all__ = [
     "MAX_USES_EXCEEDED_ERROR",
     "SERVER_TOOL_USE_ID_PREFIX",
     "WEB_SEARCH_CALL_ID_PREFIX",
+    "WEB_FETCH_HEADER",
     "WEB_SEARCH_HEADER",
     "AdmittedCodeExecution",
     "BuiltinTool",
@@ -121,6 +125,7 @@ __all__ = [
     "Tool",
     "ToolUseBudget",
     "WebAccessGrant",
+    "WebClaims",
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
     "admit_code_execution",
@@ -141,6 +146,7 @@ __all__ = [
     "native_rendering",
     "parse_code_execution_header",
     "provider_runs_code_natively",
+    "read_web_fetch_max_uses",
     "read_web_search_max_uses",
     "resolve_code_executor_preference",
     "web_search_declaration_forms",

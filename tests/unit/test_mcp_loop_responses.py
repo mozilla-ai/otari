@@ -54,7 +54,7 @@ _SEARCH = frozenset({WEB_SEARCH_TOOL_NAME})
 
 def _use_budget(max_uses: int) -> ToolUseBudget:
     """A cap on the gateway's own searches, which is the tool these loops run."""
-    return ToolUseBudget(WEB_SEARCH_TOOL_NAME, max_uses)
+    return ToolUseBudget({WEB_SEARCH_TOOL_NAME: max_uses})
 
 
 class _FakePool:

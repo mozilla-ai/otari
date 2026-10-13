@@ -61,12 +61,13 @@ def apply_web_access_policy(
     *,
     requested_tools: Sequence[WebTool],
     search_tool_entry: dict[str, Any] | None,
+    fetch_tool_entry: dict[str, Any] | None = None,
     config: GatewayConfig,
 ) -> WebAccessGrant:
     """Narrow the declared web access to what ``policy`` permits.
 
     ``None`` is no policy, which narrows nothing.
-    ``search_tool_entry`` is not mutated.
+    Neither tool entry is mutated.
 
     Raises:
         WebAccessRefusedError: the policy refuses the request, and the subclass says why.
@@ -87,7 +88,9 @@ def apply_web_access_policy(
         ):
             raise WebAccessToolNotAuthorizedError()
     try:
-        fetch_policy = _fetch_policy(workspace_domains, search_tool_entry if fetch_requested else None)
+        fetch_policy = _fetch_policy(
+            workspace_domains, search_tool_entry if fetch_requested else None, fetch_tool_entry
+        )
     except DisjointDomainAllowListsError as exc:
         raise WorkspaceWebSearchDomainsExcludedError() from exc
     if policy is not None and search_tool_entry is not None:
@@ -103,15 +106,26 @@ def apply_web_access_policy(
     )
 
 
-def _fetch_policy(workspace_domains: DomainPolicy, search_tool_entry: dict[str, Any] | None) -> DomainPolicy:
-    """Let a Search declaration's domains narrow, but never replace, the workspace's Fetch domains."""
-    request_allowed = None
-    request_blocked = None
-    if search_tool_entry is not None:
-        if search_tool_entry.get("allowed_domains"):
-            request_allowed = canonicalize_domain_rules(search_tool_entry["allowed_domains"])
-        if search_tool_entry.get("blocked_domains"):
-            request_blocked = canonicalize_domain_rules(search_tool_entry["blocked_domains"])
+def _declared_rules(tool_entry: dict[str, Any] | None, field: str) -> tuple[CanonicalHost, ...] | None:
+    values = (tool_entry or {}).get(field)
+    return canonicalize_domain_rules(values) if values else None
+
+
+def _fetch_policy(
+    workspace_domains: DomainPolicy,
+    search_tool_entry: dict[str, Any] | None,
+    fetch_tool_entry: dict[str, Any] | None,
+) -> DomainPolicy:
+    """Let the request's declarations narrow, but never replace, the workspace's Fetch domains.
+
+    A Fetch declaration's own allow-list stands in for a Search declaration's, and both block-lists apply.
+    """
+    request_allowed = _declared_rules(fetch_tool_entry, "allowed_domains") or _declared_rules(
+        search_tool_entry, "allowed_domains"
+    )
+    request_blocked = union_domain_block_lists(
+        _declared_rules(search_tool_entry, "blocked_domains"), _declared_rules(fetch_tool_entry, "blocked_domains")
+    )
     allowed = intersect_domain_allow_lists(workspace_domains.allowed or None, request_allowed) or ()
     blocked = union_domain_block_lists(workspace_domains.blocked or None, request_blocked)
     return DomainPolicy(allowed=allowed, blocked=blocked)

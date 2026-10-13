@@ -26,7 +26,7 @@ from gateway.services.tenancy.workspace_web_search_service import (
     read_web_search_policy,
 )
 from gateway.services.tools._web_access import narrow_web_search_tool_entry
-from gateway.services.tools._web_admission import _canonicalize_web_search_request_domains
+from gateway.services.tools._web_admission import _canonicalize_request_domains
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, canonicalize_domain_rule
 
@@ -112,7 +112,7 @@ def test_every_source_refuses_the_same_domain_list(value: list[Any]) -> None:
     with pytest.raises(ValueError):
         read_web_search_policy({"enabled": True, "allowed_domains": value})
     with pytest.raises(ValueError):
-        _canonicalize_web_search_request_domains({"allowed_domains": value})
+        _canonicalize_request_domains({"allowed_domains": value})
 
 
 def test_every_source_reads_the_same_domain_list() -> None:
@@ -123,7 +123,7 @@ def test_every_source_reads_the_same_domain_list() -> None:
     assert tuple(_normalize_domains(value) or ()) == expected
     assert _stored_domains(value) == expected
     assert read_web_search_policy({"enabled": True, "allowed_domains": value}).allowed_domains == expected
-    _canonicalize_web_search_request_domains(request_entry)
+    _canonicalize_request_domains(request_entry)
     assert tuple(request_entry["allowed_domains"]) == expected
     assert tuple(request_entry["blocked_domains"]) == expected
 
@@ -131,7 +131,7 @@ def test_every_source_reads_the_same_domain_list() -> None:
 def test_a_request_keeps_an_empty_domain_list_empty() -> None:
     request_entry: dict[str, Any] = {"allowed_domains": [], "blocked_domains": None}
 
-    _canonicalize_web_search_request_domains(request_entry)
+    _canonicalize_request_domains(request_entry)
 
     assert request_entry == {"allowed_domains": [], "blocked_domains": None}
 

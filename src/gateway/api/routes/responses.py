@@ -87,6 +87,7 @@ from gateway.services.providers import aresponses
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
+    WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
@@ -631,6 +632,7 @@ async def create_response(
             max_tool_iterations=request_body.max_tool_iterations,
             tools_header=request_body.tools_header,
             code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         ),
         backends=ToolBackends(
