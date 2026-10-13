@@ -569,3 +569,72 @@ def test_open_signup_without_mail_configured_registers_nobody(tmp_path: Path) ->
 
         assert response.status_code == 503
         assert _identity_count(tmp_path) == before
+
+
+def _signed_in_member(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> str:
+    """Add, claim, verify and sign in a member; return their organization membership id."""
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": email, "role": "member"},
+        headers={"Otari-Key": MASTER_KEY},
+    )
+    assert added.status_code == 201, added.text
+    token = _captured_verification_link(caplog, client, email=email)
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+    assert client.post(f"{API_ROOT}/auth/session", json={"email": email, "password": PASSWORD}).status_code == 200
+    return str(added.json()["organization_member_id"])
+
+
+def _remove(client: TestClient, organization_member_id: str) -> None:
+    """Remove a member as the operator, leaving the member's own session cookie in place."""
+    session = dict(client.cookies)
+    client.cookies.clear()
+    removed = client.delete(
+        f"{API_ROOT}/organizations/me/members/{organization_member_id}", headers={"Otari-Key": MASTER_KEY}
+    )
+    assert removed.status_code == 200, removed.text
+    client.cookies.update(session)
+
+
+def test_a_member_can_create_an_organization_where_signup_is_closed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        _signed_in_member(client, caplog, email="ada@example.com")
+
+        created = client.post(f"{API_ROOT}/organizations", json={"name": "Ada Corp"})
+
+        assert created.status_code == 201, created.text
+
+
+def test_a_removed_member_cannot_create_an_organization_where_signup_is_closed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Removal ends the membership but not the identity or its password, so the session still signs in.
+
+    Creating an organization would make that identity a tenant of a deployment
+    that admits nobody it was not invited into.
+    """
+    with _client(tmp_path) as client:
+        membership_id = _signed_in_member(client, caplog, email="eve@example.com")
+        _remove(client, membership_id)
+
+        created = client.post(f"{API_ROOT}/organizations", json={"name": "Eve Corp"})
+
+        assert created.status_code == 403, created.text
+        memberships = client.get(f"{API_ROOT}/organizations/me/memberships")
+        assert memberships.status_code == 200, memberships.text
+        assert memberships.json()["count"] == 0
+
+
+def test_a_removed_member_can_create_an_organization_where_signup_is_open(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Open signup already gives any address an organization of its own, so refusing here would protect nothing."""
+    with _client(tmp_path, open_signup=True) as client:
+        membership_id = _signed_in_member(client, caplog, email="eve@example.com")
+        _remove(client, membership_id)
+
+        created = client.post(f"{API_ROOT}/organizations", json={"name": "Eve Corp"})
+
+        assert created.status_code == 201, created.text

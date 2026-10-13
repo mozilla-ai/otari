@@ -114,6 +114,7 @@ async def create_organization(
     service: OrganizationServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationCreateRequest,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OrganizationPublic:
     """Create an organization with the caller as its owner.
 
@@ -125,8 +126,15 @@ async def create_organization(
     The caller is **not** moved into it. Switching is a separate call
     (``POST /me/switch``), so creating an organization does not change what the
     rest of the caller's session is looking at.
+
+    Where signup is closed, the caller must already be an active member of an
+    organization; a caller with none is refused with a 403.
     """
-    return await service.create_organization_for_user(user=current_identity, request=body)
+    return await service.create_organization_for_user(
+        user=current_identity,
+        request=body,
+        require_existing_membership=not config.open_signup,
+    )
 
 
 @router.get("/me")

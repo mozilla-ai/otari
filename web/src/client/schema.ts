@@ -1908,6 +1908,9 @@ export interface paths {
          *     The caller is **not** moved into it. Switching is a separate call
          *     (``POST /me/switch``), so creating an organization does not change what the
          *     rest of the caller's session is looking at.
+         *
+         *     Where signup is closed, the caller must already be an active member of an
+         *     organization; a caller with none is refused with a 403.
          */
         post: operations["organizations-create_organization"];
         delete?: never;

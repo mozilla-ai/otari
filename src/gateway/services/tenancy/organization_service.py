@@ -506,6 +506,7 @@ class OrganizationService:
         *,
         user: User,
         request: OrganizationCreateRequest,
+        require_existing_membership: bool = False,
     ) -> OrganizationPublic:
         """Create an organization owned by the caller, with a workspace to work in.
 
@@ -527,10 +528,14 @@ class OrganizationService:
         looking at.
 
         No role check, because there is no organization to check a role in yet:
-        this is not an action inside a tenant. The credential is the gate, and it
-        is the management API's own, so a caller who can reach this can already
-        reach `/v1/keys`.
+        this is not an action inside a tenant. ``require_existing_membership`` is
+        for a deployment that keeps signup closed: there, an identity whose every
+        membership has ended (revoked, removed) would otherwise make itself a
+        tenant by creating one, so the caller must already be an active member
+        somewhere.
         """
+        if require_existing_membership and await self.members.get_first_active_for_user(user.id) is None:
+            raise NotAuthorizedError("Only a member of an organization can create another one")
         name = _validated_organization_name(request.name)
         try:
             async with self._require_unit_of_work():

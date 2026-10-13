@@ -3221,7 +3221,7 @@
               },
               "raw": "{\n  \"name\": \"string\"\n}"
             },
-            "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.",
+            "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.\n\nWhere signup is closed, the caller must already be an active member of an\norganization; a caller with none is refused with a 403.",
             "header": [
               {
                 "key": "Content-Type",
