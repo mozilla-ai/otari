@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
 from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
+from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.api.routes._request_tags import MAX_TAG_KEY_LENGTH
 from gateway.core.config import GatewayConfig
 from gateway.core.metered_pricing import quantize_cost
@@ -608,13 +609,14 @@ async def ingest_external_usage(
     prompt/completion/tool field is rejected (422), not stored.
     """
     api_key, is_master_key = auth_result
-    return await ingest_external_events(
-        db,
-        request,
-        api_key=api_key,
-        is_master_key=is_master_key,
-        reject_user_mismatch=config.reject_user_mismatch,
-    )
+    with retryable_on_database_outage("external usage ingest"):
+        return await ingest_external_events(
+            db,
+            request,
+            api_key=api_key,
+            is_master_key=is_master_key,
+            reject_user_mismatch=config.reject_user_mismatch,
+        )
 
 
 class RequestSettlement(BaseModel):

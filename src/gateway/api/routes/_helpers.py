@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
+from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
@@ -390,3 +392,25 @@ async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID
             detail=f"Workspace '{workspace_id}' not found",
         )
     return named
+
+
+@contextmanager
+def retryable_on_database_outage(what: str) -> Iterator[None]:
+    """Answer a database outage while storing an idempotent batch with a 503 to retry.
+
+    For ingest only: every row it writes is keyed, so a sender that retries a
+    batch this refused stores each event once. An OTLP exporter retries a 503 and
+    drops the batch on a 500. A row the database refuses for what it holds is not
+    an outage, and is raised unchanged.
+    """
+    try:
+        yield
+    except DATA_ERRORS:
+        raise
+    except DATABASE_ERRORS as exc:
+        logger.warning("%s: database unavailable, asking the sender to retry", what, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not store the batch right now. Retry it.",
+            headers={"Retry-After": "2"},
+        ) from exc

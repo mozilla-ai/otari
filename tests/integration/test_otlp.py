@@ -10,6 +10,7 @@ token semantics here mirror payloads captured from the real clients.
 
 import gzip
 import json
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -148,6 +149,37 @@ def test_otlp_idempotent(client: TestClient, master_key_header: dict[str, str], 
     client.post(_PATH, json=_otlp(_api_request_record("req_dup")), headers=headers)
     client.post(_PATH, json=_otlp(_api_request_record("req_dup")), headers=headers)
     assert db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_dup").count() == 1
+
+
+def test_otlp_replay_held_by_an_uncommitted_write_gets_a_retryable_503(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A replay colliding with a write still in flight gives up on the lock and asks for a retry.
+
+    The uncommitted delete stands in for a concurrent import of the same event: an
+    insert of that key has to wait to learn whether it commits. Unbounded, the wait
+    held a pooled connection for the whole statement timeout, and the 500 it ended
+    in made the exporter drop the batch.
+    """
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    assert client.post(_PATH, json=_otlp(_api_request_record("req_held")), headers=headers).status_code == 200
+
+    db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_held").delete()
+    db_session.flush()
+    try:
+        started = time.monotonic()
+        held = client.post(_PATH, json=_otlp(_api_request_record("req_held")), headers=headers)
+        waited = time.monotonic() - started
+    finally:
+        db_session.rollback()
+
+    assert held.status_code == 503, held.text
+    assert held.headers["Retry-After"] == "2"
+    assert waited < 10
+    retried = client.post(_PATH, json=_otlp(_api_request_record("req_held")), headers=headers)
+    assert retried.status_code == 200
+    assert db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_held").count() == 1
 
 
 def test_otlp_requires_exempt_key(client: TestClient, master_key_header: dict[str, str]) -> None:

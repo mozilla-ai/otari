@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
 from gateway.core.metered_pricing import BillableUsage, ChargeLine, billable_usage, price_billable_usage
+from gateway.core.sql import INGEST_LOCK_TIMEOUT_MS, insert_ignoring_duplicates
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
@@ -191,33 +192,6 @@ def _reject(result: ExternalIngestResult, index: int, source_event_id: str | Non
     result.rejected += 1
     if len(result.errors) < _MAX_ERRORS:
         result.errors.append(ExternalIngestError(index=index, source_event_id=source_event_id, detail=detail))
-
-
-async def _existing_event_ids(db: AsyncSession, source: str, event_ids: list[str]) -> set[str]:
-    """Return the subset of ``event_ids`` already present for ``source``.
-
-    Chunked so a full 1000-event batch stays under SQLite's default bound on the
-    number of bind parameters in a single statement.
-    """
-    found: set[str] = set()
-    for start in range(0, len(event_ids), _IN_CHUNK):
-        chunk = event_ids[start : start + _IN_CHUNK]
-        if not chunk:
-            continue
-        rows = (
-            (
-                await db.execute(
-                    select(UsageLog.source_event_id).where(
-                        UsageLog.source == source,
-                        UsageLog.source_event_id.in_(chunk),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        found.update(row for row in rows if row is not None)
-    return found
 
 
 def _model_keys(provider: str, model: str) -> list[str]:
@@ -393,52 +367,52 @@ async def _insert_rows(
     rows: list[UsageLog],
     result: ExternalIngestResult,
 ) -> None:
-    """Commit new rows, treating unique-constraint collisions as duplicates.
+    """Commit new rows; a row whose ``(source, source_event_id)`` exists is a duplicate.
 
-    A concurrent import of the same event races on ``(source, source_event_id)``.
-    On IntegrityError the whole batch rolls back, so re-query what now exists and
-    retry only the survivors. If the retry commit also collides (a still-racing
-    writer landed more ids in the window), fall back to row-at-a-time inserts so
-    events that collide with nothing are not misreported as duplicates.
+    One ``ON CONFLICT DO NOTHING`` insert, so a batch repeating events that an
+    earlier or concurrent import stored needs no rollback and retry. Any other
+    refusal (an API key deleted mid-import, say) fails the whole statement, so the
+    batch falls back to row-at-a-time inserts and only the refused rows are lost.
     """
     if not rows:
         return
-    db.add_all(rows)
     try:
-        await db.commit()
-        result.accepted += len(rows)
-        return
+        inserted = await _insert_and_commit(db, rows)
     except IntegrityError:
         await db.rollback()
-
-    existing = await _existing_event_ids(db, source, [r.source_event_id for r in rows if r.source_event_id])
-    survivors = [r for r in rows if r.source_event_id not in existing]
-    result.duplicate += len(rows) - len(survivors)
-    if not survivors:
+    else:
+        result.accepted += len(inserted)
+        result.duplicate += len(rows) - len(inserted)
         return
-    db.add_all(survivors)
-    try:
-        await db.commit()
-        result.accepted += len(survivors)
-        return
-    except IntegrityError:
-        await db.rollback()
 
-    still_colliding = 0
-    for row in survivors:
-        db.add(row)
+    refused = 0
+    for row in rows:
         try:
-            await db.commit()
-            result.accepted += 1
+            inserted = await _insert_and_commit(db, [row])
         except IntegrityError:
             await db.rollback()
-            # This specific event is landing via a concurrent request (or, rarely,
-            # violates another constraint such as a just-deleted API key). Count it
-            # as duplicate rather than retry indefinitely.
+            refused += 1
+            # Reported as a duplicate: nothing the submitter could fix by
+            # sending it again.
             result.duplicate += 1
-            still_colliding += 1
-    if still_colliding:
-        logger.warning("external usage: %d events still colliding after retry for source=%s", still_colliding, source)
+        else:
+            result.accepted += len(inserted)
+            result.duplicate += 1 - len(inserted)
+    if refused:
+        logger.warning("external usage: %d events refused by the database for source=%s", refused, source)
+
+
+async def _insert_and_commit(db: AsyncSession, rows: list[UsageLog]) -> list[str]:
+    """Insert and commit ``rows``, returning the event ids that were new."""
+    inserted = await insert_ignoring_duplicates(
+        db,
+        rows,
+        conflict=(UsageLog.source, UsageLog.source_event_id),
+        returning=UsageLog.source_event_id,
+        lock_timeout_ms=INGEST_LOCK_TIMEOUT_MS,
+    )
+    await db.commit()
+    return inserted
 
 
 async def ingest_external_events(
@@ -544,12 +518,7 @@ async def ingest_external_events(
         pricing = _resolve_pricing(pricing_index, event.provider, event.model, event.timestamp)
         rows.append(_build_row(request.source, target_user, event, pricing, api_key_id, usage_workspace_id))
 
-    # Drop events already imported in a prior batch before inserting.
-    if rows:
-        existing = await _existing_event_ids(db, request.source, [r.source_event_id for r in rows if r.source_event_id])
-        fresh = [r for r in rows if r.source_event_id not in existing]
-        result.duplicate += len(rows) - len(fresh)
-        await _insert_rows(db, request.source, fresh, result)
+    await _insert_rows(db, request.source, rows, result)
 
     logger.info(
         "external usage ingest: source=%s accepted=%d duplicate=%d rejected=%d",

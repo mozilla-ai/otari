@@ -80,7 +80,11 @@ Only metadata and numeric usage are accepted. Use the generated OpenAPI document
 for the exact schema and validation limits.
 
 Rows are unique on `(source, source_event_id)`. Replaying a batch reports
-duplicates without creating new usage rows.
+duplicates without creating new usage rows. When the database cannot take a
+batch right away (another import of the same events is still writing, or the
+database is unreachable), this endpoint and the OTLP endpoints below answer
+`503` with `Retry-After`. Send the batch again: the events it already stored
+come back as duplicates.
 
 ## OpenTelemetry
 
