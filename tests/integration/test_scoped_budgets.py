@@ -955,7 +955,7 @@ def test_a_blank_provider_narrowing_is_refused(
 ) -> None:
     """A ceiling narrowed to nothing would be created, listed, and never enforced.
 
-    ``applicable_budgets`` matches ``provider_key_id == provider_instance OR IS
+    ``get_provider_ceilings`` matches ``provider_key_id == provider_instance OR IS
     NULL``, and a blank string is neither: it would store as a narrowed row
     under ``uq_scoped_budgets_scope_with_key`` and bind to no request ever. That
     is the same permissive-direction failure a scope naming nothing has, so it

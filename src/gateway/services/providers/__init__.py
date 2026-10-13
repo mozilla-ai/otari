@@ -15,7 +15,6 @@ from gateway.services.providers._provider_clients import (
     amessages,
     aresponses,
     provider_for,
-    reset_provider_clients,
 )
 from gateway.services.providers._provider_endpoint_cache import (
     OwnedEndpoint,
@@ -40,7 +39,6 @@ __all__ = [
     "owned_endpoint_http_client",
     "provider_for",
     "refresh_provider_endpoint_cache",
-    "reset_provider_clients",
     "reset_provider_endpoint_cache",
     "run_provider_endpoint_refresher",
     "unpriced_model_refusal",

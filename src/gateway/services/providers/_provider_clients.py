@@ -75,11 +75,6 @@ def provider_for(
     return llm
 
 
-def reset_provider_clients() -> None:
-    """Forget every cached provider (tests)."""
-    _providers.clear()
-
-
 def _split(model: str, provider: str | LLMProvider | None) -> tuple[str | LLMProvider, str]:
     if provider is None:
         return AnyLLM.split_model_provider(model)

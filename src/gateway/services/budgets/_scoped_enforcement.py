@@ -223,23 +223,6 @@ async def roll_ended_windows(
         await ceilings_repository.roll_period(budget_id, now=now, period_start=period_start, period_end=next_period_end)
 
 
-async def applicable_budgets(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    scope: BudgetScopeRequest,
-) -> tuple[ApplicableBudget, ...]:
-    """Every ceiling this request must pass, in reservation order.
-
-    A ceiling applies when its identity is one the request bills to AND it is
-    either aggregate (no provider) or narrowed to this request's provider. A
-    window that has run out is rolled here, before the reservation reads the
-    counters, so a request at the boundary is gated on the new period.
-    """
-    ceilings = await get_scope_ceilings(db, user_id=user_id, scope=scope)
-    return await roll_and_list_applicable(db, get_provider_ceilings(ceilings, scope.provider_instance))
-
-
 async def roll_and_list_applicable(
     db: AsyncSession, ceilings: Sequence[ApplicableCeiling]
 ) -> tuple[ApplicableBudget, ...]:
@@ -472,7 +455,6 @@ async def settle(
 __all__ = [
     "ApplicableBudget",
     "BudgetScopeRequest",
-    "applicable_budgets",
     "blocked_axis",
     "get_provider_ceilings",
     "get_scope_ceilings",
