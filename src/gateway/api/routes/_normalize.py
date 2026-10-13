@@ -120,13 +120,13 @@ def provider_container_requested(
     candidate that runs it natively. A file the request attaches then has to be one
     that provider holds, so it is copied there rather than read for the model.
     ``providers`` is every candidate the request may dispatch to, head first; unless
-    ``auto`` splits them, the head decides.
+    ``auto`` splits them, the first that can be dispatched decides.
     """
     explicit, remaining = extract_code_execution_tool(tools)
     keyword = first_provider_code_execution_tool(remaining)
     if explicit is not None or keyword is None:
         return False
-    candidates = _keyword_candidates(
+    decided = _keyword_candidates(
         keyword,
         config=config,
         providers=providers,
@@ -134,6 +134,8 @@ def provider_container_requested(
         code_execution_header=code_execution_header,
         workspace_executor=workspace_executor,
     )
+    # A candidate whose provider cannot run the code it was asked to is skipped, so it decides nothing.
+    candidates = [candidate for candidate in decided or [] if not candidate.unserved]
     if not candidates:
         return False
     claimed = [CODE_EXECUTION_TOOL.name in candidate.claimed for candidate in candidates]

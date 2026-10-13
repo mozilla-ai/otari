@@ -75,6 +75,10 @@ def test_config(postgres_url: str) -> GatewayConfig:
                         "select": [{"default": f"anthropic:{_CLAUDE}"}],
                         "on_failure": [f"vertexai:{_CLAUDE}"],
                     },
+                    "vertex-then-claude": {
+                        "select": [{"default": f"vertexai:{_CLAUDE}"}],
+                        "on_failure": [f"anthropic:{_CLAUDE}"],
+                    },
                     "claude-then-bedrock": {
                         "select": [{"default": f"anthropic:{_CLAUDE}"}],
                         "on_failure": [f"bedrock:{_CLAUDE}"],
@@ -506,6 +510,69 @@ def test_without_a_header_the_keyword_is_forwarded_to_every_candidate(
     assert seen.loop_calls == []
 
 
+def _provider(api_key_header: dict[str, str], tool: str) -> dict[str, str]:
+    return {**api_key_header, _HEADERS[tool]: "provider"}
+
+
+def _skip_rows(db_session: Session, instance: str) -> list[str | None]:
+    return [row.error_message for row in _rows(db_session) if row.status == "absorbed" and row.provider == instance]
+
+
+def _provider_skip(tool: str) -> str:
+    return f"Skipped: vertexai can't run {_NAMES[tool]} itself and the request asked for provider"
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_provider_skips_a_fallback_that_cannot_run_the_tool_itself(
+    client: TestClient, api_key_header: dict[str, str], db_session: Session, tool: str, stream: bool
+) -> None:
+    body = _messages_body("claude-then-vertex", _DECLARATIONS[tool], **({"stream": True} if stream else {}))
+
+    response, seen = _post_messages(client, _provider(api_key_header, tool), body, provider_fails=True)
+
+    # The head's own failure answers, since the only fallback was never sent the request.
+    assert response.status_code >= 500, response.text
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [{_DECLARATIONS[tool]["type"]}]
+    assert seen.loop_calls == []
+    assert seen.web_backends == []
+    assert _skip_rows(db_session, "vertexai") == [_provider_skip(tool)]
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_provider_skips_a_head_that_cannot_run_the_tool_itself(
+    client: TestClient, api_key_header: dict[str, str], db_session: Session, tool: str, stream: bool
+) -> None:
+    body = _messages_body("vertex-then-claude", _DECLARATIONS[tool], **({"stream": True} if stream else {}))
+
+    response, seen = _post_messages(client, _provider(api_key_header, tool), body)
+
+    assert response.status_code == 200, response.text
+    assert "via-provider" in response.text
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [{_DECLARATIONS[tool]["type"]}]
+    assert seen.web_backends == []
+    assert _skip_rows(db_session, "vertexai") == [_provider_skip(tool)]
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_provider_with_no_candidate_that_runs_the_tool_itself_is_refused(
+    client: TestClient, api_key_header: dict[str, str], tool: str, stream: bool
+) -> None:
+    body = _messages_body("openai-then-mistral", _DECLARATIONS[tool], **({"stream": True} if stream else {}))
+
+    response, seen = _post_messages(client, _provider(api_key_header, tool), body)
+
+    assert response.status_code == 400, response.text
+    assert response.headers["Otari-Error-Code"] == "native_tool_unavailable"
+    message = response.json()["detail"]["error"]["message"]
+    assert _NAMES[tool] in message
+    assert "auto" in message
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []
+
+
 def test_code_and_search_on_a_fallback_that_runs_neither_is_skipped_as_one_request_would_be(
     client: TestClient, api_key_header: dict[str, str], db_session: Session
 ) -> None:
@@ -650,6 +717,21 @@ def test_responses_leaves_the_search_with_an_openai_head(client: TestClient, api
     assert [seen.tool_types(call) for call in seen.provider_calls] == [{"web_search"}]
     assert seen.loop_calls == []
     assert seen.web_backends == []
+
+
+def test_responses_provider_skips_a_fallback_without_its_own_search(
+    client: TestClient, api_key_header: dict[str, str], db_session: Session
+) -> None:
+    response, seen = _post_responses(
+        client, _provider(api_key_header, "search"), _responses_body(), provider_fails=True
+    )
+
+    assert response.status_code >= 500, response.text
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [{"web_search"}]
+    assert seen.loop_calls == []
+    assert _skip_rows(db_session, "mistral") == [
+        "Skipped: mistral can't run web_search itself and the request asked for provider"
+    ]
 
 
 def test_responses_runs_otaris_search_for_a_fallback_without_one(

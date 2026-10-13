@@ -1,9 +1,11 @@
 """Errors that the tools domain may raise, each carrying the status it renders as."""
 
+from collections.abc import Iterable
 from enum import StrEnum
 
 from fastapi import status
 
+from gateway.core.error_codes import NATIVE_TOOL_UNAVAILABLE
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -78,6 +80,20 @@ class McpServerConfigurationError(TenancyError):
 
 class CodeExecutionDeclarationError(TenancyValidationError):
     """A request's code execution declaration or container cannot be served as written."""
+
+
+class NativeToolUnavailableError(TenancyValidationError):
+    """A request asked for the provider's own built-in tool, and no candidate's provider runs it itself."""
+
+    error_code = NATIVE_TOOL_UNAVAILABLE
+
+    def __init__(self, tools: Iterable[str]) -> None:
+        names = " or ".join(sorted(tools))
+        super().__init__(
+            f"no model this request may be sent to runs {names} itself, and provider allows only the "
+            "provider's own tool. Use auto to keep the provider's tool where a model has one and run "
+            "Otari's where it does not."
+        )
 
 
 class CodeExecutionRefusedError(TenancyForbiddenError):

@@ -4,9 +4,9 @@ A request may declare a built-in tool in a provider's own words (Anthropic's
 ``web_search_<date>``, OpenAI's ``code_interpreter``) and say who should run it,
 in :class:`~gateway.models.tools.CodeExecutor`'s vocabulary: ``otari`` always
 runs it here, ``auto`` leaves it with a provider that runs it itself and runs it
-here for one that does not, and ``provider`` always forwards it. Whether a
-provider runs a declaration itself is the tool's own answer
-(``BuiltinTool.runs_natively``), asked here once per candidate.
+here for one that does not, and ``provider`` only ever leaves it with a provider
+that runs it itself. Whether a provider runs a declaration itself is the tool's
+own answer (``BuiltinTool.runs_natively``), asked here once per candidate.
 """
 
 from __future__ import annotations
@@ -45,22 +45,29 @@ class CandidateTools:
     """What one candidate is sent for the declarations a request made in a provider's words.
 
     ``claimed`` names the tools Otari runs in place of the provider's, and ``native``
-    the ones forwarded to a provider that runs them itself. A tool in neither is
-    forwarded as written.
+    the ones forwarded to a provider that runs them itself. ``unserved`` names the
+    ones the request asked the provider to run (``provider``) that this candidate's
+    provider cannot run itself. A tool in none of them is forwarded as written.
     """
 
     claimed: frozenset[str] = frozenset()
     native: frozenset[str] = frozenset()
+    unserved: frozenset[str] = frozenset()
 
     def __or__(self, other: CandidateTools) -> CandidateTools:
         """The same candidate's answers for two sets of declarations, taken together."""
-        return CandidateTools(claimed=self.claimed | other.claimed, native=self.native | other.native)
+        return CandidateTools(
+            claimed=self.claimed | other.claimed,
+            native=self.native | other.native,
+            unserved=self.unserved | other.unserved,
+        )
 
 
 class _Decision(Enum):
     CLAIMED = auto()
     NATIVE = auto()
     FORWARDED = auto()
+    UNSERVED = auto()
 
 
 def _decide(declaration: ProviderToolDeclaration, *, provider: str | None, dialect: Dialect) -> _Decision:
@@ -71,6 +78,8 @@ def _decide(declaration: ProviderToolDeclaration, *, provider: str | None, diale
             return _Decision.CLAIMED if declaration.backend_configured else forwarded
         case CodeExecutor.AUTO:
             return _Decision.CLAIMED if declaration.backend_configured and not native else forwarded
+        case CodeExecutor.PROVIDER:
+            return _Decision.NATIVE if native else _Decision.UNSERVED
         case _:
             return forwarded
 
@@ -94,18 +103,17 @@ def decide_candidate_tools(
         if declaration.uniform and any(row[index] is _Decision.CLAIMED for row in decisions):
             for row in decisions:
                 row[index] = _Decision.CLAIMED
+
+    def _named(row: list[_Decision], decision: _Decision) -> frozenset[str]:
+        return frozenset(
+            declaration.tool.name for declaration, decided in zip(declarations, row, strict=True) if decided is decision
+        )
+
     return [
         CandidateTools(
-            claimed=frozenset(
-                declaration.tool.name
-                for declaration, decision in zip(declarations, row, strict=True)
-                if decision is _Decision.CLAIMED
-            ),
-            native=frozenset(
-                declaration.tool.name
-                for declaration, decision in zip(declarations, row, strict=True)
-                if decision is _Decision.NATIVE
-            ),
+            claimed=_named(row, _Decision.CLAIMED),
+            native=_named(row, _Decision.NATIVE),
+            unserved=_named(row, _Decision.UNSERVED),
         )
         for row in decisions
     ]

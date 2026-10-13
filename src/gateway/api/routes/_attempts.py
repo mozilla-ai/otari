@@ -79,11 +79,13 @@ class CandidateCannotServe(Exception):
     """The candidate cannot serve this request, which says nothing about its provider.
 
     ``refusal`` is what the request is answered with when no candidate can.
+    ``reason`` is what the record of the skipped candidate says, the refusal's detail where none is given.
     """
 
-    def __init__(self, refusal: HTTPException) -> None:
+    def __init__(self, refusal: HTTPException, *, reason: str | None = None) -> None:
         super().__init__(refusal.detail)
         self.refusal = refusal
+        self.reason = reason if reason is not None else str(refusal.detail)
 
 
 @dataclass(frozen=True)
@@ -146,7 +148,7 @@ async def walk_attempts(
     prepare_kwargs: PrepareKwargs | None = None,
     admit_attempt: AdmitAttempt | None = None,
     on_absorbed: Callable[[Attempt, BaseException, int], Awaitable[None]] | None = None,
-    on_skipped: Callable[[Attempt, HTTPException], Awaitable[None]] | None = None,
+    on_skipped: Callable[[Attempt, CandidateCannotServe], Awaitable[None]] | None = None,
     on_terminal: Callable[[Attempt], None] | None = None,
 ) -> tuple[Attempt, T]:
     """Try each attempt in order; return ``(chosen, result)`` for the first success.
@@ -168,8 +170,8 @@ async def walk_attempts(
     the request itself is still going to be served. It is not called for a terminal failure: that
     one is the request's outcome and the caller logs it as such.
 
-    ``on_skipped`` is the same for a candidate that could not serve, with its
-    refusal, so a model skipped because it was full is on record beside the one
+    ``on_skipped`` is the same for a candidate that could not serve, with why,
+    so a model skipped because it was full is on record beside the one
     that served. A walk that ends in that refusal reports it as the outcome instead.
 
     ``build_kwargs`` builds each candidate's call kwargs, defaulting to
@@ -220,7 +222,7 @@ async def walk_attempts(
     refusals: list[tuple[Attempt, HTTPException]] = []
     # A failure is absorbed, and a skip recorded, only once another candidate is sent the request.
     unabsorbed: tuple[Attempt, BaseException] | None = None
-    unrecorded_skips: list[tuple[Attempt, HTTPException]] = []
+    unrecorded_skips: list[tuple[Attempt, CandidateCannotServe]] = []
     last_failed: Attempt | None = None
 
     for attempt in attempts:
@@ -249,8 +251,8 @@ async def walk_attempts(
                 await on_absorbed(*unabsorbed, len(attempts))
             unabsorbed = None
             if on_skipped is not None:
-                for skipped, refusal in unrecorded_skips:
-                    await on_skipped(skipped, refusal)
+                for skipped, skip in unrecorded_skips:
+                    await on_skipped(skipped, skip)
             unrecorded_skips = []
             sent = True
             result = await run_attempt(attempt, call_kwargs, _mark_locked_in)
@@ -265,7 +267,7 @@ async def walk_attempts(
             )
             cannot_serve = exc
             refusals.append((attempt, exc.refusal))
-            unrecorded_skips.append((attempt, exc.refusal))
+            unrecorded_skips.append((attempt, exc))
             if drop_admission is not None:
                 await drop_admission(False)
             continue
@@ -348,8 +350,8 @@ async def walk_attempts(
         raise refusal
 
     if on_skipped is not None:
-        for skipped, refusal in unrecorded_skips:
-            await on_skipped(skipped, refusal)
+        for skipped, skip in unrecorded_skips:
+            await on_skipped(skipped, skip)
 
     logger.error("All attempts failed policy=%s failures=%s", policy_name, failures)
     # A candidate that could not serve was never called, so the last one that

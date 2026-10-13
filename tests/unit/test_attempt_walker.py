@@ -754,8 +754,8 @@ async def _walk_admitted(
     dropped = dropped if dropped is not None else []
     skipped = skipped if skipped is not None else []
 
-    async def on_skipped(attempt: Attempt, refusal: HTTPException) -> None:
-        skipped.append((attempt.model, refusal.detail))
+    async def on_skipped(attempt: Attempt, skip: CandidateCannotServe) -> None:
+        skipped.append((attempt.model, skip.refusal.detail))
 
     async def admit(attempt: Attempt) -> Any:
         if attempt.model in full:

@@ -282,17 +282,33 @@ def test_the_header_can_leave_a_claimed_keyword_with_the_provider(
     client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    monkeypatch.setenv("OTARI_CODE_EXECUTION_EXECUTOR", "otari")
+
+    response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_ANTHROPIC, _DATED))
+
+    assert response.status_code == 200, response.text
+    assert seen.forwarded_tool_types == {"code_execution_20250825"}
+    assert seen.loop_kwargs is None
+
+
+def test_provider_refuses_a_keyword_the_provider_cannot_run_itself(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bare short form is nobody's own, so no provider runs it."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
 
     response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_ANTHROPIC, _BARE))
 
-    assert response.status_code == 200, response.text
-    assert seen.forwarded_tool_types == {"code_execution"}
+    assert response.status_code == 400, response.text
+    assert response.headers["Otari-Error-Code"] == "native_tool_unavailable"
+    assert seen.provider_kwargs is None
+    assert seen.loop_kwargs is None
 
 
-def test_chat_completions_can_leave_a_claimed_keyword_with_the_provider(
+def test_chat_completions_refuses_provider_for_a_keyword(
     client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No keyword is native on Chat Completions, so only the header keeps one with the provider."""
+    """No keyword is native on Chat Completions, so no provider runs one there itself."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
 
     response, seen = _post_chat(
@@ -301,8 +317,9 @@ def test_chat_completions_can_leave_a_claimed_keyword_with_the_provider(
         {"model": _OPENAI, "messages": [{"role": "user", "content": "compute"}], "tools": [_BARE]},
     )
 
-    assert response.status_code == 200, response.text
-    assert seen.forwarded_tool_types == {"code_execution"}
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "native_tool_unavailable"
+    assert seen.provider_kwargs is None
     assert seen.loop_kwargs is None
 
 
@@ -332,16 +349,21 @@ def test_asking_for_otari_without_a_sandbox_is_refused(
 # --- the deployment default ---------------------------------------------------------------
 
 
-def test_a_provider_default_forwards_every_provider_declaration(
+def test_a_provider_default_leaves_a_declaration_only_with_a_provider_that_runs_it(
     client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
     monkeypatch.setenv("OTARI_CODE_EXECUTION_EXECUTOR", "provider")
 
-    response, seen = _post_messages(client, api_key_header, _messages_body(_OPENAI, _DATED))
+    native, native_seen = _post_messages(client, api_key_header, _messages_body(_ANTHROPIC, _DATED))
+    foreign, foreign_seen = _post_messages(client, api_key_header, _messages_body(_OPENAI, _DATED))
 
-    assert response.status_code == 200, response.text
-    assert seen.forwarded_tool_types == {"code_execution_20250825"}
+    assert native.status_code == 200, native.text
+    assert native_seen.forwarded_tool_types == {"code_execution_20250825"}
+    assert foreign.status_code == 400, foreign.text
+    assert foreign.headers["Otari-Error-Code"] == "native_tool_unavailable"
+    assert foreign_seen.provider_kwargs is None
+    assert foreign_seen.loop_kwargs is None
 
 
 def test_the_explicit_type_is_always_the_gateways_whatever_the_default_says(
@@ -444,7 +466,7 @@ def test_a_header_that_agrees_with_the_pin_is_fine(
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
     _pin_executor(client, master_key_header, "provider")
 
-    response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_OPENAI, _DATED))
+    response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_ANTHROPIC, _DATED))
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution_20250825"}
@@ -466,7 +488,7 @@ def test_a_provider_pin_keeps_a_disabled_veto_out_of_the_way(
     )
     assert stored.status_code == 200, stored.text
 
-    response, seen = _post_messages(client, api_key_header, _messages_body(_OPENAI, _DATED))
+    response, seen = _post_messages(client, api_key_header, _messages_body(_ANTHROPIC, _DATED))
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution_20250825"}

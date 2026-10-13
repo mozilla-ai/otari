@@ -164,6 +164,7 @@ from gateway.exceptions.tools_exceptions import (
     McpServerConfigurationError,
     McpServerDeclarationError,
     McpServerResolutionFailedError,
+    NativeToolUnavailableError,
     WebAccessRefusedError,
     WebSearchInterceptedError,
     WebSearchPolicyResolutionFailedError,
@@ -2987,8 +2988,10 @@ class ToolContext:
         # Each candidate's tools by its provider, where the request's candidates are not all dispatched alike.
         self.candidate_variants: dict[str | None, CandidateVariant] = {}
 
-    def for_candidate(self, provider: str | None) -> ToolContext:
+    def for_candidate(self, provider: str | None, *, instance: str | None = None) -> ToolContext:
         """The tools the candidate on ``provider`` is dispatched with: these, or its variant's.
+
+        ``instance`` names the candidate in the record of a skip.
 
         Raises:
             CandidateCannotServe: the candidate's tools were refused.
@@ -2997,16 +3000,19 @@ class ToolContext:
         if variant is None:
             return self
         if isinstance(variant.tools, HTTPException):
-            raise CandidateCannotServe(variant.tools)
+            reason = _unserved_reason(instance or provider, variant.unserved) if variant.unserved else None
+            raise CandidateCannotServe(variant.tools, reason=reason)
         return variant.tools
 
-    def request_fields_for(self, provider: str | None, base_fields: dict[str, Any]) -> dict[str, Any]:
+    def request_fields_for(
+        self, provider: str | None, base_fields: dict[str, Any], *, instance: str | None = None
+    ) -> dict[str, Any]:
         """What the candidate on ``provider`` is sent: ``base_fields``, built from these tools, or its variant's own.
 
         Raises:
             CandidateCannotServe: as :meth:`for_candidate` does.
         """
-        if self.for_candidate(provider) is self:
+        if self.for_candidate(provider, instance=instance) is self:
             return base_fields
         request_fields = self.candidate_variants[provider].request_fields
         assert request_fields is not None  # built by ``build_request_fields`` before any candidate is dispatched
@@ -3183,10 +3189,17 @@ class CandidateVariant:
 
     ``tools`` is what they are dispatched with, or the refusal that skips them, and
     ``request_fields`` what they are sent, once the route has built it.
+    ``unserved`` names the tools they were skipped for, asked of a provider that cannot run them itself.
     """
 
     tools: ToolContext | HTTPException
     request_fields: dict[str, Any] | None = None
+    unserved: frozenset[str] = frozenset()
+
+
+def _unserved_reason(instance: str | None, tools: Iterable[str]) -> str:
+    """Why a candidate was skipped for tools the request asked its provider alone to run."""
+    return f"{instance} can't run {' or '.join(sorted(tools))} itself and the request asked for provider"
 
 
 def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[GuardrailConfig]) -> None:
@@ -3436,8 +3449,7 @@ async def prepare_gateway_tools(
             adapter, ctx, declared, code, candidates, mcp_servers=mcp_servers, port=backends.ports.web_search_policy
         )
         if not any(isinstance(answer, _AdmittedTools) for answer in answers.values()):
-            refusal = answers[candidates[0].claimed]
-            assert isinstance(refusal, _ToolRefusal)
+            refusal = _answering_refusal(adapter, answers, candidates)
             if refusal.unpriced_tool is not None:
                 await _log_unpriced_tool_rejection(adapter, ctx, refusal.unpriced_tool)
             raise refusal.error
@@ -3476,7 +3488,7 @@ async def prepare_gateway_tools(
     # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
 
-    admitted = {claimed: answer for claimed, answer in answers.items() if isinstance(answer, _AdmittedTools)}
+    admitted = {key: answer for key, answer in answers.items() if isinstance(answer, _AdmittedTools)}
     caps: dict[str, int] = {}
     for answer in admitted.values():
         caps |= _tool_use_caps(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
@@ -3517,16 +3529,18 @@ async def prepare_gateway_tools(
             shared=shared,
         )
 
-    contexts = {claimed: _tool_context(answer) for claimed, answer in admitted.items()}
+    contexts = {key: _tool_context(answer) for key, answer in admitted.items()}
     # The first candidate that can be served is the one the request's own fields are built for.
-    tool_ctx = next(contexts[candidate.claimed] for candidate in candidates if candidate.claimed in contexts)
+    tool_ctx = next(contexts[key] for key in map(_variant_key, candidates) if key in contexts)
     if len(answers) > 1:
         variants = {
-            claimed: CandidateVariant(tools=answer.error if isinstance(answer, _ToolRefusal) else contexts[claimed])
-            for claimed, answer in answers.items()
+            key: CandidateVariant(tools=answer.error, unserved=key[1])
+            if isinstance(answer, _ToolRefusal)
+            else CandidateVariant(tools=contexts[key])
+            for key, answer in answers.items()
         }
         tool_ctx.candidate_variants = {
-            provider: variants[candidate.claimed]
+            provider: variants[_variant_key(candidate)]
             for provider, candidate in zip(_candidate_provider_names(ctx), candidates, strict=True)
         }
     return tool_ctx
@@ -3556,12 +3570,45 @@ class _ToolRefusal:
 def _decide_for_candidates(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declarations: Iterable[ProviderToolDeclaration | None]
 ) -> list[CandidateTools]:
-    """What each candidate of the request is sent for ``declarations``, head first."""
-    return decide_candidate_tools(
+    """What each candidate of the request is sent for ``declarations``, head first.
+
+    A hybrid attempt asked for a provider's own tool is sent it whether or not its provider runs it.
+    """
+    decided = decide_candidate_tools(
         [declaration for declaration in declarations if declaration is not None],
         providers=_candidate_provider_names(ctx),
         dialect=adapter.name,
     )
+    if ctx.hybrid_mode:
+        return [replace(candidate, unserved=frozenset()) for candidate in decided]
+    return decided
+
+
+# The candidates that share one: the tools Otari claims for them, and the ones they cannot run as asked.
+_VariantKey = tuple[frozenset[str], frozenset[str]]
+
+
+def _variant_key(candidate: CandidateTools) -> _VariantKey:
+    return candidate.claimed, candidate.unserved
+
+
+def _answering_refusal(
+    adapter: FormatAdapter[Any, Any],
+    answers: Mapping[_VariantKey, _AdmittedTools | _ToolRefusal],
+    candidates: Sequence[CandidateTools],
+) -> _ToolRefusal:
+    """The refusal a request none of whose candidates can be served is answered with.
+
+    The first candidate's that asked for something Otari could have run, or, where
+    every one was asked for a provider tool its provider lacks, all of those tools.
+    """
+    for candidate in candidates:
+        if not candidate.unserved:
+            refusal = answers[_variant_key(candidate)]
+            assert isinstance(refusal, _ToolRefusal)
+            return refusal
+    unserved = frozenset().union(*(candidate.unserved for candidate in candidates))
+    return _ToolRefusal(domain_error(adapter, NativeToolUnavailableError(unserved)))
 
 
 async def _admit_candidates(
@@ -3573,18 +3620,24 @@ async def _admit_candidates(
     *,
     mcp_servers: list[McpServerConfig] | None,
     port: WebSearchPolicyPort,
-) -> dict[frozenset[str], _AdmittedTools | _ToolRefusal]:
+) -> dict[_VariantKey, _AdmittedTools | _ToolRefusal]:
     """The tools each set of claims among ``candidates`` is admitted with, or why it is refused, head's first.
 
     The checks admission makes for a whole request, made once for the candidates that
-    share one answer. Nothing is logged for a refusal here: the walk records each
-    candidate it skips, and the caller logs the one that answers the request.
+    share one answer. A candidate whose provider cannot run a tool asked of it alone
+    is refused without them. Nothing is logged for a refusal here: the walk records
+    each candidate it skips, and the caller logs the one that answers the request.
     """
     beside_sandbox = any(CODE_EXECUTION_TOOL_NAME in candidate.claimed for candidate in candidates)
-    answers: dict[frozenset[str], _AdmittedTools | _ToolRefusal] = {}
+    answers: dict[_VariantKey, _AdmittedTools | _ToolRefusal] = {}
     for candidate in candidates:
-        if candidate.claimed not in answers:
-            answers[candidate.claimed] = await _admit_claims(
+        key = _variant_key(candidate)
+        if key in answers:
+            continue
+        if candidate.unserved:
+            answers[key] = _ToolRefusal(domain_error(adapter, NativeToolUnavailableError(candidate.unserved)))
+        else:
+            answers[key] = await _admit_claims(
                 adapter,
                 ctx,
                 declared,
@@ -5394,7 +5447,7 @@ def _failover_kwargs(
     """
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
-        fields = tool_ctx.request_fields_for(attempt.provider.value, base_request_fields)
+        fields = tool_ctx.request_fields_for(attempt.provider.value, base_request_fields, instance=attempt.instance)
         return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
 
     return _build
@@ -5504,8 +5557,8 @@ async def run_single_attempt_stream(
                 sent += 1
                 await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
-            async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
-                await _write_absorbed_row(ctx, absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, refusal))
+            async def _skipped(attempt: Attempt, skip: CandidateCannotServe) -> None:
+                await _write_absorbed_row(ctx, absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, skip))
 
             # The walk reports which candidate it stopped on, so the failure row
             # names the provider that actually failed rather than the end of the plan.
@@ -6158,14 +6211,14 @@ async def log_skipped_attempt(
     ctx: RequestContext,
     adapter: FormatAdapter[Any, Any],
     attempt: Attempt,
-    refusal: HTTPException,
+    skip: CandidateCannotServe,
 ) -> None:
     """Record a candidate the walk skipped, such as a model a ``per: model`` rate limit had no room on.
 
     An absorbed row like a recovered failure, so it counts toward no request or
     error total. Its error starts with :data:`SKIPPED_ATTEMPT_PREFIX`.
     """
-    await _log_absorbed_row(ctx, adapter, attempt, f"{SKIPPED_ATTEMPT_PREFIX}{refusal.detail}", refusal.status_code)
+    await _log_absorbed_row(ctx, adapter, attempt, f"{SKIPPED_ATTEMPT_PREFIX}{skip.reason}", skip.refusal.status_code)
 
 
 # Absorbed rows being written, held so a request that ends first (its client gone)
@@ -6295,8 +6348,8 @@ async def run_standalone_non_stream(
                 sent += 1
                 await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
-            async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
-                await _write_absorbed_row(ctx, absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, refusal))
+            async def _skipped(attempt: Attempt, skip: CandidateCannotServe) -> None:
+                await _write_absorbed_row(ctx, absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, skip))
 
             # The walk reports which candidate it stopped on, so the failure row
             # names the provider that actually failed rather than the end of the plan.
