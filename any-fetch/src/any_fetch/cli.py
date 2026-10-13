@@ -64,6 +64,7 @@ def _describe(metadata: ProviderMetadata) -> str:
         f"{metadata.name}: {metadata.doc_url}",
         f"API key: {_source(metadata.requires_api_key, metadata.env_key, None)}",
         f"API base: {_source(metadata.requires_api_base, metadata.env_api_base, metadata.default_api_base)}",
+        f"Pages: at most {metadata.max_urls_per_call} per call",
         f"Formats: {', '.join(metadata.formats)}",
         f"Renders JavaScript: {'yes' if metadata.renders_javascript else 'no'}",
     ]

@@ -109,6 +109,7 @@ def test_describe_lists_every_option_without_a_url(provider: str, capsys: pytest
     out = _describe(provider, capsys)
     metadata = AnyFetch.get_provider_metadata(provider)
     assert out.startswith(f"{provider}: {metadata.doc_url}\n")
+    assert f"Pages: at most {metadata.max_urls_per_call} per call" in out
     assert f"Formats: {', '.join(metadata.formats)}" in out
     assert "Shared parameters: --max-chars" in out
     for option in metadata.options:
