@@ -189,6 +189,20 @@ def test_metadata_entry_reads_a_gemini_listing_id_as_the_bare_one() -> None:
     assert metadata_entry(None, "gemini", "gemini-3.5-flash-lite") is None
 
 
+@pytest.mark.parametrize(
+    "catalog",
+    [
+        pytest.param({"openai": ["gpt-4o"]}, id="provider-not-an-object"),
+        pytest.param({"openai": {"models": ["gpt-4o"]}}, id="models-not-an-object"),
+        pytest.param({"openai": {}}, id="no-models"),
+        pytest.param({"openai": {"models": {"gpt-4o": "GPT-4o"}}}, id="model-not-an-object"),
+    ],
+)
+def test_metadata_entry_reads_a_malformed_catalog_as_no_entry(catalog: dict[str, Any]) -> None:
+    """models.dev is fetched JSON, so a shape it was not expected to have describes no model rather than raising."""
+    assert metadata_entry(catalog, "openai", "gpt-4o") is None
+
+
 @pytest.mark.asyncio
 async def test_catalog_metadata_fetches_only_when_a_read_may() -> None:
     """A request-time read fetches on a cold cache; a read off the request path never does."""
