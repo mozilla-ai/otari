@@ -443,7 +443,9 @@ unknown address does depends on `open_signup`:
   added gets no account. An identity whose invitation was revoked or expired, or
   whose membership was removed, still exists, but signup refuses to claim it.
   This is the posture a single-tenant deployment wants, since anyone who can
-  reach the dashboard can reach the form.
+  reach the dashboard can reach the form. For the same reason, creating an
+  organization requires an active membership in one already, so a member who
+  was removed cannot make themselves a tenant.
 - `true`: an unknown address is registered, with an organization and workspace of
   its own. Use it where the deployment serves many tenants.
 
