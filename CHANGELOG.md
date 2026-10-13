@@ -4,6 +4,22 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.24.0](https://github.com/mozilla-ai/otari/releases/tag/v0.24.0) - 2026-10-13
+
+
+
+### Features
+
+- **any-search:** Add --describe to the any-search and any-fetch CLIs in [#2248](https://github.com/mozilla-ai/otari/pull/2248) by [@aittalam](https://github.com/aittalam) ([`4da4c60`](https://github.com/mozilla-ai/otari/commit/4da4c60421f1be183a59d39bfb51ff947ac421d5))
+- **traces:** Record a trace for every completion served in [#2087](https://github.com/mozilla-ai/otari/pull/2087) by [@agpituk](https://github.com/agpituk) ([`086274e`](https://github.com/mozilla-ai/otari/commit/086274e47fb4a55bd81b9ff4048ff3e3134ed119))
+- **traces:** Group a session's requests into one trace in [#2088](https://github.com/mozilla-ai/otari/pull/2088) by [@agpituk](https://github.com/agpituk) ([`7cd0658`](https://github.com/mozilla-ai/otari/commit/7cd06584e93da17ffc39427ca064fe7140dee078))
+- **traces:** Keep the spans instrumented agents export over OTLP in [#2089](https://github.com/mozilla-ai/otari/pull/2089) by [@agpituk](https://github.com/agpituk) ([`bd875c2`](https://github.com/mozilla-ai/otari/commit/bd875c2c21ecc8b46d13a8b42e740c926418dd58))
+- **traces:** Read agent sessions back through a trace API in [#2090](https://github.com/mozilla-ai/otari/pull/2090) by [@agpituk](https://github.com/agpituk) ([`a57d065`](https://github.com/mozilla-ai/otari/commit/a57d0650c5247ba39ad67537a2f529605bd687e5))
+- **web:** Explore agent sessions on the Activity page in [#2091](https://github.com/mozilla-ai/otari/pull/2091) by [@agpituk](https://github.com/agpituk) ([`0f43561`](https://github.com/mozilla-ai/otari/commit/0f43561556091c0c3a5b0fcd96308474bcaa3623))
+- **web:** Open a session in a side panel, sessions and requests in one list in [#2094](https://github.com/mozilla-ai/otari/pull/2094) by [@agpituk](https://github.com/agpituk) ([`6906ae6`](https://github.com/mozilla-ai/otari/commit/6906ae635324964b73a35c34a4222681cbc3ea68))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.23.0...v0.24.0
 ## [0.23.0](https://github.com/mozilla-ai/otari/releases/tag/v0.23.0) - 2026-10-13
 
 
