@@ -6,6 +6,7 @@ comes back. The key it presents and the route that calls it are covered in
 ``tests/integration/test_playground_hosted_dispatch.py``.
 """
 
+import json
 from collections.abc import AsyncIterator
 
 import httpx
@@ -90,6 +91,27 @@ async def test_the_request_carries_the_key_and_the_body_and_nothing_else(monkeyp
     assert seen["authorization"] == "Bearer gw-secret"
     assert seen["cookie"] is None
     assert b'"model":"openai:gpt-4o"' in seen["body"]  # type: ignore[operator]
+
+
+@pytest.mark.asyncio
+async def test_a_body_user_is_not_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The data plane would derive the end-user identifier from it, not from the key's own user."""
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return _answer(200, b"{}", **{"content-type": "application/json"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory(handler))
+
+    _status, _headers, body = await playground_dispatch.forward_completion(
+        url="https://gateway.example.com/api/v1/chat/completions",
+        api_key="gw-secret",
+        payload={"model": "openai:gpt-4o", "user": "shared-tag-alpha"},
+    )
+    await _drain(body)
+
+    assert seen["body"] == {"model": "openai:gpt-4o"}
 
 
 @pytest.mark.asyncio

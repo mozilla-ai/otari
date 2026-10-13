@@ -281,12 +281,12 @@ async def _dispatch_to_data_plane(
     a forward and which key; this is the request-shaped part: resolve the key,
     release the session, and forward.
 
-    The body is re-sent as validated, with ``exclude_unset`` so a default the data
-    plane would have chosen is not overridden by one chosen here. A field
-    ``ChatCompletionRequest`` does not model is dropped, exactly as it is dropped
-    on the standalone path, which runs the same validated object through the same
-    pipeline. Forwarding the raw body instead would make this deployment accept
-    what a standalone one refuses, and the two must answer alike.
+    The body is re-sent as validated, with ``exclude_unset``
+    so a default the data plane would have chosen is not overridden by one chosen
+    here. A field ``ChatCompletionRequest`` does not model is dropped, exactly as
+    it is dropped on the standalone path, which runs the same validated object
+    through the same pipeline. Forwarding the raw body instead would make this
+    deployment accept what a standalone one refuses, and the two must answer alike.
 
     The answer is streamed back whatever its shape. A non-streaming completion is
     one chunk of JSON carrying the upstream's own content type, so the page reads

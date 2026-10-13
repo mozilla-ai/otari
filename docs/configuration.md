@@ -351,7 +351,9 @@ Messages), or of the workspace and the resolved user when the caller sent no
 tag. The table below names the field each provider receives it in. The
 provider never sees the tag, which may be personal data, or an Otari id. The
 same user in the same workspace always gets the same identifier, which is what
-a provider scopes enforcement by.
+a provider scopes enforcement by. The dashboard's Playground ignores a `user`
+sent in its request body, so the identifier its calls carry is always the
+signed-in member's.
 
 | Provider | Field |
 | --- | --- |
