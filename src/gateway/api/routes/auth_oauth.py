@@ -41,6 +41,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import IdentityProviderPortDep, get_config, get_db, record_auth_failure
@@ -222,7 +223,9 @@ async def authorize(
     try:
         url, state = await authorization_url(config, provider, db=db, flow_secret=flow_secret)
         await db.commit()
-    except DATABASE_ERRORS as exc:
+    # Not DATABASE_ERRORS: building the URL calls the OAuth client, which can
+    # raise TimeoutError for reasons that are not the database's.
+    except SQLAlchemyError as exc:
         await db.rollback()
         raise database_error(f"record a pending {provider} sign-in", exc) from None
     apply_flow_cookie(response, flow_secret, secure=request_is_https(request))

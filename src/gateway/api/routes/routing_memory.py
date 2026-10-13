@@ -45,6 +45,7 @@ from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator
@@ -427,7 +428,9 @@ async def rank_candidates(
                 task_id=example.task_id,
                 label_source=example.label_source,
             )
-        except DATABASE_ERRORS as exc:
+        # Not DATABASE_ERRORS: the embedding call can raise TimeoutError too, and
+        # that is the 502 below, not a database failure.
+        except SQLAlchemyError as exc:
             raise database_error(f"record a router example after {recorded} example(s)", exc) from exc
         except Exception as exc:
             # Broad on purpose, and matching the read path: `knn.rank` catches bare
