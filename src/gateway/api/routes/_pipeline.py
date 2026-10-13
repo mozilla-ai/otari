@@ -4772,7 +4772,7 @@ class _OpenedTools:
 
     pool: ToolBackend
     # The entered sandbox, whose lease the Messages loop reports. ``None`` without one.
-    sandbox: Any
+    sandbox: SandboxBackend | None
 
 
 async def _open_tool_backends(

@@ -707,7 +707,7 @@ def test_code_execution_disabled_for_the_workspace_refuses_the_whole_request(
     companion: dict[str, Any] | None,
     with_mcp: bool,
 ) -> None:
-    """A tool its policy refuses is not silently dropped from a combination: the request is refused as before."""
+    """A tool its policy refuses is not dropped from a combination: the request is refused, as it is alone."""
     workspace_id = _default_workspace_id(client, master_key_header)
     stored = client.put(
         f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
