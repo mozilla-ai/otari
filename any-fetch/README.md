@@ -95,12 +95,15 @@ install_log_filter()
 any-fetch fake https://www.python.org/downloads/ --max-chars 200
 any-fetch fake https://www.python.org/downloads/ --json
 any-fetch fake https://www.python.org/downloads/ -o error=http_status -o error_status=404
+any-fetch --describe exa
 ```
 
 Keys come from the environment. `-o NAME=VALUE` passes a native option, its value read as JSON
 when it parses. `--json` prints the page as JSON without `raw`, `--raw` prints the provider's own
-response, and both together print the page with `raw` kept. `builtin` needs a host, so it fails
-from the command line.
+response, and both together print the page with `raw` kept. `--describe PROVIDER` prints the
+provider's metadata and each native option with its type, allowed values, default and
+description, then exits without fetching. `builtin` needs a host, so it fails from the command
+line, though `--describe builtin` works.
 
 ## Exa
 

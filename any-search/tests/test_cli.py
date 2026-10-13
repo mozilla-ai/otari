@@ -5,6 +5,7 @@ import logging
 
 import pytest
 
+from any_search import AnySearch
 from any_search._logging import RedactProviderUrls
 from any_search.cli import main
 from any_search.providers.fake import CANNED_HITS
@@ -84,3 +85,45 @@ def test_the_command_installs_the_log_filter() -> None:
     assert not _log_filter_installed()
     assert main(["fake", "query"]) == 0
     assert _log_filter_installed()
+
+
+def _describe(provider: str, capsys: pytest.CaptureFixture[str]) -> str:
+    with pytest.raises(SystemExit) as exited:
+        main(["--describe", provider])
+    assert exited.value.code == 0
+    return capsys.readouterr().out
+
+
+@pytest.mark.parametrize("provider", AnySearch.get_supported_providers())
+def test_describe_lists_every_option_without_a_query(provider: str, capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe(provider, capsys)
+    metadata = AnySearch.get_provider_metadata(provider)
+    assert out.startswith(f"{provider}: {metadata.doc_url}\n")
+    assert f"Results: at most {metadata.max_results} per call" in out
+    assert "Shared parameters: --max-results, --time-range" in out
+    for option in metadata.options:
+        assert f"  {option.name} ({option.type}" in out
+
+
+def test_describe_shows_defaults_as_json_and_the_allowed_values(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("exa", capsys)
+    assert "API key: required, from EXA_API_KEY" in out
+    assert "API base: https://api.exa.ai" in out
+    assert '  type (string), default "auto"\n      One of: instant, fast, auto,' in out
+    assert '  contents (object), default {"text": {"maxCharacters": 10000}}' in out
+    assert "  moderation (boolean), default false" in out
+
+
+def test_describe_marks_operator_only_options_and_the_test_tier(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("fake", capsys)
+    assert "API key: none" in out
+    assert "For tests:" in out
+    assert "  account (string, operator only)" in out
+    assert "Operator only: a host lets only its operator set it" in out
+
+
+def test_describe_refuses_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exited:
+        main(["--describe", "nope"])
+    assert exited.value.code == 2
+    assert "invalid choice: 'nope'" in capsys.readouterr().err

@@ -2,19 +2,21 @@
 
 any-search fake "latest stable python release" --max-results 2
 any-search fake "latest stable python release" --json
+any-search --describe exa
 """
 
 import argparse
 import asyncio
 import json
 import sys
+import textwrap
 from collections.abc import Sequence
 from typing import Any, get_args
 
 from any_search._api import AnySearch, asearch
 from any_search._errors import AnySearchError
 from any_search._logging import install as install_log_filter
-from any_search._types import SearchResult, TimeRange
+from any_search._types import OptionSpec, ProviderMetadata, SearchResult, TimeRange
 
 
 def _option(text: str) -> tuple[str, Any]:
@@ -37,9 +39,75 @@ def _positive(text: str) -> int:
     return value
 
 
+def _source(required: bool, env: str | None, default: str | None) -> str:
+    if default:
+        return f"{default}, or {env} when set" if env else default
+    need = "required" if required else "optional" if env else "none"
+    return f"{need}, from {env}" if env else need
+
+
+def _describe_option(option: OptionSpec) -> list[str]:
+    kind = f"{option.type}, operator only" if option.operator_only else option.type
+    head = f"  {option.name} ({kind})"
+    if option.default is not None:
+        head += f", default {json.dumps(option.default)}"
+    lines = [head]
+    if option.enum:
+        lines.append(f"      One of: {', '.join(option.enum)}.")
+    if option.description:
+        lines += textwrap.wrap(option.description, width=100, initial_indent=" " * 6, subsequent_indent=" " * 6)
+    return lines
+
+
+def _describe(metadata: ProviderMetadata) -> str:
+    lines = [
+        f"{metadata.name}: {metadata.doc_url}",
+        f"API key: {_source(metadata.requires_api_key, metadata.env_key, None)}",
+        f"API base: {_source(metadata.requires_api_base, metadata.env_api_base, metadata.default_api_base)}",
+        f"Results: at most {metadata.max_results} per call",
+    ]
+    if metadata.key_in_url:
+        lines.append("The key travels in the request URL.")
+    if metadata.query_in_url:
+        lines.append("The query travels in the request URL.")
+    if metadata.tier == "test":
+        lines.append("For tests: it answers from canned data and its options, and calls no service.")
+    lines += ["Shared parameters: --max-results, --time-range", ""]
+    if not metadata.options:
+        lines.append("Native options: none.")
+        return "\n".join(lines)
+    lines.append("Native options, passed with -o NAME=VALUE (VALUE read as JSON when it parses):")
+    for option in metadata.options:
+        lines += _describe_option(option)
+    if any(option.operator_only for option in metadata.options):
+        lines += ["", "Operator only: a host lets only its operator set it, never a tenant or a request."]
+    return "\n".join(lines)
+
+
+class _Describe(argparse.Action):
+    """Print a provider's metadata and exit while parsing, as --help does, so no query is needed."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        print(_describe(AnySearch.get_provider_metadata(str(values))))
+        parser.exit()
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="any-search", description="Run one web search. Keys come from the environment."
+    )
+    parser.add_argument(
+        "--describe",
+        action=_Describe,
+        choices=AnySearch.get_supported_providers(),
+        metavar="PROVIDER",
+        help="print the provider's metadata and native options, then exit",
     )
     parser.add_argument("provider", choices=AnySearch.get_supported_providers())
     parser.add_argument("query")

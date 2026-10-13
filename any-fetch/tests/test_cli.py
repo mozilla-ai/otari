@@ -5,6 +5,7 @@ import logging
 
 import pytest
 
+from any_fetch import AnyFetch
 from any_fetch._logging import RedactProviderUrls
 from any_fetch.cli import main
 from any_fetch.providers.fake import CANNED_TEXT, CANNED_TITLE
@@ -94,3 +95,48 @@ def test_the_command_installs_the_log_filter() -> None:
     assert not _log_filter_installed()
     assert main(["fake", "https://example.com/page"]) == 0
     assert _log_filter_installed()
+
+
+def _describe(provider: str, capsys: pytest.CaptureFixture[str]) -> str:
+    with pytest.raises(SystemExit) as exited:
+        main(["--describe", provider])
+    assert exited.value.code == 0
+    return capsys.readouterr().out
+
+
+@pytest.mark.parametrize("provider", AnyFetch.get_supported_providers())
+def test_describe_lists_every_option_without_a_url(provider: str, capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe(provider, capsys)
+    metadata = AnyFetch.get_provider_metadata(provider)
+    assert out.startswith(f"{provider}: {metadata.doc_url}\n")
+    assert f"Formats: {', '.join(metadata.formats)}" in out
+    assert "Shared parameters: --max-chars" in out
+    for option in metadata.options:
+        assert f"  {option.name} ({option.type}" in out
+
+
+def test_describe_shows_the_key_and_base(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("exa", capsys)
+    assert "API key: required, from EXA_API_KEY" in out
+    assert "API base: https://api.exa.ai" in out
+    assert "  maxAgeHours (integer)\n      Use a cached copy" in out
+
+
+def test_describe_shows_defaults_as_json_and_the_test_tier(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("fake", capsys)
+    assert "For tests:" in out
+    assert '  content_type (string), default "text/html"' in out
+    assert "  source_truncated (boolean), default false" in out
+
+
+def test_describe_works_for_builtin_with_no_host(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("builtin", capsys)
+    assert "API key: none" in out
+    assert "Native options: none." in out
+
+
+def test_describe_refuses_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exited:
+        main(["--describe", "nope"])
+    assert exited.value.code == 2
+    assert "invalid choice: 'nope'" in capsys.readouterr().err

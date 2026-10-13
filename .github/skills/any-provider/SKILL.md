@@ -46,7 +46,8 @@ context and calls the adapter.
    - the provider to `tests/test_registry.py`.
 
    Run `make test-libs`, `make lint-python` and `make typecheck-python`, then the live tests once.
-4. **Try it from the CLI** against the real account, and note anything surprising.
+4. **Try it from the CLI** against the real account, and note anything surprising. Check that
+   `--describe <name>` prints the metadata and options as the documentation gives them.
 5. **In the gateway**, nothing in code, since the catalog routes and the settings validation read
    the libraries' metadata. Add the provider's pricing note to `docs/tools.md`, and a compose or
    `.env.example` line where a key is expected.

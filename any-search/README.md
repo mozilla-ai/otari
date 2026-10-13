@@ -80,11 +80,14 @@ install_log_filter()
 any-search fake "latest stable python release" --max-results 2
 any-search fake "latest stable python release" --json
 any-search fake "latest stable python release" -o cost=0.007 -o error=rate_limit
+any-search --describe exa
 ```
 
 Keys come from the environment. `-o NAME=VALUE` passes a native option, its value read as JSON
 when it parses. `--json` prints the result as JSON without `raw`, `--raw` prints the provider's
-own response, and both together print the result with `raw` kept.
+own response, and both together print the result with `raw` kept. `--describe PROVIDER` prints the
+provider's metadata and each native option with its type, allowed values, default and
+description, then exits without searching.
 
 ## Exa
 
