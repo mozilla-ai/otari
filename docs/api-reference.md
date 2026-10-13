@@ -448,8 +448,9 @@ never a body, a URL or the query:
 | `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
 | `Otari-Error-Retryable` | `true` for a timeout, a 429 or a 5xx from the provider, when a retry may help; otherwise `false`. |
 
-A 502 for the workspace's organization search key, and one for a failure that is
-not the provider's, carries none of them.
+On a search the workspace's organization key serves, they name the key's
+provider. A 502 for a failure that is not the provider's, such as an organization
+key this gateway cannot call, carries none of them.
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.

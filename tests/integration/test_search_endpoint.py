@@ -1031,6 +1031,7 @@ def test_a_workspace_key_its_provider_cannot_be_called_with_is_a_generic_502(
 
     assert resp.status_code == 502
     assert "base URL" not in resp.json()["detail"]
+    assert not {name.lower() for name in _FAILURE_HEADERS} & set(resp.headers)
     (row,) = _search_rows(client, master_key_header, "refused-key")
     assert "base URL" in row["error_message"]
 
@@ -1118,6 +1119,22 @@ def test_an_unnamed_call_runs_on_the_credential_the_port_answers(
 
     assert resp.status_code == 200, resp.text
     assert keyed.call_args.args[0] == credential
+
+
+def test_a_failure_on_the_organization_key_names_the_keys_provider_in_the_headers(
+    default_tool_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = default_tool_client
+    headers = _keyed(client, master_key_header, "port-key-failure")
+    credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brave-key")
+    _stub_policy(client, _policy(credential=credential))
+    keyed = AsyncMock(side_effect=SearchProviderError("brave answered 503", tag="http_error", status=503))
+    with patch("gateway.services.search_backend.run_keyed_search", keyed):
+        resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 502
+    # Brave, not the default tool's fake provider.
+    assert tuple(resp.headers.get(name) for name in _FAILURE_HEADERS) == ("brave", "503", "http_error", "true")
 
 
 def test_the_ceiling_the_port_answers_lowers_the_count(client: TestClient, api_key_header: dict[str, str]) -> None:
