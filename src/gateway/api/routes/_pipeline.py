@@ -250,6 +250,7 @@ from gateway.services.model_access import (
     org_model_refusal,
     resolve_request_allowlist,
     unresolvable_model_detail,
+    unresolved_model_refusal,
 )
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
@@ -2625,14 +2626,9 @@ async def resolve_request_context(
                     tags=tags,
                 )
             raise
-        # A selector no configured instance, known provider, alias, policy or
-        # catalog id resolves is invalid_model whatever the pricing settings, so it
-        # is refused ahead of the pricing gate rather than as unpriced. A
-        # ``provider:model`` pair with a model the gateway does not know locally
-        # resolves, and is left to the pricing gate and the provider.
         if gate_instance is None:
+            unresolved = unresolved_model_refusal(model)
             await refund_reservation(db, reservation)
-            unresolvable_detail = unresolvable_model_detail(model)
             await log_gateway_rejection(
                 db=db,
                 log_writer=log_writer,
@@ -2641,17 +2637,17 @@ async def resolve_request_context(
                 model=gate_model,
                 provider=None,
                 endpoint=adapter.endpoint,
-                detail=unresolvable_detail,
-                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=unresolved.detail,
+                status_code=unresolved.status_code,
                 started_at=started_at,
                 request_id=request_id,
                 tags=tags,
             )
             raise adapter.error(
-                status.HTTP_400_BAD_REQUEST,
-                unresolvable_detail,
-                ErrorKind.INVALID_REQUEST,
-                headers=error_headers(INVALID_MODEL),
+                unresolved.status_code,
+                unresolved.detail,
+                error_kind_for_status(unresolved.status_code),
+                headers=error_headers(unresolved.code),
             )
         # require_pricing is a budget-enforcement safety gate: it refuses a request
         # we cannot price because we then cannot debit it. A budget-exempt key is
