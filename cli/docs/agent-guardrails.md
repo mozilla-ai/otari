@@ -65,7 +65,8 @@ the only type that calls a model, and it can only be `advisory`.
 
 ## Registering the hook
 
-Run `otari hook setup` inside the Git repository you want to guard.
+Run `otari hook setup` inside the Git repository you want to guard. `--harness pi`
+installs an extension rather than writing a settings file, so it also runs outside one.
 
 ### Claude Code
 
@@ -102,8 +103,18 @@ for what it cannot see.
 
 ### pi
 
-pi is wired by the pi-otari extension, not by a settings file, so
-`otari hook setup --harness pi` writes nothing and only says so. The extension
+pi is wired by the pi-otari extension, not by a settings file:
+
+```bash
+otari hook setup --harness pi
+```
+
+installs the extension (`pi install npm:@mozilla-ai/pi-otari`) rather than
+writing a hook file, and writes nothing under `.claude` or `.codex`. If `pi` is
+not on `PATH` it prints those install instructions instead. If `pi list` already
+shows the extension it says so; otherwise it asks before installing. Inside a Git
+repository it also offers the same starter `.otari/guardrails.yml` as the other
+harnesses; outside one it installs the extension only. The extension
 calls `otari hook --harness pi` with pi's own tool names (`bash`, `read`,
 `edit`, `write`) and `tool_input` (`command` or `path`). An `edit` or `write`
 path is an edit target, a `read` path is a read target, and a `bash` command is
@@ -329,8 +340,8 @@ CLAUDE.md when that is the only one:
 otari guardrails generate
 ```
 
-1. Confirm the model CLI it names (`claude -p` or `codex exec`) before it sends
-   the file.
+1. Confirm the model CLI it names (`claude -p`, `codex exec` or `pi -p`) before
+   it sends the file.
 2. Answer each proposal with `y`, `n`, `e` (edit) or `q`. Only accepted gates are
    written.
 3. Run `otari guardrails validate` on the result.

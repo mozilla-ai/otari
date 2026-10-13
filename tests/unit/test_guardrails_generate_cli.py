@@ -515,6 +515,28 @@ def test_codex_exec_call_shape(repo: Path, monkeypatch: pytest.MonkeyPatch) -> N
     ]
 
 
+def test_pi_p_call_shape(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: "/fake/bin/pi" if name == "pi" else None)
+    calls = _stub_cli_output(monkeypatch, "[]")
+
+    result = _invoke(monkeypatch, "--cli", "pi", "--model", "otari/fast")
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        [
+            "/fake/bin/pi",
+            "-p",
+            "--no-tools",
+            "--no-session",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-context-files",
+            "--offline",
+            "--model",
+            "otari/fast",
+        ]
+    ]
+
+
 def test_cli_option_overrides_the_default_preference_order(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shutil,
