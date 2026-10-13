@@ -59,6 +59,8 @@ def _call(*, failed: bool = False) -> NativeCall:
     ("tool_entry", "expected"),
     [
         ({"type": "web_fetch_20250910"}, True),
+        ({"type": "web_fetch_preview"}, False),
+        ({"type": "web_fetch_2025091"}, False),
         ({"type": "otari_web_fetch"}, False),
         ({}, False),
         (None, False),

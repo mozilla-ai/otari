@@ -5,6 +5,7 @@ rendering needs the same names and ``_web_search_tool.py`` imports that
 rendering.
 """
 
+import re
 from typing import Any
 
 from gateway.models.tools import WebTool
@@ -15,8 +16,10 @@ WEB_SEARCH_TOOL_NAME = WebTool.SEARCH.value
 # the provider's own vocabulary rather than the gateway's.
 WEB_SEARCH_NATIVE_TYPE_PREFIX = "web_search_"
 WEB_FETCH_TOOL_NAME = WebTool.FETCH.value
-# The dated spellings of Anthropic's own web-fetch tool type (``web_fetch_20250910``).
+# Any ``web_fetch_<suffix>``: what the gateway recognizes as a provider-named fetch.
 WEB_FETCH_NATIVE_TYPE_PREFIX = "web_fetch_"
+# Anthropic's own web-fetch tool type (``web_fetch_20250910``), the only one native anywhere.
+ANTHROPIC_WEB_FETCH_TYPE = re.compile(r"web_fetch_\d{8}")
 WEB_RETRIEVAL_RESULT_MAX_BYTES = 50 * 1024
 
 

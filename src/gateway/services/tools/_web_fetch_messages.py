@@ -17,7 +17,7 @@ from anthropic.types import (
 
 from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
 from gateway.services.tools._web_names import (
-    WEB_FETCH_NATIVE_TYPE_PREFIX,
+    ANTHROPIC_WEB_FETCH_TYPE,
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
 )
@@ -64,7 +64,7 @@ class MessagesWebFetchRendering:
     def declared(self, tool_entry: Mapping[str, Any] | None) -> bool:
         """Whether the caller asked in Anthropic's dated keyword, which is what asks for the pair."""
         type_value = (tool_entry or {}).get("type")
-        return isinstance(type_value, str) and type_value.startswith(WEB_FETCH_NATIVE_TYPE_PREFIX)
+        return isinstance(type_value, str) and ANTHROPIC_WEB_FETCH_TYPE.fullmatch(type_value) is not None
 
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The pair for one fetch, in the vocabulary's error shape where it failed.

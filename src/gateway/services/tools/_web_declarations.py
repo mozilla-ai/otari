@@ -28,7 +28,11 @@ from gateway.core.env import otari_env
 from gateway.models.tools import CodeExecutor
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool
 from gateway.services.tools._native import Dialect
-from gateway.services.tools._web_names import WEB_FETCH_NATIVE_TYPE_PREFIX, WEB_SEARCH_NATIVE_TYPE_PREFIX
+from gateway.services.tools._web_names import (
+    ANTHROPIC_WEB_FETCH_TYPE,
+    WEB_FETCH_NATIVE_TYPE_PREFIX,
+    WEB_SEARCH_NATIVE_TYPE_PREFIX,
+)
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -211,10 +215,6 @@ def _is_any_web_fetch_tool_type(type_value: Any) -> bool:
     return _is_web_fetch_tool_type(type_value) or is_provider_web_fetch_tool_type(type_value)
 
 
-# Anthropic is the only provider with a fetch tool of its own, and only on Messages.
-_ANTHROPIC_WEB_FETCH_TYPE = re.compile(r"web_fetch_\d{8}")
-
-
 def first_provider_web_fetch_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """The first provider-named web-fetch declaration in ``tools``, if any."""
     for entry in tools or []:
@@ -232,7 +232,7 @@ def provider_runs_web_fetch_natively(
     type_value = tool_entry.get("type")
     return (
         isinstance(type_value, str)
-        and _ANTHROPIC_WEB_FETCH_TYPE.fullmatch(type_value) is not None
+        and ANTHROPIC_WEB_FETCH_TYPE.fullmatch(type_value) is not None
         and (provider.lower(), dialect) == ("anthropic", Dialect.MESSAGES)
     )
 
