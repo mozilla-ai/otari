@@ -53,6 +53,8 @@ T = TypeVar("T")
 
 UpstreamErrorKind = Literal["timeout", "conn_err"]
 
+EMPTY_COMPLETION_DETAIL = "The provider returned a completion with no choices"
+
 
 class EmptyCompletionError(Exception):
     """The provider answered a chat completion with no choices.
@@ -63,7 +65,7 @@ class EmptyCompletionError(Exception):
     """
 
     def __init__(self) -> None:
-        super().__init__("The provider returned a completion with no choices")
+        super().__init__(EMPTY_COMPLETION_DETAIL)
 
 
 def require_choices(completion: T) -> T:

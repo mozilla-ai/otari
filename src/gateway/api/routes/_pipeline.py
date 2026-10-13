@@ -217,6 +217,7 @@ from gateway.services.code_execution import (
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.guardrails import InProcessGuardrail
 from gateway.services.inference import (
+    EMPTY_COMPLETION_DETAIL,
     BlockedCaller,
     Claimed,
     InvalidKey,
@@ -431,7 +432,6 @@ PROVIDER_ACCOUNT_QUOTA_DETAIL = (
     "Raise the quota, or route this model to another provider."
 )
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
-PROVIDER_EMPTY_COMPLETION_DETAIL = "The provider returned a completion with no choices"
 
 
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
@@ -762,7 +762,7 @@ def classify_provider_error(
     if missing is not None:
         return ProviderErrorMapping(missing.status_code, missing.detail)
     if is_empty_completion(exc):
-        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_EMPTY_COMPLETION_DETAIL)
+        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, EMPTY_COMPLETION_DETAIL)
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)

@@ -51,6 +51,7 @@ from gateway.services.inference._responses_input import strip_gateway_minted_ite
 from gateway.services.inference._stream_cost import is_chat_stream_cost_carrier
 from gateway.services.inference._sweeper import run_idempotency_sweeper
 from gateway.services.inference._upstream_errors import (
+    EMPTY_COMPLETION_DETAIL,
     EmptyCompletionError,
     UpstreamErrorKind,
     is_empty_completion,
@@ -128,6 +129,7 @@ __all__ = [
     "transcription_usage",
     "uses_chat_completions_bridge",
     "with_upstream_user",
+    "EMPTY_COMPLETION_DETAIL",
     "EmptyCompletionError",
     "UpstreamErrorKind",
     "is_empty_completion",
