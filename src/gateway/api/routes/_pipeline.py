@@ -2996,6 +2996,8 @@ class ToolContext:
         self.web_retrieval_counter: WebRetrievalCounter = shared.web_retrieval_counter
         # Each candidate's tools by its provider, where the request's candidates are not all dispatched alike.
         self.candidate_variants: dict[str | None, CandidateVariant] = {}
+        # The built-in tool names no MCP server may expose: those any attempt of the request runs here.
+        self.reserved_tool_names: frozenset[str] = frozenset(self.declared_gateway_tools)
 
     def for_candidate(self, provider: str | None) -> ToolContext:
         """The tools the candidate on ``provider`` is dispatched with: these, or its variant's.
@@ -3547,6 +3549,9 @@ async def prepare_gateway_tools(
         )
 
     contexts = {claimed: _tool_context(answer) for claimed, answer in admitted.items()}
+    reserved = frozenset[str]().union(*(context.reserved_tool_names for context in contexts.values()))
+    for context in contexts.values():
+        context.reserved_tool_names = reserved
     # The first candidate that can be served is the one the request's own fields are built for.
     tool_ctx = next(contexts[candidate.claimed] for candidate in candidates if candidate.claimed in contexts)
     if len(answers) > 1:
@@ -4780,9 +4785,10 @@ async def _open_tool_backends(
 ) -> _OpenedTools:
     """Open each tool backend the request declared on ``stack``, combined into one pool when there are several.
 
-    The MCP servers open first, so a request whose servers shadow a built-in tool it
-    declared is refused before a sandbox is leased. The built-in backends come first in
-    the pool, so a call that more than one backend owns reaches the gateway's own.
+    The MCP servers open first, so a request whose servers shadow a built-in tool any
+    of its attempts runs here is refused before a sandbox is leased. The built-in
+    backends come first in the pool, so a call that more than one backend owns reaches
+    the gateway's own.
     """
     mcp: MCPClientPool | None = None
     if tool_ctx.mcp_server_configs:
@@ -4790,7 +4796,7 @@ async def _open_tool_backends(
             MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace)
         )
         try:
-            refuse_shadowed_builtin_tools(mcp, tool_ctx.declared_gateway_tools.keys())
+            refuse_shadowed_builtin_tools(mcp, tool_ctx.reserved_tool_names)
         except McpServerDeclarationError as exc:
             raise domain_error(adapter, exc) from exc
     backends: list[ToolBackend] = []
@@ -4954,7 +4960,7 @@ async def open_stream(
     if not tool_ctx.use_tool_loop:
         return await hold_for_first_chunk(await adapter.open_provider_stream(kwargs), tool_ctx.config)
 
-    if tool_ctx.mcp_server_configs and not tool_ctx.declared_gateway_tools:
+    if tool_ctx.mcp_server_configs and not tool_ctx.reserved_tool_names:
         return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)
 
     stack = AsyncExitStack()

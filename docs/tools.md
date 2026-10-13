@@ -189,8 +189,9 @@ searching, fetching a page and then running code on what it found. Each call
 runs on the tool it names, and each tool keeps the rules it has alone:
 
 - Its workspace policy and its pricing apply. A declared tool its policy refuses
-  refuses the whole request, as it would alone, rather than being dropped while
-  the others run.
+  is never dropped while the others run: an attempt that needs it is refused as
+  it would be alone, and [Who runs a tool](#who-runs-a-tool) says what that
+  means on a fallback chain.
 - A `max_uses` caps only its own tool: once search reaches its cap, the model is
   told so for each further search while code and MCP calls keep running.
 - Each built-in comes back in the same native result blocks or items as it does
@@ -210,12 +211,13 @@ What one tool returns reaches the model before its next call, so a fetched page
 or a search result can steer what the model asks of the sandbox or an MCP
 server. Declare together only tools you would let untrusted web content drive.
 
-A built-in tool's name belongs to the built-in in a request that declares it.
-When a connected MCP server exposes a tool of the same name (`web_search`,
-`web_fetch` or `code_execution`), the request is refused with a `400` naming the
-tool, before the model is called or a sandbox is opened. Leave that tool out of
-the server's `allowed_tools`, or declare only one of the two. In a request that
-does not declare the built-in, the server's tool of that name runs as usual.
+A built-in tool's name belongs to the built-in in a request where Otari runs it,
+on any of the request's attempts. When a connected MCP server exposes a tool of
+the same name (`web_search`, `web_fetch` or `code_execution`), the request is
+refused with a `400` naming the tool, before any model is called or a sandbox is
+opened. Leave that tool out of the server's `allowed_tools`, or declare only one
+of the two. In a request where Otari runs no built-in of that name, the server's
+tool of that name runs as usual.
 
 ## Code execution
 

@@ -577,6 +577,51 @@ def test_otaris_search_beside_the_providers_own_code_falls_back_to_running_both_
     assert len(seen.web_backends) == 2
 
 
+class _ShadowingMcpPool:
+    """An MCP pool whose one server exposes a tool named ``web_search``."""
+
+    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None) -> None:
+        return None
+
+    async def __aenter__(self) -> _ShadowingMcpPool:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": WEB_SEARCH_TOOL_NAME, "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == WEB_SEARCH_TOOL_NAME
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_an_mcp_tool_shadowing_a_builtin_only_the_fallback_runs_is_refused_before_the_head_is_called(
+    client: TestClient, api_key_header: dict[str, str], stream: bool
+) -> None:
+    """Whether the request is refused does not wait on its head failing."""
+    body = _messages_body(
+        "claude-then-vertex",
+        _SEARCH,
+        mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}],
+        **({"stream": True} if stream else {}),
+    )
+
+    with patch("gateway.api.routes._pipeline.MCPClientPool", new=_ShadowingMcpPool):
+        response, seen = _post_messages(client, _auto(api_key_header, "search"), body)
+
+    assert response.status_code == 400, response.text
+    assert f"'{WEB_SEARCH_TOOL_NAME}'" in response.text
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []
+    assert seen.web_backends == []
+
+
 def test_caps_are_shared_by_attempts_that_run_different_tools(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:
