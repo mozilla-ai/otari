@@ -1175,14 +1175,6 @@ def get_budget_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetService:
     """Build the request's budget service on the request's Unit of Work."""
-    return build_budget_service(uow, db)
-
-
-def build_budget_service(uow: UnitOfWork, db: AsyncSession) -> BudgetService:
-    """Build the budget service for a request or for startup work, on a Unit of Work over ``db``.
-
-    ``db`` reaches only the organizations service and workspace access, which still take a session.
-    """
     organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     return BudgetService(
         uow,
@@ -1194,6 +1186,11 @@ def build_budget_service(uow: UnitOfWork, db: AsyncSession) -> BudgetService:
 
 
 BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
+
+
+def build_budget_service(session: AsyncSession) -> BudgetService:
+    """Build the budget service for startup work, on a Unit of Work over a session of its own."""
+    return get_budget_service(get_unit_of_work(session), session)
 
 
 def get_organization_guardrail_definition_service(

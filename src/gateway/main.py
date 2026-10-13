@@ -26,7 +26,6 @@ from gateway.api.deps import (
     build_file_service,
     build_inference_service,
     get_membership_listener,
-    get_unit_of_work,
     get_workspace_code_execution_policies,
     get_workspace_listener,
     get_workspace_search_keys,
@@ -561,7 +560,7 @@ async def apply_declared_access(config: GatewayConfig, session: "AsyncSession", 
     """
     # Only when a key is declared: resolving can create the default workspace on a schema built without Alembic.
     workspace_id = await default_workspace_id(session) if config.api_keys else None
-    budgets = build_budget_service(get_unit_of_work(session), session)
+    budgets = build_budget_service(session)
     await budgets.apply_declared_access(
         config.budgets, config.api_keys, workspace_id=workspace_id, fingerprint=key_format.fingerprint
     )
