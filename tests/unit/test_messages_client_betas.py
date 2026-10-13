@@ -7,6 +7,9 @@ any-llm refuses the whole request and a model swap would otherwise stop working.
 
 from __future__ import annotations
 
+import pytest
+from any_llm import AnyLLM
+
 from gateway.api.routes.messages import _serves_messages_natively, _split_client_betas
 from gateway.services.mcp_loop_messages import MCP_CLIENT_BETA
 
@@ -70,3 +73,12 @@ def test_an_unknown_selector_is_not_stripped_on_a_guess() -> None:
     assert _serves_messages_natively("not-a-provider:some-model")
     assert _serves_messages_natively(None)
     assert _serves_messages_natively("")
+
+
+def test_nativeness_follows_the_provider_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _serves_messages_natively(ANTHROPIC)
+    assert not _serves_messages_natively(OPEN_MODEL)
+
+    monkeypatch.setattr(AnyLLM.get_provider_class("nebius"), "SUPPORTS_MESSAGES_NATIVE", True)
+
+    assert _serves_messages_natively(OPEN_MODEL)

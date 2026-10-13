@@ -134,30 +134,16 @@ def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -
 def _serves_messages_natively(dispatch_model: Any) -> bool:
     """Whether the dispatched provider has an Anthropic Messages API of its own.
 
-    The same question any-llm asks before refusing ``betas``, asked the same
-    way: a provider that serves Messages natively overrides ``_amessages``,
-    while a bridged one inherits the base implementation that converts
-    Messages to Completions (and refuses what cannot survive the conversion).
-    ``SUPPORTS_MESSAGES`` does not answer it, being true for every provider the
-    bridge covers.
-
-    An unknown or unparseable selector answers yes, so nothing is stripped on a
-    guess; any-llm then refuses the beta itself, as it did before.
-
-    This reads a private any-llm attribute, which nothing public answers today
-    (``SUPPORTS_MESSAGES`` is true for every bridged provider). It is a shim in
-    the sense of CONTRIBUTING's "when the fix is upstream": the durable answer
-    is a public capability flag on the any-llm provider class, asked for in
-    https://github.com/mozilla-ai/any-llm/issues/1418, and this goes when that
-    lands. ``getattr`` keeps a renamed attribute from breaking a request; it
-    degrades to forwarding the betas, the pre-shim behavior.
+    A bridged provider (``SUPPORTS_MESSAGES`` without ``SUPPORTS_MESSAGES_NATIVE``)
+    goes through any-llm's Messages-to-Completions conversion, which refuses
+    ``betas``. An unknown or unparseable selector answers yes, so nothing is
+    stripped on a guess; any-llm then refuses the beta itself.
     """
     if not isinstance(dispatch_model, str) or not dispatch_model:
         return True
     try:
         provider, _ = AnyLLM.split_model_provider(dispatch_model)
-        native = getattr(AnyLLM.get_provider_class(provider), "_amessages", None)
-        return native is not getattr(AnyLLM, "_amessages", None)
+        return AnyLLM.get_provider_class(provider).SUPPORTS_MESSAGES_NATIVE
     except Exception:  # noqa: BLE001 - any-llm raises its own types for an unknown provider
         return True
 
