@@ -47,6 +47,7 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, Us
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.file_extractors import ExtractionResult
+from gateway.services.inference import upstream_user_identifier
 
 from .conftest import MODEL_NAME, build_test_client
 
@@ -808,6 +809,33 @@ def test_a_completion_cannot_be_billed_to_a_workspace_that_is_not_the_caller_s(
     assert code == status.HTTP_404_NOT_FOUND
 
     assert db_session.query(UsageLog).count() == 0
+
+
+def test_a_body_user_cannot_choose_the_provider_end_user_identifier(client: TestClient, world: _World) -> None:
+    """The identifier is the caller's own, whatever ``user`` the body names.
+
+    An API key may name an end user, so a member who could do the same here
+    could take on the identifier a key's end user is known by upstream.
+    """
+    with patch("gateway.api.routes.chat.acompletion") as mock:
+        mock.side_effect = _mock_acompletion
+        code, _ = _request(
+            client,
+            world,
+            "member",
+            "POST",
+            f"{_PREFIX}/chat/completions",
+            json={
+                "model": "openai:gpt-4o-mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": "shared-tag-alpha",
+            },
+            params=_ws(world),
+        )
+
+    assert code == status.HTTP_200_OK
+    workspace = str(world.workspaces["alpha_one"])
+    assert mock.call_args.kwargs["user"] == upstream_user_identifier(workspace, str(world.users["member"]), None)
 
 
 def test_a_completion_streams_server_sent_events(

@@ -246,6 +246,10 @@ def test_the_tag_wins_over_the_resolved_user() -> None:
     assert _identifier() == upstream_user_identifier("ws", "alice", None)
 
 
+def test_a_session_s_tag_is_ignored() -> None:
+    assert _identifier(tag="end-user-7", session=True) == upstream_user_identifier("ws", "alice", None)
+
+
 def test_turned_off_there_is_no_identifier_and_no_refusal() -> None:
     assert _identifier(enabled=False, workspace_id=None, user_id=None) is None
 

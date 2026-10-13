@@ -1375,6 +1375,8 @@ def _end_user(
     workspace_id: str | None,
     tag: str | None,
     user_id: str | None,
+    *,
+    session: bool = False,
 ) -> str | None:
     try:
         return end_user_identifier(
@@ -1383,6 +1385,7 @@ def _end_user(
             workspace_id=workspace_id,
             tag=tag,
             user_id=user_id,
+            session=session,
         )
     except UnidentifiedEndUserError as exc:
         raise adapter.error(502, NO_UPSTREAM_USER_DETAIL, ErrorKind.API) from exc
@@ -2372,7 +2375,14 @@ async def resolve_request_context(
         if not names_end_user:
             rate_limit_info = await check_rate_limit(raw_request, user_id)
         # Never refused here: a standalone request always has a workspace and a user.
-        upstream_user = _end_user(adapter, config, str(workspace_id), user_id_from_request, user_id)
+        upstream_user = _end_user(
+            adapter,
+            config,
+            str(workspace_id),
+            user_id_from_request,
+            user_id,
+            session=session_principal is not None,
+        )
 
         # Tolerate an unparseable / unknown-provider selector here: the key's
         # allow-list, the budget check below and the downstream provider call
