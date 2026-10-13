@@ -252,9 +252,12 @@ def container_copies_step(
     A refusal is rendered with ``render``, the dialect's own envelope.
     A copy that could not be made raises :class:`ProviderUploadFailedError`,
     which is that candidate's own failure rather than a refusal of the request.
+    A candidate sent no ``container_upload`` block, as one whose sandbox holds the files is, needs no copy.
     """
 
     async def _prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if not has_container_blocks(kwargs["messages"], "anthropic"):
+            return kwargs
         provider, _ = AnyLLM.split_model_provider(kwargs["model"])
         if not isinstance(provider, LLMProvider) or not provider_holds_copies(provider):
             raise CandidateCannotServe(render(NoCandidateHoldsCopiesError()))

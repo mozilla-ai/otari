@@ -24,7 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
@@ -128,6 +128,11 @@ def _text_block(fmt: WireFormat, text: str) -> dict[str, Any]:
     if fmt == "responses":
         return {"type": "input_text", "text": text}
     return {"type": "text", "text": text}
+
+
+def _sandbox_file_text(fmt: WireFormat, filename: str) -> dict[str, Any]:
+    """What the model is told in place of a file the sandbox holds."""
+    return _text_block(fmt, f"[File available in the code execution sandbox: {filename}]")
 
 
 def _decode_data_url(url: str) -> tuple[bytes | None, str]:
@@ -395,6 +400,27 @@ def name_container_copies(messages: list[dict[str, Any]], copies: Mapping[str, s
     ]
 
 
+def stage_container_blocks(messages: list[dict[str, Any]], staged: Sequence[StagedFile]) -> list[dict[str, Any]]:
+    """``messages`` with each ``container_upload`` block naming a ``staged`` upload told as the sandbox's file.
+
+    For the attempts that run the code on the sandbox when others of the same
+    request run it in the provider's container. The messages passed in are left as they are.
+    """
+    names = {file.file_id: file.filename for file in staged}
+
+    def _staged(block: Any) -> Any:
+        if isinstance(block, dict) and _is_container_block(block, "anthropic") and block.get("file_id") in names:
+            return _sandbox_file_text("anthropic", names[block["file_id"]])
+        return block
+
+    return [
+        {**message, "content": [_staged(block) for block in message["content"]]}
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
 def has_container_blocks(messages: Any, fmt: WireFormat) -> bool:
     """Whether any message carries a block naming a file for a code-execution container."""
     if not isinstance(messages, list):
@@ -446,18 +472,20 @@ async def _normalize_block(
 
     staged = stats.stage(src.staged) if sandbox_requested and src.staged is not None else None
     if src.kind == _CONTAINER:
-        if staged is not None:
-            # The sandbox gets the bytes; the model gets told where they are.
-            return _text_block(fmt, f"[File available in the code execution sandbox: {staged.filename}]")
         if provider_container and _is_container_block(block, fmt):
             if src.staged is None:
                 # Resolved, but to no stored file, so there is nothing to copy.
                 # Falling back would show the model contents its code cannot open.
                 raise AttachedFileUnavailableError
             # The block keeps naming the upload, because the account whose copy
-            # it must name is not known until a candidate is chosen.
+            # it must name is not known until a candidate is chosen. Where other
+            # candidates run the code on the sandbox, the upload is staged too and
+            # their block is rewritten by ``stage_container_blocks``.
             stats.hold_for_container(src.staged)
             return {**block, "file_id": src.staged.file_id}
+        if staged is not None:
+            # The sandbox gets the bytes; the model gets told where they are.
+            return _sandbox_file_text(fmt, staged.filename)
         src.kind = _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf and _is_native_document(src)
@@ -528,7 +556,9 @@ async def normalize_messages(
     ``provider_container`` says the provider runs the code in a container of its
     own. A ``container_upload`` block then keeps naming the upload, which is
     recorded on ``stats.container_inputs``, and a block naming no upload this
-    caller holds refuses the request rather than reaching the provider.
+    caller holds refuses the request rather than reaching the provider. With both
+    set, for a request whose candidates run the code in different places, the
+    block keeps naming the upload and the upload is staged as well.
 
     Messages whose ``content`` is a plain string are returned untouched (the
     common, zero-overhead path). Only list-content messages are walked, plus, on

@@ -85,6 +85,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.code_execution import ContainerLease, check_container_on_credential, gateway_container_value
+from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
@@ -996,6 +997,9 @@ async def create_message(
             # provider tool survives alongside the sandbox and dropping it here cannot
             # strand a container the provider would have used.
             fields.pop("container", None)
+            if container_inputs:
+                # This candidate's sandbox holds the files the others' containers are sent copies of.
+                fields["messages"] = stage_container_blocks(fields["messages"], sandbox_inputs)
         elif gateway_container_value(fields.get("container")) is not None:
             # Otari's own ``auto``, there for the candidates whose code the sandbox runs.
             fields.pop("container")
