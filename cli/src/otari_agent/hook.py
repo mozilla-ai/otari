@@ -897,7 +897,7 @@ _HOOK_JUDGE_TOTAL_BUDGET_SECONDS = 480
 # session history names a current default of "gpt-6-astra", not any of the
 # "cheap tier" ids OpenAI's own docs name elsewhere, which is exactly the
 # kind of drift a hardcoded guess here would silently go stale against).
-# `_hook_run_judge` leaves `--model` off the codex backend's own invocation
+# `_hook_run_judge` leaves `--model` off the codex (and pi) backend's own invocation
 # entirely when neither this nor --judge-model apply, falling back to
 # whatever model that account already has configured as its own default,
 # rather than risk naming one Codex might reject outright.
@@ -1303,12 +1303,12 @@ def _hook_run_judge_subprocess(argv: list[str], prompt: str, *, deadline: float,
     """Shared tail of every judge-CLI backend's own invocation: run `argv`, parse its
     stdout as the one JSON verdict object the judge prompt demands; return (outcome, reasoning).
 
-    Both `_hook_call_claude_p` and `_hook_call_codex_exec` build their own
+    `_hook_call_claude_p`, `_hook_call_codex_exec` and `_hook_call_pi_p` build their own
     `argv` (each backend's own flags are backend-specific: see each
     function's own docstring for why) and hand it here for everything after
     that: launching it, bounding it to what is left of the shared
     `deadline`, and turning its stdout into a verdict. `label` (`"claude
-    -p"`/`"codex exec"`) names the backend in every message this produces,
+    -p"`/`"codex exec"`/`"pi -p"`) names the backend in every message this produces,
     the only difference in what each backend's own error/success text reads.
 
     outcome is always one of "pass"/"fail"/"error": a nonzero exit, a
@@ -1455,19 +1455,72 @@ def _hook_call_codex_exec(codex_path: str, model: str | None, prompt: str, *, de
     return _hook_run_judge_subprocess(argv, prompt, deadline=deadline, label="codex exec")
 
 
+def _hook_call_pi_p(pi_path: str, model: str | None, prompt: str, *, deadline: float) -> tuple[str, str]:
+    """One `pi -p` invocation; return (outcome, reasoning).
+
+    `model` is `None` when `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` named
+    none specifically: `--model` is then left off entirely and pi uses the
+    model the user has configured as its own default, the same choice
+    `_hook_call_codex_exec` makes (see `_HOOK_JUDGE_DEFAULT_MODEL`'s comment).
+
+    The prompt goes over stdin with no positional message: pi's print mode
+    prepends piped stdin to the first prompt (docs/cli.md, "Piped stdin"),
+    so stdin alone is the whole prompt, and, as for the other backends, a
+    diff or transcript with an embedded NUL byte survives stdin but not an
+    argv element.
+
+    `--no-tools` leaves the model nothing to call, since this prompt embeds
+    the diff and transcript verbatim and both are attacker-influenceable (see
+    JudgeGate's own docstring). `--no-session` leaves no session file behind,
+    and `--no-skills`, `--no-prompt-templates` and `--no-context-files` keep
+    the call from loading the user's own skills, templates, AGENTS.md or
+    CLAUDE.md, which would only add noise to a one-shot classification.
+    `--offline` skips pi's startup network work (model catalog refresh).
+
+    Unlike `_hook_call_claude_p`, this does not turn extensions off, on
+    purpose: the pi-otari extension is installed user-wide and has to load
+    here so a model routed through Otari resolves. That extension also
+    registers `otari hook --harness pi` on pi's Stop event, so this call
+    would re-enter the hook were nothing else in the way. What stops the loop
+    is `otari hook` itself: this runs from `_hook_judge_workdir()`
+    (`~/.otari/judge-workdir`), which is not a git repository and holds no
+    guardrail, so the nested `otari hook` finds no repo or rules and exits 0
+    immediately without evaluating anything.
+
+    outcome is always one of "pass"/"fail"/"error", the same contract
+    `_hook_call_claude_p` returns, parsed from pi's stdout. No "prompt is too
+    long" retry: pi's own wording for it is unconfirmed, so
+    `_hook_run_judge` never applies that retry to this backend.
+    """
+    argv = [
+        pi_path,
+        "-p",
+        "--no-tools",
+        "--no-session",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-context-files",
+        "--offline",
+    ]
+    if model is not None:
+        argv += ["--model", model]
+    return _hook_run_judge_subprocess(argv, prompt, deadline=deadline, label="pi -p")
+
+
 # Binary name `shutil.which` resolves for each judge_cli backend.
 # _hook_run_judge's own inline dispatch (not a dict of the two caller
 # functions: their `model` parameter is optional for codex, required for
 # claude, and a dict's value type would otherwise have to widen to the union
 # of both, losing the distinction a type checker could otherwise hold onto)
 # picks which one to call.
-_JUDGE_CLI_BINARY_NAMES = {"claude": "claude", "codex": "codex"}
+_JUDGE_CLI_BINARY_NAMES = {"claude": "claude", "codex": "codex", "pi": "pi"}
 
 # Which judge_cli backend a gate gets when neither it nor --judge-cli names
 # one: whichever CLI the harness actually invoking this hook run is itself
 # built on. See _hook_collect_judge_verdicts for the full precedence order.
-# pi is built on neither, so it takes whichever of the two is installed.
-_JUDGE_CLI_DEFAULT_BY_HARNESS = {"claude-code": ("claude",), "codex": ("codex",), "pi": ("claude", "codex")}
+# pi prefers its own CLI (so the user's configured pi model and any
+# Otari routing apply), then whichever of the other two is installed.
+_JUDGE_CLI_DEFAULT_BY_HARNESS = {"claude-code": ("claude",), "codex": ("codex",), "pi": ("pi", "claude", "codex")}
 
 
 def _hook_resolve_judge_cli(candidates: tuple[str, ...]) -> tuple[str, str] | None:
@@ -1516,8 +1569,8 @@ def _hook_run_judge(
     `model` is the caller's own explicit choice (`--judge-model`/
     `OTARI_HOOK_JUDGE_MODEL`), or `None` for "no explicit choice, use this
     backend's own default": `claude` gets `_HOOK_JUDGE_DEFAULT_MODEL`
-    (Haiku); `codex` gets none at all, `_hook_call_codex_exec` then omitting
-    `--model` entirely (see `_HOOK_JUDGE_DEFAULT_MODEL`'s own comment on why
+    (Haiku); `codex` and `pi` get none at all, `_hook_call_codex_exec` and
+    `_hook_call_pi_p` then omitting `--model` entirely (see `_HOOK_JUDGE_DEFAULT_MODEL`'s own comment on why
     the two are not symmetric here). Resolved after `judge_cli`, not before:
     which default applies depends on which backend actually gets picked.
 
@@ -1570,6 +1623,8 @@ def _hook_run_judge(
             return _hook_call_claude_p(
                 binary_path, model if model is not None else _HOOK_JUDGE_DEFAULT_MODEL, prompt_text, deadline=deadline
             )
+        if backend == "pi":
+            return _hook_call_pi_p(binary_path, model, prompt_text, deadline=deadline)
         return _hook_call_codex_exec(binary_path, model, prompt_text, deadline=deadline)
 
     outcome, reasoning = call(_hook_build_judge_prompt(rubric, diff, transcript))
@@ -2117,8 +2172,8 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
     default=None,
     help=(
         f"Model the resolved judge CLI uses for a judge gate's model call. Defaults to "
-        f"{_HOOK_JUDGE_DEFAULT_MODEL!r} when the resolved backend is claude; when it is codex, "
-        "left unset (that account's own default model applies) unless given explicitly here."
+        f"{_HOOK_JUDGE_DEFAULT_MODEL!r} when the resolved backend is claude; when it is codex or pi, "
+        "left unset (that CLI's own default model applies) unless given explicitly here."
     ),
 )
 @click.option(
@@ -2127,7 +2182,7 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
     default=None,
     callback=_parse_judge_cli,
     help=(
-        "Comma-separated, ordered judge-gate CLI backend(s) to try (claude, codex); the first one "
+        "Comma-separated, ordered judge-gate CLI backend(s) to try (claude, codex, pi); the first one "
         "found on PATH is used. A gate's own judge_cli overrides this; with neither set, defaults to "
         "whichever CLI --harness itself implies."
     ),
@@ -2746,40 +2801,66 @@ _HOOK_SETUP_BY_HARNESS = {
 }
 
 
-@hook.command(name="setup")
-@click.option(
-    "--harness",
-    type=click.Choice(["claude-code", "codex", "pi"]),
-    default="claude-code",
-    show_default=True,
-    help="Agent integration to configure.",
-)
-def hook_setup(harness: str) -> None:
-    """Register otari hook in this repository, in a supported agent's own settings.
+_PI_EXTENSION_PACKAGE = "@mozilla-ai/pi-otari"
+_PI_EXTENSION_SOURCE = f"npm:{_PI_EXTENSION_PACKAGE}"
+_PI_COMMAND_TIMEOUT_SECONDS = 300
 
-    Writes or updates a PreToolUse hook entry and a Stop hook entry in the
-    harness's own personal, gitignored settings file so registering it is not
-    a manual JSON edit. Both point at the same otari hook invocation; the
-    harness passes its own hook_event_name in the payload, so one callback
-    serves either event. Offers to scaffold a starter .otari/guardrails.yml
-    when this repo has no guardrail yet, and picks the PreToolUse matcher
-    (whether it needs to cover the shell tool, the read tool, or both) from
-    whatever gates the guardrail turns out to have; Stop needs no matcher;
-    see docs/agent-guardrails.md for why both are registered unconditionally.
+
+def _hook_run_pi(pi_path: str, *args: str) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(  # noqa: S603 - fixed argv, no shell, resolved executable path
+            [pi_path, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=_PI_COMMAND_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise click.ClickException(
+            f"pi {' '.join(args)} did not finish within {_PI_COMMAND_TIMEOUT_SECONDS}s."
+        ) from exc
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"Could not run pi {' '.join(args)}: {exc}") from exc
+
+
+def _hook_setup_pi() -> None:
+    """Install the pi-otari extension into pi, then offer a starter guardrail inside a repo.
+
+    pi has no hook settings file: the extension registers the callback
+    itself and invokes `otari hook --harness pi`, so nothing is written under
+    `.claude` or `.codex`.
     """
-    if harness == "pi":
-        # pi has no hook settings file: the pi-otari extension registers the
-        # callback itself and invokes `otari hook --harness pi`.
+    pi_path = shutil.which("pi")
+    if pi_path is None:
         click.echo(
-            "pi is wired by the pi-otari extension, not a settings file; nothing was written. "
-            "Install pi-otari in pi to enable Agent Guardrails there."
+            "pi was not found on PATH. Install pi, then run:\n\n"
+            f"    pi install {_PI_EXTENSION_SOURCE}\n\n"
+            "and re-run `otari hook setup --harness pi`."
         )
         return
 
-    root = _hook_find_repo_root(Path.cwd())
-    if root is None:
-        raise click.ClickException("Not inside a Git repository.")
+    listing = _hook_run_pi(pi_path, "list")
+    if listing.returncode == 0 and _PI_EXTENSION_PACKAGE in listing.stdout + listing.stderr:
+        click.echo(f"{_PI_EXTENSION_PACKAGE} is already installed in pi.")
+    elif click.confirm(f"Install {_PI_EXTENSION_PACKAGE} into pi (pi install {_PI_EXTENSION_SOURCE})?", default=True):
+        installed = _hook_run_pi(pi_path, "install", _PI_EXTENSION_SOURCE)
+        output = (installed.stdout + installed.stderr).strip()
+        if output:
+            click.echo(output)
+        if installed.returncode != 0:
+            raise click.ClickException(f"pi install {_PI_EXTENSION_SOURCE} exited {installed.returncode}.")
+        click.echo(f"Installed {_PI_EXTENSION_PACKAGE}.")
+    else:
+        click.echo(f"Skipping. Run `pi install {_PI_EXTENSION_SOURCE}` to enable Agent Guardrails in pi.")
 
+    root = _hook_find_repo_root(Path.cwd())
+    if root is not None:
+        _offer_starter_guardrail(root)
+
+
+def _offer_starter_guardrail(root: Path) -> None:
+    """Offer to scaffold a starter guardrail when `root` has none; shared by every harness's setup."""
     # The single file, not a directory holding one: it is the smaller thing to
     # start with, and splitting it later is moving gates into
     # `.otari/guardrails/` rather than a migration.
@@ -2803,6 +2884,38 @@ def hook_setup(harness: str) -> None:
                 f"Skipping. otari hook will still be registered below, but every gate check "
                 f"passes until {GUARDRAIL_FILE} or {GUARDRAIL_DIR}/ exists; see docs/agent-guardrails.md."
             )
+
+
+@hook.command(name="setup")
+@click.option(
+    "--harness",
+    type=click.Choice(["claude-code", "codex", "pi"]),
+    default="claude-code",
+    show_default=True,
+    help="Agent integration to configure.",
+)
+def hook_setup(harness: str) -> None:
+    """Register otari hook in this repository, in a supported agent's own settings.
+
+    Writes or updates a PreToolUse hook entry and a Stop hook entry in the
+    harness's own personal, gitignored settings file so registering it is not
+    a manual JSON edit. Both point at the same otari hook invocation; the
+    harness passes its own hook_event_name in the payload, so one callback
+    serves either event. Offers to scaffold a starter .otari/guardrails.yml
+    when this repo has no guardrail yet, and picks the PreToolUse matcher
+    (whether it needs to cover the shell tool, the read tool, or both) from
+    whatever gates the guardrail turns out to have; Stop needs no matcher;
+    see docs/agent-guardrails.md for why both are registered unconditionally.
+    """
+    if harness == "pi":
+        _hook_setup_pi()
+        return
+
+    root = _hook_find_repo_root(Path.cwd())
+    if root is None:
+        raise click.ClickException("Not inside a Git repository.")
+
+    _offer_starter_guardrail(root)
 
     setup = _HOOK_SETUP_BY_HARNESS[harness]
     needs = _guardrail_matcher_needs(_hook_guardrail_spec(root))
@@ -2845,7 +2958,7 @@ def hook_setup(harness: str) -> None:
 # this repo (see AGENTS.md, top) and elsewhere it copies that pairing, so it
 # carries real content only when AGENTS.md itself is missing.
 _GATES_GENERATE_DEFAULT_SOURCE_NAMES = ("AGENTS.md", "CLAUDE.md")
-_GATES_GENERATE_DEFAULT_CLI_ORDER = ("claude", "codex")
+_GATES_GENERATE_DEFAULT_CLI_ORDER = ("claude", "codex", "pi")
 _GATES_GENERATE_TIMEOUT_SECONDS = 300
 # A developer-authored doc, not a data export; bounds a pathological input
 # (and an accidental binary) before it goes into a model prompt, the same
@@ -3007,7 +3120,27 @@ def _gates_generate_call_codex_exec(codex_path: str, model: str | None, prompt: 
     return _gates_generate_run_cli(argv, prompt, label="codex exec")
 
 
+def _gates_generate_call_pi_p(pi_path: str, model: str | None, prompt: str) -> str:
+    # Same flags and stdin prompt as _hook_call_pi_p (see its docstring for
+    # why, including why extensions stay on and what stops a Stop-hook loop).
+    argv = [
+        pi_path,
+        "-p",
+        "--no-tools",
+        "--no-session",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-context-files",
+        "--offline",
+    ]
+    if model:
+        argv += ["--model", model]
+    return _gates_generate_run_cli(argv, prompt, label="pi -p")
+
+
 def _gates_generate_call_cli(cli_name: str, cli_path: str, model: str | None, prompt: str) -> str:
+    if cli_name == "pi":
+        return _gates_generate_call_pi_p(cli_path, model, prompt)
     if cli_name == "codex":
         return _gates_generate_call_codex_exec(cli_path, model, prompt)
     return _gates_generate_call_claude_p(cli_path, model, prompt)
@@ -3305,7 +3438,7 @@ def guardrails() -> None:
     default=None,
     envvar="OTARI_GUARDRAILS_GENERATE_CLI",
     help=(
-        "Comma-separated, ordered CLI backend(s) to try (claude, codex). Defaults to claude, "
+        "Comma-separated, ordered CLI backend(s) to try (claude, codex, pi). Defaults to claude, "
         "then codex, whichever is found on PATH first."
     ),
 )
@@ -3323,7 +3456,7 @@ def guardrails_generate(
 ) -> None:
     """Propose guardrail gates from a repo's own AGENTS.md/CLAUDE.md, one at a time.
 
-    Resolves a locally installed model CLI (`claude -p` or `codex exec`,
+    Resolves a locally installed model CLI (`claude -p`, `codex exec` or `pi -p`,
     whichever is found on PATH first; no otari server, no otari credential)
     and asks the user to confirm it before sending the doc anywhere. Walks
     the proposals one at a time, screen cleared between each so only the
@@ -4075,7 +4208,7 @@ def _echo_check_report(
     default=None,
     help=(
         f"Model a judge gate's call uses. Defaults to {_HOOK_JUDGE_DEFAULT_MODEL!r} for claude, "
-        "and to the account's own default for codex."
+        "and to the CLI's own default for codex and pi."
     ),
 )
 @click.option(
@@ -4084,7 +4217,7 @@ def _echo_check_report(
     default=None,
     callback=_parse_judge_cli,
     help=(
-        "Comma-separated, ordered judge CLI backends to try (claude, codex). "
+        "Comma-separated, ordered judge CLI backends to try (claude, codex, pi). "
         "A gate's own judge_cli overrides this. Defaults to claude."
     ),
 )

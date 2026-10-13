@@ -454,10 +454,11 @@ evidence it already collected for `path` gates.
 ```
 
 `judge_cli` is also optional: a string or ordered list naming which locally
-installed CLI(s) may make this gate's own model call (`claude`, `codex`
+installed CLI(s) may make this gate's own model call (`claude`, `codex`, `pi`
 today). Omitted (the default, and the only behavior before this field
 existed), `otari hook` picks whichever CLI its own invoking harness implies:
-a Claude Code hook uses `claude`, a Codex hook uses `codex`, so most
+a Claude Code hook uses `claude`, a Codex hook uses `codex`, a pi hook tries
+`pi`, then `claude`, then `codex`, so most
 policies never need this field at all. Naming one is for a gate that must
 always use a specific CLI regardless of which harness invoked the hook (a
 rubric that only works well with one model family, say); naming an ordered
@@ -528,14 +529,15 @@ directly on the same rejection instead.
 
 Precedence, most specific first: a gate's own `judge_cli`, then `otari
 hook`'s own `--judge-cli`/`OTARI_HOOK_JUDGE_CLI`, then a default keyed on
-`--harness` (`claude-code` → `claude`, `codex` → `codex`). Whichever list
+`--harness` (`claude-code` → `claude`, `codex` → `codex`, `pi` → `pi`, then
+`claude`, then `codex`). Whichever list
 that produces is tried in order; the first entry whose own binary
 `shutil.which` finds on `PATH` is the one actually invoked, so a
 multi-entry list is a fallback preference, not a "use all of these"
 instruction, and an error message on a run where none resolve names every
 candidate that was tried.
 
-The two backends' own call shape differs in what each can bind, including
+The backends' own call shape differs in what each can bind, including
 what "no `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` given" defaults to:
 
 - `claude`: `claude -p --model <model> --tools "" --strict-mcp-config`,
@@ -566,6 +568,19 @@ what "no `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` given" defaults to:
   `--ephemeral` keeps this one-shot call from leaving a rollout file behind
   for a later `Stop` event's own transcript scan to mistake for real session
   evidence.
+- `pi`: `pi -p --no-tools --no-session --no-skills --no-prompt-templates
+  --no-context-files --offline [--model <model>]`, the prompt piped over stdin
+  with no positional message (pi's print mode prepends piped stdin to the first
+  prompt). Like `codex`, it has no hardcoded default model: `--model` is
+  included only when `--judge-model` names one, otherwise pi uses the user's
+  own configured default. `--no-tools` leaves the model nothing to call.
+  Extensions are deliberately left on, so the pi-otari extension loads and an
+  Otari-routed model resolves. That extension also registers `otari hook` on
+  pi's `Stop` event, but the call runs in `~/.otari/judge-workdir`, which is
+  not a Git repository and has no guardrail, so the nested `otari hook` exits 0
+  at once. The loop is stopped by `otari hook` bailing outside a repo, not by
+  disabling the extension (the way `claude` is isolated). `otari guardrails
+  generate` accepts `pi` too, with the same flags.
 
 The diff covers tracked changes (`git diff HEAD`) and every untracked file
 the ignore rules do not exclude, each appended as a `new file` hunk. Both
@@ -1153,7 +1168,12 @@ neither depends on `PreToolUse` firing.
 ## Registering it for pi
 
 pi has no hook settings file. The pi-otari extension registers with pi and runs
-`otari hook --harness pi`, so `otari hook setup --harness pi` writes nothing.
+`otari hook --harness pi`, so `otari hook setup --harness pi` installs the
+extension instead: it runs `pi list`, and if `@mozilla-ai/pi-otari` is not
+listed asks, then runs `pi install npm:@mozilla-ai/pi-otari` (a non-zero exit is
+an error). With no `pi` on `PATH` it prints those instructions and exits 0.
+Inside a Git repository it also offers the starter `.otari/guardrails.yml`;
+it never writes `.claude` or `.codex` files for pi.
 The payload uses pi's lowercase tool names and native `tool_input`:
 
 | pi tool | `tool_input` | Evidence surface |
@@ -1305,8 +1325,8 @@ composes.
 Writing a guardrail by hand means finding the rules worth checking
 in a repo's own AGENTS.md (or CLAUDE.md, when that is the only doc a repo
 has) and turning prose into the gate schema above. `otari guardrails generate`
-does the first pass: it resolves a locally installed model CLI (`claude -p`
-or `codex exec`, whichever is found on `PATH` first), names it and asks the user to confirm before sending the
+does the first pass: it resolves a locally installed model CLI (`claude -p`,
+`codex exec` or `pi -p`, whichever is found on `PATH` first), names it and asks the user to confirm before sending the
 doc anywhere, then asks it to propose gates for whichever rules look
 mechanically checkable.
 

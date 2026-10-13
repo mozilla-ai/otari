@@ -10,6 +10,7 @@ import json
 import shutil
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -183,6 +184,132 @@ def test_codex_exec_is_invoked_read_only_and_non_interactive(monkeypatch: pytest
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="codex")
     assert result.exit_code == 0, result.output
     assert captured["judge_results"] == [JudgeVerdict(gate_id="g", outcome="fail", reasoning="no")]
+
+
+_PI_BASE_ARGV = [
+    "/usr/bin/pi",
+    "-p",
+    "--no-tools",
+    "--no-session",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-context-files",
+    "--offline",
+]
+
+
+def _pi_run(seen: list[tuple[list[str], dict[str, Any]]], stdout: str, returncode: int = 0) -> Any:
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        seen.append((cmd, kwargs))
+        return subprocess.CompletedProcess(args=cmd, returncode=returncode, stdout=stdout, stderr="boom")
+
+    return fake_run
+
+
+def test_pi_harness_prefers_pi_then_claude_then_codex() -> None:
+    assert hook_cli._JUDGE_CLI_DEFAULT_BY_HARNESS["pi"] == ("pi", "claude", "codex")
+
+
+def test_pi_harness_defaults_to_the_pi_backend(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
+    seen: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(subprocess, "run", _pi_run(seen, json.dumps({"outcome": "fail", "reasoning": "no"})))
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    captured = _capture_evidence(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="pi")
+    assert result.exit_code == 0, result.output
+    ((cmd, kwargs),) = seen
+    assert cmd == _PI_BASE_ARGV, "no --model when none is named, and no --no-extensions"
+    assert "--no-extensions" not in cmd
+    assert isinstance(kwargs["input"], str) and kwargs["input"], "the prompt is piped over stdin"
+    assert kwargs["cwd"] == hook_cli._hook_judge_workdir()
+    assert captured["judge_results"] == [JudgeVerdict(gate_id="g", outcome="fail", reasoning="no")]
+
+
+def test_pi_harness_falls_back_to_claude_then_codex(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
+    called: list[str] = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        called.append(cmd[0])
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    _capture_evidence(monkeypatch)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name in ("claude", "codex") else None)
+    assert _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="pi").exit_code == 0
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+    assert _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="pi").exit_code == 0
+    assert called == ["/usr/bin/claude", "/usr/bin/codex"]
+
+
+def test_judge_model_is_passed_to_pi(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
+    seen: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(subprocess, "run", _pi_run(seen, json.dumps({"outcome": "pass", "reasoning": "ok"})))
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/pi" if name == "pi" else None)
+    _capture_evidence(monkeypatch)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="pi", extra=["--judge-model", "otari/fast"])
+    assert result.exit_code == 0, result.output
+    assert seen[0][0] == [*_PI_BASE_ARGV, "--model", "otari/fast"]
+
+
+def test_gate_and_flag_can_name_pi_on_a_claude_code_harness(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    _guardrail_path(repo).write_text(_gates_yaml(judge_cli="pi"), encoding="utf-8")
+    seen: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(subprocess, "run", _pi_run(seen, json.dumps({"outcome": "pass", "reasoning": "ok"})))
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    _capture_evidence(monkeypatch)
+    assert _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code").exit_code == 0
+    assert seen[0][0][0] == "/usr/bin/pi"
+
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
+    seen.clear()
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code", extra=["--judge-cli", "pi"])
+    assert result.exit_code == 0, result.output
+    assert seen[0][0][0] == "/usr/bin/pi"
+
+
+@pytest.mark.parametrize(
+    ("stdout", "returncode", "expected"),
+    [
+        ("not json", 0, "pi -p did not return valid JSON"),
+        (json.dumps({"outcome": "maybe", "reasoning": "x"}), 0, "unrecognized verdict shape"),
+        ("", 1, "pi -p exited 1: boom"),
+    ],
+)
+def test_pi_backend_error_paths(stdout: str, returncode: int, expected: str) -> None:
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="boom")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(subprocess, "run", fake_run)
+        outcome, reasoning = hook_cli._hook_call_pi_p("/usr/bin/pi", None, "p", deadline=time.monotonic() + 60)
+    assert outcome == "error"
+    assert expected in reasoning
+
+
+def test_pi_backend_timeout_is_an_error() -> None:
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd, 1)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(subprocess, "run", fake_run)
+        outcome, reasoning = hook_cli._hook_call_pi_p("/usr/bin/pi", None, "p", deadline=time.monotonic() + 60)
+    assert outcome == "error"
+    assert "pi -p did not respond" in reasoning
+
+
+def test_pi_backend_with_an_exhausted_deadline_never_runs() -> None:
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must not run"))
+        outcome, _ = hook_cli._hook_call_pi_p("/usr/bin/pi", None, "p", deadline=time.monotonic() - 1)
+    assert outcome == "error"
 
 
 def test_claude_gets_the_haiku_default_model_with_no_override(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
