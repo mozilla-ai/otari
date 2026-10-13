@@ -26,8 +26,6 @@ PROVIDERS = [
 ]
 URL = "https://www.python.org/downloads/"
 MISSING_URL = "https://www.python.org/no-such-page-any-fetch-live-test"
-# Tabstack documents up to 15 s for a fetch at its default effort, the library's default timeout.
-TIMEOUT = 60.0
 
 
 @dataclass(frozen=True)
@@ -64,7 +62,7 @@ def test_every_production_provider_says_what_it_must_return() -> None:
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_a_live_fetch_returns_the_page_text(provider: str) -> None:
     _require_key(provider)
-    async with AnyFetch.create(provider, timeout=TIMEOUT) as fetcher:
+    async with AnyFetch.create(provider) as fetcher:
         page = await fetcher.fetch(URL, max_chars=500)
     assert page.error is None
     assert page.text
@@ -82,7 +80,7 @@ async def test_a_live_fetch_returns_the_page_text(provider: str) -> None:
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_a_live_fetch_of_a_missing_page_is_an_error_or_the_sites_error_page(provider: str) -> None:
     _require_key(provider)
-    async with AnyFetch.create(provider, timeout=TIMEOUT) as fetcher:
+    async with AnyFetch.create(provider) as fetcher:
         page = await fetcher.fetch(MISSING_URL, max_chars=500)
     if EXPECTED[provider].page_errors:
         assert page.error is not None

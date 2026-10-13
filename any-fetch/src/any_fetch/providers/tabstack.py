@@ -38,9 +38,6 @@ from any_fetch._api import AnyFetch
 from any_fetch._errors import ProviderError
 from any_fetch._types import FetchedPage, OptionSpec, ProviderMetadata
 
-# Native options copied into the request as they are; Tabstack refuses a value it does not take.
-_PASSED_THROUGH = ("content", "effort", "geo_target", "nocache")
-
 
 class TabstackProvider(AnyFetch):
     """Tabstack's markdown extraction endpoint."""
@@ -88,8 +85,8 @@ class TabstackProvider(AnyFetch):
     )
 
     async def _fetch(self, url: str, *, max_chars: int | None, options: dict[str, Any]) -> FetchedPage:
-        payload: dict[str, Any] = {"url": url, "metadata": True}
-        payload.update({name: options[name] for name in _PASSED_THROUGH if name in options})
+        # Every native option is sent as it is, and Tabstack refuses a value it does not take.
+        payload: dict[str, Any] = {"url": url, "metadata": True, **options}
 
         endpoint = f"{(self._api_base or '').rstrip('/')}/extract/markdown"
         response = await self._http.request(
@@ -103,7 +100,7 @@ class TabstackProvider(AnyFetch):
             url=url,
             final_url=final_url,
             title=_title(body, response),
-            text=text[:max_chars] if max_chars else text,
+            text=text[:max_chars],
             # Tabstack returns extracted text and does not say what the page was served as.
             content_type="",
             cost_source="none",

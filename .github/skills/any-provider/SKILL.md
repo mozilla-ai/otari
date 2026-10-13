@@ -192,7 +192,8 @@ The first search provider with the key in the URL and errors inside a 200.
   200 and does not say what status the site answered, hence `page_errors` in the live tests.
 - A provider can be slower than the default 15-second timeout: Tabstack documents up to 15 s at
   its default effort and 15 to 60 s at `max`, and a zero-byte file took 29 s. Say so in the
-  option's description and the README; the live tests pass a longer timeout, and a slow fixture
+  option's description, the README and the pricing note, which tells an operator to set the
+  instance's `timeout`. The live tests keep the default, which is what hosts use. A slow fixture
   can be recorded with a faster option (`effort: min` for the empty page).
 - A provider may report no cost in any answer: Tabstack shows spend only in its console. The
   pricing note in `docs/tools.md` then says what it charges, and no more.

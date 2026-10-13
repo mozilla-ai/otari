@@ -515,9 +515,9 @@ is unacceptable.
 ### Fetch providers
 
 A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
-names a provider that fetches pages. Fetch instances do not serve
-`otari_web_fetch` or enrich search results yet, so the built-in fetcher above
-still does both; `POST /api/v1/search-tools/{name}/test` with a `url` tries one.
+names a provider for `otari_web_fetch` and for enriching search results. Neither
+runs on fetch instances yet, so the built-in fetcher above still does both;
+`POST /api/v1/search-tools/{name}/test` with a `url` tries one.
 
 - **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
   reports what each fetch costs (`costDollars.total`).
@@ -526,6 +526,8 @@ still does both; `POST /api/v1/search-tools/{name}/test` with a `url` tries one.
   [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
   page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
   whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
+  Tabstack documents up to 15 seconds a page at its default `effort` and up to
+  60 at `effort: max`, so give the instance a `timeout` to match.
 
 ### Web search
 

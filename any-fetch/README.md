@@ -162,9 +162,10 @@ reports no cost, so `cost_source` is `none`.
 
 A failed call raises `ProviderError` with Tabstack's HTTP status and the tag `http_error`: its
 error body is a sentence that can quote the URL, so it is not read. Tabstack reports no error
-inside a successful answer. A page it cannot fetch fails the call, and a page whose site answered
-with an error status, such as a 404, comes back as the text of that error page, since Tabstack
-does not say what status the site answered with.
+inside a successful answer. A page it cannot fetch fails the call, as does a URL it refuses, one
+whose host does not resolve (422) or that points at a private address (403). A page whose site
+answered with an error status, such as a 404, comes back as the text of that error page, since
+Tabstack does not say what status the site answered with.
 
 Every field read from a successful answer is checked. An answer whose `content` is not a string,
 or whose `url` is not a non-empty string, raises `ProviderError` with the tag
