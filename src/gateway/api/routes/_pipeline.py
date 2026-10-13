@@ -3438,6 +3438,7 @@ async def prepare_gateway_tools(
         backends.ports.web_search_policy,
         WebSearchPolicyScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token),
     )
+    unpriced_tool: str | None = None
     try:
         web_candidates = _admit_web_declarations(adapter, ctx, declared)
         await _admit_guardrails(adapter, ctx, response, declared)
@@ -3465,8 +3466,7 @@ async def prepare_gateway_tools(
         if not any(isinstance(answer, _AdmittedTools) for answer in answers.values()):
             refusal = answers[candidates[0].claimed]
             assert isinstance(refusal, _ToolRefusal)
-            if refusal.unpriced_tool is not None:
-                await _log_unpriced_tool_rejection(adapter, ctx, refusal.unpriced_tool)
+            unpriced_tool = refusal.unpriced_tool
             raise refusal.error
     except ControlPlaneError as exc:
         # A peer's refusal of the web search, code execution or MCP resolve is a domain error,
@@ -3489,6 +3489,9 @@ async def prepare_gateway_tools(
         raise domain_error(adapter, exc) from exc
     except HTTPException:
         await release_reservation(ctx)
+        # After the refund, which `log_gateway_rejection` requires of its callers.
+        if unpriced_tool is not None:
+            await _log_unpriced_tool_rejection(adapter, ctx, unpriced_tool)
         raise
     except DATABASE_ERRORS:
         # A database failure is not an HTTPException, so the reservation is released here too.
