@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
-from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS
+from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
@@ -408,9 +408,19 @@ def retryable_on_database_outage(what: str) -> Iterator[None]:
     except DATA_ERRORS:
         raise
     except DATABASE_ERRORS as exc:
-        logger.warning("%s: database unavailable, asking the sender to retry", what, exc_info=True)
+        logger.warning("%s: database unavailable, asking the sender to retry: %s", what, describe_database_error(exc))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not store the batch right now. Retry it.",
             headers={"Retry-After": "2"},
         ) from exc
+
+
+def database_error(operation: str, exc: BaseException) -> HTTPException:
+    """Log a failed database operation safely and return the generic 500 for the client.
+
+    Logs the error's class, SQLSTATE and constraint only, never its message or a
+    traceback, which carry the statement's values (see ``describe_database_error``).
+    """
+    logger.error("%s failed: %s", operation, describe_database_error(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")

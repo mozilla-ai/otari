@@ -33,10 +33,10 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_config, get_db, record_auth_failure
+from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
 # The refusal is the same refusal, so it is imported rather than restated: the
@@ -44,9 +44,9 @@ from gateway.api.routes._public_auth import throttle_public_auth
 # differently would tell a person the two doors closed for different reasons.
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import PasskeysNotConfiguredError
-from gateway.log_config import logger
 from gateway.models.tenancy import (
     MAX_WEBAUTHN_CREDENTIAL_NAME,
     WebAuthnCredentialPublic,
@@ -144,13 +144,9 @@ async def _commit(db: AsyncSession, what: str) -> None:
     """
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        logger.warning("Failed to %s", what, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error(what, exc) from None
 
 
 @router.post("/register/options", response_model=CeremonyOptions, dependencies=[Depends(require_passkey_support)])

@@ -28,8 +28,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.api.routes._helpers import resolve_managed_workspace_id
+from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
 from gateway.models.providers import ModelAlias
 from gateway.repositories.users_repository import get_active_user
@@ -246,12 +247,9 @@ async def upsert_alias_in_workspace(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("upsert alias in workspace", exc) from None
     await db.refresh(alias)
     # The write is committed; a cache-refresh failure must not turn it into a 500.
     # This worker serves the new alias on its next background refresh, others
@@ -313,12 +311,9 @@ async def delete_alias_in_workspace(
     await db.delete(alias)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("delete alias in workspace", exc) from None
     # The delete is committed; a cache-refresh failure must not turn it into a 500.
     try:
         await refresh_alias_cache(db)

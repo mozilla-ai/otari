@@ -3,10 +3,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import BudgetServiceDep, get_db, require_deployment_operator
+from gateway.api.routes._helpers import database_error
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.models.budgets import Budget, BudgetResetLog
 from gateway.models.money import to_usd, to_usd_or_none
@@ -86,12 +87,9 @@ async def create_budget(
     db.add(budget)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("create budget", exc) from None
     await db.refresh(budget)
 
     # A newly created budget has no users assigned yet, so the rollup is zero.
@@ -232,12 +230,9 @@ async def update_budget(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("update budget", exc) from None
     await db.refresh(budget)
 
     user_count, total_spend, total_reserved = await _budget_usage(db, budget_id)

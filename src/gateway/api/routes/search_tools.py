@@ -40,6 +40,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_catalog_reader,
 )
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.settings.tools import (
@@ -130,19 +131,19 @@ def _is_decryptable(row: SearchToolCredential) -> bool:
     return True
 
 
-async def _commit(db: AsyncSession, *, conflict_detail: str | None = None) -> None:
+async def _commit(db: AsyncSession, operation: str, *, conflict_detail: str | None = None) -> None:
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         # A concurrent create can slip past the pre-check and collide on the
         # primary key here; surface that as the intended 409, not a 500.
         await db.rollback()
         if conflict_detail is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
-    except DATABASE_ERRORS:
+        raise database_error(operation, exc) from None
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error(operation, exc) from None
 
 
 async def _apply_write(db: AsyncSession, config: GatewayConfig, name: str) -> None:
@@ -246,9 +247,9 @@ async def reencrypt_stored_search_tool_keys(
     except SecretBoxUnavailableError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except DATABASE_ERRORS:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error("reencrypt stored search tool keys", exc) from None
     try:
         await refresh_search_tool_cache(db, config)
     except DATABASE_ERRORS:
@@ -278,10 +279,9 @@ async def create_search_tool(
         # Another replica may have stored an instance this one would clash with or
         # name, or the default setting the pin below reads.
         await refresh_tool_instances(db, config)
-    except DATABASE_ERRORS:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        logger.exception("Failed to reload stored tools before creating '%s'", name)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error(f"reload stored tools before creating '{name}'", exc) from None
     check_tool_write(
         config,
         name,
@@ -319,7 +319,7 @@ async def create_search_tool(
             f"'{name}' was not stored: a stored tool of that name exists, or another create changed the "
             "search instances at the same time. Reload and retry."
         )
-    await _commit(db, conflict_detail=conflict)
+    await _commit(db, "create search tool", conflict_detail=conflict)
     if pinned is not None:
         apply_override(config, WEB_SEARCH_DEFAULT_TOOL, pinned.name)
         logger.info("Set web_search_default_tool to '%s' before adding a second search instance", pinned.name)
@@ -394,10 +394,9 @@ async def update_search_tool(
         try:
             # The fetch instance it names may have been stored through another replica.
             await refresh_search_tool_cache(db, config)
-        except DATABASE_ERRORS:
+        except DATABASE_ERRORS as exc:
             await db.rollback()
-            logger.exception("Failed to reload stored tools before updating '%s'", name)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+            raise database_error(f"reload stored tools before updating '{name}'", exc) from None
     check_tool_write(
         config,
         name,
@@ -424,7 +423,7 @@ async def update_search_tool(
     except SecretBoxUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
-    await _commit(db)
+    await _commit(db, "update search tool")
     await _apply_write(db, config, name)
     await db.refresh(row)
     from_config = config_file_tools(config, kind)
@@ -447,7 +446,7 @@ async def delete_stored_search_tool(
         elif name == BUILTIN_FETCH:
             detail = f"{BUILTIN_FETCH}, the built-in fetcher, always exists and cannot be deleted."
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
-    await _commit(db)
+    await _commit(db, "delete stored search tool")
     await _apply_write(db, config, name)
 
 

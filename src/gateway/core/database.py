@@ -140,6 +140,31 @@ DATABASE_ERRORS: tuple[type[BaseException], ...] = (SQLAlchemyError, TimeoutErro
 DATA_ERRORS: tuple[type[BaseException], ...] = (IntegrityError, DataError)
 
 
+def describe_database_error(exc: BaseException) -> str:
+    """Name a database error by its classes, SQLSTATE and constraint, never its message.
+
+    The message carries the statement's bound parameters, and PostgreSQL's
+    DETAIL for a constraint failure carries the row itself, so ``str(exc)`` (or a
+    logged traceback, which prints it) can put a stored credential in a log line.
+    What is kept here tells a lock timeout from a duplicate from a lost
+    connection, which is what an operator reading the log needs.
+    """
+    orig = getattr(exc, "orig", None)
+    # asyncpg's own exception, under SQLAlchemy's adapter, is the most specific.
+    driver = getattr(orig, "__cause__", None) or orig
+    parts = [type(exc).__name__]
+    if driver is not None and type(driver).__name__ != type(exc).__name__:
+        parts.append(type(driver).__name__)
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None) or getattr(orig, "sqlite_errorname", None)
+    if code:
+        parts.append(f"sqlstate={code}")
+    diag = getattr(orig, "diag", None)  # psycopg
+    constraint = getattr(driver, "constraint_name", None) or getattr(diag, "constraint_name", None)
+    if constraint:
+        parts.append(f"constraint={constraint}")
+    return " ".join(parts)
+
+
 def translate_timeout_error(context: Any) -> None:
     """Re-raise a bare command timeout as a ``SQLAlchemyError``.
 
@@ -234,8 +259,8 @@ async def release_session(session: AsyncSession | None) -> bool:
         return False
     try:
         await session.commit()
-    except DATABASE_ERRORS:
-        logger.warning("Could not release the database connection before dispatch", exc_info=True)
+    except DATABASE_ERRORS as exc:
+        logger.warning("Could not release the database connection before dispatch: %s", describe_database_error(exc))
         with contextlib.suppress(*DATABASE_ERRORS):
             await session.rollback()
         return False
@@ -388,7 +413,9 @@ def engine_kwargs(
     # parsed URL arguments, and the first has already captured the reference by
     # the time the second is built.
     args = dict(connect_args)
-    kwargs: dict[str, Any] = {"connect_args": args}
+    # A database error's message would otherwise carry the statement's bound
+    # parameters, stored credentials included, into every log line that prints it.
+    kwargs: dict[str, Any] = {"connect_args": args, "hide_parameters": True}
     if is_sqlite:
         kwargs["pool_pre_ping"] = True
         kwargs["poolclass"] = NullPool

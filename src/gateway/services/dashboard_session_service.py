@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
-from gateway.core.database import create_session
+from gateway.core.database import create_session, describe_database_error
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import DashboardSession, User
@@ -175,8 +175,10 @@ async def _revoke_deactivated_identity_sessions(user_id: uuid.UUID) -> None:
         async with create_session() as session:
             await revoke_user_dashboard_sessions(session, user_id)
             await session.commit()
-    except SQLAlchemyError:
-        logger.warning("Could not revoke the sessions of deactivated identity %s", user_id, exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "Could not revoke the sessions of deactivated identity %s: %s", user_id, describe_database_error(exc)
+        )
 
 
 async def revoke_dashboard_session(db: AsyncSession, token: str) -> None:

@@ -57,7 +57,9 @@ from gateway.api.deps import (
     is_valid_master_key,
     record_auth_failure,
 )
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import EmailNotVerifiedError, InvalidCredentialsError
 from gateway.log_config import logger
@@ -349,14 +351,10 @@ async def create_session(
         await OrganizationDomainService(db).auto_join_for_user(identity)
         token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
         # Generic error to the client; the raw failure is only logged here.
-        logger.warning("Failed to persist a dashboard session on sign-in", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("persist a dashboard session on sign-in", exc) from None
     apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
     return SessionResponse(
         expires_at=expires_at,

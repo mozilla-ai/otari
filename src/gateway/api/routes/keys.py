@@ -5,7 +5,6 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -17,8 +16,10 @@ from gateway.api.deps import (
     get_db,
     require_deployment_operator,
 )
+from gateway.api.routes._helpers import database_error
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import Workspace
@@ -390,12 +391,9 @@ async def create_key(
     db.add(db_key)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("create key", exc) from None
     await db.refresh(db_key)
 
     key_info = KeyInfo.from_model(db_key)
@@ -514,12 +512,9 @@ async def update_key(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("update key", exc) from None
     await db.refresh(key)
 
     return KeyInfo.from_model(key)
@@ -551,12 +546,9 @@ async def rotate_key(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("rotate key", exc) from None
     await db.refresh(key)
 
     key_info = KeyInfo.from_model(key)
@@ -581,12 +573,9 @@ async def delete_key(
     await db.delete(key)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("delete key", exc) from None
 
 
 ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]

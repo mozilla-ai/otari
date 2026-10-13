@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from collections.abc import Callable, Mapping
 
-from gateway.core.database import DATABASE_ERRORS
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.api_keys import ApiKeyConfig
 from gateway.core.settings.budgets import BudgetConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -334,11 +334,11 @@ class BudgetService:
         try:
             async with self._uow:
                 return await self._moves.landed(handle, move)
-        except DATABASE_ERRORS:
+        except DATABASE_ERRORS as exc:
             logger.error(
-                "Could not tell whether the fallback holds of reservation %s committed; they are left as they are.",
+                "Could not tell whether the fallback holds of reservation %s committed; they are left as they are: %s",
                 move.reservation_id,
-                exc_info=True,
+                describe_database_error(exc),
             )
             return False
 

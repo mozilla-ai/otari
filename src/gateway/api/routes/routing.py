@@ -27,8 +27,9 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.api.routes._helpers import resolve_managed_workspace_id
+from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.log_config import logger
 from gateway.models.routing import PolicySpec, RoutingPolicy
@@ -516,7 +517,7 @@ async def upsert_policy_in_workspace(
 
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
         # The name check above and this commit are not one atomic step, so another
         # writer can claim the name in between and the unique constraint is what
@@ -525,10 +526,10 @@ async def upsert_policy_in_workspace(
         # would send the operator after the wrong thing.
         if await _name_is_taken(db, request.name, request.user_id, workspace_id):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_name_taken_detail(request.name)) from None
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
-    except SQLAlchemyError:
+        raise database_error("upsert policy in workspace", exc) from None
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error("upsert policy in workspace", exc) from None
     await db.refresh(policy)
     # An operator changing where traffic goes is worth a line in the log: this is the
     # object that decides which model spends money.
@@ -602,9 +603,9 @@ async def delete_policy_in_workspace(
     await db.delete(policy)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error("delete policy in workspace", exc) from None
     await _refresh_quietly(db, name)
 
 

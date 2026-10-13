@@ -117,7 +117,7 @@ from gateway.core.config import (
     RESPONSE_DURATION_HEADER,
     GatewayConfig,
 )
-from gateway.core.database import DATABASE_ERRORS, release_session
+from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
 from gateway.core.env import otari_env
 from gateway.core.error_codes import (
     BUDGET_EXCEEDED,
@@ -4075,8 +4075,10 @@ async def _apply_tool_charges(
             as_of=usage_log.timestamp,
             organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
         )
-    except SQLAlchemyError:
-        logger.exception("Failed to price gateway tool calls; counts recorded without cost")
+    except SQLAlchemyError as exc:
+        logger.error(
+            "Failed to price gateway tool calls; counts recorded without cost: %s", describe_database_error(exc)
+        )
         commit_meters()
         return
 

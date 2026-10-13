@@ -11,10 +11,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import OrganizationServiceDep, get_db, require_deployment_operator
+from gateway.api.routes._helpers import database_error
+from gateway.core.database import DATABASE_ERRORS
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import (
     SCOPE_API_TOKEN,
@@ -154,12 +156,9 @@ async def create_scoped_budget(
             status_code=status.HTTP_409_CONFLICT,
             detail="A budget already exists for this scope and provider",
         ) from None
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("create scoped budget", exc) from None
     await db.refresh(budget)
     return ScopedBudgetResponse.from_model(budget, limit)
 
@@ -251,12 +250,9 @@ async def update_scoped_budget(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("update scoped budget", exc) from None
     await db.refresh(budget)
     return ScopedBudgetResponse.from_model(budget, limit)
 
@@ -275,9 +271,6 @@ async def delete_scoped_budget(
     await db.delete(budget)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("delete scoped budget", exc) from None

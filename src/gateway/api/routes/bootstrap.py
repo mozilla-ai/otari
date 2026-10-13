@@ -49,6 +49,7 @@ from gateway.api.routes import (
     workspaces,
 )
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.database import describe_database_error
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.log_config import logger
@@ -414,8 +415,8 @@ async def _sign_in_methods(db: AsyncSession, config: GatewayConfig) -> list[Sign
         claimed = await operator_has_password(db)
         passwords = await password_sign_in_possible(db)
         passkeys = await has_any_credential(db, config)
-    except SQLAlchemyError:
-        logger.warning("Could not read which sign-in methods this deployment offers", exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning("Could not read which sign-in methods this deployment offers: %s", describe_database_error(exc))
         return []
     methods: list[SignInMethod] = []
     if not claimed:
@@ -439,6 +440,8 @@ async def _maintenance_mode(db: AsyncSession) -> bool:
     """
     try:
         return await is_maintenance_mode(db)
-    except SQLAlchemyError:
-        logger.warning("Could not read whether this deployment is in maintenance mode", exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "Could not read whether this deployment is in maintenance mode: %s", describe_database_error(exc)
+        )
         return False

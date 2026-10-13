@@ -28,6 +28,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.database import describe_database_error
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.log_config import logger
@@ -216,9 +217,9 @@ async def delete_usage(db: AsyncSession, request: UsageDeleteRequest) -> UsageDe
     try:
         result = cast("CursorResult[Any]", await db.execute(delete(UsageLog).where(*conditions)))
         await db.commit()
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.exception("usage delete failed")
+        logger.error("usage delete failed: %s", describe_database_error(exc))
         raise
     deleted = result.rowcount or 0
     logger.info("usage delete: removed=%d by_filter=%s", deleted, request.by_filter)
@@ -340,9 +341,9 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
             await db.flush()
             db.expunge_all()
         await db.commit()
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.exception("usage set-price failed")
+        logger.error("usage set-price failed: %s", describe_database_error(exc))
         raise
 
     logger.info(

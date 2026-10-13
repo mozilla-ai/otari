@@ -28,7 +28,7 @@ from any_llm.types.completion import CreateEmbeddingResponse
 from any_llm.types.rerank import RerankResponse as ProviderRerankResponse
 
 from gateway.core.config import GatewayConfig
-from gateway.core.database import DATABASE_ERRORS
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
@@ -321,8 +321,8 @@ class InferenceService:
                     response_headers=headers,
                     expires_at=expires_at,
                 )
-        except DATABASE_ERRORS:
-            logger.warning("Could not store the response for idempotent replay", exc_info=True)
+        except DATABASE_ERRORS as exc:
+            logger.warning("Could not store the response for idempotent replay: %s", describe_database_error(exc))
             return False
         if not stored:
             logger.warning("Idempotency claim was taken over before the request completed")
@@ -344,8 +344,10 @@ class InferenceService:
         try:
             async with self._uow:
                 await self._keys.release(request.scope, request.key, claim_token=claimed.token)
-        except DATABASE_ERRORS:
-            logger.warning("Could not release an idempotency claim; it lapses at its lease", exc_info=True)
+        except DATABASE_ERRORS as exc:
+            logger.warning(
+                "Could not release an idempotency claim; it lapses at its lease: %s", describe_database_error(exc)
+            )
 
     async def sweep(self, *, batch_size: int = 500) -> int:
         """Delete every record whose retention has passed, returning how many went.

@@ -46,6 +46,7 @@ from gateway.api.deps import (
     verify_catalog_reader,
     verify_master_key,
 )
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.settings.tools import validate_default_tool
@@ -332,15 +333,11 @@ async def update_tool_settings(
         except ValueError as exc:
             await db.rollback()
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
-        except DATABASE_ERRORS:
+        except DATABASE_ERRORS as exc:
             await db.rollback()
             # Log for the operator debugging from logs; the client sees only a
             # generic message so no internals leak. Keys, not values, are logged.
-            logger.exception("Failed to read or persist tool settings: %s", sorted(updates))
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error",
-            ) from None
+            raise database_error(f"read or persist tool settings {sorted(updates)}", exc) from None
         # Apply only after the commit succeeds, so a failed write never leaves this
         # worker running against an unpersisted value.
         for key, value in normalized.items():

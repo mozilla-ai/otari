@@ -18,11 +18,12 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_session_identity, require_deployment_operator, verify_master_key
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.settings_view import derive_view
 from gateway.core.surface import Surface
 from gateway.models.tenancy import User as TenancyUser
@@ -254,12 +255,9 @@ async def update_settings(
         except ValueError as exc:
             await db.rollback()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-        except SQLAlchemyError:
+        except DATABASE_ERRORS as exc:
             await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error",
-            ) from None
+            raise database_error("update settings", exc) from None
         # Apply only after the write has committed, so a failed commit never
         # leaves this worker metering or listing against an unpersisted value.
         for key, value in normalized.items():
@@ -323,9 +321,9 @@ async def rotate_master_key(
     except MasterKeyRotationConflictError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error("rotate master key", exc) from None
     config._master_key_hash = hashed
     if session_token is not None and session_expires_at is not None:
         apply_session_cookie(response, session_token, session_expires_at, secure=request_is_https(request))

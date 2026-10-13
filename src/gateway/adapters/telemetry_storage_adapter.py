@@ -22,6 +22,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.database import describe_database_error
 from gateway.core.sql import (
     INGEST_LOCK_TIMEOUT_MS,
     bucket_expr,
@@ -347,8 +348,8 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
         try:
             result = cast("CursorResult[Any]", await db.execute(delete(AgentTelemetry).where(*conditions)))
             await db.commit()
-        except SQLAlchemyError:
+        except SQLAlchemyError as exc:
             await db.rollback()
-            logger.exception("agent_telemetry delete failed")
+            logger.error("agent_telemetry delete failed: %s", describe_database_error(exc))
             raise
         return result.rowcount or 0

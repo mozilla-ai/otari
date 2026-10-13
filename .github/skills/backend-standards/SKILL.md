@@ -210,6 +210,11 @@ through the config / `otari_env()`.
 - **Never log secrets or user payloads**: no API keys, no `messages`/`input`/completion text,
   no full request bodies. Log opaque ids, token counts, model/provider names, status. (The
   one sanctioned exception is the intentional one-time bootstrap key print.)
+- **Never log a database error's message or traceback**: it carries the statement's bound
+  parameters, and PostgreSQL's DETAIL carries the row. A route answers a failed write with
+  `raise database_error("<operation>", exc)` (`api/routes/_helpers.py`), which logs the error's
+  class, SQLSTATE and constraint; elsewhere, log `describe_database_error(exc)`
+  (`core/database.py`), never `exc_info=True` or `logger.exception`.
 
 ## Before you finish
 

@@ -24,11 +24,13 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.models.money import as_float
 from gateway.models.pricing import OrganizationModelPricing
 
@@ -249,7 +251,7 @@ def _to_input(body: OrganizationModelPricingRates) -> PricingOverrideInput:
     )
 
 
-async def _commit(db: AsyncSession) -> None:
+async def _commit(db: AsyncSession, operation: str) -> None:
     """Commit the request's work, mapping a database failure to a status.
 
     The services flush rather than commit (the house contract), so the route owns
@@ -273,12 +275,9 @@ async def _commit(db: AsyncSession) -> None:
                 "Re-read the overrides and try again."
             ),
         ) from None
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error(operation, exc) from None
 
 
 @router.get("")
@@ -346,7 +345,7 @@ async def create_organization_pricing(
     model_key = normalize_pricing_key(config, body.model_key)
     override = await service.create_for_caller(identity, model_key, _to_input(body))
     response = OrganizationModelPricingPublic.from_model(override)
-    await _commit(db)
+    await _commit(db, "create organization pricing")
     return response
 
 
@@ -370,7 +369,7 @@ async def replace_organization_pricing(
     """
     override = await service.replace_for_caller(identity, pricing_id, _to_input(body))
     response = OrganizationModelPricingPublic.from_model(override)
-    await _commit(db)
+    await _commit(db, "replace organization pricing")
     return response
 
 
@@ -383,4 +382,4 @@ async def delete_organization_pricing(
 ) -> None:
     """Remove an override, returning the model to the deployment price list."""
     await service.delete_for_caller(identity, pricing_id)
-    await _commit(db)
+    await _commit(db, "delete organization pricing")

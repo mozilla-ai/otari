@@ -94,6 +94,11 @@ resources.
 Never log or return provider keys, API keys, master keys, bearer tokens, raw
 provider bodies, prompts, responses, or tool payloads.
 
+Flag a database error logged with `exc_info=True`, `logger.exception`, or
+`str(exc)`: PostgreSQL's DETAIL carries the row, stored credentials and stored
+responses included. A route answers a failed write with
+`database_error(operation, exc)`; other code logs `describe_database_error(exc)`.
+
 Upstream errors the caller can act on may pass through only after
 `redact_upstream_message` and length limiting: the caller-fixable 400, 404, and
 422, plus the 429 whose text names the exhausted quota and the retry window.
