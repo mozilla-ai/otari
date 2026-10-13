@@ -568,12 +568,17 @@ what "no `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` given" defaults to:
   `--ephemeral` keeps this one-shot call from leaving a rollout file behind
   for a later `Stop` event's own transcript scan to mistake for real session
   evidence.
-- `pi`: `pi -p --no-tools --no-session --no-skills --no-prompt-templates
-  --no-context-files --offline [--model <model>]`, the prompt piped over stdin
-  with no positional message (pi's print mode prepends piped stdin to the first
-  prompt). Like `codex`, it has no hardcoded default model: `--model` is
-  included only when `--judge-model` names one, otherwise pi uses the user's
-  own configured default. `--no-tools` leaves the model nothing to call.
+- `pi`: `pi -p --mode json --no-tools --no-session --no-skills
+  --no-prompt-templates --no-context-files --offline --provider otari --model
+  nebius:openai/gpt-oss-120b`, the prompt piped over stdin with no positional
+  message (pi's print mode prepends piped stdin to the first prompt). The
+  default model is `gpt-oss-120b` on Nebius through Otari, which every
+  otari.ai organization has; it needs the pi-otari extension. `--judge-model`
+  replaces `--provider otari --model ...` with `--model <model>`, any pi model
+  pattern (`otari/<id>`, or another provider pi knows). JSON mode keeps a
+  reasoning model's thinking out of the verdict: only the final assistant
+  text is parsed, and a model error, which pi reports with exit code 0, is
+  surfaced as the judge's error. `--no-tools` leaves the model nothing to call.
   Extensions are deliberately left on, so the pi-otari extension loads and an
   Otari-routed model resolves. That extension also registers `otari hook` on
   pi's `Stop` event, but the call runs in `~/.otari/judge-workdir`, which is

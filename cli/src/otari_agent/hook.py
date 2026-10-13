@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import Enum
@@ -897,11 +897,23 @@ _HOOK_JUDGE_TOTAL_BUDGET_SECONDS = 480
 # session history names a current default of "gpt-6-astra", not any of the
 # "cheap tier" ids OpenAI's own docs name elsewhere, which is exactly the
 # kind of drift a hardcoded guess here would silently go stale against).
-# `_hook_run_judge` leaves `--model` off the codex (and pi) backend's own invocation
+# `_hook_run_judge` leaves `--model` off the codex backend's own invocation
 # entirely when neither this nor --judge-model apply, falling back to
 # whatever model that account already has configured as its own default,
 # rather than risk naming one Codex might reject outright.
 _HOOK_JUDGE_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+# pi's own default when no --judge-model / OTARI_HOOK_JUDGE_MODEL applies:
+# pi's own startup model is whatever its settings or catalog order happen to
+# produce (often the first model listed, not a judge-sized one), so this
+# names one on purpose. gpt-oss-120b is cheap, fast and reliable at the
+# single JSON verdict a judge prompt demands, and is in the otari.ai catalog
+# for every organization; pinned to Nebius as its provider. It is an Otari
+# model id, so it resolves through the pi-otari extension's `otari` provider
+# (`--provider otari`); a pi without pi-otari reports the model as missing
+# and the judge gate degrades to "error" like any other unavailable backend.
+_HOOK_PI_JUDGE_DEFAULT_PROVIDER = "otari"
+_HOOK_PI_JUDGE_DEFAULT_MODEL = "nebius:openai/gpt-oss-120b"
 
 _HOOK_JUDGE_PROMPT_TEMPLATE = """\
 You are reviewing a code change against exactly one rule. Reply with exactly \
@@ -1299,7 +1311,14 @@ _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER = "prompt is too long"
 _HOOK_MAX_JUDGE_REASONING_LENGTH = 4_096
 
 
-def _hook_run_judge_subprocess(argv: list[str], prompt: str, *, deadline: float, label: str) -> tuple[str, str]:
+def _hook_run_judge_subprocess(
+    argv: list[str],
+    prompt: str,
+    *,
+    deadline: float,
+    label: str,
+    stdout_text: Callable[[str], str] | None = None,
+) -> tuple[str, str]:
     """Shared tail of every judge-CLI backend's own invocation: run `argv`, parse its
     stdout as the one JSON verdict object the judge prompt demands; return (outcome, reasoning).
 
@@ -1361,15 +1380,18 @@ def _hook_run_judge_subprocess(argv: list[str], prompt: str, *, deadline: float,
         detail = result.stderr.strip() or result.stdout.strip()
         return "error", f"{label} exited {result.returncode}: {detail[:500]}"
 
+    # A backend whose stdout is not the bare answer (pi's JSON event stream)
+    # names how to get at it; every other backend's stdout is the answer.
+    answer = stdout_text(result.stdout) if stdout_text is not None else result.stdout
     try:
-        verdict = json.loads(_hook_strip_judge_code_fence(result.stdout))
+        verdict = json.loads(_hook_strip_judge_code_fence(answer))
     except ValueError:
-        return "error", f"{label} did not return valid JSON: {result.stdout[:500]!r}"
+        return "error", f"{label} did not return valid JSON: {answer[:500]!r}"
 
     outcome = verdict.get("outcome") if isinstance(verdict, dict) else None
     reasoning = verdict.get("reasoning") if isinstance(verdict, dict) else None
     if outcome not in ("pass", "fail") or not isinstance(reasoning, str):
-        return "error", f"{label} returned an unrecognized verdict shape: {result.stdout[:500]!r}"
+        return "error", f"{label} returned an unrecognized verdict shape: {answer[:500]!r}"
 
     return outcome, reasoning[:_HOOK_MAX_JUDGE_REASONING_LENGTH]
 
@@ -1455,13 +1477,77 @@ def _hook_call_codex_exec(codex_path: str, model: str | None, prompt: str, *, de
     return _hook_run_judge_subprocess(argv, prompt, deadline=deadline, label="codex exec")
 
 
+def _pi_print_argv(pi_path: str, model: str | None) -> list[str]:
+    """argv for one non-interactive pi call: shared by the judge and `guardrails generate` backends.
+
+    `--mode json` rather than plain text: a reasoning model's thinking can
+    land in pi's plain-text print output ahead of the answer (seen with
+    gpt-oss-120b), which a verdict parser cannot tell from the answer itself.
+    JSON mode emits one event per line with thinking and text as separate
+    content blocks; `_pi_final_text` keeps only the answer.
+
+    With no explicit model, `_HOOK_PI_JUDGE_DEFAULT_MODEL` on the Otari
+    provider; an explicit one is passed through as given, as a pi `--model`
+    pattern (`otari/<id>`, or any other provider pi knows).
+    """
+    argv = [
+        pi_path,
+        "-p",
+        "--mode",
+        "json",
+        "--no-tools",
+        "--no-session",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-context-files",
+        "--offline",
+    ]
+    if model is None:
+        argv += ["--provider", _HOOK_PI_JUDGE_DEFAULT_PROVIDER, "--model", _HOOK_PI_JUDGE_DEFAULT_MODEL]
+    else:
+        argv += ["--model", model]
+    return argv
+
+
+def _pi_final_text(stdout: str) -> str:
+    """The last assistant message's text from pi's `--mode json` event stream.
+
+    pi exits 0 even when the model call itself failed (an API 400, an
+    unknown model): that shows up only as the assistant message's own
+    `stopReason: "error"` and `errorMessage`, returned here as the text so
+    the caller's own "not valid JSON" error carries the real reason. Output
+    with no assistant message at all is returned unchanged for the same
+    reason.
+    """
+    final: dict[str, Any] | None = None
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "message_end":
+            continue
+        message = event.get("message")
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            final = message
+    if final is None:
+        return stdout
+    if final.get("stopReason") == "error":
+        return f"pi error: {final.get('errorMessage') or 'unknown error'}"
+    content = final.get("content")
+    if not isinstance(content, list):
+        return ""
+    return "".join(
+        block.get("text", "") for block in content if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
 def _hook_call_pi_p(pi_path: str, model: str | None, prompt: str, *, deadline: float) -> tuple[str, str]:
     """One `pi -p` invocation; return (outcome, reasoning).
 
     `model` is `None` when `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` named
-    none specifically: `--model` is then left off entirely and pi uses the
-    model the user has configured as its own default, the same choice
-    `_hook_call_codex_exec` makes (see `_HOOK_JUDGE_DEFAULT_MODEL`'s comment).
+    none specifically: `_HOOK_PI_JUDGE_DEFAULT_MODEL` is then used (see its
+    comment, and `_pi_print_argv` for the full argv and why it is JSON mode).
 
     The prompt goes over stdin with no positional message: pi's print mode
     prepends piped stdin to the first prompt (docs/cli.md, "Piped stdin"),
@@ -1492,19 +1578,9 @@ def _hook_call_pi_p(pi_path: str, model: str | None, prompt: str, *, deadline: f
     long" retry: pi's own wording for it is unconfirmed, so
     `_hook_run_judge` never applies that retry to this backend.
     """
-    argv = [
-        pi_path,
-        "-p",
-        "--no-tools",
-        "--no-session",
-        "--no-skills",
-        "--no-prompt-templates",
-        "--no-context-files",
-        "--offline",
-    ]
-    if model is not None:
-        argv += ["--model", model]
-    return _hook_run_judge_subprocess(argv, prompt, deadline=deadline, label="pi -p")
+    return _hook_run_judge_subprocess(
+        _pi_print_argv(pi_path, model), prompt, deadline=deadline, label="pi -p", stdout_text=_pi_final_text
+    )
 
 
 # Binary name `shutil.which` resolves for each judge_cli backend.
@@ -1569,9 +1645,9 @@ def _hook_run_judge(
     `model` is the caller's own explicit choice (`--judge-model`/
     `OTARI_HOOK_JUDGE_MODEL`), or `None` for "no explicit choice, use this
     backend's own default": `claude` gets `_HOOK_JUDGE_DEFAULT_MODEL`
-    (Haiku); `codex` and `pi` get none at all, `_hook_call_codex_exec` and
-    `_hook_call_pi_p` then omitting `--model` entirely (see `_HOOK_JUDGE_DEFAULT_MODEL`'s own comment on why
-    the two are not symmetric here). Resolved after `judge_cli`, not before:
+    (Haiku); `pi` gets `_HOOK_PI_JUDGE_DEFAULT_MODEL` on the Otari provider;
+    `codex` gets none at all, `_hook_call_codex_exec` then omitting `--model`
+    entirely (see `_HOOK_JUDGE_DEFAULT_MODEL`'s own comment on why). Resolved after `judge_cli`, not before:
     which default applies depends on which backend actually gets picked.
 
     `judge_cli` is the already-resolved preference order for this one gate
@@ -2172,8 +2248,9 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
     default=None,
     help=(
         f"Model the resolved judge CLI uses for a judge gate's model call. Defaults to "
-        f"{_HOOK_JUDGE_DEFAULT_MODEL!r} when the resolved backend is claude; when it is codex or pi, "
-        "left unset (that CLI's own default model applies) unless given explicitly here."
+        f"{_HOOK_JUDGE_DEFAULT_MODEL!r} when the resolved backend is claude, "
+        f"{_HOOK_PI_JUDGE_DEFAULT_MODEL!r} (Otari) when it is pi; when it is codex, "
+        "left unset (Codex's own default model applies) unless given explicitly here."
     ),
 )
 @click.option(
@@ -3121,21 +3198,10 @@ def _gates_generate_call_codex_exec(codex_path: str, model: str | None, prompt: 
 
 
 def _gates_generate_call_pi_p(pi_path: str, model: str | None, prompt: str) -> str:
-    # Same flags and stdin prompt as _hook_call_pi_p (see its docstring for
-    # why, including why extensions stay on and what stops a Stop-hook loop).
-    argv = [
-        pi_path,
-        "-p",
-        "--no-tools",
-        "--no-session",
-        "--no-skills",
-        "--no-prompt-templates",
-        "--no-context-files",
-        "--offline",
-    ]
-    if model:
-        argv += ["--model", model]
-    return _gates_generate_run_cli(argv, prompt, label="pi -p")
+    # Same argv and stdin prompt as _hook_call_pi_p (see its docstring for
+    # why, including why extensions stay on and what stops a Stop-hook loop),
+    # and the same JSON-mode answer extraction (see _pi_print_argv).
+    return _pi_final_text(_gates_generate_run_cli(_pi_print_argv(pi_path, model), prompt, label="pi -p"))
 
 
 def _gates_generate_call_cli(cli_name: str, cli_path: str, model: str | None, prompt: str) -> str:
@@ -4208,7 +4274,7 @@ def _echo_check_report(
     default=None,
     help=(
         f"Model a judge gate's call uses. Defaults to {_HOOK_JUDGE_DEFAULT_MODEL!r} for claude, "
-        "and to the CLI's own default for codex and pi."
+        f"{_HOOK_PI_JUDGE_DEFAULT_MODEL!r} (Otari) for pi, and Codex's own default for codex."
     ),
 )
 @click.option(

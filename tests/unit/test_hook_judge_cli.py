@@ -189,6 +189,8 @@ def test_codex_exec_is_invoked_read_only_and_non_interactive(monkeypatch: pytest
 _PI_BASE_ARGV = [
     "/usr/bin/pi",
     "-p",
+    "--mode",
+    "json",
     "--no-tools",
     "--no-session",
     "--no-skills",
@@ -196,6 +198,21 @@ _PI_BASE_ARGV = [
     "--no-context-files",
     "--offline",
 ]
+_PI_DEFAULT_MODEL_ARGV = ["--provider", "otari", "--model", "nebius:openai/gpt-oss-120b"]
+
+
+def _pi_events(*content: dict[str, Any], stop_reason: str = "stop", error: str | None = None) -> str:
+    """pi `--mode json` output: a user message, then the assistant's, one event per line."""
+    assistant: dict[str, Any] = {"role": "assistant", "content": list(content), "stopReason": stop_reason}
+    if error is not None:
+        assistant["errorMessage"] = error
+    events = [
+        {"type": "agent_start"},
+        {"type": "message_end", "message": {"role": "user", "content": [{"type": "text", "text": "p"}]}},
+        {"type": "message_end", "message": assistant},
+        {"type": "agent_end", "messages": []},
+    ]
+    return "\n".join(json.dumps(event) for event in events) + "\n"
 
 
 def _pi_run(seen: list[tuple[list[str], dict[str, Any]]], stdout: str, returncode: int = 0) -> Any:
@@ -222,7 +239,7 @@ def test_pi_harness_defaults_to_the_pi_backend(monkeypatch: pytest.MonkeyPatch, 
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="pi")
     assert result.exit_code == 0, result.output
     ((cmd, kwargs),) = seen
-    assert cmd == _PI_BASE_ARGV, "no --model when none is named, and no --no-extensions"
+    assert cmd == [*_PI_BASE_ARGV, *_PI_DEFAULT_MODEL_ARGV], "the Otari default model, and no --no-extensions"
     assert "--no-extensions" not in cmd
     assert isinstance(kwargs["input"], str) and kwargs["input"], "the prompt is piped over stdin"
     assert kwargs["cwd"] == hook_cli._hook_judge_workdir()
@@ -292,6 +309,37 @@ def test_pi_backend_error_paths(stdout: str, returncode: int, expected: str) -> 
         outcome, reasoning = hook_cli._hook_call_pi_p("/usr/bin/pi", None, "p", deadline=time.monotonic() + 60)
     assert outcome == "error"
     assert expected in reasoning
+
+
+def test_pi_backend_reads_the_answer_past_the_thinking() -> None:
+    stdout = _pi_events(
+        {"type": "thinking", "thinking": "The user wants JSON. Must comply."},
+        {"type": "text", "text": json.dumps({"outcome": "fail", "reasoning": "no tests"})},
+    )
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(subprocess, "run", fake_run)
+        assert hook_cli._hook_call_pi_p("/usr/bin/pi", None, "p", deadline=time.monotonic() + 60) == (
+            "fail",
+            "no tests",
+        )
+
+
+def test_pi_backend_surfaces_a_model_error_despite_exit_0() -> None:
+    # pi exits 0 when the model call itself fails; only the event says so.
+    stdout = _pi_events(stop_reason="error", error="400 maximum tokens exceeds the model limit")
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(subprocess, "run", fake_run)
+        outcome, reasoning = hook_cli._hook_call_pi_p("/usr/bin/pi", None, "p", deadline=time.monotonic() + 60)
+    assert outcome == "error"
+    assert "pi error: 400 maximum tokens exceeds the model limit" in reasoning
 
 
 def test_pi_backend_timeout_is_an_error() -> None:
