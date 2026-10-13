@@ -179,8 +179,7 @@ decided per candidate by `decide_candidate_tools`
 (`services/tools/_candidate_tools.py`), from the preference the request
 resolves once and the tool's own `BuiltinTool.runs_natively` answer: `otari`
 runs it here on every candidate, `auto` only where the candidate's provider does
-not run it natively, and `provider` never, skipping a candidate whose provider
-cannot run it. Code execution's preference is the workspace pin, then the
+not run it natively, and `provider` never. Code execution's preference is the workspace pin, then the
 `Otari-Code-Execution` header, then the deployment default
 (`services/tools/_code_execution_declarations.py`); search's is
 `web_search_intercept`, then `Otari-Web-Search`, and fetch's `Otari-Web-Fetch`
@@ -192,8 +191,7 @@ those candidates (`CandidateCannotServe`) and refuses the request only where
 none is left, and each walker dispatches a candidate with
 `ToolContext.for_candidate`. A request that also declares the explicit code
 type decides every candidate alike. A hybrid attempt is never skipped, so hybrid
-sends a `provider` tool to every attempt and decides a request one of whose
-attempts would be refused as a whole; its walkers take each attempt's request
+decides a request one of whose attempts would be refused as a whole; its walkers take each attempt's request
 fields and tools, and the web policy is read once per request
 (`_RequestWebPolicy`). The workspace's code execution policy is read
 once, in the request preamble, and reused at admission; the same decision says

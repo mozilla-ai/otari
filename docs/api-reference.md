@@ -153,10 +153,9 @@ provider's own words (`code_execution_<date>`, `code_interpreter`,
 takes `auto`, `otari` or `provider`, and each attempt of a fallback chain is
 decided on its own. `auto` keeps the provider's own tool on an attempt whose
 model runs it natively and runs Otari's on one that does not. `otari` always
-runs Otari's. `provider` is strict: the provider's own tool only, so a fallback
-that cannot run it is skipped, and the request fails with
-`native_tool_unavailable` if none can. A hybrid gateway skips no attempt. See
-[Who runs a tool](tools.md#who-runs-a-tool).
+runs Otari's. `provider` always forwards the provider's own tool and never uses
+Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
+use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
 
 ### Provider-specific fields
 
