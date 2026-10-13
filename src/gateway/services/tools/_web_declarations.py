@@ -4,7 +4,7 @@ The explicit ``otari_web_search`` and ``otari_web_fetch`` types always run on th
 A provider-native web-search keyword (``web_search`` / ``web_search_<date>``)
 is forwarded to the upstream provider unless ``web_search_intercept`` is on or
 :data:`WEB_SEARCH_HEADER` asks otherwise. The header takes ``CodeExecutor``'s
-vocabulary: ``auto`` claims the keyword only when a provider in the chain cannot
+vocabulary: ``auto`` claims the keyword for each attempt whose provider cannot
 run it (Anthropic's dated keyword on Messages, OpenAI's on Responses are the
 native pairings), ``otari`` always, ``provider`` never, and none of them can
 undo interception. Interception is off by default because turning it on

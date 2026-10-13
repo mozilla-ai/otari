@@ -3689,7 +3689,7 @@ def _admit_web_declarations(
             web_search_header=declared.web_search_header,
             web_fetch_header=declared.web_fetch_header,
             config=ctx.config,
-            uniform=True,
+            uniform=ctx.hybrid_mode,
         )
         candidates = _decide_for_candidates(adapter, ctx, declarations)
         distinct = dict.fromkeys(
