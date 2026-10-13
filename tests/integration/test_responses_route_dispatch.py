@@ -650,49 +650,6 @@ def test_code_execution_without_sandbox_env_returns_400(
     assert "OTARI_SANDBOX_URL" in resp.json()["detail"]
 
 
-def test_code_execution_combined_with_mcp_servers_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    resp = client.post(
-        f"{API_ROOT}/responses",
-        json={
-            "model": _MODEL,
-            "input": "hi",
-            "tools": [{"type": "otari_code_execution"}],
-            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    assert "otari_code_execution and mcp_servers" in resp.json()["detail"]
-
-
-def test_web_search_combined_with_sandbox_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
-    resp = client.post(
-        f"{API_ROOT}/responses",
-        json={
-            "model": _MODEL,
-            "input": "hi",
-            "tools": [
-                {"type": "otari_code_execution"},
-                {"type": "otari_web_search"},
-            ],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    assert "cannot be combined with otari_code_execution" in resp.json()["detail"]
-
-
 # ---------- gateway-side runtime errors ----------
 
 

@@ -35,6 +35,7 @@ from gateway.log_config import logger
 from gateway.services._tool_loop import (
     StreamAction,
     log_tool_failure,
+    owning_backend,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
@@ -123,19 +124,20 @@ async def _execute_function_calls(
                 native_items.extend(_native_items(call, pool, tools, refused=True))
             out.append({"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
+        owner = owning_backend(pool, item.name)
         try:
-            text = await pool.call_tool(item.name, args)
+            text = await owner.call_tool(item.name, args)
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
-            detail = tool_failure_detail(pool, item.name)
+            detail = tool_failure_detail(owner, item.name)
             log_tool_failure(item.name, detail, exc)
             text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
                 budget.record(item.name, text)
         if native_items is not None:
-            native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), pool, tools, refused=False))
+            native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=False))
         out.append({"type": "function_call_output", "call_id": item.call_id, "output": text})
     return out
 
@@ -275,18 +277,19 @@ async def _execute_stream_owned(
             state.native_items.extend(_native_items(call, pool, tools, refused=True))
             results.append({"type": "function_call_output", "call_id": call.id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
+        owner = owning_backend(pool, call.name)
         try:
-            text = await pool.call_tool(call.name, args)
+            text = await owner.call_tool(call.name, args)
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
-            detail = tool_failure_detail(pool, call.name)
+            detail = tool_failure_detail(owner, call.name)
             log_tool_failure(call.name, detail, exc)
             text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
                 budget.record(call.name, text)
-        state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), pool, tools, refused=False))
+        state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=False))
         results.append({"type": "function_call_output", "call_id": call.id, "output": text})
     return results
 

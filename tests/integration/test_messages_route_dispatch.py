@@ -837,59 +837,6 @@ def test_code_execution_without_sandbox_env_returns_400_anthropic_body(
     _assert_anthropic_error(resp.json(), error_type="invalid_request_error", message_substr="OTARI_SANDBOX_URL")
 
 
-def test_code_execution_combined_with_mcp_servers_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    resp = client.post(
-        f"{API_ROOT}/messages",
-        json={
-            "model": "anthropic:claude-3-5-sonnet-20241022",
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 100,
-            "tools": [{"type": "otari_code_execution"}],
-            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    _assert_anthropic_error(
-        resp.json(),
-        error_type="invalid_request_error",
-        message_substr="otari_code_execution and mcp_servers cannot be combined",
-    )
-
-
-def test_web_search_combined_with_mcp_servers_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The use cap reads ownership off the pool, which only tells a gateway call from an
-    MCP server's own because the two never share a request.
-    """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
-    resp = client.post(
-        f"{API_ROOT}/messages",
-        json={
-            "model": "anthropic:claude-3-5-sonnet-20241022",
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 100,
-            "tools": [{"type": "otari_web_search", "max_uses": 1}],
-            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    _assert_anthropic_error(
-        resp.json(),
-        error_type="invalid_request_error",
-        message_substr="cannot be combined with otari_code_execution",
-    )
-
-
 def test_code_execution_combined_with_a_provider_native_tool_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -963,34 +910,6 @@ def test_code_execution_allows_an_unrelated_caller_function(
         )
 
     assert resp.status_code == 200, resp.text
-
-
-def test_web_search_combined_with_sandbox_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
-    resp = client.post(
-        f"{API_ROOT}/messages",
-        json={
-            "model": "anthropic:claude-3-5-sonnet-20241022",
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 100,
-            "tools": [
-                {"type": "otari_code_execution"},
-                {"type": "otari_web_search"},
-            ],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    _assert_anthropic_error(
-        resp.json(),
-        error_type="invalid_request_error",
-        message_substr="cannot be combined with otari_code_execution",
-    )
 
 
 # ---------- gateway-side runtime errors ----------
@@ -2241,31 +2160,3 @@ def test_an_unknown_web_fetch_header_value_is_rejected(
 
     assert resp.status_code == 400, resp.text
     assert "Otari-Web-Fetch must be one of auto, otari, provider" in resp.text
-
-
-def test_a_claimed_fetch_keyword_cannot_be_combined_with_mcp_servers(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-    test_config: GatewayConfig,
-) -> None:
-    """A claimed keyword is a managed web tool, so the existing combination rule holds."""
-    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
-    resp = client.post(
-        f"{API_ROOT}/messages",
-        json={
-            "model": MODEL_NAME,
-            "messages": [{"role": "user", "content": "read"}],
-            "max_tokens": 100,
-            "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}],
-            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
-        },
-        headers={**api_key_header, WEB_FETCH_HEADER: "auto"},
-    )
-
-    assert resp.status_code == 400, resp.text
-    _assert_anthropic_error(
-        resp.json(),
-        error_type="invalid_request_error",
-        message_substr="cannot be combined with otari_code_execution",
-    )

@@ -7,8 +7,8 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 - `otari_web_fetch`, a bounded public-web fetcher
 
 Code execution and Search need separate backends. Fetch runs in the gateway.
-Search and Fetch may be combined, but Otari's web tools cannot be combined with
-its code execution or with MCP servers on one attempt.
+One request may declare any of them together, and MCP servers beside them: see
+[Combining tools](#combining-tools).
 
 Inspect the tools available on a running deployment:
 
@@ -70,10 +70,9 @@ Without interception, a request can choose for itself with the
   on a fallback that needs it.
 
 An attempt that runs Otari's search follows the rules for a gateway-run search
-below. One that cannot be served that way (the workspace has search off, no
-price under `require_pricing`, gateway code execution or `mcp_servers` on the
-same attempt) is skipped and recorded as `Skipped:` in the activity log, and the
-request fails only when no model is left.
+below. One that cannot be served that way (the workspace has search off, or no
+price under `require_pricing`) is skipped and recorded as `Skipped:` in the
+activity log, and the request fails only when no model is left.
 
 The header can add a claim but never remove one: with `web_search_intercept`
 on, every search runs on Otari's backend whatever the header says, and
@@ -81,8 +80,7 @@ on, every search runs on Otari's backend whatever the header says, and
 search under the workspace's web-search policy and tool pricing.
 
 Whenever Otari runs the search, the rules for a gateway-run search apply: the
-workspace's web-search policy, tool pricing, and the restriction on combining it
-with gateway code execution or `mcp_servers` on one attempt. All of this
+workspace's web-search policy and tool pricing. All of this
 requires a search backend (`web_search_provider` or `web_search_url`); without
 one, the declaration is forwarded unchanged. A function named `web_search` is
 never claimed.
@@ -110,8 +108,7 @@ tools are native in different places and a request may want one taken over and
 not the other. There is no deployment-wide toggle like `web_search_intercept`
 for fetch. A claimed declaration is an [Otari fetch](#web-fetch): it needs
 `web_fetch_enabled` (without it the keyword is forwarded unchanged), follows the
-workspace policy, pricing and the restriction on combining it with code
-execution or `mcp_servers`, and honors the declaration's `max_uses`,
+workspace policy and pricing, and honors the declaration's `max_uses`,
 `allowed_domains` and `blocked_domains`. The URL in the returned blocks omits
 its query string and fragment, as the tool result does. When such a turn is
 echoed back on a later request, Otari drops its own fetch blocks before calling
@@ -181,6 +178,44 @@ message. Calls for tools the client must execute are preserved.
 
 For gateway-run MCP activity in Messages streams, see
 [Messages streaming activity](mcp.md#messages-streaming-activity).
+
+## Combining tools
+
+One request may declare any mix of `otari_web_search`, `otari_web_fetch`,
+`otari_code_execution` and MCP servers (`mcp_servers` or `mcp_server_ids`), on
+Chat Completions, Messages and Responses, streamed or not. The model is offered
+all of them at once and may call any of them in the same tool loop, for example
+searching, fetching a page and then running code on what it found. Each call
+runs on the tool it names, and each tool keeps the rules it has alone:
+
+- Its workspace policy and its pricing apply. A declared tool its policy refuses
+  refuses the whole request, as it would alone, rather than being dropped while
+  the others run.
+- A `max_uses` caps only its own tool: once search reaches its cap, the model is
+  told so for each further search while code and MCP calls keep running.
+- Each built-in comes back in the same native result blocks or items as it does
+  alone ([What clients receive](#what-clients-receive)), and so does MCP activity.
+- Usage counts each tool's calls under the tool's own name.
+
+The tools share one loop, so its limit is shared too: `max_tool_iterations`
+bounds the rounds of the whole request, and so does a workspace code policy's
+`max_iterations` when the request runs code on Otari's sandbox.
+
+A tool declared in a provider's own words is still [decided per
+attempt](#who-runs-a-tool), so on a fallback chain one attempt may run the
+provider's own code execution beside Otari's search, and another run both on
+Otari, in the same loop.
+
+What one tool returns reaches the model before its next call, so a fetched page
+or a search result can steer what the model asks of the sandbox or an MCP
+server. Declare together only tools you would let untrusted web content drive.
+
+A built-in tool's name belongs to the built-in in a request that declares it.
+When a connected MCP server exposes a tool of the same name (`web_search`,
+`web_fetch` or `code_execution`), the request is refused with a `400` naming the
+tool, before the model is called or a sandbox is opened. Leave that tool out of
+the server's `allowed_tools`, or declare only one of the two. In a request that
+does not declare the built-in, the server's tool of that name runs as usual.
 
 ## Code execution
 
@@ -313,10 +348,9 @@ catalog ID that falls back from Claude to Claude on Vertex or Bedrock sends
 Anthropic its own tool, and only if Anthropic fails before any output does the
 fallback run the code on the sandbox; a request Anthropic answers never opens
 or pays for one. A fallback that cannot run on the sandbox (code execution off
-for the workspace, no sandbox price under `require_pricing`, a container id
-from another provider, or Otari's web tools on the same attempt or MCP servers,
-which the sandbox cannot be combined with yet) is skipped rather than refusing
-the whole request, and the request is refused only when no attempt can run. A
+for the workspace, no sandbox price under `require_pricing`, or a container id
+from another provider) is skipped rather than refusing the whole request, and
+the request is refused only when no attempt can run. A
 request that also declares `otari_code_execution` decides every attempt alike
 instead, running the code on the sandbox unless every model runs it natively.
 [Hybrid mode](#who-runs-a-tool) skips no attempt.

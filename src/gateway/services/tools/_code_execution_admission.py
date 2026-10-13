@@ -51,10 +51,6 @@ CODE_EXECUTOR_PINNED_DETAIL = (
     f"this workspace's code-execution policy decides who runs code; the {CODE_EXECUTION_HEADER} "
     "header cannot choose otherwise"
 )
-SANDBOX_MCP_CONFLICT_DETAIL = (
-    "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
-    "pick one. Multi-backend dispatch is a planned refinement."
-)
 SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL = (
     "otari_code_execution cannot be combined with a provider-native code-execution tool "
     "(code_execution, code_interpreter, code_execution_<date>) in the same request; pick one. "
@@ -126,7 +122,6 @@ async def declare_code_execution(
     config: GatewayConfig,
     resolve_policy: Callable[[], Awaitable[ResolvedCodeExecutionPolicy | None]],
     container_registry: SandboxContainerRegistry | None,
-    mcp_servers_declared: bool,
 ) -> DeclaredCodeExecution:
     """Read the code execution one request declared, refusing what no candidate could serve.
 
@@ -189,7 +184,6 @@ async def declare_code_execution(
         container_id=container_id,
         container_registry=container_registry,
         keyword_entry=provider_code_entry,
-        mcp_servers_declared=mcp_servers_declared,
         policy=code_execution_policy,
         preference=preference,
         sandbox_available=sandbox_available,
@@ -213,7 +207,6 @@ class DeclaredCodeExecution:
         container_id: object,
         container_registry: SandboxContainerRegistry | None,
         keyword_entry: dict[str, Any] | None,
-        mcp_servers_declared: bool,
         policy: ResolvedCodeExecutionPolicy | None,
         preference: CodeExecutor | None,
         sandbox_available: bool,
@@ -224,7 +217,6 @@ class DeclaredCodeExecution:
         self.container_id = container_id
         self.container_registry = container_registry
         self.keyword_entry = keyword_entry
-        self.mcp_servers_declared = mcp_servers_declared
         self.policy = policy
         self.preference = preference
         self.sandbox_available = sandbox_available
@@ -303,8 +295,6 @@ class DeclaredCodeExecution:
 
         if use_sandbox:
             assert sandbox_tool_entry is not None
-            if self.mcp_servers_declared:
-                raise CodeExecutionDeclarationError(SANDBOX_MCP_CONFLICT_DETAIL)
             # The policy only narrows what the deployment allows. No policy means no narrowing.
             if code_execution_policy is not None:
                 if not code_execution_policy.enabled:

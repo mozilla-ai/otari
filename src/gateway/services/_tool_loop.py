@@ -20,7 +20,7 @@ tests can keep monkeypatching them there.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar, cast
@@ -36,12 +36,12 @@ AccT = TypeVar("AccT")
 class ToolBackend(Protocol):
     """Subset of the tool-backend surface the loop drives.
 
-    Structurally implemented by ``MCPClientPool``, ``SandboxBackend``, and
-    ``WebSearchBackend``; each exposes the same members the loop and the route
-    pipeline need to advertise tools, decide ownership, execute a call, and
-    describe each tool's purpose for the system-message hint block. Widening
-    ``pool`` to this Protocol lets the routes pass any of those backends
-    without casts.
+    Structurally implemented by ``MCPClientPool``, ``SandboxBackend``,
+    ``WebRetrievalBackend`` and :class:`CombinedToolBackend`; each exposes the
+    same members the loop and the route pipeline need to advertise tools, decide
+    ownership, execute a call, and describe each tool's purpose for the
+    system-message hint block. Widening ``pool`` to this Protocol lets the routes
+    pass any of those backends without casts.
     """
 
     @property
@@ -52,6 +52,46 @@ class ToolBackend(Protocol):
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str: ...
 
     def purpose_hints(self) -> list[tuple[str, str]]: ...
+
+
+class CombinedToolBackend:
+    """Several tool backends of one request, driven by the tool loop as one pool.
+
+    A call runs on the first backend that owns its name, so put the gateway's own
+    backends ahead of MCP. Each backend keeps its own tally, trace and result
+    buffers, which is why a native rendering is handed :func:`owning_backend`'s
+    answer rather than this pool.
+    """
+
+    def __init__(self, backends: Sequence[ToolBackend]) -> None:
+        self._backends = tuple(backends)
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [tool for backend in self._backends for tool in backend.openai_tools]
+
+    def owns_tool(self, name: str) -> bool:
+        return self.backend_for(name) is not None
+
+    def backend_for(self, name: str) -> ToolBackend | None:
+        """The backend that runs ``name``, or ``None`` when none of them owns it."""
+        return next((backend for backend in self._backends if backend.owns_tool(name)), None)
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        backend = self.backend_for(name)
+        if backend is None:
+            raise KeyError(f"No tool backend owns tool {name!r}")
+        return await backend.call_tool(name, arguments)
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return [hint for backend in self._backends for hint in backend.purpose_hints()]
+
+
+def owning_backend(pool: ToolBackend, name: str) -> ToolBackend:
+    """The backend that runs ``name``: the member of a combined pool that owns it, else ``pool`` itself."""
+    if isinstance(pool, CombinedToolBackend):
+        return pool.backend_for(name) or pool
+    return pool
 
 
 def tool_failure_detail(pool: ToolBackend, name: str) -> str:

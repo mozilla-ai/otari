@@ -21,9 +21,10 @@ Settlement invariants owned here:
   :func:`build_streaming_response`, and are wired identically for the
   single-attempt and platform-fallback paths of every format.
 * Backend open semantics: sandbox and web_search backends open eagerly so an
-  unreachable backend surfaces as an HTTP 502 before the 200 OK header; the
-  MCP pool opens lazily inside the stream generator (single-attempt paths) or
-  eagerly on an ``AsyncExitStack`` shared across attempts (platform fallback).
+  unreachable backend surfaces as an HTTP 502 before the 200 OK header; an
+  MCP pool declared alone opens lazily inside the stream generator
+  (single-attempt paths), and otherwise eagerly beside the others, on an
+  ``AsyncExitStack`` shared across attempts on the platform fallback path.
 * Every gateway-side rejection that reaches a known user records an error row
   via :func:`log_gateway_rejection`, so refused traffic is visible in the
   activity log and countable by the dashboard's failure count instead of
@@ -251,6 +252,7 @@ from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
+    CombinedToolBackend,
     MaxToolIterationsExceeded,
     ToolBackend,
 )
@@ -329,7 +331,6 @@ from gateway.services.tools import (
     WebClaims,
     admit_mcp_servers,
     admit_web_access,
-    check_web_tools_alone,
     decide_candidate_tools,
     declare_code_execution,
     declares_code_execution,
@@ -338,6 +339,7 @@ from gateway.services.tools import (
     read_web_declarations,
     read_web_fetch_max_uses,
     read_web_search_max_uses,
+    refuse_shadowed_builtin_tools,
     validate_web_declarations,
     web_search_intercept_enabled,
 )
@@ -3422,7 +3424,6 @@ async def prepare_gateway_tools(
     """Admit the gateway-run tools one request declared, handling the reservation release on a refusal.
 
     The steps run in a fixed order, so a request that breaks two rules always gets the same refusal.
-    MCP servers, the sandbox and the web tools cannot be combined in one request.
     Every backend URL comes from the deployment and never from the request.
 
     A built-in tool declared in a provider's own words is decided for each candidate
@@ -3444,14 +3445,13 @@ async def prepare_gateway_tools(
         web_candidates = _admit_web_declarations(adapter, ctx, declared)
         await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
-        code = await _declare_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
+        code = await _declare_code_execution(adapter, ctx, declared, backends)
         candidates = _combined(web_candidates, _decide_for_candidates(adapter, ctx, [code.provider_declaration()]))
         answers = await _admit_candidates(
             adapter,
             ctx,
             code,
             candidates,
-            mcp_servers=mcp_servers,
             web_policy=web_policy,
             whole=ctx.hybrid_mode and len({candidate.claimed for candidate in candidates}) > 1,
         )
@@ -3460,9 +3460,7 @@ async def prepare_gateway_tools(
                 _decide_for_candidates(adapter, ctx, _web_declarations(ctx, declared, uniform=True)),
                 _decide_for_candidates(adapter, ctx, [code.provider_declaration(follow_head=True)]),
             )
-            answers = await _admit_candidates(
-                adapter, ctx, code, candidates, mcp_servers=mcp_servers, web_policy=web_policy, whole=False
-            )
+            answers = await _admit_candidates(adapter, ctx, code, candidates, web_policy=web_policy, whole=False)
             assert answers is not None
         if not any(isinstance(answer, _AdmittedTools) for answer in answers.values()):
             refusal = answers[candidates[0].claimed]
@@ -3615,7 +3613,6 @@ async def _admit_candidates(
     code: DeclaredCodeExecution,
     candidates: Sequence[CandidateTools],
     *,
-    mcp_servers: list[McpServerConfig] | None,
     web_policy: _RequestWebPolicy,
     whole: bool,
 ) -> dict[frozenset[str], _AdmittedTools | _ToolRefusal] | None:
@@ -3633,12 +3630,7 @@ async def _admit_candidates(
     for candidate in candidates:
         if candidate.claimed not in claims:
             claims[candidate.claimed] = await _declare_claims(
-                adapter,
-                ctx,
-                code,
-                candidate.claimed,
-                beside_sandbox=beside_sandbox,
-                mcp_servers_declared=bool(mcp_servers),
+                adapter, ctx, code, candidate.claimed, beside_sandbox=beside_sandbox
             )
     if whole and any(isinstance(claim, _ToolRefusal) for claim in claims.values()):
         return None
@@ -3665,7 +3657,6 @@ async def _declare_claims(
     claimed: frozenset[str],
     *,
     beside_sandbox: bool,
-    mcp_servers_declared: bool,
 ) -> _DeclaredClaims | _ToolRefusal:
     """What a candidate is sent where Otari runs the provider keywords in ``claimed``, or why it cannot be."""
     try:
@@ -3675,7 +3666,6 @@ async def _declare_claims(
     web_claims = WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
     try:
         web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
-        check_web_tools_alone(web, use_sandbox=admitted.use_sandbox, mcp_servers_declared=mcp_servers_declared)
     except WebToolDeclarationError as exc:
         return _ToolRefusal(domain_error(adapter, exc))
     return _DeclaredClaims(code=admitted, web=web)
@@ -3832,8 +3822,6 @@ async def _declare_code_execution(
     ctx: RequestContext,
     declared: DeclaredTools,
     backends: ToolBackends,
-    *,
-    mcp_servers_declared: bool,
 ) -> DeclaredCodeExecution:
     """Read the request's code execution, refusing what no candidate could serve."""
     try:
@@ -3844,7 +3832,6 @@ async def _declare_code_execution(
             config=ctx.config,
             resolve_policy=lambda: _resolve_code_execution_policy(adapter, ctx, backends.ports.code_execution_policy),
             container_registry=backends.sandbox_containers,
-            mcp_servers_declared=mcp_servers_declared,
         )
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError) as exc:
         raise domain_error(adapter, exc) from exc
@@ -4779,6 +4766,45 @@ def _native_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext
     return {"native_tools": native_tools} if native_tools else {}
 
 
+@dataclass(frozen=True)
+class _OpenedTools:
+    """The tool backends one request opened, as the pool its tool loop drives."""
+
+    pool: ToolBackend
+    # The entered sandbox, whose lease the Messages loop reports. ``None`` without one.
+    sandbox: Any
+
+
+async def _open_tool_backends(
+    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, stack: AsyncExitStack
+) -> _OpenedTools:
+    """Open each tool backend the request declared on ``stack``, combined into one pool when there are several.
+
+    The MCP servers open first, so a request whose servers shadow a built-in tool it
+    declared is refused before a sandbox is leased. The built-in backends come first in
+    the pool, so a call that more than one backend owns reaches the gateway's own.
+    """
+    mcp: MCPClientPool | None = None
+    if tool_ctx.mcp_server_configs:
+        mcp = await stack.enter_async_context(
+            MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace)
+        )
+        try:
+            refuse_shadowed_builtin_tools(mcp, tool_ctx.declared_gateway_tools.keys())
+        except McpServerDeclarationError as exc:
+            raise domain_error(adapter, exc) from exc
+    backends: list[ToolBackend] = []
+    if tool_ctx.use_web_search or tool_ctx.use_web_fetch:
+        backends.append(await stack.enter_async_context(tool_ctx.build_web_retrieval_backend()))
+    sandbox: SandboxBackend | None = None
+    if tool_ctx.use_sandbox:
+        sandbox = await stack.enter_async_context(tool_ctx.build_sandbox_backend())
+        backends.append(sandbox)
+    if mcp is not None:
+        backends.append(mcp)
+    return _OpenedTools(pool=backends[0] if len(backends) == 1 else CombinedToolBackend(backends), sandbox=sandbox)
+
+
 async def dispatch_non_stream(
     *,
     adapter: FormatAdapter[ResultT, Any],
@@ -4786,40 +4812,24 @@ async def dispatch_non_stream(
     call_kwargs: dict[str, Any],
     on_first_response: Callable[[], None] | None = None,
 ) -> ResultT:
-    """Non-streaming dispatch: plain provider call, or the matching tool-loop
-    backend (MCP pool / sandbox / web_search) opened for the duration of the
-    loop.
+    """Non-streaming dispatch: plain provider call, or the tool loop over every
+    backend the request declared (MCP pool / sandbox / web retrieval), opened for
+    the duration of the loop.
     """
     if not tool_ctx.use_tool_loop:
         return await adapter.call_provider(call_kwargs)
 
-    if tool_ctx.mcp_server_configs:
-        async with MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace) as pool:
-            kwargs = adapter.inject_hints(call_kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
-            return await adapter.run_tool_loop(kwargs, pool, tool_ctx.max_tool_iterations, on_first_response)
-
-    if tool_ctx.use_sandbox:
-        async with tool_ctx.build_sandbox_backend() as backend:
-            kwargs = adapter.inject_hints(call_kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
-            return await adapter.run_tool_loop(
-                kwargs,
-                backend,
-                tool_ctx.max_tool_iterations,
-                on_first_response,
-                **_native_loop_options(adapter, tool_ctx),
-                **_container_loop_option(adapter, backend),
-            )
-
-    assert tool_ctx.use_web_search or tool_ctx.use_web_fetch
-    async with tool_ctx.build_web_retrieval_backend() as web_backend:
-        kwargs = adapter.inject_hints(call_kwargs, web_backend.purpose_hints(), header=tool_ctx.tools_header)
+    async with AsyncExitStack() as stack:
+        opened = await _open_tool_backends(adapter, tool_ctx, stack)
+        kwargs = adapter.inject_hints(call_kwargs, opened.pool.purpose_hints(), header=tool_ctx.tools_header)
         return await adapter.run_tool_loop(
             kwargs,
-            web_backend,
+            opened.pool,
             tool_ctx.max_tool_iterations,
             on_first_response,
             **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
+            **_container_loop_option(adapter, opened.sandbox),
         )
 
 
@@ -4829,12 +4839,20 @@ class _ToolBackendKind(StrEnum):
     MCP = "MCP"
     SANDBOX = "sandbox"
     WEB_RETRIEVAL = "web retrieval"
+    COMBINED = "combined"
 
     @classmethod
     def of(cls, tool_ctx: ToolContext) -> _ToolBackendKind:
-        if tool_ctx.mcp_server_configs:
-            return cls.MCP
-        return cls.SANDBOX if tool_ctx.use_sandbox else cls.WEB_RETRIEVAL
+        declared = [
+            kind
+            for kind, used in (
+                (cls.MCP, bool(tool_ctx.mcp_server_configs)),
+                (cls.SANDBOX, tool_ctx.use_sandbox),
+                (cls.WEB_RETRIEVAL, tool_ctx.use_web_search or tool_ctx.use_web_fetch),
+            )
+            if used
+        ]
+        return declared[0] if len(declared) == 1 else cls.COMBINED
 
 
 async def _close_tool_backend(closing: Awaitable[object], kind: _ToolBackendKind) -> None:
@@ -4888,28 +4906,29 @@ async def _lazy_mcp_stream(
 async def _eager_backend_stream(
     adapter: FormatAdapter[Any, ChunkT],
     kwargs: dict[str, Any],
-    backend: Any,
+    opened: _OpenedTools,
+    stack: AsyncExitStack,
     tool_ctx: ToolContext,
 ) -> AsyncIterator[ChunkT]:
-    # ``backend.__aenter__`` already ran in ``open_stream``; this generator
-    # owns the matching ``__aexit__`` once the stream finishes or errors, and
-    # hands it the error so a backend can abandon work nobody will read.
+    # The backends on ``stack`` were entered in ``open_stream``; this generator
+    # closes them once the stream finishes or errors, and hands them the error
+    # so a backend can abandon work nobody will read.
     kind = _ToolBackendKind.of(tool_ctx)
     try:
-        hinted = adapter.inject_hints(kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
+        hinted = adapter.inject_hints(kwargs, opened.pool.purpose_hints(), header=tool_ctx.tools_header)
         async for event in adapter.open_tool_loop_stream(
             hinted,
-            backend,
+            opened.pool,
             tool_ctx.max_tool_iterations,
             **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
-            **(_container_loop_option(adapter, backend) if tool_ctx.use_sandbox else {}),
+            **_container_loop_option(adapter, opened.sandbox),
         ):
             yield event
     except BaseException as exc:
-        await _close_tool_backend(backend.__aexit__(type(exc), exc, exc.__traceback__), kind)
+        await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), kind)
         raise
-    await _close_tool_backend(backend.__aexit__(None, None, None), kind)
+    await _close_tool_backend(stack.aclose(), kind)
 
 
 async def open_stream(
@@ -4926,26 +4945,26 @@ async def open_stream(
     The sandbox and web_search backends are opened eagerly (their
     ``__aenter__`` runs before this function returns) so a backend-unreachable
     error surfaces as an HTTP 502 rather than landing in the SSE channel after
-    the response has already committed to 200 OK. The MCP pool is entered
-    lazily inside the returned iterator.
+    the response has already committed to 200 OK. An MCP pool declared alone is
+    entered lazily inside the returned iterator; one declared beside the others
+    opens with them, so a refusal of its tool names is an HTTP error too.
     """
     kwargs = adapter.prepare_stream_kwargs(call_kwargs)
 
     if not tool_ctx.use_tool_loop:
         return await hold_for_first_chunk(await adapter.open_provider_stream(kwargs), tool_ctx.config)
 
-    if tool_ctx.mcp_server_configs:
+    if tool_ctx.mcp_server_configs and not tool_ctx.declared_gateway_tools:
         return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)
 
-    if tool_ctx.use_sandbox:
-        sandbox_backend = tool_ctx.build_sandbox_backend()
-        await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
-        return _eager_backend_stream(adapter, kwargs, sandbox_backend, tool_ctx)
-
-    assert tool_ctx.use_web_search or tool_ctx.use_web_fetch
-    web_search_backend = tool_ctx.build_web_retrieval_backend()
-    await web_search_backend.__aenter__()  # may raise WebSearchNotReachableError
-    return _eager_backend_stream(adapter, kwargs, web_search_backend, tool_ctx)
+    stack = AsyncExitStack()
+    try:
+        # May raise SandboxNotReachableError, WebSearchNotReachableError or a refusal.
+        opened = await _open_tool_backends(adapter, tool_ctx, stack)
+    except BaseException as exc:
+        await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(tool_ctx))
+        raise
+    return _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -5812,9 +5831,9 @@ async def run_streaming_with_fallback(
     or a client-aware "restart" event (breaks SDK compatibility).
 
     Tool-loop modes are layered on top with the same pre-first-chunk fallback
-    semantics. Each attempt is dispatched with its own tools, and the backend
-    they run on (including the MCP pool) is opened once on an ``AsyncExitStack``
-    for the attempts that share it: the head's eagerly, so its gateway-side
+    semantics. Each attempt is dispatched with its own tools, and the backends
+    they run on (including the MCP pool) are opened once on an ``AsyncExitStack``
+    for the attempts that share them: the head's eagerly, so its gateway-side
     dependency failures surface as a normal HTTP error, and a fallback's only
     when that attempt is reached. Each retried attempt starts with a clean
     conversation slate, and each attempt's own tools set its first-chunk budget.
@@ -5837,12 +5856,12 @@ async def run_streaming_with_fallback(
     # Only tool backends go on this stack, because a failure to close it is logged rather than raised.
     backend_stack = AsyncExitStack()
     # The backend each set of tools runs on, by the tools' identity, and the kind of the first one opened.
-    pools: dict[int, Any] = {}
+    pools: dict[int, ToolBackend | None] = {}
     opened: list[_ToolBackendKind] = []
 
-    async def _pool_for(tools: ToolContext) -> Any:
+    async def _pool_for(tools: ToolContext) -> ToolBackend | None:
         if id(tools) not in pools:
-            pool = await _enter_tool_backend(backend_stack, tools)
+            pool = (await _open_tool_backends(adapter, tools, backend_stack)).pool if tools.use_tool_loop else None
             if pool is not None:
                 opened.append(_ToolBackendKind.of(tools))
             pools[id(tools)] = pool
@@ -5850,11 +5869,13 @@ async def run_streaming_with_fallback(
 
     try:
         await _pool_for(head_tools)
-    except BaseException:
+    except BaseException as exc:
         # Eager-open failure (e.g. SandboxNotReachableError): propagate so the
-        # route handler maps it to the existing HTTP status. Nothing to clean
-        # up on the stack yet because the entry failed.
-        await backend_stack.aclose()
+        # route handler maps it to the existing HTTP status, once whatever
+        # opened before it is closed.
+        await _close_tool_backend(
+            backend_stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(head_tools)
+        )
         raise
 
     async def _build_for_attempt(attempt: ResolvedAttempt) -> AsyncIterator[ChunkT]:
@@ -5987,19 +6008,6 @@ async def run_streaming_with_fallback(
         tool_tally=tool_ctx.tally,
         tool_loop=tool_mode,
     )
-
-
-async def _enter_tool_backend(stack: AsyncExitStack, tools: ToolContext) -> Any:
-    """Open the backend ``tools`` run their tool loop on, onto ``stack``; ``None`` where they run none."""
-    if tools.mcp_server_configs:
-        return await stack.enter_async_context(
-            MCPClientPool(tools.mcp_server_configs, tally=tools.tally, trace=tools.trace)
-        )
-    if tools.use_sandbox:
-        return await stack.enter_async_context(tools.build_sandbox_backend())
-    if tools.use_web_search or tools.use_web_fetch:
-        return await stack.enter_async_context(tools.build_web_retrieval_backend())
-    return None
 
 
 async def _stream_with_stack_cleanup(

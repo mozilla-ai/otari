@@ -41,9 +41,8 @@ class ToolUseBudget:
 
         A call the pool does not own is the caller's own to dispatch and spends nothing
         here. Ownership alone does not tell the gateway's tool from an MCP server's tool
-        of the same name, and it does not have to: a request declaring a built-in tool
-        alongside an MCP server is refused, so a request holding a budget reaches one
-        built-in backend and no MCP pool.
+        of the same name, and it does not have to: a request whose MCP servers expose a
+        tool named like a built-in tool it declared is refused.
         """
         return name in self._remaining and pool.owns_tool(name)
 

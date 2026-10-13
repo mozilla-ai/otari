@@ -7,6 +7,7 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``Tool`` names the ``tools[].type`` values the gateway runs itself.
 ``read_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
+``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
 ``search_provider_catalog`` lists the providers a search or fetch tool may name.
@@ -52,7 +53,7 @@ from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CA
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
-from gateway.services.tools._mcp_admission import admit_mcp_servers
+from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -81,7 +82,6 @@ from gateway.services.tools._web_admission import (
     DeclaredWebTools,
     WebClaims,
     admit_web_access,
-    check_web_tools_alone,
     extract_web_tools,
     read_web_declarations,
     read_web_fetch_max_uses,
@@ -162,7 +162,6 @@ __all__ = [
     "admit_mcp_servers",
     "admit_web_access",
     "apply_web_access_policy",
-    "check_web_tools_alone",
     "code_execution_declaration_forms",
     "decide_code_executor",
     "decide_candidate_tools",
@@ -180,6 +179,7 @@ __all__ = [
     "read_web_declarations",
     "read_web_fetch_max_uses",
     "read_web_search_max_uses",
+    "refuse_shadowed_builtin_tools",
     "resolve_code_executor_preference",
     "validate_web_declarations",
     "web_search_declaration_forms",
