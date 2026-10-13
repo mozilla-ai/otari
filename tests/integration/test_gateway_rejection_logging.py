@@ -196,14 +196,14 @@ def test_unresolvable_selector_releases_the_reservation(
     then builds its key as the model alone, and that raw selector is exactly the
     ``provider:model`` form stored pricing rows use, so an instance removed from
     config while its pricing row survives still prices, still reserves a nonzero
-    estimate, and only fails later at dispatch. Before the refund, that hold
+    estimate, and is refused as invalid_model only after it reserved. Before the refund, that hold
     stayed on ``users.reserved`` until the next budget reset (forever for a
     budget with no reset period).
 
     Structured as an A/B, because ``reserved == 0.0`` alone would also hold if
     the estimate were 0, which would make this test pass while guarding nothing.
     The control puts the same request under a budget smaller than the estimate:
-    it is refused at the budget gate rather than reaching dispatch, which is only
+    it is refused at the budget gate rather than as invalid_model, which is only
     possible if the raw selector really did match pricing and really did produce
     a nonzero estimate. That is the precondition that makes the refund matter.
     """
