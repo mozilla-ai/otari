@@ -134,7 +134,7 @@ def test_signup_claims_a_roster_identity_and_sends_a_verification_link(
         response = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
         assert response.status_code == 403
 
-        verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
+        verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
         assert verified.status_code == 200, verified.text
         assert verified.json()["email"] == "ada@example.com"
 
@@ -371,7 +371,9 @@ def test_closed_signup_claims_an_identity_with_a_pending_invitation(
 
         token = _captured_verification_link(caplog, client, email="ada@example.com")
 
-        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
+        )
 
 
 @pytest.mark.parametrize("ending", ["revoked", "lapsed", "removed"])
@@ -431,7 +433,9 @@ def test_open_signup_registers_an_unknown_address_and_verification_lets_it_sign_
             client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 403
         )
-        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
+        )
         assert (
             client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
@@ -449,7 +453,9 @@ def test_open_signup_lands_the_new_account_in_an_organization_it_owns(
     """
     with _client(tmp_path, open_signup=True) as client:
         token = _captured_verification_link(caplog, client, email="ada@example.com", full_name="Ada Lovelace")
-        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
+        )
         assert (
             client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
@@ -472,7 +478,9 @@ def test_open_signup_names_the_organization_from_the_address_when_no_name_is_giv
 ) -> None:
     with _client(tmp_path, open_signup=True) as client:
         token = _captured_verification_link(caplog, client, email="ada@example.com")
-        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
+        )
         assert (
             client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
@@ -493,7 +501,9 @@ def test_open_signup_fits_a_long_name_into_the_organization_name_column(
     """
     with _client(tmp_path, open_signup=True) as client:
         token = _captured_verification_link(caplog, client, email="ada@example.com", full_name="A" * 255)
-        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
+        )
         assert (
             client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
@@ -580,7 +590,7 @@ def _signed_in_member(client: TestClient, caplog: pytest.LogCaptureFixture, *, e
     )
     assert added.status_code == 201, added.text
     token = _captured_verification_link(caplog, client, email=email)
-    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
     assert client.post(f"{API_ROOT}/auth/session", json={"email": email, "password": PASSWORD}).status_code == 200
     return str(added.json()["organization_member_id"])
 
@@ -638,3 +648,49 @@ def test_a_removed_member_can_create_an_organization_where_signup_is_open(
         created = client.post(f"{API_ROOT}/organizations", json={"name": "Eve Corp"})
 
         assert created.status_code == 201, created.text
+
+
+def test_signup_requires_the_terms_where_the_deployment_publishes_them(tmp_path: Path) -> None:
+    config = _config(tmp_path, open_signup=True).model_copy(update={"terms_url": "https://example.com/terms"})
+    with TestClient(create_app(config)) as client:
+        _sign_in_with_master_key(client)
+        before = _identity_count(tmp_path)
+
+        refused = _signup(client, email="new@example.com")
+        assert refused.status_code == 400, refused.text
+        assert _identity_count(tmp_path) == before
+
+        accepted = _signup(client, email="new@example.com", terms_accepted=True)
+        assert accepted.status_code == 200, accepted.text
+        assert _identity_count(tmp_path) == before + 1
+
+
+def _name_and_organization(tmp_path: Path, *, email: str) -> tuple[str | None, str]:
+    engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
+    with engine.begin() as connection:
+        row = connection.execute(
+            text(
+                'SELECT "user".full_name, organization.name FROM "user" '
+                'JOIN organization ON organization.id = "user".active_organization_id WHERE "user".email = :email'
+            ),
+            {"email": email},
+        ).one()
+    engine.dispose()
+    return (row[0], row[1])
+
+
+@pytest.mark.parametrize(
+    ("submitted", "stored", "organization"),
+    [
+        ("   ", None, "ada's organization"),
+        ("  Ada   Lovelace ", "Ada Lovelace", "Ada Lovelace's organization"),
+    ],
+    ids=["blank", "padded"],
+)
+def test_open_signup_stores_the_name_the_way_the_account_page_does(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, submitted: str, stored: str | None, organization: str
+) -> None:
+    with _client(tmp_path, open_signup=True) as client:
+        _captured_verification_link(caplog, client, email="ada@example.com", full_name=submitted)
+
+    assert _name_and_organization(tmp_path, email="ada@example.com") == (stored, organization)

@@ -61,7 +61,7 @@ def _claimed_and_verified(
     )
     assert signup.status_code == 200, signup.text
     token = _extract_token(caplog.text)
-    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
 
 
 def test_reset_request_then_confirm_then_sign_in(

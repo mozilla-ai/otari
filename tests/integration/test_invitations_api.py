@@ -312,8 +312,30 @@ def test_accepting_without_a_password_still_works_and_sets_none(
 
     assert accept.status_code == 200, accept.text
     assert accept.json()["password_set"] is False
+    assert accept.json()["verification_pending"] is False
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "hedy@example.com", "password": PASSWORD})
     assert signed_in.status_code == 401
+
+
+def test_accepting_after_an_unverified_signup_says_the_address_still_needs_verifying(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accepting does not verify (whoever signed up may not hold the mailbox), so the page has to say so."""
+    result = _invite(client, master_key_header, email="hedy@example.com")
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "hedy@example.com", "password": PASSWORD})
+    assert signed_up.status_code == 200, signed_up.text
+
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])})
+
+    assert accept.status_code == 200, accept.text
+    assert accept.json()["verification_pending"] is True
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "hedy@example.com", "password": PASSWORD})
+    assert signed_in.status_code == 403
 
 
 def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_sign_in(
@@ -758,7 +780,12 @@ def test_accepting_from_the_inbox_activates_the_membership(
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
-    assert response.json() == {"organization_name": "Second", "role": "member", "password_set": False}
+    assert response.json() == {
+        "organization_name": "Second",
+        "role": "member",
+        "password_set": False,
+        "verification_pending": False,
+    }
 
     db_session.refresh(membership)
     db_session.refresh(invitation)

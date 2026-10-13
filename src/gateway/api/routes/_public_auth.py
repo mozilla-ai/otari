@@ -17,13 +17,13 @@ from gateway.services.mail import MailNotConfiguredError
 def throttle_public_auth(request: Request) -> None:
     """Throttle calls to a public auth route per client IP.
 
-    Unconditional, not just on failure, the same reasoning
-    ``invitations._throttle`` gives its own two routes: there is no legitimate
-    caller here at a rate worth exempting, only a client with an address or a
-    token it can retry from. Reuses the sign-in route's limiter/budget rather
-    than a separate one.
+    Unconditional, not just on failure: there is no legitimate caller here at a
+    rate worth exempting, only a client with an address or a code it can retry
+    from. The budget is ``public_auth_rate_limiter``, not the failed sign-in
+    one, so a few mistyped passwords do not lock the same person (or everyone
+    behind the same NAT) out of the link that would let them in.
     """
-    limiter = getattr(request.app.state, "login_rate_limiter", None)
+    limiter = getattr(request.app.state, "public_auth_rate_limiter", None)
     if limiter is None:
         return
     client_ip = request.client.host if request.client else None

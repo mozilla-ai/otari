@@ -62,6 +62,12 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "verification_pending": {
+            "default": false,
+            "description": "Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.",
+            "title": "Verification Pending",
+            "type": "boolean"
           }
         },
         "required": [
@@ -14887,7 +14893,7 @@
       "RequestPasswordResetResponse": {
         "properties": {
           "message": {
-            "description": "The same message whether or not the address has a password to reset.",
+            "description": "The same message whether or not a link was sent.",
             "title": "Message",
             "type": "string"
           }
@@ -15258,6 +15264,12 @@
             "minLength": 8,
             "title": "New Password",
             "type": "string"
+          },
+          "terms_accepted": {
+            "default": false,
+            "description": "Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url and the account has not accepted them yet.",
+            "title": "Terms Accepted",
+            "type": "boolean"
           },
           "token": {
             "description": "The token from the reset link.",
@@ -17086,7 +17098,7 @@
           },
           "terms_accepted": {
             "default": false,
-            "description": "Whether the caller accepted this deployment's terms.",
+            "description": "Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url.",
             "title": "Terms Accepted",
             "type": "boolean"
           }
@@ -21188,6 +21200,12 @@
       },
       "VerifyEmailRequest": {
         "properties": {
+          "password": {
+            "description": "The password chosen at signup. The link verifies the address only together with it, so a link that reaches someone who did not sign up verifies nothing.",
+            "maxLength": 1024,
+            "title": "Password",
+            "type": "string"
+          },
           "token": {
             "description": "The token from the verification link.",
             "maxLength": 512,
@@ -21196,7 +21214,8 @@
           }
         },
         "required": [
-          "token"
+          "token",
+          "password"
         ],
         "title": "VerifyEmailRequest",
         "type": "object"
@@ -23953,7 +23972,7 @@
     },
     "/api/v1/auth/oauth/{provider}/callback": {
       "post": {
-        "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the provider's account resolves to,\nexactly as a password sign-in binds one to the identity that authenticated,\nso every request it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and rendered by the tenancy error handler. Like\nthe passkey route there is no separate post-failure throttle: this route is\nthrottled unconditionally on the way in, because there is no legitimate\ncaller here whose correct credential must never be blocked. An authorization\ncode is single-use and minted by a redirect, not something a person retries\nby hand.\n\n**Maintenance mode freezes this the way it freezes the other two sign-ins.**\nThe freeze is on starting a session, not on a credential, so an OAuth sign-in\nhas to answer to it or the switch is bypassable by anybody holding a Google\naccount. Refused before the exchange, so a frozen deployment makes no\noutbound call, spends nobody's authorization code, and counts no auth\nfailure: nobody failed to authenticate, the gateway declined to try.",
+        "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the provider's account resolves to,\nexactly as a password sign-in binds one to the identity that authenticated,\nso every request it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and rendered by the tenancy error handler. Like\nthe passkey route there is no separate post-failure throttle: this route is\nthrottled unconditionally on the way in, because there is no legitimate\ncaller here whose correct credential must never be blocked. An authorization\ncode is single-use and minted by a redirect, not something a person retries\nby hand.\n\n**Maintenance mode freezes this the way it freezes the other two sign-ins.**\nThe freeze is on starting a session, not on a credential, so an OAuth sign-in\nhas to answer to it or the switch is bypassable by anybody holding a Google\naccount. Refused before the exchange, so a frozen deployment makes no\noutbound call, spends nobody's authorization code, and counts no auth\nfailure: nobody failed to authenticate, the gateway declined to try.\n\nA sign-in that created the account, or is the first way in to one, is\nreported to ``GrowthSignalPort`` as a signup once it has committed.",
         "operationId": "auth-callback",
         "parameters": [
           {
@@ -24101,7 +24120,7 @@
     },
     "/api/v1/auth/password/reset/confirm": {
       "post": {
-        "description": "Complete a password reset. Single-use: the token stops working after this.",
+        "description": "Complete a password reset, or choose a first password. Single-use: the token stops working after this.\n\nNot throttled with the address-bearing routes, for the reason the\nverification route gives: the token is the proof.",
         "operationId": "auth-confirm_reset",
         "requestBody": {
           "content": {
@@ -24283,7 +24302,7 @@
     },
     "/api/v1/auth/signup": {
       "post": {
-        "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.",
+        "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.\n\nRefused with a 400 where the deployment publishes terms and ``terms_accepted``\nis not set, whatever the address.",
         "operationId": "auth-signup",
         "requestBody": {
           "content": {
@@ -24325,7 +24344,7 @@
     },
     "/api/v1/auth/verify-email": {
       "post": {
-        "description": "Confirm an address from its verification link, lifting the sign-in gate.",
+        "description": "Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.\n\nOne refusal for a link that is unknown, expired or spent and for a password\nthat does not match, and a refusal consumes nothing. Not throttled with the\naddress-bearing routes: the token is the proof, and a person who mistyped\ntheir password must still be able to use it.",
         "operationId": "auth-verify_email_route",
         "requestBody": {
           "content": {
@@ -26977,7 +26996,7 @@
     },
     "/api/v1/invitations/accept": {
       "post": {
-        "description": "Accept a pending invitation, resolving it to an active membership and optionally setting a first password.",
+        "description": "Accept a pending invitation, resolving it to an active membership and optionally setting a first password.\n\nSetting a first password makes the account usable for the first time, so it\nis reported to ``GrowthSignalPort`` as a signup.",
         "operationId": "invitations-accept_invitation",
         "requestBody": {
           "content": {

@@ -15,10 +15,11 @@ provider sign-in claims it.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import MembershipListenerDep, UnitOfWorkDep, get_db
+from gateway.api.deps import GrowthSignalPortDep, MembershipListenerDep, UnitOfWorkDep, get_db
+from gateway.api.routes._public_auth import throttle_public_auth
 from gateway.models.tenancy import (
     AcceptInvitationRequest,
     AcceptInvitationResultPublic,
@@ -61,18 +62,11 @@ def _throttle(request: Request) -> None:
     out guessing, so this isn't about brute-forcing a token: it's that these
     are the app's only unauthenticated write surface, reachable at whatever
     rate a client can manage, each call costing a handful of reads (``accept``
-    several writes). Reuses the sign-in route's limiter/budget rather than a
-    separate one, unconditionally (not just on failure, unlike sign-in): there
-    is no legitimate caller here to avoid locking out, only a client with an
-    address it can retry from.
+    several writes). Counted unconditionally on the public auth budget
+    (``throttle_public_auth``), not the failed sign-in one, so mistyped
+    passwords do not lock an invitee out of their link.
     """
-    limiter = getattr(request.app.state, "login_rate_limiter", None)
-    if limiter is None:
-        return
-    client_ip = request.client.host if request.client else None
-    if client_ip is None:
-        return
-    limiter.check(client_ip)
+    throttle_public_auth(request)
 
 
 @router.post("/validate")
@@ -94,14 +88,30 @@ async def validate_invitation(
 @router.post("/accept")
 async def accept_invitation(
     request: Request,
+    background_tasks: BackgroundTasks,
     service: OrganizationServiceDep,
+    growth: GrowthSignalPortDep,
     body: AcceptInvitationRequest,
 ) -> AcceptInvitationResultPublic:
-    """Accept a pending invitation, resolving it to an active membership and optionally setting a first password."""
+    """Accept a pending invitation, resolving it to an active membership and optionally setting a first password.
+
+    Setting a first password makes the account usable for the first time, so it
+    is reported to ``GrowthSignalPort`` as a signup.
+    """
     _throttle(request)
-    return await service.accept_invitation(
+    acceptance = await service.accept_invitation(
         body.token,
         password=body.password,
         full_name=body.full_name,
         terms_accepted=body.terms_accepted,
     )
+    claimed = acceptance.claimed
+    if claimed is not None and claimed.email is not None:
+        await growth.record_signup(
+            background_tasks=background_tasks,
+            user_id=claimed.id,
+            email=claimed.email,
+            full_name=claimed.full_name,
+            created_at=claimed.created_at,
+        )
+    return acceptance.result

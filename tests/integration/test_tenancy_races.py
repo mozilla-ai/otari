@@ -79,7 +79,11 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
-from gateway.services.password_service import verify_absent_password_async, verify_password_async
+from gateway.services.password_service import (
+    hash_password_async,
+    verify_absent_password_async,
+    verify_password_async,
+)
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.membership_listener import MembershipListener
@@ -1149,7 +1153,7 @@ async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity
     organizations_before = await _organization_count(async_db)
 
     async def sign_in(session: AsyncSession) -> uuid.UUID:
-        identity = await DeploymentIdentityProviderAdapter(
+        resolution = await DeploymentIdentityProviderAdapter(
             UserRepository(session),
             OrganizationService(session, **membership_writes(session)),
             open_signup=True,
@@ -1160,7 +1164,7 @@ async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity
             email_verified=True,
         )
         await session.commit()
-        return identity.id
+        return resolution.identity.id
 
     outcomes = await _race(sessions, sign_in)
 
@@ -1289,12 +1293,13 @@ async def test_concurrent_verifications_of_one_token_verify_exactly_once(
     )
     identity_id = identity.id
     token = generate_token()
+    identity.hashed_password = await hash_password_async("vera-password")
     identity.email_verification_token_hash = hash_token(token)
     identity.email_verification_token_expires_at = datetime.now(UTC) + timedelta(hours=1)
     await async_db.commit()
 
     async def attempt(session: AsyncSession) -> object:
-        return await user_service.verify_email(session, token=token)
+        return await user_service.verify_email(session, token=token, password="vera-password", open_signup=True)
 
     outcomes = await _race(sessions, attempt)
 
@@ -1341,7 +1346,7 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
             try:
                 await user_service.reset_password(
                     session,
-                    GatewayConfig(),
+                    GatewayConfig(open_signup=True),
                     organizations=OrganizationService(
                         session, membership_listener=None, workspace_listener=NullWorkspaceListener()
                     ),

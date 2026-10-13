@@ -362,6 +362,9 @@ export interface paths {
          *     account. Refused before the exchange, so a frozen deployment makes no
          *     outbound call, spends nobody's authorization code, and counts no auth
          *     failure: nobody failed to authenticate, the gateway declined to try.
+         *
+         *     A sign-in that created the account, or is the first way in to one, is
+         *     reported to ``GrowthSignalPort`` as a signup once it has committed.
          */
         post: operations["auth-callback"];
         delete?: never;
@@ -433,7 +436,10 @@ export interface paths {
         put?: never;
         /**
          * Confirm Reset
-         * @description Complete a password reset. Single-use: the token stops working after this.
+         * @description Complete a password reset, or choose a first password. Single-use: the token stops working after this.
+         *
+         *     Not throttled with the address-bearing routes, for the reason the
+         *     verification route gives: the token is the proof.
          */
         post: operations["auth-confirm_reset"];
         delete?: never;
@@ -564,6 +570,9 @@ export interface paths {
          *
          *     No session is minted. A newly claimed or registered identity is hard-blocked
          *     from signing in until it verifies, so there is nothing yet to sign it into.
+         *
+         *     Refused with a 400 where the deployment publishes terms and ``terms_accepted``
+         *     is not set, whatever the address.
          */
         post: operations["auth-signup"];
         delete?: never;
@@ -583,7 +592,12 @@ export interface paths {
         put?: never;
         /**
          * Verify Email Route
-         * @description Confirm an address from its verification link, lifting the sign-in gate.
+         * @description Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
+         *
+         *     One refusal for a link that is unknown, expired or spent and for a password
+         *     that does not match, and a refusal consumes nothing. Not throttled with the
+         *     address-bearing routes: the token is the proof, and a person who mistyped
+         *     their password must still be able to use it.
          */
         post: operations["auth-verify_email_route"];
         delete?: never;
@@ -1468,6 +1482,9 @@ export interface paths {
         /**
          * Accept Invitation
          * @description Accept a pending invitation, resolving it to an active membership and optionally setting a first password.
+         *
+         *     Setting a first password makes the account usable for the first time, so it
+         *     is reported to ``GrowthSignalPort`` as a signup.
          */
         post: operations["invitations-accept_invitation"];
         delete?: never;
@@ -6330,6 +6347,12 @@ export interface components {
             password_set: boolean;
             /** Role */
             role: string;
+            /**
+             * Verification Pending
+             * @description Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.
+             * @default false
+             */
+            verification_pending: boolean;
         };
         /**
          * AcceptedSnapshotResponse
@@ -13445,7 +13468,7 @@ export interface components {
         RequestPasswordResetResponse: {
             /**
              * Message
-             * @description The same message whether or not the address has a password to reset.
+             * @description The same message whether or not a link was sent.
              */
             message: string;
         };
@@ -13638,6 +13661,12 @@ export interface components {
              * @description The password to sign in with from now on. At least 8 characters, at most 72 bytes.
              */
             new_password: string;
+            /**
+             * Terms Accepted
+             * @description Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url and the account has not accepted them yet.
+             * @default false
+             */
+            terms_accepted: boolean;
             /**
              * Token
              * @description The token from the reset link.
@@ -14439,7 +14468,7 @@ export interface components {
             password: string;
             /**
              * Terms Accepted
-             * @description Whether the caller accepted this deployment's terms.
+             * @description Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url.
              * @default false
              */
             terms_accepted: boolean;
@@ -15904,6 +15933,11 @@ export interface components {
         };
         /** VerifyEmailRequest */
         VerifyEmailRequest: {
+            /**
+             * Password
+             * @description The password chosen at signup. The link verifies the address only together with it, so a link that reaches someone who did not sign up verifies nothing.
+             */
+            password: string;
             /**
              * Token
              * @description The token from the verification link.

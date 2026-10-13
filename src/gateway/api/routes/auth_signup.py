@@ -72,7 +72,12 @@ class SignupRequest(BaseModel):
     full_name: str | None = Field(
         default=None, max_length=MAX_FULL_NAME_LENGTH, description="Filled in only if not already set."
     )
-    terms_accepted: bool = Field(default=False, description="Whether the caller accepted this deployment's terms.")
+    terms_accepted: bool = Field(
+        default=False,
+        description=(
+            "Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url."
+        ),
+    )
 
 
 class SignupResponse(BaseModel):
@@ -83,6 +88,13 @@ class SignupResponse(BaseModel):
 
 class VerifyEmailRequest(BaseModel):
     token: str = Field(max_length=_MAX_SUBMITTED_TOKEN, description="The token from the verification link.")
+    password: str = Field(
+        max_length=_MAX_SUBMITTED_PASSWORD,
+        description=(
+            "The password chosen at signup. The link verifies the address only together with it, "
+            "so a link that reaches someone who did not sign up verifies nothing."
+        ),
+    )
 
 
 class VerifyEmailResponse(BaseModel):
@@ -126,6 +138,9 @@ async def signup(
 
     No session is minted. A newly claimed or registered identity is hard-blocked
     from signing in until it verifies, so there is nothing yet to sign it into.
+
+    Refused with a 400 where the deployment publishes terms and ``terms_accepted``
+    is not set, whatever the address.
     """
     throttle_public_auth(request)
     try:
@@ -163,12 +178,17 @@ async def signup(
 @router.post("/verify-email")
 async def verify_email_route(
     body: VerifyEmailRequest,
-    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> VerifyEmailResponse:
-    """Confirm an address from its verification link, lifting the sign-in gate."""
-    throttle_public_auth(request)
-    identity = await verify_email(db, token=body.token)
+    """Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
+
+    One refusal for a link that is unknown, expired or spent and for a password
+    that does not match, and a refusal consumes nothing. Not throttled with the
+    address-bearing routes: the token is the proof, and a person who mistyped
+    their password must still be able to use it.
+    """
+    identity = await verify_email(db, token=body.token, password=body.password, open_signup=config.open_signup)
     assert identity.email is not None  # guaranteed: only a claimed identity has a verification token
     return VerifyEmailResponse(email=identity.email)
 

@@ -13,12 +13,12 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
   return { ...actual, apiFetch: vi.fn() }
 })
 
-function renderPage(hash: string) {
+function renderPage(hash: string, termsUrl: string | null = null) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={bootstrap()}>
+    <DeploymentProvider value={bootstrap({ terms_url: termsUrl })}>
       <ThemeProvider>
         <QueryClientProvider client={client}>
           <ResetPasswordPage hash={hash} />
@@ -117,6 +117,32 @@ describe("ResetPasswordPage", () => {
         "This password reset link is invalid, expired, or already used",
       ),
     ).toBeNull()
+  })
+
+  it("requires the terms where the deployment publishes them", async () => {
+    // The same link sets a first password for an account somebody added, so
+    // it can be what makes the account usable at all.
+    vi.mocked(apiFetch).mockResolvedValue(undefined as never)
+    const user = userEvent.setup()
+    renderPage("#/reset-password?token=abc123", "https://example.com/terms")
+
+    await user.type(screen.getByLabelText("New password"), "correct-horse")
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "correct-horse",
+    )
+    expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
+
+    await user.click(screen.getByLabelText("I accept the terms of service"))
+    await user.click(screen.getByRole("button", { name: "Set password" }))
+
+    await screen.findByRole("heading", { name: "Password updated" })
+    const [, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).toEqual({
+      token: "abc123",
+      new_password: "correct-horse",
+      terms_accepted: true,
+    })
   })
 
   it("says there is nothing to set when the link carries no token", () => {

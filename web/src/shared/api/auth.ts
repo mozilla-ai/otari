@@ -14,6 +14,7 @@ import type {
   SignupRequest,
   SignupResponse,
   UpdateProfileRequest,
+  VerifyEmailRequest,
   VerifyEmailResponse,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
@@ -237,46 +238,16 @@ export function useSignup() {
   })
 }
 
-// A query rather than a mutation, the same shape `useValidateInvitation` takes
-// and for a reason that outranks the fact that this one does write: the page
-// verifies on arrival rather than behind a button, so *whatever* fires it has
-// to fire exactly once per token, and a query keyed on the token is the only
-// one of the two that the cache makes idempotent for free. A mutation fired
-// from an effect is not: `main.tsx` runs under StrictMode, whose
-// mount/unmount/mount would spend a single-use token twice and land the second
-// call's `400` over the first call's success.
-//
-// The knobs are what keep it a one-shot, and they are spelled out here rather
-// than leaning on the provider's defaults, because "fires once" is this hook's
-// contract and not a coincidence of how the app is configured. Never stale and
-// never collected, so a remount reads the answer back instead of asking again.
-// No retry, because a spent token's `400` is the final answer and not a blip.
-// And the three automatic refetches are off by name: staleness alone does not
-// hold them back once a query has failed, since a failure leaves no data for
-// `staleTime` to keep fresh, so without these a reconnect or a remount would
-// re-POST a token that is already gone.
-//
-// POST with the token in the body rather than a GET with it in the URL, the
-// same reasoning `useValidateInvitation` gives: the token is a bearer
-// credential and a URL is what an access log or an intermediate proxy
-// routinely retains.
-export function useVerifyEmail(token: string) {
-  return useQuery({
-    queryKey: ["verify-email", token],
-    queryFn: () =>
+// The link verifies only together with the password chosen at signup, so this
+// runs behind a button rather than on arrival. The token travels in the body,
+// not in a URL an access log or a proxy routinely retains.
+export function useVerifyEmail() {
+  return useMutation({
+    mutationFn: (body: VerifyEmailRequest) =>
       apiFetch<VerifyEmailResponse>("/auth/verify-email", {
         method: "POST",
-        body: JSON.stringify({ token }),
+        body: JSON.stringify(body),
       }),
-    // A malformed link is never worth a round trip; the page says so itself.
-    enabled: token.length > 0,
-    retry: false,
-    retryOnMount: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
-    staleTime: Number.POSITIVE_INFINITY,
-    gcTime: Number.POSITIVE_INFINITY,
   })
 }
 

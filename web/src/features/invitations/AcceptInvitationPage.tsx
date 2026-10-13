@@ -111,9 +111,11 @@ export function AcceptInvitationPage() {
               <p className="text-center text-xs text-muted">
                 {accept.data.password_set
                   ? `Your password is set. Sign in as ${preview.data?.email ?? "the invited address"} to get started.`
-                  : preview.data?.needs_password && offersProviderSignIn
-                    ? "Sign in with one of the providers on the sign-in screen to get started."
-                    : "Sign in to get started."}
+                  : accept.data.verification_pending
+                    ? `Verify ${preview.data?.email ?? "the invited address"} first: open the verification link we emailed when you signed up, then sign in.`
+                    : preview.data?.needs_password && offersProviderSignIn
+                      ? "Sign in with one of the providers on the sign-in screen to get started."
+                      : "Sign in to get started."}
               </p>
               <Button
                 variant="primary"

@@ -15,6 +15,7 @@ import logging
 import re
 import uuid
 from base64 import urlsafe_b64encode
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http.cookies import SimpleCookie
 from types import SimpleNamespace
@@ -34,7 +35,7 @@ from sqlmodel import col, delete
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
-from gateway.models.tenancy import Organization, User
+from gateway.models.tenancy import Organization, User, WebAuthnCredential
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
 from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
@@ -963,7 +964,10 @@ def test_a_password_on_an_already_verified_address_survives_linking_a_provider(
         gateway_logger.removeHandler(caplog.handler)
     token = _TOKEN_IN_LINK.search(caplog.text)
     assert token, caplog.text
-    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1)}).status_code == 200
+    assert (
+        client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD}).status_code
+        == 200
+    )
     stub_exchange(monkeypatch)
 
     assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
@@ -1027,6 +1031,109 @@ def test_a_refused_provider_sign_in_writes_nothing_to_a_deactivated_identity(
     assert refused.email_verified_at is None
     assert refused.hashed_password is not None
     assert refused.email_verification_token_hash is not None
+
+
+def _signed_in_cookie(client: TestClient, *, email: str, password: str) -> str:
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": email, "password": password})
+    assert signed_in.status_code == 200, signed_in.text
+    cookie = signed_in.cookies[SESSION_COOKIE_NAME]
+    client.cookies.clear()
+    return cookie
+
+
+def _give_a_passkey_and_a_reset_link(db_session: Session, identity: User) -> None:
+    db_session.add(
+        WebAuthnCredential(
+            user_id=identity.id,
+            name="Laptop",
+            credential_id=f"credential-{identity.id}",
+            public_key="public-key",
+            rp_id="testserver",
+        )
+    )
+    identity.password_reset_token_hash = sha256(b"outstanding reset").hexdigest()
+    identity.password_reset_token_expires_at = datetime.now(UTC) + timedelta(hours=1)
+    db_session.add(identity)
+    db_session.commit()
+
+
+def _passkeys(db_session: Session, identity: User) -> list[WebAuthnCredential]:
+    db_session.expire_all()
+    statement = select(WebAuthnCredential).where(col(WebAuthnCredential.user_id) == identity.id)
+    return list(db_session.execute(statement).scalars())
+
+
+def test_a_provider_sign_in_ends_the_access_a_vouched_password_opened(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # The inviter held the link that chose this password, so whatever it opened
+    # cannot outlive the owner proving the mailbox.
+    invitation = _invite(client, master_key_header, email="ada@example.com")
+    token = invitation["accept_link"].split("token=")[1]
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": UNPROVEN_PASSWORD})
+    assert accepted.status_code == 200, accepted.text
+    vouched_cookie = _signed_in_cookie(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
+    identity = _identity(db_session, "ada@example.com")
+    _give_a_passkey_and_a_reset_link(db_session, identity)
+    stub_exchange(monkeypatch)
+
+    signed_in = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+    assert signed_in.status_code == 200, signed_in.text
+    client.cookies.clear()
+
+    client.cookies.set(SESSION_COOKIE_NAME, vouched_cookie)
+    assert client.get(f"{API_ROOT}/organizations/me").status_code == 401
+    assert _passkeys(db_session, identity) == []
+    assert _identity(db_session, "ada@example.com").password_reset_token_hash is None
+
+
+def test_a_provider_sign_in_keeps_the_access_a_proven_password_opened(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    signup_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    db_session: Session,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        sign_up(client, email="ada@example.com", password=PASSWORD)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    token = _TOKEN_IN_LINK.search(caplog.text)
+    assert token, caplog.text
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD})
+    assert verified.status_code == 200, verified.text
+    proven_cookie = _signed_in_cookie(client, email="ada@example.com", password=PASSWORD)
+    identity = _identity(db_session, "ada@example.com")
+    _give_a_passkey_and_a_reset_link(db_session, identity)
+    stub_exchange(monkeypatch)
+
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+    client.cookies.clear()
+
+    client.cookies.set(SESSION_COOKIE_NAME, proven_cookie)
+    assert client.get(f"{API_ROOT}/organizations/me").status_code == 200
+    assert len(_passkeys(db_session, identity)) == 1
+
+
+@pytest.mark.parametrize(("provider", "label"), [("google", "Google"), ("github", "GitHub")])
+def test_a_refusal_names_the_provider_the_way_it_writes_its_name(
+    client: TestClient, oauth_configured: None, monkeypatch: pytest.MonkeyPatch, provider: str, label: str
+) -> None:
+    stub_exchange(monkeypatch, email="stranger@example.com")
+    unknown = client.post(f"{API_ROOT}/auth/oauth/{provider}/callback", json={"code": "c", "state": "s"})
+    stub_exchange(monkeypatch, email_verified=False)
+    unverified = client.post(f"{API_ROOT}/auth/oauth/{provider}/callback", json={"code": "c", "state": "s"})
+
+    assert unknown.json()["detail"].startswith(f"That {label} account")
+    assert unverified.json()["detail"].startswith(f"{label} did not confirm")
 
 
 # ---------- the state check, with nothing stubbed but the token endpoint ----------

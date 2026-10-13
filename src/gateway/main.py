@@ -1233,10 +1233,15 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
         app.add_middleware(MetricsMiddleware)
 
+    # Two budgets of the same size: failed sign-ins, and the public auth routes
+    # (signup, resend, reset request, OAuth, invitation links), so spending one
+    # does not lock a person out of the other.
     if config.dashboard_login_rate_limit_per_minute is not None:
         app.state.login_rate_limiter = RateLimiter(config.dashboard_login_rate_limit_per_minute)
+        app.state.public_auth_rate_limiter = RateLimiter(config.dashboard_login_rate_limit_per_minute)
     else:
         app.state.login_rate_limiter = None
+        app.state.public_auth_rate_limiter = None
 
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
 

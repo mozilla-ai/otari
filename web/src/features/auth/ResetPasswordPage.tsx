@@ -1,6 +1,7 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
 import { useResetPassword } from "@/shared/api/auth"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import {
@@ -8,6 +9,7 @@ import {
   MIN_PASSWORD_LENGTH,
   newPasswordProblem,
 } from "@/shared/helpers/password"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { AuthPasswordField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
@@ -24,16 +26,27 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
  * goes next. The gateway revokes every other session this identity holds as
  * part of the reset, so a session opened before the account was recovered does
  * not outlive it.
+ *
+ * The same link sets a first password for an account somebody added or
+ * invited, so where the deployment publishes terms they are accepted here, as
+ * on signup. The gateway records the acceptance only for an account that has
+ * none yet.
  */
 export function ResetPasswordPage({ hash }: { hash: string }) {
   const token = tokenFromHash(hash)
   const reset = useResetPassword()
+  const { terms_url } = useDeployment()
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [isTermsAccepted, setIsTermsAccepted] = useState(false)
 
   const problem = newPasswordProblem(password, confirmPassword)
   const isComplete = password !== "" && confirmPassword !== ""
-  const canSubmit = token !== null && isComplete && problem === null
+  const canSubmit =
+    token !== null &&
+    isComplete &&
+    problem === null &&
+    (terms_url === null || isTermsAccepted)
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to
@@ -50,7 +63,11 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
     if (!canSubmit || reset.isPending) {
       return
     }
-    reset.mutate({ token, new_password: password })
+    reset.mutate({
+      token,
+      new_password: password,
+      ...(terms_url !== null ? { terms_accepted: true } : {}),
+    })
   }
 
   if (token === null) {
@@ -131,6 +148,33 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
           }}
           autoComplete="new-password"
         />
+        {/* Beside the checkbox rather than inside its label, for the reason
+            `SignupPage` gives: nested, the link only ticked the box. */}
+        {terms_url !== null ? (
+          <div className="flex flex-wrap items-center gap-x-1 text-caption">
+            <Checkbox
+              isSelected={isTermsAccepted}
+              onChange={(next) => {
+                setIsTermsAccepted(next)
+                clearError()
+              }}
+              ariaLabel="I accept the terms of service"
+            >
+              <span className="text-caption">I accept the</span>
+            </Checkbox>
+            <span>
+              <a
+                href={terms_url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-link hover:text-link-hover"
+              >
+                terms of service
+              </a>
+              .
+            </span>
+          </div>
+        ) : null}
         <ErrorBanner error={reset.error} />
         <Button
           type="submit"

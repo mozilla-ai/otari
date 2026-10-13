@@ -27,6 +27,7 @@ const SESSION_MARKER = "otari.dashboard.hasSession"
 // is what most tests press; the ones about claiming a seat say so.
 function mockApi(opts: {
   needsPassword?: boolean
+  verificationPending?: boolean
   previewError?: string
   acceptError?: string
 }) {
@@ -55,6 +56,7 @@ function mockApi(opts: {
         organization_name: "Acme",
         role: "admin",
         password_set: body.password !== undefined,
+        verification_pending: opts.verificationPending ?? false,
       } as never
     }
     throw new Error(`Unexpected apiFetch call: ${url}`)
@@ -140,6 +142,22 @@ describe("AcceptInvitationPage", () => {
     expect(screen.queryByLabelText("Password")).toBeNull()
     await user.click(screen.getByRole("button", { name: "Go to sign in" }))
     expect(window.location.hash).toBe("#/")
+  })
+
+  it("says to verify first when the address signed up and has not verified yet", async () => {
+    // Accepting never verifies: whoever signed up may not hold the mailbox.
+    mockApi({ verificationPending: true })
+    const user = userEvent.setup()
+    renderPage("#/accept-invitation?token=abc123")
+
+    await user.click(
+      await screen.findByRole("button", { name: "Accept invitation" }),
+    )
+
+    expect(
+      await screen.findByText(/Verify ada@example.com first/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Sign in to get started.")).toBeNull()
   })
 
   it("sets a password for an address that has never signed in, in the same step", async () => {

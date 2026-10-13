@@ -71,7 +71,7 @@ def test_signup_then_verify_then_sign_in(
     unverified = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
     assert unverified.status_code == 403
 
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
     assert verified.json()["email"] == "ada@example.com"
 
@@ -122,7 +122,7 @@ def test_invited_member_accepts_then_claims_the_invited_address(
     assert spent.status_code == 400, spent.text
 
     verification_token = _signed_up_token(client, caplog, email=previewed_email)
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": verification_token})
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": verification_token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
 
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": previewed_email, "password": PASSWORD})

@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import OrganizationServiceDep, get_config, get_db
+from gateway.api.deps import GrowthSignalPortDep, OrganizationServiceDep, get_config, get_db
 from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
 from gateway.core.config import GatewayConfig
 from gateway.services.mail import MailNotConfiguredError
@@ -28,7 +28,11 @@ router = APIRouter(prefix="/auth/password", tags=["auth"])
 _MAX_SUBMITTED_PASSWORD = 1024
 _MAX_SUBMITTED_TOKEN = 512
 
-_RESET_REQUEST_MESSAGE = "If this address has a password, a reset email is on its way."
+# One wording for both cases a link is mailed for, a forgotten password and a
+# first one, so the response says nothing about which applies to the address.
+_RESET_REQUEST_MESSAGE = (
+    "If this address has an account here, an email with a link to set or reset its password is on its way."
+)
 
 
 class RequestPasswordResetRequest(BaseModel):
@@ -36,7 +40,7 @@ class RequestPasswordResetRequest(BaseModel):
 
 
 class RequestPasswordResetResponse(BaseModel):
-    message: str = Field(description="The same message whether or not the address has a password to reset.")
+    message: str = Field(description="The same message whether or not a link was sent.")
 
 
 class ResetPasswordRequest(BaseModel):
@@ -45,6 +49,13 @@ class ResetPasswordRequest(BaseModel):
         min_length=8,
         max_length=_MAX_SUBMITTED_PASSWORD,
         description="The password to sign in with from now on. At least 8 characters, at most 72 bytes.",
+    )
+    terms_accepted: bool = Field(
+        default=False,
+        description=(
+            "Whether the caller accepted this deployment's terms. Required where the bootstrap reports a "
+            "terms_url and the account has not accepted them yet."
+        ),
     )
 
 
@@ -71,14 +82,33 @@ async def request_reset(
 @router.post("/reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
 async def confirm_reset(
     body: ResetPasswordRequest,
-    request: Request,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    growth: GrowthSignalPortDep,
     organizations: OrganizationServiceDep,
 ) -> None:
-    """Complete a password reset. Single-use: the token stops working after this."""
-    throttle_public_auth(request)
-    await reset_password(db, config, organizations=organizations, token=body.token, new_password=body.new_password)
+    """Complete a password reset, or choose a first password. Single-use: the token stops working after this.
+
+    Not throttled with the address-bearing routes, for the reason the
+    verification route gives: the token is the proof.
+    """
+    claimed = await reset_password(
+        db,
+        config,
+        organizations=organizations,
+        token=body.token,
+        new_password=body.new_password,
+        terms_accepted=body.terms_accepted,
+    )
+    if claimed is not None and claimed.email is not None:
+        await growth.record_signup(
+            background_tasks=background_tasks,
+            user_id=claimed.id,
+            email=claimed.email,
+            full_name=claimed.full_name,
+            created_at=claimed.created_at,
+        )
 
 
 __all__ = ["router"]

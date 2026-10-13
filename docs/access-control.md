@@ -430,22 +430,33 @@ dashboard to finish. Where an edge serves the dashboard elsewhere, set
 
 OAuth signs in the account that holds the address the provider verified. If no account holds that address, the result depends on `open_signup`, as it does for [signup](#signup). When `open_signup` is disabled, the sign-in is refused, and so is one on an account an owner or admin added or invited whose address nobody has verified yet, unless it is still an active member or has an invitation it can accept, the same rule [signup](#signup) follows. When it is enabled, Otari creates an account with its own organization and workspace, and sends no verification email, because the provider has already verified the address. A sign-in is always refused if the provider did not verify the address, or if the account for it is deactivated.
 
-A provider sign-in on an address that is not yet verified marks it verified. It also removes any password and verification link set on that address before then: the provider confirms who owns the address, not who chose that password. The person can set a new password from their account page once signed in. A password on an address that was already verified is kept.
+A provider sign-in on an address that is not yet verified, or that an organization only vouched for (see [Invitations](#invitations)), marks it verified. It also removes everything set up on that address before then: its password, any verification or reset link, every session signed in with that password, and every passkey registered from one. The provider confirms who owns the address, not who chose that password. The person can set a new password from their account page once signed in. A password on an address that was already verified is kept, with its sessions and passkeys.
+
+A sign-in that creates an account, or that is the first way in to one an owner or admin added, is reported as a signup to whatever growth integration the deployment runs, as the signup form, a first password set from an invitation link, and a first password set by reset are.
 
 ### Signup
 
-Signup sets a password for an address and sends a verification link. What an
-unknown address does depends on `open_signup`:
+Signup sets a password for an address and sends a verification link. The link
+verifies the address only together with that password: the verification page
+asks for it, and a wrong one is refused without spending the link. Anyone can
+sign up with an address they do not hold, and the link then reaches the
+address's real owner, whose click must not activate a password a stranger
+chose. An owner who never signed up uses "Forgot your password?" instead, which
+replaces that password. Where the deployment publishes terms (`terms_url`),
+signup is refused unless they are accepted. What an unknown address does depends
+on `open_signup`:
 
 - `false` (default): signup only completes an identity an owner or admin already
   added or invited by address, and only while it is still wanted: an active
   member, or an invitee whose invitation is still pending. An address nobody has
-  added gets no account. An identity whose invitation was revoked or expired, or
-  whose membership was removed, still exists, but signup refuses to claim it.
-  This is the posture a single-tenant deployment wants, since anyone who can
-  reach the dashboard can reach the form. For the same reason, creating an
-  organization requires an active membership in one already, so a member who
-  was removed cannot make themselves a tenant.
+  added gets no account, and neither does one whose invitation was revoked or
+  expired or whose membership was removed. This is the posture a single-tenant
+  deployment wants, since anyone who can reach the dashboard can reach the form.
+  The rule holds when a link is used as well as when it is mailed, so revoking
+  the invitation or removing the member also stops a verification link, a resent
+  one, and a reset link minted before then. For the same reason, creating an
+  organization requires an active membership in one already, so a member who was
+  removed cannot make themselves a tenant.
 - `true`: an unknown address is registered, with an organization and workspace of
   its own. Use it where the deployment serves many tenants.
 
@@ -453,14 +464,17 @@ Signup never sets a password on an address that is already verified. That is the
 state a Google or GitHub sign-in leaves, and the person who signs in that way
 adds a password from Account settings while signed in.
 
-"Forgot your password?" mails a reset link to an address that has a password,
-and also to one an owner or admin added or invited that nobody has signed in to
-yet, so that person can choose a first password. Completing the reset verifies
-the address, since the link reached its mailbox. Where `open_signup` is
-disabled, every address that is not yet verified, with or without a password,
-follows the signup rule above: it gets a link, and the link completes, only
-while it is an active member or holds an invitation it can still accept, so a
-revoked invitee gets none. An address that signs in only through a provider
+"Forgot your password?" mails a link to set or reset the password of an
+address that has a password, and also of one an owner or admin added or invited
+that nobody has signed in to yet, so that person can choose a first password.
+Completing it verifies the address, since the link reached its mailbox, and where
+the address was unverified or only vouched for it also ends every session and
+removes every passkey set up before then. Where `open_signup` is disabled, every
+address that is not yet verified, with or without a password, follows the signup
+rule above: it gets a link, and the link completes, only while it is an active
+member or holds an invitation it can still accept, so a revoked invitee gets
+none. Where the deployment publishes terms and the account has accepted none,
+the reset page asks for them. An address that signs in only through a provider
 gets no link.
 
 Either way the response says the same thing whether the address was unknown,

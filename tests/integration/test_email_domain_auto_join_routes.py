@@ -147,7 +147,10 @@ def _claim_password(
     assert signed_up.status_code == 200, signed_up.text
     token = _TOKEN_IN_LINK.search(caplog.text)
     assert token, caplog.text
-    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1)}).status_code == 200
+    assert (
+        client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD}).status_code
+        == 200
+    )
 
 
 def _memberships(client: TestClient) -> list[dict[str, Any]]:

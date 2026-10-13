@@ -217,7 +217,7 @@ test("recover password", async ({ page }) => {
   await withMailReady(page)
   await page.goto("/#/recover-password")
   await expect(
-    page.getByRole("heading", { name: "Reset your password" }),
+    page.getByRole("heading", { name: "Set or reset your password" }),
   ).toBeVisible()
   await captureScreenshot(page, "recover-password")
 })
@@ -226,8 +226,10 @@ test("verify email with a spent link", async ({ page }) => {
   // The gateway's own refusal, not a stub: a token it never issued is exactly
   // what an expired or already-used link looks like to it.
   await page.goto("/#/verify-email?token=not-a-real-token")
+  await page.getByLabel("Password", { exact: true }).fill("a-real-password")
+  await page.getByRole("button", { name: "Verify email" }).click()
   await expect(
-    page.getByRole("heading", { name: "Verification failed" }),
+    page.getByText("This verification link is invalid", { exact: false }),
   ).toBeVisible()
   await captureScreenshot(page, "verify-email-failed")
 })

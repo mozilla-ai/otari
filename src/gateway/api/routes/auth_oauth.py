@@ -39,12 +39,18 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import IdentityProviderPortDep, get_config, get_db, record_auth_failure
+from gateway.api.deps import (
+    GrowthSignalPortDep,
+    IdentityProviderPortDep,
+    get_config,
+    get_db,
+    record_auth_failure,
+)
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
@@ -243,6 +249,8 @@ async def callback(
     request: Request,
     response: Response,
     identity_provider: IdentityProviderPortDep,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     flow_cookie: FlowCookie = None,
@@ -267,6 +275,9 @@ async def callback(
     account. Refused before the exchange, so a frozen deployment makes no
     outbound call, spends nobody's authorization code, and counts no auth
     failure: nobody failed to authenticate, the gateway declined to try.
+
+    A sign-in that created the account, or is the first way in to one, is
+    reported to ``GrowthSignalPort`` as a signup once it has committed.
     """
     throttle_public_auth(request)
     if await is_maintenance_mode(db):
@@ -278,7 +289,7 @@ async def callback(
         external = await exchange_code(
             config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
         )
-        identity = await identity_provider.resolve(
+        resolution = await identity_provider.resolve(
             provider=external.provider,
             email=external.email,
             full_name=external.full_name,
@@ -303,6 +314,7 @@ async def callback(
         # Not guarded: the only expected failure is two concurrent sign-ins
         # racing, which the service settles on its own, and a database that
         # cannot stage this cannot stage the session row either.
+        identity = resolution.identity
         await OrganizationDomainService(db).auto_join_for_user(identity)
         token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
         await db.commit()
@@ -310,6 +322,14 @@ async def callback(
         await db.rollback()
         raise database_error(f"persist a dashboard session on a {provider} sign-in", exc) from None
     logger.info("Signed in %s with %s", identity.id, provider_label(provider))
+    if resolution.new_account and identity.email is not None:
+        await growth.record_signup(
+            background_tasks=background_tasks,
+            user_id=identity.id,
+            email=identity.email,
+            full_name=identity.full_name,
+            created_at=identity.created_at,
+        )
     apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
     return OAuthSessionResponse(
         expires_at=expires_at,

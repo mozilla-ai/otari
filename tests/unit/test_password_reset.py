@@ -16,11 +16,12 @@ from fastapi.testclient import TestClient
 from httpx2 import Response
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
+from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
-from gateway.models.tenancy import DashboardSession
+from gateway.models.tenancy import DashboardSession, User, WebAuthnCredential
 
 MASTER_KEY = "sk-test-master"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
@@ -78,7 +79,7 @@ def _claimed_and_verified(client: TestClient, caplog: pytest.LogCaptureFixture, 
     )
     assert signup.status_code == 200, signup.text
     token = _extract_token(caplog.text)
-    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
 
 
 def _request_reset(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> tuple[int, str]:
@@ -494,3 +495,157 @@ def test_reset_claims_a_revoked_invitee_where_signup_is_open(tmp_path: Path, cap
 
         assert status_code == 200
         assert "mail:console" in log_text
+
+
+def test_reset_request_says_the_same_thing_for_a_first_password_and_a_forgotten_one(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _invite(client, email="ida@example.com")
+
+        messages: set[str] = set()
+        for email in ("nobody@example.com", "ada@example.com", "ida@example.com"):
+            reply = client.post(f"{API_ROOT}/auth/password/reset", json={"email": email})
+            messages.add(reply.json()["message"])
+        _, mailed = _request_reset(client, caplog, email="ida@example.com")
+
+        assert len(messages) == 1
+        assert "set or reset" in messages.pop()
+        assert "Set or reset your Otari password" in mailed
+
+
+def test_a_reset_link_stops_working_once_the_invitation_behind_it_is_revoked(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Closed signup's rule holds when the link is used, not only when it was mailed."""
+    with _client(tmp_path) as client:
+        invitation_id = _invite(client, email="eve@example.com")
+        _, log_text = _request_reset(client, caplog, email="eve@example.com")
+        revoked = client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{invitation_id}", headers={"Otari-Key": MASTER_KEY}
+        )
+        assert revoked.status_code == 200, revoked.text
+
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm",
+            json={"token": _extract_token(log_text), "new_password": NEW_PASSWORD},
+        )
+
+        assert confirmed.status_code == 400
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "eve@example.com", "password": NEW_PASSWORD})
+        assert signed_in.status_code == 401
+
+
+TERMS_URL = "https://example.com/terms"
+
+
+def _terms_accepted_at(tmp_path: Path, *, email: str) -> object:
+    engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+    with engine.begin() as connection:
+        accepted = connection.execute(
+            text('SELECT terms_accepted_at FROM "user" WHERE email = :email'), {"email": email}
+        ).scalar_one()
+    engine.dispose()
+    return accepted
+
+
+def test_a_reset_that_claims_an_account_requires_the_published_terms(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path, terms_url=TERMS_URL) as client:
+        _invite(client, email="ida@example.com")
+        _, log_text = _request_reset(client, caplog, email="ida@example.com")
+        token = _extract_token(log_text)
+
+        refused = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
+        )
+        assert refused.status_code == 400, refused.text
+        assert _terms_accepted_at(tmp_path, email="ida@example.com") is None
+
+        # The refusal spent nothing, so the same link completes once the terms are accepted.
+        accepted = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm",
+            json={"token": token, "new_password": NEW_PASSWORD, "terms_accepted": True},
+        )
+        assert accepted.status_code == 204, accepted.text
+    assert _terms_accepted_at(tmp_path, email="ida@example.com") is not None
+
+
+def test_a_reset_does_not_ask_again_for_terms_already_accepted(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path, terms_url=TERMS_URL) as client:
+        client.post(
+            f"{API_ROOT}/organizations/me/members",
+            json={"email": "ada@example.com", "role": "member"},
+            headers={"Otari-Key": MASTER_KEY},
+        )
+        _with_logs(
+            client,
+            caplog,
+            lambda: client.post(
+                f"{API_ROOT}/auth/signup",
+                json={"email": "ada@example.com", "password": PASSWORD, "terms_accepted": True},
+            ),
+        )
+        _, log_text = _request_reset(client, caplog, email="ada@example.com")
+
+        _complete_reset(client, log_text)
+
+
+def _add_passkey(tmp_path: Path, *, email: str) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+    with sessionmaker(bind=engine)() as session:
+        identity = session.execute(select(User).where(col(User.email) == email)).scalar_one()
+        session.add(
+            WebAuthnCredential(
+                user_id=identity.id,
+                name="Laptop",
+                credential_id=f"credential-{identity.id}",
+                public_key="public-key",
+                rp_id="gw.example.com",
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+
+def _passkey_count(tmp_path: Path) -> int:
+    engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+    with engine.begin() as connection:
+        count = connection.execute(text("SELECT COUNT(*) FROM webauthn_credential")).scalar_one()
+    engine.dispose()
+    return int(count)
+
+
+def test_a_reset_that_replaces_a_vouched_address_removes_the_passkeys_registered_under_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        _claimed_and_verified(client, caplog, email="ada@example.com")
+        engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+        with engine.begin() as connection:
+            connection.execute(
+                text('UPDATE "user" SET email_vouched_at = CURRENT_TIMESTAMP WHERE email = :email'),
+                {"email": "ada@example.com"},
+            )
+        engine.dispose()
+        _add_passkey(tmp_path, email="ada@example.com")
+
+        _, log_text = _request_reset(client, caplog, email="ada@example.com")
+        _complete_reset(client, log_text)
+
+    assert _passkey_count(tmp_path) == 0
+
+
+def test_an_ordinary_reset_keeps_the_passkeys(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    with _client(tmp_path) as client:
+        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _add_passkey(tmp_path, email="ada@example.com")
+
+        _, log_text = _request_reset(client, caplog, email="ada@example.com")
+        _complete_reset(client, log_text)
+
+    assert _passkey_count(tmp_path) == 1

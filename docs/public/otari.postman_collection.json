@@ -629,7 +629,7 @@
               },
               "raw": "{\n  \"code\": \"string\",\n  \"state\": \"string\"\n}"
             },
-            "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the provider's account resolves to,\nexactly as a password sign-in binds one to the identity that authenticated,\nso every request it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and rendered by the tenancy error handler. Like\nthe passkey route there is no separate post-failure throttle: this route is\nthrottled unconditionally on the way in, because there is no legitimate\ncaller here whose correct credential must never be blocked. An authorization\ncode is single-use and minted by a redirect, not something a person retries\nby hand.\n\n**Maintenance mode freezes this the way it freezes the other two sign-ins.**\nThe freeze is on starting a session, not on a credential, so an OAuth sign-in\nhas to answer to it or the switch is bypassable by anybody holding a Google\naccount. Refused before the exchange, so a frozen deployment makes no\noutbound call, spends nobody's authorization code, and counts no auth\nfailure: nobody failed to authenticate, the gateway declined to try.",
+            "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the provider's account resolves to,\nexactly as a password sign-in binds one to the identity that authenticated,\nso every request it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and rendered by the tenancy error handler. Like\nthe passkey route there is no separate post-failure throttle: this route is\nthrottled unconditionally on the way in, because there is no legitimate\ncaller here whose correct credential must never be blocked. An authorization\ncode is single-use and minted by a redirect, not something a person retries\nby hand.\n\n**Maintenance mode freezes this the way it freezes the other two sign-ins.**\nThe freeze is on starting a session, not on a credential, so an OAuth sign-in\nhas to answer to it or the switch is bypassable by anybody holding a Google\naccount. Refused before the exchange, so a frozen deployment makes no\noutbound call, spends nobody's authorization code, and counts no auth\nfailure: nobody failed to authenticate, the gateway declined to try.\n\nA sign-in that created the account, or is the first way in to one, is\nreported to ``GrowthSignalPort`` as a signup once it has committed.",
             "header": [
               {
                 "key": "Content-Type",
@@ -741,7 +741,7 @@
               },
               "raw": "{\n  \"token\": \"string\",\n  \"new_password\": \"string\"\n}"
             },
-            "description": "Complete a password reset. Single-use: the token stops working after this.",
+            "description": "Complete a password reset, or choose a first password. Single-use: the token stops working after this.\n\nNot throttled with the address-bearing routes, for the reason the\nverification route gives: the token is the proof.",
             "header": [
               {
                 "key": "Content-Type",
@@ -899,7 +899,7 @@
               },
               "raw": "{\n  \"email\": \"string\",\n  \"password\": \"string\"\n}"
             },
-            "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.",
+            "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.\n\nRefused with a 400 where the deployment publishes terms and ``terms_accepted``\nis not set, whatever the address.",
             "header": [
               {
                 "key": "Content-Type",
@@ -931,9 +931,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"token\": \"string\"\n}"
+              "raw": "{\n  \"token\": \"string\",\n  \"password\": \"string\"\n}"
             },
-            "description": "Confirm an address from its verification link, lifting the sign-in gate.",
+            "description": "Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.\n\nOne refusal for a link that is unknown, expired or spent and for a password\nthat does not match, and a refusal consumes nothing. Not throttled with the\naddress-bearing routes: the token is the proof, and a person who mistyped\ntheir password must still be able to use it.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2525,7 +2525,7 @@
               },
               "raw": "{\n  \"token\": \"string\"\n}"
             },
-            "description": "Accept a pending invitation, resolving it to an active membership and optionally setting a first password.",
+            "description": "Accept a pending invitation, resolving it to an active membership and optionally setting a first password.\n\nSetting a first password makes the account usable for the first time, so it\nis reported to ``GrowthSignalPort`` as a signup.",
             "header": [
               {
                 "key": "Content-Type",

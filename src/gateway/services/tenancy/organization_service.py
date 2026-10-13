@@ -232,6 +232,14 @@ _BULK_INVITE_MAIL_CONCURRENCY = 5
 
 
 @dataclass(frozen=True, slots=True)
+class InvitationAcceptance:
+    """What accepting an invitation by its link produced, and the identity it claimed, if it set a first password."""
+
+    result: AcceptInvitationResultPublic
+    claimed: User | None
+
+
+@dataclass(frozen=True, slots=True)
 class SignupRegistration:
     """Holds the identity a signup resolves to, and whether that signup created it."""
 
@@ -1402,7 +1410,7 @@ class OrganizationService:
         password: str | None = None,
         full_name: str | None = None,
         terms_accepted: bool = False,
-    ) -> AcceptInvitationResultPublic:
+    ) -> InvitationAcceptance:
         """Resolve a pending invitation to an active membership, optionally setting a first password.
 
         No session is minted (see ``AcceptInvitationResultPublic``): this
@@ -1418,6 +1426,11 @@ class OrganizationService:
         an unclaimed seat and never take over an account. The verification it
         stamps is recorded as vouched (``email_vouched_at``), which domain
         auto-join does not trust.
+
+        ``verification_pending`` on the result says the invitee chose a password
+        through signup and has not verified it yet, so the page can tell them to
+        verify before signing in. Accepting never verifies it: whoever signed up
+        may not be the person the invitation reached.
         """
         if password is not None:
             # Before the lookup, so a policy refusal says nothing about the token.
@@ -1435,8 +1448,8 @@ class OrganizationService:
         # no longer pending, so it raises InvitationAlreadyUsedError instead.
         await self.organizations.lock(organization.id)
         invitation, membership, organization = await self._resolve_pending_invitation(token)
+        invitee = await self.users.get(membership.user_id)
         if password is not None:
-            invitee = await self.users.get(membership.user_id)
             if invitee is None or not await self._invitation_may_set_password(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError
             now = datetime.now(UTC)
@@ -1462,7 +1475,15 @@ class OrganizationService:
                 await self.db.rollback()
                 raise InvitationPasswordNotAcceptedError
         result = await self._resolve_invitation_to_active_membership(invitation, membership, organization)
-        return result.model_copy(update={"password_set": password is not None})
+        verification_pending = (
+            invitee is not None and invitee.hashed_password is not None and invitee.email_verified_at is None
+        )
+        return InvitationAcceptance(
+            result=result.model_copy(
+                update={"password_set": password is not None, "verification_pending": verification_pending}
+            ),
+            claimed=invitee if password is not None else None,
+        )
 
     async def _resolve_invitation_to_active_membership(
         self,
@@ -1974,4 +1995,4 @@ class OrganizationService:
         )
 
 
-__all__ = ["OrganizationService", "SignupRegistration"]
+__all__ = ["InvitationAcceptance", "OrganizationService", "SignupRegistration"]

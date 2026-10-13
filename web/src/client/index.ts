@@ -92,11 +92,15 @@ export type SignupRequest = Defaulted<
   "terms_accepted"
 >
 export type SignupResponse = Schemas["SignupResponse"]
+export type VerifyEmailRequest = Schemas["VerifyEmailRequest"]
 export type VerifyEmailResponse = Schemas["VerifyEmailResponse"]
 export type ResendVerificationResponse = Schemas["ResendVerificationResponse"]
 export type RequestPasswordResetResponse =
   Schemas["RequestPasswordResetResponse"]
-export type ResetPasswordRequest = Schemas["ResetPasswordRequest"]
+export type ResetPasswordRequest = Defaulted<
+  Schemas["ResetPasswordRequest"],
+  "terms_accepted"
+>
 
 // ---------------------------------------------------------------------------
 // Passkeys (otari#652)

@@ -1681,7 +1681,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": ("gateway/services/tenancy/webauthn_service.py",),
     },
     "gateway.models.tenancy.WebAuthnCredential": {
-        "repository": None,
+        "repository": "gateway/repositories/identity/webauthn_credential_repository.py",
         "baseline": ("gateway/services/tenancy/webauthn_service.py",),
     },
     "gateway.models.tenancy.Workspace": {

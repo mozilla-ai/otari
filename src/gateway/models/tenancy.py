@@ -1185,6 +1185,13 @@ class AcceptInvitationResultPublic(SQLModel):
     organization_name: str
     role: str
     password_set: bool = Field(default=False, description="Whether this accept set the identity's password.")
+    verification_pending: bool = Field(
+        default=False,
+        description=(
+            "Whether the invited address chose a password through signup and has not verified it yet, "
+            "so it has to open its verification link before it can sign in."
+        ),
+    )
 
 
 class PendingOrganizationInvitationPublic(SQLModel):

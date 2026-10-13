@@ -15,6 +15,8 @@ puts first-occurrence detection on the caller, and a milestone that fires on
 every key is not a milestone.
 """
 
+import logging
+import re
 import uuid
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
@@ -28,9 +30,11 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.oauth_service import OAuthIdentity
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 _KEYS = f"{API_ROOT}/organizations/me/keys"
@@ -174,6 +178,104 @@ def test_a_second_signup_on_a_claimed_address_notifies_nothing(
         assert response.status_code == status.HTTP_200_OK, response.text
 
     assert len(growth.of("signup")) == 1, growth.calls
+
+
+def _sign_in_with_google(client: TestClient, monkeypatch: pytest.MonkeyPatch, *, email: str) -> None:
+    async def _exchange(_config: GatewayConfig, provider: str, **_: Any) -> OAuthIdentity:
+        return OAuthIdentity(provider=provider, email=email, full_name="Ada Lovelace", email_verified=True)
+
+    monkeypatch.setattr("gateway.api.routes.auth_oauth.exchange_code", _exchange)
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+    assert response.status_code == status.HTTP_200_OK, response.text
+    client.cookies.clear()
+
+
+@pytest.fixture
+def oauth(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(test_config, "public_base_url", "http://testserver")
+    monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
+    monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
+
+
+def test_a_provider_registration_notifies_the_signup_and_a_later_sign_in_does_not(
+    client: TestClient,
+    test_config: GatewayConfig,
+    growth: RecordingGrowthAdapter,
+    oauth: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "open_signup", True)
+
+    _sign_in_with_google(client, monkeypatch, email="new@example.com")
+    _sign_in_with_google(client, monkeypatch, email="new@example.com")
+
+    signups = growth.of("signup")
+    assert [signup["email"] for signup in signups] == ["new@example.com"], growth.calls
+
+
+def test_a_provider_sign_in_that_claims_an_added_address_notifies_the_signup(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    growth: RecordingGrowthAdapter,
+    oauth: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _add_member(client, master_key_header, email="ada@example.com")
+
+    _sign_in_with_google(client, monkeypatch, email="ada@example.com")
+
+    assert [signup["email"] for signup in growth.of("signup")] == ["ada@example.com"], growth.calls
+
+
+def test_a_first_password_from_an_invitation_link_notifies_the_signup(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    growth: RecordingGrowthAdapter,
+) -> None:
+    invited = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "ida@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert invited.status_code == status.HTTP_201_CREATED, invited.text
+    token = invited.json()["accept_link"].split("token=")[1]
+
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+
+    assert accepted.status_code == status.HTTP_200_OK, accepted.text
+    assert [signup["email"] for signup in growth.of("signup")] == ["ida@example.com"], growth.calls
+
+
+def _complete_a_reset(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> None:
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    caplog.clear()
+    try:
+        requested = client.post(f"{API_ROOT}/auth/password/reset", json={"email": email})
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    assert requested.status_code == status.HTTP_200_OK, requested.text
+    match = re.search(r"token=([\w-]+)", caplog.text)
+    assert match, caplog.text
+    confirmed = client.post(
+        f"{API_ROOT}/auth/password/reset/confirm", json={"token": match.group(1), "new_password": PASSWORD}
+    )
+    assert confirmed.status_code == status.HTTP_204_NO_CONTENT, confirmed.text
+
+
+def test_a_reset_that_claims_an_added_address_notifies_the_signup_and_a_later_reset_does_not(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    growth: RecordingGrowthAdapter,
+    mail: None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _add_member(client, master_key_header, email="ada@example.com")
+
+    _complete_a_reset(client, caplog, email="ada@example.com")
+    _complete_a_reset(client, caplog, email="ada@example.com")
+
+    assert [signup["email"] for signup in growth.of("signup")] == ["ada@example.com"], growth.calls
 
 
 @pytest.fixture

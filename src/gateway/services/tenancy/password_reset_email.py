@@ -13,7 +13,7 @@ def render_password_reset_email(*, reset_link: str, expiry_hours: int) -> MailMe
     """Render the password-reset message for one recipient."""
     return render_email(
         "password_reset",
-        subject="Reset your Otari password",
+        subject="Set or reset your Otari password",
         values={
             "RESET_LINK": reset_link,
             "VALID_PERIOD": format_expiry(expiry_hours),

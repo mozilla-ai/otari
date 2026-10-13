@@ -212,7 +212,6 @@ describe("App", () => {
   })
 
   it("renders a public auth page ahead of the sign-in screen", async () => {
-    vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
     window.location.hash = "#/verify-email?token=abc123"
 
     renderApp(bootstrap())
@@ -220,7 +219,7 @@ describe("App", () => {
     // No session marker is stored, and the emailed token is this visitor's
     // whole credential, so the sign-in gate must not be what answers the link.
     expect(
-      await screen.findByRole("heading", { name: "Email verified" }),
+      await screen.findByRole("heading", { name: "Verify your email" }),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole("heading", { name: "Sign in to Otari" }),

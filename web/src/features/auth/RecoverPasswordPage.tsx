@@ -45,7 +45,7 @@ export function RecoverPasswordPage() {
     return (
       <PublicAuthLayout
         title="Check your email"
-        description="If that address has a password on this gateway, a reset link is on its way."
+        description="If that address has an account on this gateway, a link to set or reset its password is on its way."
         footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
       >
         <p className="text-center text-caption">
@@ -59,8 +59,8 @@ export function RecoverPasswordPage() {
   return (
     <PublicAuthLayout
       isBusy={request.isPending}
-      title="Reset your password"
-      description="Enter the address you sign in with and we will mail a link to set a new password."
+      title="Set or reset your password"
+      description="Enter your address and we will mail a link to choose a password, whether it is your first or a forgotten one."
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
     >
       <form
@@ -86,7 +86,7 @@ export function RecoverPasswordPage() {
           isPending={request.isPending}
           isDisabled={email.trim() === ""}
         >
-          Send reset link
+          Send link
         </Button>
       </form>
     </PublicAuthLayout>

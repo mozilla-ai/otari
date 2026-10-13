@@ -7,11 +7,12 @@ from gateway.exceptions.identity_exceptions import (
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
 )
-from gateway.models.tenancy import User
-from gateway.ports.identity_provider_port import IdentityProviderPort
+from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.tenancy import UserRepository
+from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.user_service import forget_unproven_access, unverified_identity_is_claimable
 
 
 class DeploymentIdentityProviderAdapter(IdentityProviderPort):
@@ -33,7 +34,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         email: str | None,
         full_name: str | None,
         email_verified: bool,
-    ) -> User:
+    ) -> IdentityResolution:
         """Return the account for this OAuth sign-in.
 
         The provider must have verified the email address.
@@ -48,7 +49,8 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         - It records ``provider`` if the account names none.
           An account that already names a provider keeps it.
         - It marks an unverified address verified, which lets a deployment with no mail admit a member.
-          Verifying the address also removes its password and its pending email verification token.
+          Verifying the address also removes its password, its pending email verification and reset tokens,
+          its sessions and its passkeys (``forget_unproven_access``).
           The provider confirms who owns the address, not who set a password on it while it was unverified.
           A password on an address that is already verified is kept.
         - It sets ``full_name`` if the account has none.
@@ -56,9 +58,11 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         NOTE: Concurrent sign-ins on one account are serialized on PostgreSQL only.
         On SQLite, the later of two concurrent sign-ins can overwrite the provider that the first recorded.
 
-        If ``open_signup`` is disabled, an account nobody has verified yet is signed in only while it has an
-        active membership or an invitation it can still accept. Revoking an invitation, letting it lapse or
-        removing the member leaves the account behind, and the signup form refuses to claim it for the same reason.
+        An account nobody has verified yet is signed in only where ``unverified_identity_is_claimable`` allows,
+        the rule the signup form and a password reset follow.
+
+        ``new_account`` is true when this sign-in created the account, or is the first way in to one an
+        organization added and nobody had claimed.
 
         Raises:
             OAuthEmailNotVerifiedError: If the provider returned no address, or one it did not verify.
@@ -66,37 +70,37 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
                 and ``open_signup`` does not register a new one.
 
         """
+        label = provider_label(provider)
         if not email_verified or not email:
-            raise OAuthEmailNotVerifiedError(provider)
+            raise OAuthEmailNotVerifiedError(label)
         # An address this gateway would never store names no account, so it is refused as unknown.
         try:
             address = validated_email(email)
         except InvalidEmailError as error:
-            raise OAuthIdentityUnknownError(provider) from error
+            raise OAuthIdentityUnknownError(label) from error
 
+        created = False
         identity = await self._users.get_by_email(address)
         if identity is None and self._open_signup:
             registration = await self._organizations.provision_signup_tenancy(email=address, full_name=full_name)
             identity = registration.identity
+            created = registration.created
         if identity is None:
-            raise OAuthIdentityUnknownError(provider)
+            raise OAuthIdentityUnknownError(label)
 
         # The account is read again under a lock, so a change since the first read is seen before anything is written.
         identity = await self._users.get_locked(identity.id)
         # A deactivated account is refused as unknown, so the response does not confirm that the account exists.
         if identity is None or not identity.is_active:
-            raise OAuthIdentityUnknownError(provider)
+            raise OAuthIdentityUnknownError(label)
         # The address is looked up again rather than compared here, so both lookups treat letter case alike.
         holder = await self._users.get_by_email(address)
         if holder is None or holder.id != identity.id:
-            raise OAuthIdentityUnknownError(provider)
-        if (
-            not self._open_signup
-            and identity.email_verified_at is None
-            and not await self._organizations.has_live_membership(identity.id)
-        ):
-            raise OAuthIdentityUnknownError(provider)
+            raise OAuthIdentityUnknownError(label)
+        if not await unverified_identity_is_claimable(self._organizations, identity, open_signup=self._open_signup):
+            raise OAuthIdentityUnknownError(label)
 
+        first_claim = identity.hashed_password is None and identity.email_verified_at is None
         if identity.oauth_provider is None:
             identity.oauth_provider = provider
         if identity.email_verified_at is None or identity.email_vouched_at is not None:
@@ -106,10 +110,11 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
             identity.hashed_password = None
             identity.email_verification_token_hash = None
             identity.email_verification_token_expires_at = None
+            await forget_unproven_access(self._users.db, identity)
         if not identity.full_name and full_name:
             identity.full_name = full_name
         self._users.stage(identity)
-        return identity
+        return IdentityResolution(identity=identity, new_account=created or first_claim)
 
 
 __all__ = ["DeploymentIdentityProviderAdapter"]

@@ -391,16 +391,19 @@ class InvalidEmailError(TenancyValidationError):
 
 
 class VerificationTokenInvalidError(TenancyValidationError):
-    """A verification token that is unknown, expired, or already consumed.
+    """A verification token that is unknown, expired, or already consumed, or a password that does not match it.
 
-    One message for all three, the same reasoning ``InvitationNotFoundError``
+    One message for all of them, the same reasoning ``InvitationNotFoundError``
     gives an unknown-or-foreign invitation: distinguishing "expired" from
     "already used" from "never existed" would let a caller narrow down which
     is true of a token they do not hold.
     """
 
     def __init__(self) -> None:
-        super().__init__("This verification link is invalid, expired, or already used")
+        super().__init__(
+            "This verification link is invalid, expired, or already used, "
+            "or the password is not the one chosen when signing up"
+        )
 
 
 class ResetTokenInvalidError(TenancyValidationError):
@@ -411,6 +414,13 @@ class ResetTokenInvalidError(TenancyValidationError):
 
     def __init__(self) -> None:
         super().__init__("This password reset link is invalid, expired, or already used")
+
+
+class TermsNotAcceptedError(TenancyValidationError):
+    """An account was about to become usable without accepting the terms this deployment publishes."""
+
+    def __init__(self) -> None:
+        super().__init__("Accept the terms of service to continue")
 
 
 class EmailNotVerifiedError(TenancyForbiddenError):
@@ -456,6 +466,7 @@ __all__ = [
     "PasswordPolicyError",
     "ResetTokenInvalidError",
     "SignInAddressRequiredError",
+    "TermsNotAcceptedError",
     "UnmodifiedPasswordError",
     "VerificationTokenInvalidError",
 ]

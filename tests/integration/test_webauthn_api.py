@@ -526,7 +526,10 @@ def test_one_identitys_registration_challenge_is_not_another_identitys(
     assert signed_up.status_code == 200, signed_up.text
     token = _TOKEN_IN_LINK.search(caplog.text)
     assert token, caplog.text
-    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1)}).status_code == 200
+    assert (
+        client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD}).status_code
+        == 200
+    )
 
     # The operator's challenge, taken while they were the caller.
     operators = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)

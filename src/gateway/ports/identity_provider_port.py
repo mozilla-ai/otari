@@ -28,9 +28,22 @@ does not anticipate it. Overlay authors should pin a released tag and expect
 ``resolve`` to gain a subject and lose the boolean.
 """
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from gateway.models.tenancy import User
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityResolution:
+    """The identity an OAuth sign-in resolved to.
+
+    ``new_account`` is true when this sign-in created the account, or is the
+    first way in to one nobody had claimed. The caller reports it as a signup.
+    """
+
+    identity: User
+    new_account: bool
 
 
 class IdentityProviderPort(Protocol):
@@ -43,7 +56,7 @@ class IdentityProviderPort(Protocol):
         email: str | None,
         full_name: str | None,
         email_verified: bool,
-    ) -> User:
+    ) -> IdentityResolution:
         """Return the identity this external OAuth identity signs in as.
 
         ``provider`` names the provider or connection and is an open string
@@ -70,4 +83,4 @@ class IdentityProviderPort(Protocol):
         ...
 
 
-__all__ = ["IdentityProviderPort"]
+__all__ = ["IdentityProviderPort", "IdentityResolution"]
