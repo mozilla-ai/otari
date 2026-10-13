@@ -1,5 +1,9 @@
 import type { User } from "@/client"
 
+/** Whether an owner id is a virtual `apikey-*` shadow rather than a named user. */
+export const isVirtualUser = (userId: string | null): boolean =>
+  (userId ?? "").startsWith("apikey-")
+
 /** How a person reads in a user picker: what to show, and what to show under it. */
 export interface UserOptionText {
   label: string

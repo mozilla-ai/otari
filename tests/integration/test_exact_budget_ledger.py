@@ -163,7 +163,7 @@ async def test_many_reconciles_leave_no_residue(async_db: AsyncSession) -> None:
 async def test_a_hold_is_released_at_the_amount_it_was_taken(async_db: AsyncSession) -> None:
     """Reserve and settle a repeating fraction; the hold comes back to zero.
 
-    The clamp in ``_release_reserved`` is a floor, not a correction: if the
+    The clamp in ``release_reserved_expression`` is a floor, not a correction: if the
     release were a hair larger than the hold it would silently zero the counter
     and hide the mismatch, and if it were a hair smaller the remainder would
     outlive the request and permanently shrink the user's budget.

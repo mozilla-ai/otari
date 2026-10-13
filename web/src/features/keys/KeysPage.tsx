@@ -47,6 +47,7 @@ import {
 } from "@/features/organization/attribution"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
+import { isVirtualUser } from "@/features/users/userOptions"
 import {
   useCreateKey,
   useDeleteKey,
@@ -79,7 +80,7 @@ import {
   serviceKeyChoice,
   useServiceKeyReady,
 } from "./ServiceKeyFields"
-import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
+import { keyFingerprint, secretCaption } from "./secretCaption"
 
 // ---------- helpers ----------
 

@@ -291,7 +291,7 @@ class BudgetReservation(Base):
     the two things a counter cannot do (mozilla-ai/otari#742):
 
     * **Release becomes idempotent.** Without an identity, a second release for
-      the same request silently subtracts the hold twice. ``_release_reserved``
+      the same request silently subtracts the hold twice. ``release_reserved_expression``
       clamps at zero, so that shows up not as an error but as an under-count of
       live holds, which weakens the very overspend guarantee the reserve gate
       exists to provide. The status transition here is what makes only the first

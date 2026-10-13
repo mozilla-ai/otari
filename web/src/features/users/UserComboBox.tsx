@@ -10,7 +10,7 @@ import {
   useMemberAttributionLabels,
 } from "@/features/organization/attribution"
 
-import { userOptionTexts } from "./userOptions"
+import { isVirtualUser, userOptionTexts } from "./userOptions"
 
 // A required "owner" picker for a new API key: choose an existing user or type a
 // new id to create one (the keys API creates a named user for any id it does not
@@ -54,7 +54,7 @@ export function UserComboBox({
   // The id stays the value submitted whatever the row reads as, and a search
   // still matches it. The second line is the email, or the id only where two
   // rows would otherwise be indistinguishable.
-  const owners = users.filter((user) => !user.user_id.startsWith("apikey-"))
+  const owners = users.filter((user) => !isVirtualUser(user.user_id))
   const texts = userOptionTexts(owners, memberLabels, memberEmails)
   const options: ComboBoxOption[] = owners
     .map((user, i) => ({ value: user.user_id, ...texts[i] }))

@@ -895,11 +895,6 @@ async def reserve_budget(
     )
 
 
-def _release_reserved(estimate: Decimal) -> object:
-    """Return the column expression that subtracts ``estimate`` from reserved, clamped at 0."""
-    return ledger.release_reserved_expression(estimate)
-
-
 async def reconcile_reservation(
     db: AsyncSession,
     handle: ReservationHandle,
@@ -989,7 +984,7 @@ async def reconcile_reservation(
     # Nothing to give back when the reclaim already did it: subtracting a second
     # time is the double release the ledger exists to prevent.
     if handle.reserved and not reclaimed_early:
-        values["reserved"] = _release_reserved(handle.estimate)
+        values["reserved"] = ledger.release_reserved_expression(handle.estimate)
         if handle.token_estimate:
             values["reserved_tokens"] = ledger.release_reserved_count_expression(
                 User.reserved_tokens, handle.token_estimate
@@ -1071,7 +1066,7 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
         return
     # The user's row first, the ceilings last; see :func:`reconcile_reservation`.
     if handle.reserved:
-        values: dict[str, object] = {"reserved": _release_reserved(handle.estimate)}
+        values: dict[str, object] = {"reserved": ledger.release_reserved_expression(handle.estimate)}
         if handle.token_estimate:
             values["reserved_tokens"] = ledger.release_reserved_count_expression(
                 User.reserved_tokens, handle.token_estimate
@@ -1235,7 +1230,7 @@ async def increase_reservation(
             handle.scoped_estimate -= additional
             handle.scoped_token_estimate -= grown_tokens
         if delta is not None:
-            values: dict[str, object] = {"reserved": _release_reserved(delta.estimate)}
+            values: dict[str, object] = {"reserved": ledger.release_reserved_expression(delta.estimate)}
             if delta.token_estimate:
                 values["reserved_tokens"] = ledger.release_reserved_count_expression(
                     User.reserved_tokens, delta.token_estimate
