@@ -1691,16 +1691,19 @@ describe("OverviewIndex for an identity with no organization", () => {
     })
   }
 
-  function renderHome() {
-    const client = new QueryClient({
+  function renderHome({
+    openSignup = false,
+    client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
-    })
+    }),
+  } = {}) {
     return render(
       <QueryClientProvider client={client}>
         <DeploymentProvider
           value={bootstrap({
             deployment_type: "hosted",
             surfaces: HOSTED_SURFACES,
+            open_signup: openSignup,
           })}
         >
           <OverviewIndex />
@@ -1714,6 +1717,8 @@ describe("OverviewIndex for an identity with no organization", () => {
       },
     )
   }
+
+  const EMPTY_STATE = "You're not a member of an organization yet"
 
   it("sends an invitee who signed up before accepting to their invitations", async () => {
     mockWithoutOrganization([pendingOrganizationInvitation()])
@@ -1739,16 +1744,54 @@ describe("OverviewIndex for an identity with no organization", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("stays on the overview when nothing is waiting", async () => {
+  it("says how to get in when nothing is waiting, rather than the operator page", async () => {
     mockWithoutOrganization([])
 
     renderHome()
 
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    // The deployment-wide page fails open on an unreadable context, and a 404
+    // is not one: it is the server saying there is no organization.
     expect(
-      await screen.findByText(
+      screen.queryByText(
         "At-a-glance spend, traffic, and health across the gateway.",
       ),
+    ).toBeNull()
+    expect(
+      screen.getByRole("link", { name: /View invitations/ }),
+    ).toHaveAttribute("href", "/invitations")
+    // Signup is closed, so the server would refuse to create one.
+    expect(
+      screen.queryByRole("button", { name: "Create organization" }),
+    ).toBeNull()
+  })
+
+  it("offers to create an organization where signup is open", async () => {
+    mockWithoutOrganization([])
+
+    renderHome({ openSignup: true })
+
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Create organization" }),
     ).toBeInTheDocument()
-    expect(screen.queryByTestId("loc")).not.toBeInTheDocument()
+  })
+
+  it("does not retry the 404 that says there is no organization", async () => {
+    mockWithoutOrganization([])
+    // The app's own retry policy, which retries anything but 401 and 403.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: 2 } },
+    })
+
+    renderHome({ client })
+
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    const contextReads = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([input]) =>
+        String(input).endsWith(`${API_ROOT}/organizations/me`),
+      )
+    expect(contextReads).toHaveLength(1)
   })
 })

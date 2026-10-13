@@ -8,12 +8,14 @@ import { CreateOrganizationForm } from "@/features/organization/CreateOrganizati
 import { canManage } from "@/features/organization/roles"
 import { CreateWorkspaceForm } from "@/features/workspaces/WorkspacesPage"
 import {
+  isNoOrganizationError,
   useOrganizationContext,
   useOrganizationMemberships,
   usePendingOrganizationInvitations,
   useSwitchOrganization,
 } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { NAV_TRANSITION, navBandRowClass, navIndicatorClass } from "./rowStyles"
 
 // The menu's own rhythm, which is the rail's: a 44px row and a 32px heading
@@ -67,9 +69,15 @@ function MailMark() {
 // workspace row.
 export function WorkspaceSwitcher({
   isCollapsed,
+  onNavigate,
   createHold,
 }: {
   isCollapsed: boolean
+  /**
+   * Called when a row in the menu takes the caller to another page, so the
+   * shell can close the mobile drawer the switcher sits in.
+   */
+  onNavigate?: () => void
   // Forwarded to the create form's own hold, and only ever set by tests:
   // supplying the beat as a gate is what lets a test enter and leave the
   // dismissal window on purpose, instead of sleeping past a duration it cannot
@@ -78,6 +86,7 @@ export function WorkspaceSwitcher({
 }) {
   const { memberships, selected, select, isLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
+  const { open_signup } = useDeployment()
   const navigate = useNavigate()
   const organizations = useOrganizationMemberships()
   // What is waiting on the caller, as against what they already belong to.
@@ -109,6 +118,11 @@ export function WorkspaceSwitcher({
   // control on. Without it a member or a viewer is handed the whole form from
   // the scope menu and meets the refusal as a 403 after typing a name.
   const managesOrganization = canManage(context.data)
+  const hasNoOrganization =
+    context.data === undefined && isNoOrganizationError(context.error)
+  // Where signup is closed the server refuses to create an organization for a
+  // caller who belongs to none, so the menu points at the inbox instead.
+  const offersCreateOrganization = open_signup || !hasNoOrganization
   // Every organization the caller is an active member of. One row is the
   // overwhelmingly common case (a deployment provisions one and most keep
   // exactly that), and a single row is stated rather than offered as a control:
@@ -118,13 +132,16 @@ export function WorkspaceSwitcher({
   // Absent rather than shown empty: a permanent row reading "0 invitations"
   // would be chrome for something that is almost always nothing. A failed or
   // unserved read (an older gateway, a hybrid one) lands here as "nothing
-  // waiting" too, which is the right way for chrome to fail.
+  // waiting" too, which is the right way for chrome to fail. A caller with no
+  // organization keeps the row, because the inbox is their one way in.
   const invitationCount = pendingInvitations.data?.length ?? 0
 
   // Both hops optional: the context can answer without an organization (a
   // failed read, or a shape a test supplies), and the switcher is chrome that
   // renders around whatever else is wrong rather than taking the shell down.
-  const organizationName = context.data?.organization?.name ?? "Organization"
+  const organizationName =
+    context.data?.organization?.name ??
+    (hasNoOrganization ? "No organization" : "Organization")
 
   const workspaceName = isLoading
     ? "Loading…"
@@ -265,20 +282,23 @@ export function WorkspaceSwitcher({
                 <CheckMark />
               </div>
             )}
-            {invitationCount > 0 ? (
+            {invitationCount > 0 || hasNoOrganization ? (
               <button
                 type="button"
                 className={`${MENU_ROW} ${MENU_ROW_RESTING}`}
                 onClick={() => {
                   setOpen(false)
+                  onNavigate?.()
                   void navigate({ to: "/invitations" })
                 }}
               >
                 <MailMark />
                 <span className="min-w-0 flex-1 truncate">
-                  {invitationCount === 1
-                    ? "1 invitation waiting"
-                    : `${invitationCount} invitations waiting`}
+                  {invitationCount === 0
+                    ? "Invitations"
+                    : invitationCount === 1
+                      ? "1 invitation waiting"
+                      : `${invitationCount} invitations waiting`}
                 </span>
               </button>
             ) : null}
@@ -344,23 +364,24 @@ export function WorkspaceSwitcher({
                 </span>
               </button>
             ) : null}
-            {/* Ungated, unlike Create workspace above it. Creating an
-              organization is not an action inside one, so there is no role in
-              one to check it against, which is also why the server gates it on
-              the management credential alone. */}
-            <button
-              type="button"
-              className={`${MENU_ROW} text-muted hover:bg-surface-alt hover:text-foreground`}
-              onClick={() => {
-                setOpen(false)
-                openCreateOrganization()
-              }}
-            >
-              <PlusMark />
-              <span className="min-w-0 flex-1 truncate">
-                Create organization
-              </span>
-            </button>
+            {/* Not gated on a role, unlike Create workspace above it. Creating
+              an organization is not an action inside one, so there is no role
+              in one to check it against. */}
+            {offersCreateOrganization ? (
+              <button
+                type="button"
+                className={`${MENU_ROW} text-muted hover:bg-surface-alt hover:text-foreground`}
+                onClick={() => {
+                  setOpen(false)
+                  openCreateOrganization()
+                }}
+              >
+                <PlusMark />
+                <span className="min-w-0 flex-1 truncate">
+                  Create organization
+                </span>
+              </button>
+            ) : null}
           </Popover.Dialog>
         </Popover.Content>
       </Popover>
@@ -390,6 +411,7 @@ export function WorkspaceSwitcher({
         // not apply to.
         onCreated={(workspace) => {
           select(workspace.id)
+          onNavigate?.()
           void navigate({ to: "/" })
         }}
         hold={createHold}

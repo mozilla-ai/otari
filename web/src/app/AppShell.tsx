@@ -57,7 +57,10 @@ import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
@@ -68,6 +71,7 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 const CHROME_TITLES: Record<string, string | undefined> = {
   "/docs": "Documentation",
   "/account": "Account",
+  "/invitations": "Invitations",
 }
 
 // One width, not a range. The rail used to be draggable between 200 and 480px
@@ -558,8 +562,11 @@ function AppShellChrome() {
   // budgets and settings are reachable only through this entry, the routes still
   // work by URL, and the server authorizes every request behind it regardless.
   // Hiding the way there because one query failed strands three destinations.
+  // A 404 is not a failure but the answer that there is no organization to
+  // manage.
   const managesOrganization =
-    canManage(organization.data) || organization.isError
+    canManage(organization.data) ||
+    (organization.isError && !isNoOrganizationError(organization.error))
 
   // Both rails remember where you were, so the controls that cross between them
   // return you rather than resetting you. Recorded here rather than on those
@@ -953,7 +960,10 @@ function AppShellChrome() {
                 )}
               </div>
             ) : (
-              <WorkspaceSwitcher isCollapsed={effectiveCollapsed} />
+              <WorkspaceSwitcher
+                isCollapsed={effectiveCollapsed}
+                onNavigate={closeMobileNav}
+              />
             )}
           </div>
           {/* No bottom padding: the account band closes the rail, so it sits on

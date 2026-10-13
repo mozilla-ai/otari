@@ -5,6 +5,11 @@ import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
+/** Crumbs for chrome destinations, which the rail registry cannot name. */
+const CHROME_PAGE_LABELS: Record<string, string | undefined> = {
+  "/invitations": "Invitations",
+}
+
 /**
  * Where you are, at the head of the content pane: scope first, then the page.
  *
@@ -22,7 +27,7 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
   const organization = useOrganizationContext()
   const { selected } = useSelectedWorkspace()
 
-  const page = navLabelForPath(pathname)
+  const page = navLabelForPath(pathname) ?? CHROME_PAGE_LABELS[pathname]
   const organizationName = organization.data?.organization?.name
   // A destination no rail owns names itself and no scope. The trail would
   // otherwise read "Default workspace / Settings" and file the deployment's own

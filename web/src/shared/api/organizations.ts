@@ -63,27 +63,57 @@ const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
 // `enabled` is for the one page that renders ahead of a session: the public
 // catalog has no organization to ask about, and asking would 401 into the
 // sign-out handler.
+//
+// A 404 is not retried: it is an identity with no active membership anywhere
+// (see `isNoOrganizationError`), and asking again only holds every page that
+// waits on this answer behind the backoff. Any other failure keeps the
+// client's own retry policy.
 export function useOrganizationContext(enabled = true) {
+  const defaultRetry = useQueryClient().getDefaultOptions().queries?.retry
   return useQuery({
     queryKey: ORGANIZATION_CONTEXT,
     queryFn: () => apiFetch<OrganizationContext>("/organizations/me"),
     staleTime: 60_000,
+    retry: (failureCount, error) => {
+      if (isNoOrganizationError(error)) return false
+      if (typeof defaultRetry === "function") {
+        return defaultRetry(failureCount, error)
+      }
+      if (typeof defaultRetry === "number") return failureCount < defaultRetry
+      return defaultRetry ?? failureCount < 3
+    },
     enabled,
   })
 }
 
 /**
+ * Whether a failed context read means the caller belongs to no organization.
+ *
+ * `/organizations/me` answers 404 for a signed-in identity with no active
+ * membership: somebody who declined their only invitation, or who signed up or
+ * signed in before accepting one.
+ */
+export function isNoOrganizationError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+}
+
+/**
  * What the organization context says about whether the caller operates the
- * deployment, as one of four answers rather than a boolean.
+ * deployment, as one of five answers rather than a boolean.
  *
  * `"unavailable"` is the read having failed with nothing cached to fall back
  * on. It is kept apart from `"not-operator"` because the two call for opposite
  * behavior: a resolved no withholds the operator surface silently, while a
  * failed read cannot say whether anything is being withheld from its owner.
+ *
+ * `"no-organization"` is the one failure that is an answer: the server said
+ * the caller belongs to no organization, so there is nothing to operate and
+ * nothing to fail open onto.
  */
 export type DeploymentOperatorAnswer =
   | "operator"
   | "not-operator"
+  | "no-organization"
   | "pending"
   | "unavailable"
 
@@ -98,12 +128,16 @@ export type DeploymentOperatorAnswer =
  */
 export function deploymentOperatorAnswer(query: {
   data?: OrganizationContext
+  error?: unknown
   isFetched: boolean
 }): DeploymentOperatorAnswer {
   if (query.data) {
     return query.data.deployment_operator === true ? "operator" : "not-operator"
   }
-  return query.isFetched ? "unavailable" : "pending"
+  if (!query.isFetched) {
+    return "pending"
+  }
+  return isNoOrganizationError(query.error) ? "no-organization" : "unavailable"
 }
 
 /**
@@ -203,8 +237,9 @@ export function useCreateOrganization() {
 // step with every future query, and the one it missed would render another
 // organization's rows under this one's name.
 //
-// The context is the exception, and the only one: it is what the switch itself
-// answers with, and what a role gate reads.
+// The context is the exception to the invalidation: it is what the switch
+// itself answers with, and what a role gate reads. Queries keyed on one of the
+// left organization's workspaces are invalidated without a refetch.
 export function useSwitchOrganization() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -221,6 +256,17 @@ export function useSwitchOrganization() {
       })
     },
     onSuccess: (context) => {
+      const leftWorkspaceIds = (
+        queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT)
+          ?.workspace_memberships ?? []
+      ).map((membership) => membership.workspace_id)
+      // A query keyed on a workspace of the organization just left stays
+      // mounted under that id until the selection follows the new context on
+      // the next render, so refetching it here asks for a workspace the caller
+      // no longer acts in and earns a 404. It is only marked stale, and the
+      // page asks for the new workspace once the selection moves.
+      const isKeyedOnLeftWorkspace = (queryHash: string) =>
+        leftWorkspaceIds.some((id) => queryHash.includes(id))
       // Written, not invalidated, and written first: the invalidation below is
       // where every query decides whether to refetch, and one gated on the role
       // in here would decide it against the organization just left, asking for
@@ -229,7 +275,13 @@ export function useSwitchOrganization() {
       // being made in it.
       queryClient.setQueryData(ORGANIZATION_CONTEXT, context)
       void queryClient.invalidateQueries({
-        predicate: (query) => query.queryHash !== ORGANIZATION_CONTEXT_HASH,
+        predicate: (query) =>
+          query.queryHash !== ORGANIZATION_CONTEXT_HASH &&
+          !isKeyedOnLeftWorkspace(query.queryHash),
+      })
+      void queryClient.invalidateQueries({
+        predicate: (query) => isKeyedOnLeftWorkspace(query.queryHash),
+        refetchType: "none",
       })
     },
   })

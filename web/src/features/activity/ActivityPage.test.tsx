@@ -2568,7 +2568,7 @@ describe("ActivityPage when the organization context fails", () => {
       const url = String(input)
       calls.push(url)
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse({ detail: "no active membership" }, 404)
+        return jsonResponse({ detail: "Internal server error" }, 500)
       }
       if (url.includes("/usage/in-flight")) {
         return jsonResponse({ requests: [], total: 0 })

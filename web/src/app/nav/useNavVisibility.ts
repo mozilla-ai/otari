@@ -71,6 +71,12 @@ export function useNavVisibility(): (item: NavItem) => boolean {
         : isOperator
     }
 
+    // A caller with no organization has no workspace and no tenant for any
+    // row but the index to read, so each of the others would open on a
+    // refusal.
+    if (answer === "no-organization") {
+      return (item: NavItem) => item.to === "/" && isRouteVisible(item)
+    }
     return (item: NavItem) => isRouteVisible(item) && allowedByCaller(item)
   }, [isRouteVisible, answer, isOperator])
 }

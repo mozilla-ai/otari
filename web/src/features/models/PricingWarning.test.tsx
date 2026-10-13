@@ -301,7 +301,7 @@ describe("PricingWarning", () => {
       { ...BASE, require_pricing: true, default_pricing: false },
       12,
       {
-        failsWith: 404,
+        failsWith: 500,
       },
     )
     renderPage(<PricingWarning />)

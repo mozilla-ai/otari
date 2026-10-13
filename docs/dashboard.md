@@ -218,6 +218,20 @@ What a signed-in person can see or change is enforced by their organization and
 workspace roles. Deployment-wide operations require an operator. See
 [Access control](access-control.md).
 
+Invitations waiting on you are listed under Invitations, reached from the
+organization switcher. After you accept one, the page offers to take you into
+that organization. Someone signed in who is not yet a member of any
+organization is taken to Invitations when one is waiting; otherwise Overview
+says how to get in, and the sidebar holds only Overview. Creating an
+organization is offered to them only where `open_signup` is on, since the
+gateway refuses it otherwise.
+
+Opening an invitation link in a browser signed in as a different address says
+who the invitation is for and offers to sign out and continue, because
+accepting always adds the invited address, whoever is signed in. After a
+password is set from an invitation link, the sign-in screen opens with the
+invited address filled in.
+
 ## Authentication options
 
 Password sign-in works for an existing account. Optional passkeys, Google OAuth and GitHub OAuth add more ways to sign in. Set `passkeys_enabled: false` (`OTARI_PASSKEYS_ENABLED`) to switch passkeys off entirely. When the deployment sets `open_signup: true`, a new address can also create an account with its own organization, through the signup form or a Google or GitHub sign-in. A passkey never creates an account. OAuth requires `public_base_url` plus the provider's client ID and secret. Passkeys can instead use `public_base_url`, or an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.

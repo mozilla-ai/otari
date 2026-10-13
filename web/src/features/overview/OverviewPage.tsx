@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react"
 import type { UsageEntry } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageError } from "@/design-system/feedback/PageError"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
@@ -19,6 +20,7 @@ import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { TrendChip } from "@/design-system/metrics/TrendChip"
 import { scopeLabel } from "@/features/budgets/organizationBudget"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
+import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
 import { canManage } from "@/features/organization/roles"
 import {
   allocationStrip,
@@ -26,7 +28,6 @@ import {
   errorRateHealth,
   providerHealthStatus,
 } from "@/features/overview/overview"
-import { ApiError } from "@/shared/api/client"
 import { useModels } from "@/shared/api/models"
 import {
   useDeploymentOperator,
@@ -48,7 +49,7 @@ import {
   formatUsd,
 } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
+import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 const DAY_MS = 86_400_000
 const PERIOD_DAYS = 30
@@ -343,19 +344,16 @@ function UsageKpiCells({
  * reverse would hide the deployment's state from the one caller who owns it.
  * An errored context is an answer, not a wait: holding the page on a loading
  * state that no retry clears renders nothing at all.
+ *
+ * The one failure that is not sent there is a caller with no organization,
+ * who has no deployment to operate and no organization to report on.
  */
 export function OverviewIndex() {
   const { answer, isSettled } = useDeploymentOperator()
-  const context = useOrganizationContext()
-  // A 404 here is an identity with no active membership anywhere: somebody who
-  // signed up or signed in before accepting the invitation that created their
-  // account. Every page below would fail for them, and the inbox is the one
-  // that can fix it, so they are sent there rather than left to find it in the
-  // switcher.
-  const hasNoOrganization =
-    context.data === undefined &&
-    context.error instanceof ApiError &&
-    context.error.status === 404
+  const hasNoOrganization = answer === "no-organization"
+  // Somebody who signed up or signed in before accepting the invitation that
+  // created their account: the inbox is the page that can fix it, so they are
+  // sent there rather than left to find it in the switcher.
   const invitations = usePendingOrganizationInvitations(hasNoOrganization)
 
   if (!isSettled || (hasNoOrganization && invitations.isPending)) {
@@ -374,13 +372,65 @@ export function OverviewIndex() {
       </PageError>
     )
   }
-  if (hasNoOrganization && (invitations.data ?? []).length > 0) {
-    return <Navigate to="/invitations" replace />
+  if (hasNoOrganization) {
+    return (invitations.data ?? []).length > 0 ? (
+      <Navigate to="/invitations" replace />
+    ) : (
+      <NoOrganizationOverview />
+    )
   }
   if (answer === "not-operator") {
     return <OrganizationOverview />
   }
   return <OperatorOverviewIndex />
+}
+
+/**
+ * The landing page for a signed-in caller who belongs to no organization and
+ * has no invitation waiting.
+ *
+ * Creating an organization is offered only where signup is open: where it is
+ * closed the server refuses a caller with no membership, so the way in is an
+ * invitation from an owner.
+ */
+function NoOrganizationOverview() {
+  const { open_signup } = useDeployment()
+  const [creating, setCreating] = useState(false)
+  // Keys the form so each open starts from an empty draft.
+  const [creatingCount, setCreatingCount] = useState(0)
+
+  return (
+    <div className="flex flex-col">
+      <PageIntro title="Overview" />
+      <EmptyState
+        title="You're not a member of an organization yet"
+        description={
+          open_signup
+            ? "Ask an owner of an organization to invite you, or create one of your own. Invitations you receive are listed under Invitations."
+            : "Ask an owner of an organization to invite you. Invitations you receive are listed under Invitations."
+        }
+        actionLabel={open_signup ? "Create organization" : undefined}
+        onAction={() => {
+          setCreatingCount((count) => count + 1)
+          setCreating(true)
+        }}
+      >
+        <Link
+          to="/invitations"
+          className="inline-flex min-h-11 items-center self-start text-sm text-muted underline underline-offset-2 hover:text-foreground"
+        >
+          View invitations →
+        </Link>
+      </EmptyState>
+      {open_signup ? (
+        <CreateOrganizationForm
+          key={creatingCount}
+          isOpen={creating}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
+    </div>
+  )
 }
 
 /**
