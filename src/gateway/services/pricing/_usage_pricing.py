@@ -91,7 +91,7 @@ def price_usage(
     if unit != "tokens":
         return None
     if legacy_unit_reading:
-        for meter, unit_rate in ((_IMAGES, _image_rate), (_REQUESTS, _request_rate)):
+        for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
             if meter in counts:
                 _warn_legacy(rate, meter)
                 return _per_unit(meter, counts[meter], unit_rate(rate))
@@ -146,7 +146,13 @@ def _request_rate(rate: ModelPricing) -> Decimal | None:
 
 
 def _image_rate(rate: ModelPricing) -> Decimal | None:
-    # ``input_price_per_million`` holds USD per image, unscaled, despite its name.
+    # ``input_price_per_million`` is USD per million images, as a request rate is per million requests.
+    per_million = to_decimal(rate.input_price_per_million)
+    return meter_cost(1, per_million) if per_million is not None else None
+
+
+def _legacy_image_rate(rate: ModelPricing) -> Decimal | None:
+    # A token rate on image generation was documented as raw USD per image.
     return to_decimal(rate.input_price_per_million)
 
 

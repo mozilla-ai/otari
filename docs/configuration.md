@@ -507,9 +507,10 @@ accepted shape.
 A rate's `unit` decides what it bills. A rate in `tokens` bills the tokens the
 provider reports, a rate in `images` bills each image returned, and a rate in
 `requests` bills each request (or each search unit, for rerank). The rate reuses
-`input_price_per_million`: USD per million tokens, USD per million requests, or
-raw USD per image without million-unit scaling. A rate never bills a count of
-another unit, so a per-request price is never read as a price per image.
+`input_price_per_million`, always per million: USD per million tokens, requests
+or images. A $0.04 image is `input_price_per_million: 40000`. A rate never bills
+a count of another unit, so a per-request price is never read as a price per
+image.
 
 | Endpoint | What it reports | Rates that price it |
 |---|---|---|
@@ -520,8 +521,8 @@ another unit, so a per-request price is never read as a price per image.
 | Audio speech, moderations | One request | `requests` |
 
 A rate in `tokens` on image generation, audio or moderations is still read in
-that endpoint's unit (per image, or per million requests), as this guide used to
-document, and logs a warning once per model. A later release reads such a rate
+that endpoint's old unit (raw USD per image, or USD per million requests), as
+this guide used to document, and logs a warning once per model. A later release reads such a rate
 strictly, as tokens, so set `unit: images` or `unit: requests` on those rates
 now. A token-billed model (`gpt-image-1`, `gpt-4o-transcribe`) can then be priced
 in `tokens`, because its tokens are recorded on the usage row.
@@ -578,6 +579,12 @@ default-pricing fallback never supplies a per-request rate, so a per-request
 model needs its own pricing row.
 
 ### Per-image pricing (image generation)
+
+An `images` rate is USD per million images, like a request rate: $0.04 an image
+is `input_price_per_million: 40000`, which is what the dashboard stores when you
+enter $40 per 1,000 images. Before this release an `images` rate was read as
+raw USD per image, so a rate written that way in `config.yml` (for example
+`0.04`) now bills a millionth of what it meant; multiply it by 1,000,000.
 
 Image generation reserves the requested image count before dispatch at an
 `images` rate, then settles on the images the provider returned. Audio holds

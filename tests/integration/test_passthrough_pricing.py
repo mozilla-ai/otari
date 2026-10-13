@@ -103,7 +103,8 @@ def _generate(client: TestClient, headers: dict[str, str], result: ImagesRespons
 def test_an_images_rate_holds_the_requested_images_and_settles_the_returned_ones(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    _price(client, master_key_header, "openai:dall-e-3", unit="images", rate=0.04)
+    # $0.04 an image, per million images: what the dashboard stores for $40 per 1,000.
+    _price(client, master_key_header, "openai:dall-e-3", unit="images", rate=40000.0)
     headers = _user_key(client, master_key_header)
 
     with _held() as held:

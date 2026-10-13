@@ -127,7 +127,7 @@ def test_rerank_on_a_token_rate_holds_its_input_tokens() -> None:
 
 
 def test_a_count_holds_exactly_what_it_settles_at() -> None:
-    images_rate = _pricing(Decimal("0.04"), unit="images")
+    images_rate = _pricing(Decimal(40000), unit="images")
 
     assert count_estimate(images_rate, meter="images", count=3) == Decimal("0.12")
     assert count_estimate(_per_request_pricing(), meter="images", count=3) == Decimal("0.002")
@@ -139,7 +139,7 @@ def test_a_count_holds_exactly_what_it_settles_at() -> None:
 @pytest.mark.parametrize("count", [-5, 10**12])
 def test_a_count_estimate_is_held_within_the_reportable_range(count: int) -> None:
     """A caller's ``n`` cannot make the hold raise or go negative; the provider refuses what it cannot serve."""
-    assert count_estimate(_pricing(Decimal("0.04"), unit="images"), meter="images", count=count) >= 0
+    assert count_estimate(_pricing(Decimal(40000), unit="images"), meter="images", count=count) >= 0
 
 
 def test_an_unpriced_count_holds_nothing() -> None:

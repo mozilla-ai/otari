@@ -782,8 +782,8 @@ A receiver prices an attempt by its rate's unit, and the rate prices one thing:
 - A rate in `requests` bills the `requests` count, or else the `search_units`
   count, at `input_price_per_million / 1,000,000` each. An attempt that reports
   neither, such as a completion, is billed one request.
-- A rate in `images` bills the `images` count at `input_price_per_million` each,
-  read as USD per image. With no `images` count it prices nothing.
+- A rate in `images` bills the `images` count at `input_price_per_million /
+  1,000,000` each. With no `images` count it prices nothing.
 - A rate in `tokens` bills `usage` and never a count. With no tokens it prices
   nothing.
 

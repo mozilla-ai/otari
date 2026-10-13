@@ -99,7 +99,8 @@ class OrganizationModelPricingRates(BaseModel):
     unit: Literal["tokens", "requests", "images"] = Field(
         default="tokens",
         description=(
-            "What the rates are per: tokens for a model, requests or images for a non-token endpoint. "
+            "What the rates are per: tokens for a model, requests or images for a non-token endpoint, "
+            "each priced per million. "
             "A completion model priced per requests is charged one request per successful call."
         ),
     )

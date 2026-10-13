@@ -84,7 +84,7 @@ class SetPricingRequest(BaseModel):
         description=(
             "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
             "moderation call, or a completion model billed per call (USD per million requests), "
-            "'images' for image generation."
+            "'images' for image generation (USD per million images)."
         ),
     )
 
