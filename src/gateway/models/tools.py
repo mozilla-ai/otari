@@ -149,7 +149,7 @@ class CodeExecutor(StrEnum):
     """
 
     AUTO = "auto"
-    """The provider when it runs this tool natively for this model, else Otari."""
+    """Per attempt: the provider when that attempt's model runs this tool natively, else Otari."""
     OTARI = "otari"
     """Always the configured code-execution backend, whatever the provider offers."""
     PROVIDER = "provider"

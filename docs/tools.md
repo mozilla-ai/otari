@@ -271,15 +271,30 @@ declaration asks for:
 
 | Executor | Who runs the code |
 | --- | --- |
-| `auto` (default) | The provider, when it runs that tool natively for the dispatched model and wire format; otherwise Otari's sandbox. A request naming a container Otari minted runs here, since the sandbox it names is here (see [Reusing a sandbox across requests](#reusing-a-sandbox-across-requests)). |
+| `auto` (default) | Decided per attempt: the provider, when the model that attempt goes to runs that tool natively in that wire format; otherwise Otari's sandbox. A request naming a container Otari minted runs here, since the sandbox it names is here (see [Reusing a sandbox across requests](#reusing-a-sandbox-across-requests)). |
 | `otari` | Always Otari's sandbox. |
 | `provider` | Always the provider; the declaration is forwarded untouched. |
 
 `auto` is what makes a model swap transparent. An Anthropic Messages request
 carrying `code_execution_20250825` runs natively against an Anthropic model, and
 the same request against an open model runs on the sandbox, with the same
-`server_tool_use` and `code_execution_tool_result` blocks coming back. An
-`anthropic-beta` header travels only as far as it can be honored: against a
+`server_tool_use` and `code_execution_tool_result` blocks coming back.
+
+Fallbacks are decided the same way, one attempt at a time. A routing policy or
+catalog ID that falls back from Claude to Claude on Vertex or Bedrock sends
+Anthropic its own tool, and only if Anthropic fails before any output does the
+fallback run the code on the sandbox; a request Anthropic answers never opens
+or pays for one. A fallback that cannot run on the sandbox (code execution off
+for the workspace, no sandbox price under `require_pricing`, a container id
+from another provider, or gateway web tools or MCP servers in the same request,
+which the sandbox cannot be combined with yet) is skipped rather than refusing
+the whole request. A refusal that applies to the first attempt still refuses
+the request. Two cases decide every attempt alike instead, running the code on
+the sandbox unless every model runs it natively: a request that also declares
+`otari_code_execution`, and a request served in [hybrid mode](modes.md), whose
+attempts the platform plans.
+
+An `anthropic-beta` header travels only as far as it can be honored: against a
 provider with no Messages API of its own it is dropped rather than refused,
 because a beta names an Anthropic feature that provider was never going to
 serve, and refusing it would make the request fail purely because its model
@@ -295,7 +310,8 @@ The executor also decides where an attached file goes. Code running on Otari's
 sandbox is given the file from Otari's own store, and code running in the
 provider's container is given a short-lived copy at that provider, because such
 a container reads only files that provider holds. Either way the file reaches
-the code rather than only the model. See
+the code rather than only the model, and an attempt that falls back to the other
+place is given the file there. See
 [Files and code execution](files.md#files-and-code-execution).
 
 Three layers choose the executor. The workspace pin wins over both of the

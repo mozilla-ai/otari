@@ -1408,9 +1408,10 @@ class GatewayConfig(
         description=(
             "Who runs the code a provider-native code-execution declaration asks for "
             "(Anthropic's code_execution_<date>, OpenAI's code_interpreter, the bare code_execution). "
-            "'auto' (the default when unset) forwards it to the provider when that provider runs the "
-            "tool natively for the model, and runs it on this gateway's sandbox otherwise, so a request "
-            "written for a frontier model keeps working when the model is swapped. 'otari' always runs it "
+            "'auto' (the default when unset) decides each attempt: it forwards it to the provider when that "
+            "attempt's model runs the tool natively, and runs it on this gateway's sandbox otherwise, so a "
+            "request written for a frontier model keeps working when the model is swapped or falls back. "
+            "'otari' always runs it "
             "on the sandbox; 'provider' always forwards it. A workspace policy may pin a value and the "
             "Otari-Code-Execution header may choose one per request where the workspace has not. "
             "The explicit otari_code_execution type is always run by the gateway."

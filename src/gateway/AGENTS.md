@@ -183,9 +183,14 @@ Each tool's admission step (web, code execution, MCP) lives in `services/tools/`
 code-execution type is decided by the executor (`models/tools.py`,
 resolved in `services/tools/_code_execution_declarations.py`): a workspace pin wins over everything, the
 `Otari-Code-Execution` header wins over the deployment default, and `auto`
-claims a declaration only when the dispatched provider does not run it
-natively. The workspace policy is read once, in the request preamble, and
-reused at admission; the same decision says where a referenced upload goes,
+decides each candidate's attempt: the provider where its model runs the
+declaration natively, the sandbox where it does not. A request split that way
+is admitted both ways (`ToolContext.code_split`), a refusal of the other way
+skips only the candidates that need it (`CandidateCannotServe`), and each
+walker dispatches a candidate with `ToolContext.for_candidate`. Hybrid, and a
+request that also declares the explicit type, decide every candidate alike.
+The workspace policy is read once, in the request preamble, and reused at
+admission; the same decision says where a referenced upload goes,
 staged for the gateway's sandbox or copied, for each candidate as it is
 dispatched, into the provider account whose container will read it
 (`FileService.provider_file_ids`). The tool loop is in

@@ -128,8 +128,11 @@ for the sandbox only: the model is told the file is there and never sees its
 contents. A `document`, `file`, or `input_file` block with a `file_id` is both
 shown to the model (extracted or passed through as usual) and seeded. A request
 that runs no code execution at all reads a `container_upload` block as a
-document. Where a file goes follows who runs the code, decided once from the
-workspace pin, the header and the deployment default.
+document. Where a file goes follows who runs the code, decided from the
+workspace pin, the header and the deployment default for each attempt: a
+request whose first model runs the code itself and whose fallback runs it on
+the sandbox has the file copied to the provider for the one and seeded into the
+sandbox for the other.
 
 ### A file the provider's own code execution reads
 
@@ -157,7 +160,8 @@ than naming one its account does not hold.
 The copy is made for each candidate as it is dispatched. A routing policy that
 falls over to a model on another key sends that model a copy in its own account.
 A candidate whose provider cannot hold a copy is passed over, in the policy's
-order, and the request is refused when no candidate can.
+order, and the request is refused when no candidate can. A candidate whose code
+runs on Otari's sandbox needs no copy, so it is not passed over for that.
 
 Each copy is recorded before it is uploaded and confirmed once the provider
 holds it. Two requests copying one file at the same moment each make and record
