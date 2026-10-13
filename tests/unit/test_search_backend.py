@@ -255,6 +255,14 @@ def test_tool_options_are_defaults_and_never_displace_the_query() -> None:
     assert payload["query"] == "caller wins"
 
 
+def test_the_tools_shared_parameters_are_never_exa_body_fields() -> None:
+    tool = replace(_EXA_TOOL, options={"type": "fast", "max_results": 3, "time_range": "week"})
+    payload = build_exa_payload(tool, SearchQuery(query="q"))
+    assert payload["type"] == "fast"
+    assert "max_results" not in payload
+    assert "time_range" not in payload
+
+
 def test_tool_pinned_contents_survive_when_the_caller_asks_for_no_page_size() -> None:
     tool = replace(_EXA_TOOL, options={"contents": {"text": {"maxCharacters": 800}}})
     payload = build_exa_payload(tool, SearchQuery(query="q"))

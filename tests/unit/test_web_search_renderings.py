@@ -6,8 +6,13 @@ from typing import Any
 
 import pytest
 
-from gateway.services.tools import WEB_SEARCH_CALL_ID_PREFIX, Dialect, NativeCall, native_rendering
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import (
+    WEB_SEARCH_CALL_ID_PREFIX,
+    WEB_SEARCH_TOOL_NAME,
+    Dialect,
+    NativeCall,
+    native_rendering,
+)
 
 
 class _SearchBackendLike:

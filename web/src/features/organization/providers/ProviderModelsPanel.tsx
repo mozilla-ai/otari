@@ -279,9 +279,9 @@ export function ProviderModelsPanel({
         <div className="flex min-w-0 flex-col">
           <h3 className="text-title">Models on {providerKey.name}</h3>
           <p className="text-caption">
-            Priced in USD per million tokens, for this organization only. A
-            model nothing prices is offered but not served, and stays off until
-            it has a rate.
+            Priced for this organization only, per million tokens unless a rate
+            says it is per request or per image. A model nothing prices is
+            offered but not served, and stays off until it has a rate.
           </p>
         </div>
         {canEdit ? (

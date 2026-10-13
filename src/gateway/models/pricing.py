@@ -16,15 +16,20 @@ from gateway.models.money import UsdRate
 # on these spellings, and the request schemas validate against them.
 PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 
-# The vocabulary of ``origin`` on the same two tables. ``seed`` belongs to
-# ``organization_model_pricing`` alone: it marks a rate the offered-models
-# surface copied from the community dataset on the organization's behalf, which
-# a later refresh may move, where every other origin is a rate somebody chose
-# and a refresh leaves alone.
-PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration", "seed")
+# The counts an attempt reports in a unit other than tokens, keyed by meter. They
+# are the keys of ``billing_meters`` on the row a count settles, and of ``units``
+# in a hybrid gateway's usage report.
+UNIT_METERS: tuple[str, ...] = ("requests", "search_units", "images")
 
-# The one origin a refresh may move. Named because three modules compare against
-# it and a bare "seed" in any of them reads as a different fact.
+# The largest count one attempt may report under any meter.
+MAX_REPORTED_UNITS = 1_000_000
+
+# ``origin`` on the same two tables is ``config``, ``api``, ``migration`` or
+# ``seed``. ``seed`` belongs to ``organization_model_pricing`` alone: it marks a
+# rate the offered-models surface copied from the community dataset on the
+# organization's behalf, the one origin a later refresh may move. Named because
+# three modules compare against it and a bare "seed" in any of them reads as a
+# different fact.
 SEED_ORIGIN = "seed"
 
 # What a rate somebody set through the API carries, which is what stops a

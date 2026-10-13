@@ -68,6 +68,39 @@ def test_hybrid_models_relays_the_platform_list(
     assert body == {}
 
 
+def test_hybrid_models_relays_the_token_limits(
+    platform_client: TestClient, control_plane_transport: InstallControlPlane
+) -> None:
+    """A limit the peer reports is relayed; one that is not a positive integer reads as unknown, not as a failure."""
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {"id": "nebius:Qwen/Qwen3-30B", "context_window": 262144, "max_output_tokens": 8192},
+                    {"id": "openai:gpt-4o", "context_window": "128k", "max_output_tokens": True},
+                    {"id": "zen:space-bunny", "context_window": 0, "max_output_tokens": -1},
+                    {"id": "anthropic:claude-sonnet-4-5"},
+                ]
+            },
+        )
+
+    control_plane_transport(fake_post_platform)
+
+    response = platform_client.get(f"{API_ROOT}/models", headers={"Authorization": "Bearer user_test_token"})
+
+    assert response.status_code == 200
+    assert {m["id"]: (m["context_window"], m["max_output_tokens"]) for m in response.json()["data"]} == {
+        "nebius:Qwen/Qwen3-30B": (262144, 8192),
+        "openai:gpt-4o": (None, None),
+        "zen:space-bunny": (None, None),
+        "anthropic:claude-sonnet-4-5": (None, None),
+    }
+
+
 def test_hybrid_models_forwards_platform_refusal(
     platform_client: TestClient, control_plane_transport: InstallControlPlane
 ) -> None:

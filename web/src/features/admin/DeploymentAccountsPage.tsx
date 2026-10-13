@@ -260,6 +260,7 @@ export function DeploymentAccountsPage() {
 
       <TableScrollFrame className="otari-accounts-table">
         <DataTable
+          mobileLayout="cards"
           ariaLabel="Deployment accounts"
           columns={columns}
           rows={rows}

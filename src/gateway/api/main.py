@@ -163,14 +163,17 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # ceremony route that answers 503 still says passkeys exist here.
     RouterMount(auth_webauthn.router, Plane.CONTROL, when=lambda config: config.passkeys_enabled),
     RouterMount(auth_oauth.router, Plane.CONTROL),
+    # The pass-through routes: on a hybrid gateway ``run_passthrough`` asks the
+    # control plane for credentials and reports usage back, as completions do.
+    RouterMount(embeddings.router, Plane.DATA),
+    RouterMount(images.router, Plane.DATA),
+    RouterMount(audio.router, Plane.DATA),
+    RouterMount(rerank.router, Plane.DATA),
+    RouterMount(moderations.router, Plane.DATA),
     # Data-plane routes that also read a local control plane, because none of
     # them has hybrid handling. ``files`` is among them because an upload exists
     # to be referenced from a completion or a batch.
-    RouterMount(embeddings.router, Plane.DATA | Plane.CONTROL),
-    RouterMount(images.router, Plane.DATA | Plane.CONTROL),
-    RouterMount(audio.router, Plane.DATA | Plane.CONTROL),
     RouterMount(files.router, Plane.DATA | Plane.CONTROL),
-    RouterMount(rerank.router, Plane.DATA | Plane.CONTROL),
     RouterMount(decisions.router, Plane.DATA | Plane.CONTROL),
     # One decision call, billed here like a decisions call, so it needs both
     # planes too. Open to any key, since the harness dispatches the subagent
@@ -178,7 +181,6 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(agent_routing.router, Plane.DATA | Plane.CONTROL),
     RouterMount(search.router, Plane.DATA | Plane.CONTROL),
     RouterMount(batches.router, Plane.DATA | Plane.CONTROL),
-    RouterMount(moderations.router, Plane.DATA | Plane.CONTROL),
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
     # otherwise sit behind the catalog router's {model_id:path} catch-all.

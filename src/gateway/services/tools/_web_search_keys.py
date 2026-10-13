@@ -29,7 +29,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.tenancy import User
-from gateway.models.tools import OrgWebSearchKey, WebSearchCredential
+from gateway.models.tools import OrgWebSearchKey, WebSearchCredential, WebToolCredentialSource
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
@@ -63,7 +63,11 @@ LockWorkspace = Callable[[uuid.UUID], Awaitable[None]]
 def search_key_credential(key: OrgWebSearchKey) -> WebSearchCredential | None:
     """The key as a credential, or ``None`` where this deployment cannot decrypt it."""
     try:
-        return WebSearchCredential(provider=key.provider, api_key=decrypt_secret(key.encrypted_api_key))
+        return WebSearchCredential(
+            provider=key.provider,
+            source=WebToolCredentialSource.ORG,
+            api_key=decrypt_secret(key.encrypted_api_key),
+        )
     except (SecretBoxUnavailableError, SecretDecryptionError):
         logger.warning("Web search key %s cannot be decrypted on this deployment", key.id)
         return None

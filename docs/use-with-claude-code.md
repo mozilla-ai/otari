@@ -116,6 +116,10 @@ curl "$OTARI_URL/api/v1/routing/recommend" \
 `model` is one of the `agent_recommender_candidates`, Claude Code's `haiku`,
 `sonnet` and `opus` aliases by default, because Claude Code sends the
 subagent's requests to Anthropic itself and resolves the alias on its side.
+`harness` is `claude-code` or `pi`, and it picks the list: a pi request
+sends its own `candidates`, Otari model ids with what each is for, and a
+Claude Code request may not send any (see
+[Agent model recommendations](configuration.md#agent-model-recommendations)).
 The caller's own `requested_model` is received as a fact but kept out of the
 question, so the orchestrator's guess cannot pull the answer toward itself.
 The task reaches the decision model shortened to its first 32,000 characters.

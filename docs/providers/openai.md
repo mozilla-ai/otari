@@ -92,10 +92,10 @@ Hello, nice to meet you!
 
 | Symptom | Likely cause |
 |---------|--------------|
-| HTTP 502 `The provider rejected the gateway's credentials` | The `api_key` Otari sent to OpenAI is invalid or lacks access. Check the `api_key` (or `OPENAI_API_KEY`) configured on the gateway. |
+| HTTP 424 `The provider rejected the gateway's credentials` (code `provider_credential_rejected`) | The `api_key` Otari sent to OpenAI is invalid or lacks access. Check the `api_key` (or `OPENAI_API_KEY`) configured on the gateway. |
 | HTTP 404 (OpenAI's own "model not found" text) | The name after `openai:` is not a model your key can access, or the model name is misspelled. A rejection of your request carries OpenAI's own message, so the detail says which model it could not find. `The requested model was not found on the provider` appears instead when OpenAI sent no message at all. |
 | HTTP 502 `The upstream provider account is out of credit or over its billing limit.` | The provider rejected the call because the account Otari billed has no credit left or has hit its billing limit (for example OpenAI's "billing hard limit reached", or Anthropic's "credit balance is too low", which arrives as a 400). Top up the provider account, or point the model at a provider that has credit. The usage log keeps the status the provider actually returned, so these stay countable. |
-| HTTP 502 `LLM provider error` | Generic fallback: Otari reached the provider but the upstream call failed in a way it could not classify (for example a missing provider key, a provider-side 5xx, or a connection error). |
+| HTTP 502 `The provider failed the request with HTTP 5xx`, `The provider closed the connection before answering`, or `The gateway could not connect to the provider` | OpenAI failed on its side or the connection to it broke. These are retryable. `LLM provider error` is the same answer for a failure Otari could not place. |
 | HTTP 402 `No pricing configured for model ...` | Otari could not resolve pricing for that model and `require_pricing` rejected the request. Add a `pricing:` entry, enable `default_pricing: true` for bundled fallback pricing, or use a model that already has pricing coverage. |
 | HTTP 401 `Invalid master key` on `/api/v1/keys` | You passed a client (`gw-...`) key, or the wrong master key, instead of the configured master key. |
 

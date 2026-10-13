@@ -31,7 +31,10 @@ usage record the models that were attempted.
 retryable failure.
 A candidate whose provider has no credential configured counts as one, so the
 policy moves on to the next. When no candidate has a credential, the request is
-refused with `424 provider_not_configured`.
+refused with `424 provider_not_configured`. A candidate whose provider rejects
+the configured credential (401, or a 403 that does not reject the request itself) counts as one too; when every candidate
+either lacks a credential or had it rejected, and at least one was rejected, the
+request is refused with `424 provider_credential_rejected`.
 
 ```yaml
 routing:
@@ -236,7 +239,11 @@ talks to its provider directly can still ask Otari which model a new subagent
 should run on, through `POST /api/v1/routing/recommend`. A standalone
 deployment puts one choice question to the decision model it configured and
 recommends the candidate it picks; on otari.ai a managed recommender answers
-instead. Either way the recommendation is billed to the caller, and nothing
+instead. The harness that asks picks the candidates: Claude Code chooses among
+its own `haiku`, `sonnet` and `opus` aliases, and pi, through
+[pi-otari](https://github.com/mozilla-ai/pi-otari), among the Otari model ids
+it sends with the request.
+Either way the recommendation is billed to the caller, and nothing
 else is dispatched. See
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
 
@@ -305,7 +312,7 @@ without reading the usage log:
 | `Otari-Provider` | The provider instance that served the request, by its configured name (`openai`, `azure-eu`). Never its base URL or credentials. |
 | `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
 | `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
-| `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening, since the headers go out then. |
+| `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening or its first chunk, since the headers go out then. |
 
 A request naming a model or an alias reports `1` and `false`. Streaming responses
 carry the same values: failover happens before the stream opens, so the serving
@@ -315,15 +322,16 @@ request's cost is `usage.cost_usd` in the body, as described in the
 [API reference](api-reference.md#request-id-and-inline-cost). These headers are
 sent by a standalone gateway.
 
-Built-in tool charges settle on the final row. Candidate price and remaining
-budget are checked before each attempt, so a fallback cannot silently bypass
-pricing or spend limits.
+Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.
 
 ## Failure behavior
 
-Failover occurs only before response bytes reach the client. A streaming failure
-after the stream begins is returned to the client because switching models
-mid-answer would corrupt the response.
+Failover occurs only before response bytes reach the client. A streamed
+candidate that fails before its first chunk falls over like one that fails to
+open, as long as the failure comes within `streaming_first_chunk_hold_ms`
+(15 seconds by default; `0` limits failover to candidates that fail to open). A
+streaming failure after the stream begins is returned to the client because
+switching models mid-answer would corrupt the response.
 
 A tool loop that has already produced assistant state cannot be replayed on
 another provider. Shared service failures, such as an unavailable mandatory

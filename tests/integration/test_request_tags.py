@@ -133,7 +133,7 @@ def test_metadata_that_is_not_tags_is_refused(client: TestClient, master_key_hea
     assert "tag value must be a string" in response.text
 
 
-def test_messages_forwards_anthropic_user_id_and_tags_the_rest(
+def test_messages_forwards_no_metadata_and_tags_the_rest(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
     client.post(f"{API_ROOT}/users", json={"user_id": "tags-messages"}, headers=master_key_header)
@@ -156,7 +156,9 @@ def test_messages_forwards_anthropic_user_id_and_tags_the_rest(
         )
 
     assert captured, "amessages was never called"
-    assert captured["metadata"] == {"user_id": "tags-messages"}
+    # Gemini serves Messages as a chat completion and has no end-user field, so no
+    # metadata reaches it: not the caller's id, and not its tags.
+    assert "metadata" not in captured
     assert _row(db_session, "tags-messages").tags == {"feature": "smart-window", **_TAGS}
 
 

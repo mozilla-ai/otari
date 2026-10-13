@@ -340,6 +340,69 @@ class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
         super().__init__("A web search key cannot be both pinned and turned off for a workspace")
 
 
+class SearchToolRefusedError(TenancyValidationError):
+    """A search or fetch instance the instance rules refuse to write or test.
+
+    A 422, the status the same route's request validation answers with.
+    """
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+class SearchToolNotFoundError(TenancyNotFoundError):
+    """No configured or stored search or fetch instance has this name."""
+
+    def __init__(self, name: str):
+        super().__init__(f"No search or fetch instance '{name}'.")
+
+
+class SearchToolUntestableError(TenancyValidationError):
+    """``builtin_fetch`` has no connection test until web fetch runs on the fetch instances."""
+
+    def __init__(self, name: str):
+        super().__init__(
+            f"{name}, the built-in fetcher, has no connection test yet: it arrives when web fetch runs on the "
+            "fetch instances."
+        )
+
+
+class SearchToolMisconfiguredError(TenancyValidationError):
+    """A search instance nothing can run as it stands, such as a ``searxng`` one with no address to search."""
+
+    def __init__(self, name: str, problem: str | None = None):
+        super().__init__(problem or f"Search tool '{name}' is not configured correctly.")
+
+
+class WebSearchOptionRefusedError(TenancyValidationError):
+    """A request's ``provider_options`` key the provider serving it does not take from a request.
+
+    The provider's schema does not know the key or refuses its value, or marks
+    the key operator-only. A 400 on either door (design G).
+    """
+
+    def __init__(self, key: str, problem: str):
+        super().__init__(f"provider_options: {problem}.")
+        self.key = key
+
+
+class WebSearchCredentialRefusedError(TenancyError):
+    """A workspace's search or fetch credential its provider cannot be called with as it is.
+
+    One without a key or base URL its provider needs, which the library or the
+    old code would fill from the server's own settings, so the deployment's key
+    or endpoint would serve the tenant; or one naming a base URL the code that
+    serves its provider cannot use, which would send the tenant's key to the
+    provider's public endpoint instead. A 502, the status a malformed
+    credential from the control plane gets (design K).
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self, provider: str, problem: str) -> None:
+        super().__init__(f"The workspace's {provider} credential {problem}.")
+        self.provider = provider
+
+
 __all__ = [
     "CodeExecutionPolicyResolutionFailedError",
     "CodeExecutionPolicyResolutionFailure",
@@ -348,10 +411,16 @@ __all__ = [
     "McpSessionsInterruptedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
+    "SearchToolMisconfiguredError",
+    "SearchToolNotFoundError",
+    "SearchToolRefusedError",
+    "SearchToolUntestableError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",
+    "WebSearchCredentialRefusedError",
     "WebSearchNotEnabledError",
+    "WebSearchOptionRefusedError",
     "WebSearchPolicyResolutionFailedError",
     "WebSearchPolicyResolutionFailure",
     "WorkspaceMcpServerAlreadyExistsError",

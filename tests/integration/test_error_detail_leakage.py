@@ -98,10 +98,10 @@ def test_gateway_fault_error_keeps_a_fixed_detail(
     test_user: dict[str, Any],
 ) -> None:
     """A provider rejecting the gateway's credentials is the operator's problem.
-    It surfaces as a 502 with a fixed detail and never echoes the upstream text,
+    It surfaces as a 424 with a fixed detail and never echoes the upstream text,
     which is where a provider names the account it rejected."""
     response = _post_chat(client, api_key_header, _UpstreamError(401, "Incorrect API key sk-proj-BBBBBBBBBBBB"))
-    assert response.status_code == 502
+    assert response.status_code == 424
     assert response.json()["detail"] == "The provider rejected the gateway's credentials"
     assert "sk-proj-BBBBBBBBBBBB" not in response.text
 

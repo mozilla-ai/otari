@@ -351,10 +351,9 @@ platform bug and surfaced as `502 Bad Gateway`.
 `user_id` (optional) identifies the platform identity that owns the
 `X-User-Token` presented for this call, i.e. the token's creator. It is a
 stable, opaque string; Otari does not assume any particular format and never
-tries to parse it. Absent on older peers, which is exactly as valid as a peer
-omitting any other unrecognized field: nothing that reads this field may
-require it. When present, it is Otari's only way to key its own per-caller
+tries to parse it. When present, it is Otari's only way to key its own per-caller
 gateway-side state (aliases, routing memory, files, batches) in hybrid mode.
+See [End-user identifier](#end-user-identifier) for the one case that requires it.
 
 `workspace_id` and `organization_id` (both optional) identify the tenant that
 owns this resolution: the workspace the presented `X-User-Token` belongs to,
@@ -363,8 +362,25 @@ parses. They are the only tenant Otari sees, because `X-Gateway-Token`
 authenticates the calling gateway and carries no tenant of its own, so nothing
 downstream can recover them after the fact. Both are optional in the same
 fail-open sense as `user_id`: a peer that omits them costs whatever record
-needed a tenant, never the request. Otari records them and does not route on
-them, so neither value can reach a provider call.
+needed a tenant, never the request, except as the next section describes.
+Otari records them and does not route on them. Neither value reaches a provider
+call as itself; `workspace_id` and `user_id` reach one only inside a digest.
+
+#### End-user identifier
+
+While `provider_user_identifier_enabled` is on (the default), Otari sends each
+provider call an opaque identifier of the end user behind it, so a provider
+that enforces its usage policy per end user blocks that user and not the whole
+upstream account. The identifier is a digest of `workspace_id` and the
+caller's own user tag (`user` on chat and Responses, `metadata.user_id` on
+Messages), or of `workspace_id` and `user_id` when the caller sent no tag.
+
+So while the setting is on, a peer MUST send `workspace_id`, and MUST send
+`user_id` for a caller that sends no tag. Otari answers a resolve response
+without them with `502 Bad Gateway` and calls no provider, because a request
+it cannot identify is exactly the one that would put the whole account at
+risk. The single-attempt shape below carries neither field, so a peer still
+sending it needs the setting off.
 
 ### Response: single-attempt shape
 
@@ -522,7 +538,13 @@ Content-Type: application/json
 ```json
 {
   "models": [
-    {"id": "openai:gpt-4o", "created": 1715367049, "owned_by": "openai"}
+    {
+      "id": "openai:gpt-4o",
+      "created": 1715367049,
+      "owned_by": "openai",
+      "context_window": 128000,
+      "max_output_tokens": 16384
+    }
   ]
 }
 ```
@@ -531,9 +553,11 @@ The peer returns only the models the key may use, so it owns entitlement: a
 managed model is listed only for a key entitled to it, and the key's
 `allowed_models` narrows the list. Otari relays the list, sorted by `id`, and
 filters nothing itself. It reads `id` (required, the selector to send as
-`model`), `created` (integer, `0` when absent) and `owned_by` (the provider
-prefix of `id` when absent). Every answer must carry the `models` key; an empty
-list means the key may use none.
+`model`), `created` (integer, `0` when absent), `owned_by` (the provider
+prefix of `id` when absent), and the model's token limits, `context_window` and
+`max_output_tokens` (each a positive integer, `null` when absent or not one).
+Every answer must carry the `models` key; an empty list means the key may use
+none.
 
 ### Failure
 
@@ -713,6 +737,8 @@ Content-Type: application/json
     "cache_read_tokens": 8,            // provider cache-read input tokens
     "cache_write_tokens": 0           // cache-write (creation) input tokens; Anthropic only
   },
+  "units": {"images": 2},              // optional on success; counts in a unit
+                                       // other than tokens. See Units below.
   "error_class": "http_401",           // optional on error; omitted when the
                                        // Otari can't classify the failure
                                        // (e.g. mid-stream errors). See below.
@@ -734,6 +760,41 @@ A successful attempt that completes without provider usage data still sends a
 final report, but omits `usage` so the platform can record it as unavailable
 rather than as an explicit zero-token result.
 
+#### Units
+
+The pass-through endpoints are billed in tokens, in counts, or both. A success
+report carries the counts in `units`, an object beside `usage`. Its keys are
+meters, `requests`, `search_units` and `images`, and its values are JSON integers
+from 0 to 1,000,000. A receiver ignores a key it does not know, as the extension
+policy says, and refuses a report whose known key carries anything else with a
+422.
+
+| Endpoint | `units` | `usage` |
+|---|---|---|
+| `POST /api/v1/embeddings` | absent | input tokens |
+| `POST /api/v1/rerank` | `search_units`: the units the provider billed, at least 1 | tokens where the provider reports them |
+| `POST /api/v1/images/generations` | `images`: the images returned | tokens where the provider reports them |
+| `POST /api/v1/audio/transcriptions` | `requests`: 1 | tokens where the provider reports token usage |
+| `POST /api/v1/audio/speech`, `POST /api/v1/moderations` | `requests`: 1 | absent |
+
+A receiver prices an attempt by its rate's unit, and the rate prices one thing:
+
+- A rate in `requests` bills the `requests` count, or else the `search_units`
+  count, at `input_price_per_million / 1,000,000` each. An attempt that reports
+  neither, such as a completion, is billed one request.
+- A rate in `images` bills the `images` count at `input_price_per_million /
+  1,000,000` each. With no `images` count it prices nothing.
+- A rate in `tokens` bills `usage` and never a count. With no tokens it prices
+  nothing.
+
+Counts are never summed across meters. An attempt the rate prices nothing for is
+recorded unpriced. The cost is rounded once, half-up, to the micro-dollar.
+
+`units` sits beside `usage`, not in it, so a report whose provider returned no
+token counts still omits `usage`, and a receiver that does not read `units`
+records it as unavailable. A gateway does not negotiate this: it relies on its
+control plane reading `units` before it serves these endpoints.
+
 | Platform response | Gateway behavior |
 |---|---|
 | Completed success with `usage_status: "reported"` and non-null `pricing.source` | Validate the correlation id and attach `cost_usd` plus `pricing_source`. |
@@ -741,12 +802,14 @@ rather than as an explicit zero-token result.
 | `202` or legacy `204` | Return the provider response without inline cost. |
 | Terminal 4xx, including `404` and `410` | Do not retry or attach inline cost. |
 | Invalid body, correlation mismatch, reporting failure, or expired inline budget | Preserve the provider response and omit inline cost. |
+| A negative `cost_usd`, or a `pricing.source` that is not 1 to 32 lowercase letters and underscores | Treated as an invalid body. |
 
 ### Inline response fields
 
 | API format | Non-streaming placement | Streaming placement |
 |---|---|---|
-| Chat Completions | `usage.cost_usd`, `usage.pricing_source` | Terminal usage chunk: `usage.cost_usd`, `usage.pricing_source` |
+| Chat Completions | `usage.cost_usd`, `usage.pricing_source` | Terminal usage chunk (a usage chunk with no choices, or one that carries `finish_reason`): `usage.cost_usd`, `usage.pricing_source` |
+| Embeddings, rerank | `usage.cost_usd`, `usage.pricing_source` | Not streamed |
 | Messages | `usage.cost_usd`, `usage.pricing_source` | `message_delta.usage.cost_usd`, `message_delta.usage.pricing_source` |
 | Responses | `usage.cost_usd`, `usage.pricing_source` | `response.completed.response.usage.cost_usd`, `response.completed.response.usage.pricing_source` |
 

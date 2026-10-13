@@ -94,18 +94,36 @@ because their provider exists in any-llm.
 
 `GET /api/v1/models` combines discoverable provider models, configured prices,
 aliases, and routing-policy names. A provider's embedding and rerank models are
-offered alongside its chat models. Discovery reads one page of a provider's
-listing: Cohere pages its listing at 20 models by default, so Otari asks it for
-its largest page (1000 models), which covers its catalog today; an instance can
-set its own `page_size`. Discovery is cached and bounded; an unreachable
-provider does not block the catalog indefinitely.
+offered alongside its chat models. A provider that pages its listing, as Cohere
+does, is read to the last page.
+Discovery is cached and bounded; an unreachable provider does not block the
+catalog indefinitely.
+
+Each listed model carries the rate a request from the caller would be billed at,
+and `pricing_source` says which price list it came from: `organization` for the
+caller's organization's own override, `configured` for the deployment's stored
+rate, `default` for the genai-prices fallback, `dynamic` for a routing policy
+that picks its model per request, and `none` for an unpriced model. An alias is
+priced from its target.
+
+Each model carries its token limits, `context_window` and `max_output_tokens`,
+so a client does not have to guess them. Both come from models.dev's entry for
+the model under the provider serving it. Where that entry has no context window,
+the bundled genai-prices dataset supplies one; genai-prices lists no output
+limit, so a model models.dev does not describe reports `max_output_tokens` as
+`null`, as it does any limit neither dataset knows. An alias reports its target's
+limits, and the grouped catalog reports the same values for each offering. An
+instance declared `openai-compatible` is looked up under OpenAI, so a model it
+serves under another name usually has no models.dev entry. With
+`models_dev_metadata: false`, the context window comes from genai-prices alone.
 
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.
 
 Hosted mode keeps `GET /api/v1/models` for control-plane discovery. Hybrid mode
-does not serve the local catalog.
+does not serve the local catalog: it relays the control plane's list, limits
+included (see [Model listing](hybrid-mode-protocol.md#model-listing)).
 
 ### Who is shown which models
 
@@ -137,7 +155,10 @@ model of a `providers:` instance (see
 A refusal on that path says which narrowing turned the model away. A model the
 key offers with its switch off is a 403 with the code `model_not_serving`, naming
 the key and pointing at the switch. A model no key of the provider offers is a
-404 with `model_not_found`. A model the key serves that a workspace restriction
+404 with `model_not_found`. An undated name whose dated builds the key offers is
+answered for those builds: not serving where every one is switched off, and not
+found, naming them, where there is more than one to choose from (see
+[Catalog spellings](#catalog-spellings)). A model the key serves that a workspace restriction
 or the API key's own allow-list excludes keeps the 403 `model_not_allowed`. The
 Providers page shows each key's serving count beside it, so a key offering models
 and serving none is visible before the first request. See
@@ -280,6 +301,7 @@ what was sent, and pricing, budgets and usage key on the offering reached.
 
 - The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) resolves to the first of the model's offerings in this order. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
 - `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
+- On an organization's own provider key, a provider's undated name (`anthropic:claude-haiku-4-5`) resolves to the dated build the key serves under it (`claude-haiku-4-5-20251001`), where exactly one serving model is that name plus a release date (`-YYYYMMDD` or `-YYYY-MM-DD`). The dated build's serving switch, price and allow-lists apply as if it had been sent. A name with two dated builds, at least one of them serving, is refused as not found (404 `model_not_found`), and the detail names both; a name whose dated builds are all switched off is refused as not serving (403 `model_not_serving`). Neither detail names the dated builds to a caller who reached the model through an alias. A selector whose prefix names a `providers:` instance is never rewritten this way, even for a caller whose organization also holds a key for that provider: the instance sends any id to the provider as written.
 
 A selector that already names an offering is never rewritten, so a provider's
 own id keeps working verbatim.

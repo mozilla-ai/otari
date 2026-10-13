@@ -8,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey
 from gateway.repositories.base_repository import BaseRepository
-from gateway.repositories.users_repository import get_or_create_attribution_user, get_or_create_default_user
 
 
 class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
@@ -87,15 +86,6 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         except IntegrityError:
             return False
         return True
-
-    async def owner_user_id(self, user_id: str | None) -> str:
-        """Return the id of the user a declared key bills to, creating the user, or reviving it, when needed.
-
-        No id names the shared ``default`` user, as a key minted without an owner does.
-        """
-        if user_id is None:
-            return (await get_or_create_default_user(self.db)).user_id
-        return (await get_or_create_attribution_user(self.db, user_id=user_id, alias=f"User {user_id}")).user_id
 
     async def release_config_names(self, keep: Collection[str]) -> list[str]:
         """Clear the config name of every key config.yml no longer declares, returning the names cleared."""

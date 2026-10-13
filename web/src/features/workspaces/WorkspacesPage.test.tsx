@@ -122,8 +122,24 @@ function renderPage(ui: ReactElement) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
+const realMatchMedia = window.matchMedia
+
+function stubPhone() {
+  window.matchMedia = ((query: string) => ({
+    matches: true,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
+  window.matchMedia = realMatchMedia
 })
 
 const SECOND = "66666666-6666-6666-6666-666666666666"
@@ -139,6 +155,26 @@ describe("WorkspacesPage", () => {
 
     expect(await screen.findByText("Production")).toBeInTheDocument()
     expect(screen.getByText("Live traffic")).toBeInTheDocument()
+  })
+
+  it("keeps Edit and Delete reachable on a phone", async () => {
+    stubPhone()
+    mockApi({
+      workspaces: [
+        workspace({ name: "Production" }),
+        workspace({ id: SECOND, name: "Staging" }),
+      ],
+    })
+    renderPage(<WorkspacesPage />)
+
+    expect(await screen.findByText("Production")).toBeInTheDocument()
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument()
+    expect(
+      screen.getAllByRole("button", { name: "Edit" })[0],
+    ).toBeInTheDocument()
+    expect(
+      screen.getAllByRole("button", { name: "Delete" })[0],
+    ).toBeInTheDocument()
   })
 
   it("creates a workspace with a name and a description", async () => {

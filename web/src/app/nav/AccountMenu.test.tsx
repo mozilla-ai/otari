@@ -130,6 +130,22 @@ describe("AccountMenu", () => {
     expect(row).toHaveTextContent(/Light|Dark/)
   })
 
+  it("draws the icon of the theme the row names, and swaps it with the value", async () => {
+    mockCaller(OPERATOR)
+    await openMenu()
+
+    const row = await screen.findByRole("button", { name: /^Appearance:/ })
+    // Sun is the only one of the two with a circle in it.
+    const isSun = () => row.querySelector("svg circle") !== null
+    const wasLight = /Light/.test(row.textContent ?? "")
+    expect(isSun()).toBe(wasLight)
+
+    await userEvent.setup().click(row)
+    const after = await screen.findByRole("button", { name: /^Appearance:/ })
+    expect(/Light/.test(after.textContent ?? "")).toBe(!wasLight)
+    expect(after.querySelector("svg circle") !== null).toBe(!wasLight)
+  })
+
   it("keeps Playground reachable on mobile before Documentation", async () => {
     mockCaller(OPERATOR)
     await openMenu()

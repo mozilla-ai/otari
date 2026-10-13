@@ -92,6 +92,9 @@ the corresponding startup value after the database is available.
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
+| `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
+| `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
+| `streaming_first_chunk_hold_ms` | How long a standalone gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
@@ -444,6 +447,51 @@ master key or an `OTARI_SECRET_KEY` key. Generate one with
 your secret store. Rotating it costs nothing but a fresh copy of each file the
 next time a request uses it. Hybrid mode makes no copies and needs no pepper.
 
+### End-user identifiers
+
+Every request a deployment sends to a provider reaches it under one account. A
+provider that enforces its usage policy per end user needs an identifier for
+each one, or a block meant for one person lands on the account, and every user
+and workspace on the deployment loses that provider.
+
+So while `provider_user_identifier_enabled` is on, which it is by default, Otari
+sends each provider call a digest of the workspace and the user tag the caller
+sent Otari (`user` on chat completions and Responses, `metadata.user_id` on
+Messages), or of the workspace and the resolved user when the caller sent no
+tag. The table below names the field each provider receives it in. The
+provider never sees the tag, which may be personal data, or an Otari id. The
+same user in the same workspace always gets the same identifier, which is what
+a provider scopes enforcement by. The dashboard's Playground ignores a `user`
+sent in its request body, so the identifier its calls carry is always the
+signed-in member's.
+
+| Provider | Field |
+| --- | --- |
+| OpenAI, Azure OpenAI | `user` on chat completions, `safety_identifier` on Responses |
+| Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
+| Anthropic, including Azure and Vertex AI | `metadata.user_id` |
+| Bedrock | `requestMetadata.otari_user` |
+| Any other provider with a native Messages API, on Messages | `metadata.user_id` |
+
+Bedrock's abuse detection reads no end-user identifier, but `requestMetadata`
+lands in the account's invocation logs, which is where the prompt ids in an AWS
+abuse report are traced back to a user. Every other provider gets nothing: some
+have no such field (Gemini, Vertex AI, Mistral), some run your own models, and
+for the rest an unknown field can fail the call. A Responses or Messages request
+served as a chat completion gets that provider's chat field.
+
+Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
+characters (`openssl rand -base64 32`) to key the digest. Without it the digest
+is unkeyed, so the same workspace id and user give the same identifier on any
+deployment, and Otari logs a warning at startup. Otari refuses to start when the
+key equals the master key or an `OTARI_SECRET_KEY` key. Rotating it gives every
+user a new identifier.
+
+In hybrid mode the workspace and user come from otari.ai's resolve response,
+and Otari refuses a request with a `502` when it names no workspace, or no user
+for a caller that sent no tag, rather than send it unscoped. See
+[End-user identifier](hybrid-mode-protocol.md#end-user-identifier).
+
 ## Pricing
 
 Pricing keys use `provider:model` or `instance:model`:
@@ -467,7 +515,12 @@ review and accept newer snapshots.
 
 Default pricing is off because provider catalogs and reseller rates change.
 With `require_pricing: true`, a budgeted request with no effective price is
-rejected instead of bypassing the budget.
+rejected instead of bypassing the budget. The 402 says what to do: with
+`default_pricing` on, a model the bundled list does not price is most often a
+misspelled name, so it points at `GET /api/v1/models` and at adding a price;
+with it off, it offers both adding a price and turning the fallback on. A model
+whose provider has no credential at all is refused as `provider_not_configured`
+instead, since pricing it would not make it servable.
 
 With `require_pricing: false`, such a request is served, its model tokens carry
 no cost, and its response carries no inline `cost_usd`. The usage row records no
@@ -563,9 +616,37 @@ accepted shape.
 
 ### Per-request pricing (audio, moderations, rerank, and completion models)
 
-Audio, moderations, and direct search do not use token pricing. They reuse
-`input_price_per_million` as USD per million requests. An unpriced request on
-these endpoints is served at zero cost.
+A rate's `unit` decides what it bills. A rate in `tokens` bills the tokens the
+provider reports, a rate in `images` bills each image returned, and a rate in
+`requests` bills each request (or each search unit, for rerank). The rate reuses
+`input_price_per_million`, always per million: USD per million tokens, requests
+or images. A $0.04 image is `input_price_per_million: 40000`. A rate never bills
+a count of another unit, so a per-request price is never read as a price per
+image.
+
+| Endpoint | What it reports | Rates that price it |
+|---|---|---|
+| Embeddings | Input tokens | `tokens`; `requests` bills one request |
+| Rerank | Search units, and tokens where the provider reports them | `requests` per search unit, or `tokens` |
+| Image generation | Images returned, and tokens for a token-billed model such as `gpt-image-1` | `images` per image, `requests` per request, or `tokens` |
+| Audio transcription | One request, and tokens for a token-billed model such as `gpt-4o-transcribe` | `requests`, or `tokens` |
+| Audio speech, moderations | One request | `requests` |
+
+A rate in `tokens` on image generation, audio or moderations is still read in
+that endpoint's old unit (raw USD per image, or USD per million requests), as
+this guide used to document, and logs a warning once per model. A later release reads such a rate
+strictly, as tokens, so set `unit: images` or `unit: requests` on those rates
+now. A token-billed model (`gpt-image-1`, `gpt-4o-transcribe`) can then be priced
+in `tokens`, because its tokens are recorded on the usage row.
+
+A flat per-image or per-request rate cannot follow what the caller chooses: an
+image's size and quality, or an audio file's length. Set it at the dearest
+option you allow.
+
+An unpriced request on audio or moderations is served at zero cost. Image
+generation, embeddings and rerank are subject to `require_pricing`, which also
+refuses a rate that cannot price the endpoint, such as an `images` rate on
+embeddings, rather than serving it unpriced.
 
 A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
 `exa-search` backed by `exa`), and its provider needs no entry under
@@ -576,14 +657,14 @@ provider's reported charge when it reports one, and at the rate otherwise.
 
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
-search unit (one query over a batch of documents) report that count and no
-tokens, so give such a model `unit: requests` and it is charged the reported
-units at `input_price_per_million / 1,000,000` each, or one unit when the
-provider reports none. The budget reservation holds one unit and settles at
-the reported count. The default-pricing dataset carries no rerank rates, so a
-rerank model needs its own pricing row, for example `cohere:rerank-v3.5` at
-`input_price_per_million: 2000` (USD 2 per 1,000 searches) with
-`unit: requests`.
+search unit (one query over up to 100 documents, a long document counting as
+several) report that count and no tokens, so give such a model `unit: requests`
+and it is charged the reported units at `input_price_per_million / 1,000,000`
+each, or one unit when the provider reports none. The budget reservation holds
+the units the documents imply, from their count and length, and settles at the
+reported count. The default-pricing dataset carries no rerank rates, so a rerank
+model needs its own pricing row, for example `cohere:rerank-v3.5` at
+`input_price_per_million: 2000` (USD 2 per 1,000 searches) with `unit: requests`.
 
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or
@@ -611,20 +692,26 @@ model needs its own pricing row.
 
 ### Per-image pricing (image generation)
 
-Image generation uses `input_price_per_million` as raw USD per image, without
-million-unit scaling. Image generation is subject to `require_pricing` and
-reserves the requested image count before dispatch.
+An `images` rate is USD per million images, like a request rate: $0.04 an image
+is `input_price_per_million: 40000`, which is what the dashboard stores when you
+enter $40 per 1,000 images. Before this release an `images` rate was read as
+raw USD per image, so a rate written that way in `config.yml` (for example
+`0.04`) now bills a millionth of what it meant; multiply it by 1,000,000.
 
-These overloaded units are retained for schema compatibility. Do not apply a
-token price to a request-priced or image-priced endpoint.
+Image generation reserves the requested image count before dispatch at an
+`images` rate, then settles on the images the provider returned. Audio holds
+nothing before dispatch, so a priced audio request can exceed a budget by one
+request's price.
 
 ## Search tools
 
 `search_tools` names the deployment's search instances. Direct `POST /api/v1/search`
 calls use them by name, and the in-loop `otari_web_search` tool uses the default
-one (below). The same entries can be managed at runtime from Tools or
-`/api/v1/search-tools`. `fetch_tools` names fetch instances, for the
-`otari_web_fetch` tool and for enriching search results.
+one (below). `fetch_tools` names fetch instances, for the `otari_web_fetch` tool
+and for enriching search results. Both can also be stored at runtime through
+`/api/v1/search-tools`, a fetch instance with `kind: fetch` and listed with
+`?kind=fetch`, and search instances from Tools too. A stored instance wins over
+a configuration file entry of the same name and kind.
 
 ```yaml
 search_tools:
@@ -664,15 +751,30 @@ Rules for instances:
 - `builtin_fetch`, the built-in fetcher, is a fetch instance that always exists and
   cannot be declared. A search instance's `fetch_tool` names the fetch instance that
   enriches its results; without one, `web_fetch_default_tool` does.
-- A name contains no `/` or `:`, is not `builtin_fetch` or `none`, and is unique
-  across both maps.
-- `options` are checked against the provider's options.
+- A name contains no `/` or `:`, is not `builtin_fetch` or `none` in any case
+  (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
+- `options` are checked against the provider's options. A search instance may also
+  set `max_results` and `time_range`, and a fetch instance `max_chars`, which every
+  provider of that tool takes. Not in effect yet: they apply once the instances
+  serve requests through the libraries.
 - A `search_tools` entry that breaks the name rules, or whose `options` carry a key
   the provider does not know or a value it refuses, still loads, with a warning
   that names the entry and the problem. Fix it: a later release refuses it, and
   once the instances serve requests, the options named are left out of every call.
   A `fetch_tools` entry that breaks the name rules, or reuses a configured search
-  instance's name, stops startup.
+  instance's name, stops startup; a stored one is left out, with an error.
+
+Writes through `/api/v1/search-tools` are held to these rules in what they set, so
+rotating the key of an instance stored before the rules still works. When the
+in-loop default is the single search instance, with no default set and no legacy
+settings, adding a second there first sets `web_search_default_tool` to the first,
+so in-loop search does not turn off, and the response says so. That runtime value
+wins over the configuration file until it is cleared.
+
+`POST /api/v1/search-tools/test` runs one search or one fetch on an instance before
+it is saved, and `POST /api/v1/search-tools/{name}/test` on one that exists. Each
+says whether the call worked, the error's tag when it did not, and how many hits or
+characters came back, never the content. `builtin_fetch` has no test yet.
 
 The defaults and the call limit are runtime settings, also set from Tools or
 `/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
@@ -692,7 +794,7 @@ file or environment, then to the built-in default.
   together. Default 10.
 
 A default that names no instance, set in the file or earlier at runtime, is treated
-as unset, with a warning at startup.
+as unset, with a warning at startup, or from the refresh that first finds it so.
 
 In this release these settings are read and checked, and no request uses them yet.
 They take effect in later releases: `web_fetch_default_tool` when web fetch moves
@@ -753,11 +855,14 @@ These are a standalone deployment's settings. On otari.ai a managed
 recommender answers behind the same route, so neither applies there.
 `agent_recommender_model` is a `decision_providers` selector, resolved per
 request, so a deployment that never asks need not configure the provider.
-`agent_recommender_candidates` maps each model name, as the asking harness
-spells it, to what it is for; `null` is allowed when the name says enough. At
-least two are required, and at most 255, the limit a choice question has. The
-defaults are Claude Code's `haiku`, `sonnet` and `opus` aliases with
-descriptions along the lines above.
+`agent_recommender_candidates` maps each model name, as Claude Code spells it,
+to what it is for; `null` is allowed when the name says enough. At least two
+are required, and at most 255, the limit a choice question has. The defaults
+are Claude Code's `haiku`, `sonnet` and `opus` aliases with descriptions along
+the lines above. The list is Claude Code's alone: a pi request sends its own
+`candidates` in the same shape, as Otari model ids (`<provider>:<model>`),
+because [pi-otari](https://github.com/mozilla-ai/pi-otari) decides them on the
+laptop.
 
 ## Mail
 

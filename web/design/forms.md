@@ -259,9 +259,9 @@ control, and its `isSaving` is what disables the control mid-write.
 
 `Toggle` is `role="switch"` with an `aria-label` (its `label` prop, since a
 switch has no visible text of its own). The visible track is 44x24 with a
-1px edge, filled with the page ground rather than a surface step: on a flat plane
-the track is a drawn outline, not a raised trough, so the state is carried entirely
-by the knob's color (`control-thumb` off, `control-indicator` on).
+1px edge. Off is an outline on the page ground with a `control-thumb` knob; on
+fills the whole track with `control-indicator` and turns the knob `accent-glyph`
+(white), so the states differ in the track's area and not only in the knob's color.
 
 The knob travels with `transition-transform`, not `transition-colors`: the fill
 should read as instant, the travel is what benefits from being followed.

@@ -13,7 +13,7 @@ from anthropic.types import (
 )
 
 from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
-from gateway.services.web_retrieval_backend import (
+from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_NATIVE_TYPE_PREFIX,
     WEB_SEARCH_TOOL_NAME,

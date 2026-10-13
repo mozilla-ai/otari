@@ -35,6 +35,7 @@ from gateway.api.routes._passthrough import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.routing_exceptions import (
+    CandidatesNotAllowedError,
     RecommendationFailedError,
     RecommenderNotConfiguredError,
     UnreadableRecommendationError,
@@ -42,7 +43,7 @@ from gateway.exceptions.routing_exceptions import (
 from gateway.models.api_keys import APIKey
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort, ModelRecommendation, SubagentSpawn
 from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest
-from gateway.services.routing import build_decision_request
+from gateway.services.routing import build_decision_request, candidates_for
 
 router = APIRouter(prefix="/routing", tags=["routing"])
 
@@ -104,8 +105,9 @@ async def recommend_model_for_agent(
     parent's model and the model the caller asked for, if any. The recommender
     this build binds picks one of the candidate models and the answer names it.
     A standalone deployment asks the decision model `agent_recommender_model`
-    names to choose among `agent_recommender_candidates`; a hosted build may
-    bind a recommender of its own, which the caller never configures. Where
+    names to choose among `agent_recommender_candidates` for Claude Code and
+    among the request's own `candidates` for pi; a hosted build may bind a
+    recommender of its own, which the caller never configures. Where
     the recommender reports them, the answer also carries a one-line reason
     and its probability for each candidate.
 
@@ -123,11 +125,15 @@ async def recommend_model_for_agent(
         parent_model=request.parent_model,
         requested_model=request.requested_model,
     )
+    try:
+        candidates = candidates_for(
+            request.harness, sent=request.candidates, claude_code=config.agent_recommender_candidates
+        )
+    except CandidatesNotAllowedError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     # The hold is sized from the question the core would put, description and
     # candidates included, which is also the best guess at what a bound recommender reads.
-    question = build_decision_request(
-        spawn, decision_model=config.agent_recommender_model, candidates=config.agent_recommender_candidates
-    )
+    question = build_decision_request(spawn, decision_model=config.agent_recommender_model, candidates=candidates)
     recommendation = await scaffold.run_call(
         raw_request=raw_request,
         response=response,
@@ -136,7 +142,7 @@ async def recommend_model_for_agent(
         user=request.user,
         prompt_chars=decision_input_chars(question),
         default_output_tokens=ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,
-        call=_RecommenderCall(recommender, spawn, config.agent_recommender_candidates),
+        call=_RecommenderCall(recommender, spawn, candidates),
     )
     return AgentModelRecommendation(
         model=recommendation.model,

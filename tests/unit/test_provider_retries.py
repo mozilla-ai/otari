@@ -123,6 +123,9 @@ def test_a_negative_deployment_setting_fails_at_load() -> None:
 def test_each_listed_sdk_takes_max_retries(provider: LLMProvider, monkeypatch: pytest.MonkeyPatch) -> None:
     """The list is only true of the installed any-llm, so a provider that stops taking the keyword fails here."""
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "project")
+    # Azure Anthropic refuses a resource beside the api_base, and both SDKs read one from the shell.
+    monkeypatch.delenv("AZURE_ANTHROPIC_RESOURCE", raising=False)
+    monkeypatch.delenv("ANTHROPIC_FOUNDRY_RESOURCE", raising=False)
     kwargs = with_provider_retries(provider, {"api_key": "sk", "api_base": "http://localhost:1/v1"}, 0)
 
     llm = AnyLLM.create(provider, api_key=kwargs["api_key"], api_base=kwargs["api_base"], **kwargs["client_args"])

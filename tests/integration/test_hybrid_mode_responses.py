@@ -34,6 +34,8 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     app = app_for(
         GatewayConfig(
             mode="hybrid",
+            # These resolve payloads name no tenant. The end-user identifier has its own tests.
+            provider_user_identifier_enabled=False,
             platform={"base_url": "http://platform.test/api/v1"},
         )
     )

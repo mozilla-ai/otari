@@ -12,6 +12,7 @@ from any_fetch import (
     UnsupportedParameterError,
     UnsupportedProviderError,
     afetch,
+    shared_parameter_problems,
 )
 from any_fetch._http import ProviderHttp
 from any_fetch.providers import builtin
@@ -64,6 +65,20 @@ def test_an_unknown_provider_is_refused_with_the_supported_ones(lookup: str) -> 
 async def test_afetch_fetches_one_page() -> None:
     page = await afetch("fake", "https://example.com/", max_chars=3, account="acme")
     assert (page.text, page.text_truncated) == ("The", True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [0, "5", True])
+async def test_a_max_chars_that_is_not_a_positive_whole_number_is_refused(value: Any) -> None:
+    async with AnyFetch.create("fake") as fake:
+        with pytest.raises(ValueError, match="max_chars"):
+            await fake.fetch("https://example.com/", max_chars=value)
+
+
+def test_shared_parameter_problems_name_each_refused_value_and_nothing_else() -> None:
+    assert shared_parameter_problems({"max_chars": 0, "title": "anything"}).keys() == {"max_chars"}
+    assert shared_parameter_problems({"max_chars": 500}) == {}
+    assert shared_parameter_problems({"max_chars": None}) == {}
 
 
 def test_builtin_before_registration_is_a_clear_error() -> None:

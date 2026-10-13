@@ -6,6 +6,10 @@ so nothing an upstream said reaches the caller.
 """
 
 
+class CandidatesNotAllowedError(Exception):
+    """The request's candidates do not fit its harness. The message says which way."""
+
+
 class RecommenderNotConfiguredError(Exception):
     """This deployment names no recommender that can answer. The message says what to configure."""
 
@@ -25,3 +29,10 @@ class RecommendationFailedError(Exception):
 
 class UnreadableRecommendationError(ValueError):
     """The recommender answered, but named no candidate."""
+
+
+class PolicyOnHybridGatewayError(Exception):
+    """A request named one of this gateway's routing policies, which a hybrid gateway does not apply.
+
+    The message says what to name instead.
+    """

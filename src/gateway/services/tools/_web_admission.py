@@ -28,7 +28,7 @@ from gateway.services.tools._web_declarations import (
     web_search_header_conflicts,
     web_search_intercept_enabled,
 )
-from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, read_domain_list
 
 if TYPE_CHECKING:

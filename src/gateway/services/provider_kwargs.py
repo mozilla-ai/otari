@@ -60,7 +60,7 @@ from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
-from gateway.services.catalog import resolve_catalog_offerings, resolve_catalog_selector
+from gateway.services.catalog import resolve_catalog_offerings, resolve_catalog_selector, resolve_undated_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
@@ -770,6 +770,11 @@ def resolve_provider_selector(
         # organization's own offerings may answer. Relabeled like an alias: the
         # caller sees the spelling they sent, and pricing keys on the target.
         alias = resolve_catalog_selector(model_selector, workspace_id=workspace_id)
+    if alias is None and (written := split_selector(model_selector)) is not None and written[0] not in config.providers:
+        # An organization key serves only the ids it offers, so a provider's
+        # undated name reaches its one dated build there. A ``providers:``
+        # instance sends any id as written and is never rewritten.
+        alias = resolve_undated_selector(model_selector, workspace_id=workspace_id)
     selector = alias if alias is not None else model_selector
 
     split = split_selector(selector)

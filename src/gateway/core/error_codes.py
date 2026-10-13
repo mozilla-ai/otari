@@ -27,15 +27,22 @@ MODEL_NOT_SERVING = "model_not_serving"
 # A provider key of the organization serves the provider, and none offers the model.
 MODEL_NOT_FOUND = "model_not_found"
 CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
+# The model the request reached does not accept a kind of content the request carries, such as an image.
+UNSUPPORTED_CONTENT = "unsupported_content"
 PRICING_REQUIRED = "pricing_required"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
 PROVIDER_NOT_CONFIGURED = "provider_not_configured"
+# The provider refused the credential the gateway holds for it (an upstream 401 or 403).
+PROVIDER_CREDENTIAL_REJECTED = "provider_credential_rejected"
 # A request body or parameter that failed schema validation (a 422).
 INVALID_REQUEST = "invalid_request"
 # Sent only in a stream's error event: the provider failed after the stream
 # started, for a reason no more specific code names.
 PROVIDER_ERROR = "provider_error"
+# Sent only in a stream's error event: the provider's stream ended before it
+# finished, by closing without its final event or cutting the connection.
+PROVIDER_STREAM_INTERRUPTED = "provider_stream_interrupted"
 
 
 def error_headers(code: str, *, budget_scope: str | None = None, rule: str | None = None) -> dict[str, str]:

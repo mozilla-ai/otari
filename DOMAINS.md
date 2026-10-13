@@ -118,9 +118,12 @@ them from there.
 ### pricing
 
 The deployment price list, organization rate overrides and upstream price
-snapshots.
+snapshots, and the rule that says what a rate bills: its unit chooses the meter
+it prices (`price_usage` in `services/pricing/`). Standalone settlement and a
+hybrid gateway's control plane both price through it.
 
-It also owns `models/pricing_schemas.py`.
+It also owns `models/pricing_schemas.py`, and `UNIT_METERS` in
+`models/pricing.py`, the meters a count is reported under.
 
 ### providers
 

@@ -110,9 +110,16 @@ organization fields cannot move billing or credential resolution.
 
 ## Pricing and money
 
-`core/metered_pricing.py` is the only cost calculation. Settlement, estimates,
-repricing, and imported usage all use it. Cache-token convention is explicit,
-and a settled total is rounded once, half-up, to the micro-dollar.
+`core/metered_pricing.py` holds the cost arithmetic: the token meters, the
+per-million reading and the rounding. Settlement, estimates, repricing, and
+imported usage all use it. Cache-token convention is explicit, and a settled
+total is rounded once, half-up, to the micro-dollar.
+
+Which meter a rate prices is the pricing domain's rule, `price_usage` in
+`services/pricing/`: the rate's `unit` chooses it. A pass-through endpoint
+reports what its result was billed on (`PassthroughBilling` in
+`services/inference/`) and never prices it itself, so standalone settlement and
+the control plane price one request the same way.
 
 Money columns use the decimal types in `models/money.py`. Widen incoming
 floats with `to_usd` at service boundaries; never cast a decimal to float
@@ -158,6 +165,8 @@ default. The API attempt walker executes the compiled order and owns fallback
 settlement. Work that depends on the account a candidate's credential reaches
 runs in its `prepare_kwargs` step, once per candidate, and a candidate that step
 cannot serve is skipped without reordering the plan (`CandidateCannotServe`).
+
+The walker's `admit_attempt` step moves the reservation onto the budgets of each candidate's provider through `BudgetService.move_reservation`, and a budget on that provider alone with no room skips the candidate the same way.
 
 ## Tools, MCP, and guardrails
 

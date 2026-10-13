@@ -7,7 +7,7 @@ async with AnySearch.create("fake", timeout=15.0) as provider:
     result = await provider.search("latest stable python release", max_results=5)
 """
 
-from any_search._api import DEFAULT_TIMEOUT, AnySearch, asearch
+from any_search._api import DEFAULT_TIMEOUT, SHARED_PARAMETERS, AnySearch, asearch, shared_parameter_problems
 from any_search._errors import (
     AnySearchError,
     MissingCredentialError,
@@ -20,6 +20,7 @@ from any_search._types import OptionSpec, ProviderMetadata, SearchError, SearchH
 
 __all__ = [
     "DEFAULT_TIMEOUT",
+    "SHARED_PARAMETERS",
     "AnySearch",
     "AnySearchError",
     "MissingCredentialError",
@@ -34,4 +35,5 @@ __all__ = [
     "UnsupportedProviderError",
     "asearch",
     "install_log_filter",
+    "shared_parameter_problems",
 ]

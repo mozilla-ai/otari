@@ -9,6 +9,7 @@ i.e. budget is reserved before the pricing gate is enforced.
 
 from collections.abc import Generator
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +28,9 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
 
     Default pricing is disabled so these tests exercise the missing-pricing gate
     in isolation: otherwise genai-prices would price well-known models (gpt-4o)
-    and the 402 branch would never be reached.
+    and the 402 branch would never be reached. OpenAI and Cohere hold a credential,
+    because an unpriced model whose provider has none is refused as unconfigured
+    instead, and the chat provider call fails in place of reaching OpenAI.
     """
     config = GatewayConfig(
         database_url=postgres_url,
@@ -38,8 +41,11 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
         require_pricing=True,
         default_pricing=False,
         web_fetch_enabled=True,
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-test"}, "cohere": {"api_key": "co-test"}},
     )
-    yield from build_test_client(config)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=RuntimeError("provider down"))):
+        yield from build_test_client(config)
 
 
 def _chat(client: TestClient, *, model: str, user: str) -> int:
@@ -126,6 +132,27 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
     assert rows[0]["provider"] == "openai"
 
 
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("chat/completions", {"model": "openai:gpt-4o", "messages": _MESSAGES}),
+        ("embeddings", {"model": "openai:text-embedding-3-small", "input": "hi"}),
+        ("rerank", {"model": "cohere:rerank-v3.5", "query": "q", "documents": ["a", "b"]}),
+        ("images/generations", {"model": "openai:dall-e-3", "prompt": "a cat"}),
+    ],
+)
+def test_missing_pricing_refusal_carries_its_code_on_every_route(
+    strict_pricing_client: TestClient, path: str, body: dict[str, Any]
+) -> None:
+    """Chat and the pass-through routes name the refusal the same way, in the body and the header."""
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    resp = c.post(f"{API_ROOT}/{path}", json={**body, "user": "priced-user"}, headers=_MASTER_HEADER)
+    assert resp.status_code == 402
+    assert resp.json()["code"] == "pricing_required"
+    assert resp.headers["Otari-Error-Code"] == "pricing_required"
+
+
 def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client: TestClient) -> None:
     """A budget-exempt key skips the gate, so no missing-pricing row is written.
 
@@ -136,8 +163,8 @@ def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client
     test_gateway_rejection_logging.py; the shared writer fixes the flag at True.)
 
     Structured as an A/B against an enforced key rather than as a bare "no row
-    appeared": this fixture configures no providers, so an exempt request fails
-    before any provider call and logs nothing either way. Without the control, the
+    appeared": this fixture's provider call fails, so an exempt request logs no
+    pricing rejection either way. Without the control, the
     negative would pass even if the gate had stopped writing rows entirely.
     """
     c = strict_pricing_client

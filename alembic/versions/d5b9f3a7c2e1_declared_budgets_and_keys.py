@@ -8,7 +8,7 @@ unique index is what keeps replicas starting at once from inserting two.
 Both are nullable with no backfill, because nothing was declared before this.
 
 Revision ID: d5b9f3a7c2e1
-Revises: c7e1a4d9b3f2
+Revises: 12c2e4745129
 Create Date: 2026-10-09 00:00:00.000000
 
 """
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "d5b9f3a7c2e1"
-down_revision: str | Sequence[str] | None = "c7e1a4d9b3f2"
+down_revision: str | Sequence[str] | None = "12c2e4745129"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

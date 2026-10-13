@@ -36,6 +36,8 @@ AnyFetch.get_provider_metadata("fake")
 `fetch` takes one shared parameter, which every provider maps onto its own: `max_chars`. Every
 other keyword is a native option, passed to the provider under its own name. An option the
 provider's metadata does not list raises `UnsupportedParameterError` rather than being dropped.
+`SHARED_PARAMETERS` lists the shared parameter, so a host can tell it from native options, and
+`shared_parameter_problems` says which values `fetch` refuses, so a host can check them before the call.
 
 ## What comes back
 

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from any_search import AnySearch, UnsupportedProviderError, asearch
+from any_search import AnySearch, UnsupportedProviderError, asearch, shared_parameter_problems
 from any_search.providers.fake import FakeProvider
 
 
@@ -38,8 +38,19 @@ async def test_asearch_runs_one_search() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("argument", "value"), [("max_results", 0), ("time_range", "decade")])
+@pytest.mark.parametrize(
+    ("argument", "value"), [("max_results", 0), ("max_results", "5"), ("max_results", True), ("time_range", "decade")]
+)
 async def test_a_shared_parameter_out_of_range_is_refused(argument: str, value: Any) -> None:
     async with AnySearch.create("fake") as fake:
         with pytest.raises(ValueError, match=argument):
             await fake.search("q", **{argument: value})
+
+
+def test_shared_parameter_problems_name_each_refused_value_and_nothing_else() -> None:
+    assert shared_parameter_problems({"max_results": 0, "time_range": "decade", "type": "anything"}).keys() == {
+        "max_results",
+        "time_range",
+    }
+    assert shared_parameter_problems({"max_results": 3, "time_range": "week"}) == {}
+    assert shared_parameter_problems({"max_results": None, "time_range": None}) == {}

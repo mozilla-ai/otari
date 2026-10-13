@@ -35,7 +35,7 @@ describe("CheckEmailPage", () => {
     )
 
     expect(
-      screen.getByText(/If that address is on this gateway's roster/),
+      screen.getByText(/If you can sign up with that address/),
     ).toBeInTheDocument()
   })
 
@@ -43,7 +43,7 @@ describe("CheckEmailPage", () => {
     renderPage("#/check-email?type=resend")
 
     expect(
-      screen.getByText(/If that address is registered and still unverified/),
+      screen.getByText(/If that address has an account waiting to be verified/),
     ).toBeInTheDocument()
   })
 })

@@ -7,7 +7,7 @@ async with AnyFetch.create("builtin") as fetcher:  # once the host has registere
     page = await fetcher.fetch("https://www.python.org/downloads/", max_chars=20_000)
 """
 
-from any_fetch._api import DEFAULT_TIMEOUT, AnyFetch, afetch
+from any_fetch._api import DEFAULT_TIMEOUT, SHARED_PARAMETERS, AnyFetch, afetch, shared_parameter_problems
 from any_fetch._errors import (
     AnyFetchError,
     BuiltinNotRegisteredError,
@@ -28,6 +28,7 @@ from any_fetch._types import (
 
 __all__ = [
     "DEFAULT_TIMEOUT",
+    "SHARED_PARAMETERS",
     "AnyFetch",
     "AnyFetchError",
     "BuiltinFactory",
@@ -43,4 +44,5 @@ __all__ = [
     "UnsupportedProviderError",
     "afetch",
     "install_log_filter",
+    "shared_parameter_problems",
 ]

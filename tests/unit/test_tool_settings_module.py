@@ -457,6 +457,34 @@ def test_options_are_checked_against_the_fake_providers_metadata() -> None:
     assert effective_fetch_instances(config)["test-fetch"].dropped_options == frozenset({"nope"})
 
 
+def test_each_tools_shared_parameters_pass_for_every_provider() -> None:
+    """Design G, item 3: search takes max_results and time_range, fetch max_chars, beside any provider's options."""
+    config = GatewayConfig(
+        search_tools={"test": {"provider": "fake", "options": {"max_results": 3, "time_range": "week"}}},
+        fetch_tools={"test-fetch": {"provider": "fake", "options": {"max_chars": 500}}},
+    )
+    assert effective_search_instances(config)["test"].dropped_options == frozenset()
+    assert effective_fetch_instances(config)["test-fetch"].dropped_options == frozenset()
+
+
+def test_a_shared_parameters_value_is_checked_as_its_library_checks_it() -> None:
+    config = GatewayConfig(
+        search_tools={"test": {"provider": "fake", "options": {"max_results": 0, "time_range": "decade"}}},
+        fetch_tools={"test-fetch": {"provider": "fake", "options": {"max_chars": "5"}}},
+    )
+    assert effective_search_instances(config)["test"].dropped_options == frozenset({"max_results", "time_range"})
+    assert effective_fetch_instances(config)["test-fetch"].dropped_options == frozenset({"max_chars"})
+
+
+def test_one_tools_shared_parameter_is_unknown_to_the_other() -> None:
+    config = GatewayConfig(
+        search_tools={"test": {"provider": "fake", "options": {"max_chars": 500}}},
+        fetch_tools={"test-fetch": {"provider": "fake", "options": {"max_results": 3, "time_range": "week"}}},
+    )
+    assert effective_search_instances(config)["test"].dropped_options == frozenset({"max_chars"})
+    assert effective_fetch_instances(config)["test-fetch"].dropped_options == frozenset({"max_results", "time_range"})
+
+
 def test_exa_fetch_options_are_checked_against_its_own_metadata() -> None:
     entry = {"provider": "exa", "api_key": "k", "options": {"maxAgeHours": 1, "type": "auto"}}
     instance = effective_fetch_instances(GatewayConfig(fetch_tools={"exa-fetch": entry}))["exa-fetch"]

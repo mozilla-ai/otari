@@ -239,8 +239,13 @@ def _as_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _as_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+def token_limit(value: Any) -> int | None:
+    """A token limit, or ``None`` for anything but a positive integer.
+
+    models.dev writes 0 for a limit it does not know, and a client would read
+    0 as no tokens at all.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def _as_float(value: Any) -> float | None:
@@ -278,8 +283,8 @@ def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
         structured_output=bool(model.get("structured_output")),
         attachment=bool(model.get("attachment")),
         temperature=bool(model.get("temperature")),
-        context_window=_as_int(limit.get("context")),
-        max_output_tokens=_as_int(limit.get("output")),
+        context_window=token_limit(limit.get("context")),
+        max_output_tokens=token_limit(limit.get("output")),
         knowledge_cutoff=_as_str(model.get("knowledge")),
         release_date=_as_str(model.get("release_date")),
         last_updated=_as_str(model.get("last_updated")),

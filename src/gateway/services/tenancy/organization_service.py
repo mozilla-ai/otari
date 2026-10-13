@@ -88,6 +88,7 @@ from gateway.repositories.tenancy import (
 from gateway.repositories.users_repository import (
     attribution_spend,
     get_or_create_attribution_user,
+    get_or_create_default_user,
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
@@ -319,6 +320,15 @@ class OrganizationService:
     async def get_organization_id_for_workspace(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization that owns a workspace, or None when the workspace does not exist."""
         return await self.workspace_rows.get_organization_id(workspace_id)
+
+    async def billing_user_id(self, user_id: str | None) -> str:
+        """Return the id of the billing user ``user_id`` names, creating it, or reviving it, when needed.
+
+        No id names the shared ``default`` user, as a key minted without an owner bills to.
+        """
+        if user_id is None:
+            return (await get_or_create_default_user(self.db)).user_id
+        return (await get_or_create_attribution_user(self.db, user_id=user_id, alias=f"User {user_id}")).user_id
 
     async def lock_workspace(self, workspace_id: uuid.UUID) -> None:
         """Serialize this transaction against every other writer holding the workspace's row lock."""

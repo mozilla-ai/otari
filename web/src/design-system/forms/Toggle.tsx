@@ -32,16 +32,19 @@ export function Toggle({
       aria-label={label}
       disabled={isDisabled}
       onClick={() => onChange(!isSelected)}
-      // 44x24 with a 1px edge, filled with the page ground rather than a
-      // surface step: on a flat plane the track is a drawn outline, not a
-      // raised trough, so the state is carried entirely by the knob's color.
+      // 44x24 with a 1px edge. On fills the whole track and whitens the knob,
+      // so the states differ in area and not only in the knob's color.
       //
       // The visible track stays 24px, which is what the settings rows are drawn
       // around, while `before` carries the 44px touch floor the phone viewport
       // requires past it (responsiveness.md). Absolutely positioned on a
       // `relative` button, so it grows the hit area without moving a row. Same
       // device the master-key reveal toggle uses on the sign-in screen.
-      className="relative inline-flex h-6 w-11 shrink-0 items-center border border-control-border bg-background before:absolute before:inset-x-0 before:-inset-y-2.5 disabled:opacity-(--disabled-opacity)"
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center border before:absolute before:inset-x-0 before:-inset-y-2.5 disabled:opacity-(--disabled-opacity) ${
+        isSelected
+          ? "border-control-indicator bg-control-indicator"
+          : "border-control-border bg-background"
+      }`}
     >
       <span
         // 20x20 inset 1px from the track's inner edge, which `items-center`
@@ -49,14 +52,14 @@ export function Toggle({
         // no ring and no shadow on the knob in either theme: the edge it used
         // to carry was `shadow-elevation-sm`, which on dark was a 1px white
         // ring rather than a shadow, and both are gone with nothing in their
-        // place. Contrast against the ground is what separates it now.
+        // place. Contrast against the track is what separates it now.
         //
         // `transition-transform` and not `transition-colors`: the fill changes
         // with the state and should read as instant, while the travel is what
         // benefits from being followed.
         className={`inline-block h-5 w-5 transform transition-transform duration-150 motion-reduce:transition-none ${
           isSelected
-            ? "translate-x-[21px] bg-control-indicator"
+            ? "translate-x-[21px] bg-accent-glyph"
             : "translate-x-px bg-control-thumb"
         }`}
       />

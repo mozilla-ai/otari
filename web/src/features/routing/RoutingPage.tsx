@@ -478,11 +478,15 @@ export function RoutingPage() {
             admin sees what their own workspace writes reach, and a member is
             told who manages these rather than offered a control they would
             be refused. */}
+        Named models your callers send as the{" "}
+        <code className="font-mono text-caption">model</code> value. A policy
+        decides which real model serves each request, what is tried if that
+        fails, and which guardrails always run.{" "}
         {isOperator
-          ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
+          ? "It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
           : canEdit
-            ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
-            : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the ones in force in your workspaces; your organization's admins manage them."}
+            ? "What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
+            : "These are the ones in force in your workspaces; your organization's admins manage them."}
       </PageIntro>
 
       {/* The reads only. Every delete on this page reports inside its own

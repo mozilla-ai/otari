@@ -3,9 +3,12 @@
 from gateway.services.budgets._ledger import run_reservation_sweeper
 from gateway.services.budgets._member_policies import BudgetMembershipListener
 from gateway.services.budgets._periods import budget_window, period_window
+from gateway.services.budgets._reservation_moves import PricingLookup
 from gateway.services.budgets._reservations import (
     ZERO,
+    EstimateInputs,
     ReservationHandle,
+    count_estimate,
     estimate_cost,
     estimate_tokens,
     get_budget_state,
@@ -27,11 +30,14 @@ __all__ = [
     "BudgetMembershipListener",
     "BudgetScopeRequest",
     "BudgetService",
+    "EstimateInputs",
+    "PricingLookup",
     "ReservationHandle",
     "applicable_budgets",
     "budget_window",
     "cadence_of",
     "estimate_cost",
+    "count_estimate",
     "rerank_estimate",
     "estimate_tokens",
     "get_budget_state",

@@ -7,8 +7,7 @@ cap. What the cap counts, and which calls it applies to at all, is decided here.
 
 from typing import Any
 
-from gateway.services.tools import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import MAX_USES_EXCEEDED_ERROR, WEB_SEARCH_TOOL_NAME, ToolUseBudget, is_capped_call
 
 
 def _budget(max_uses: int) -> ToolUseBudget:

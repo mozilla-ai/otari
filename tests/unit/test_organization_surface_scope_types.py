@@ -12,6 +12,7 @@ from gateway.repositories.budgets import (
     BudgetRepositories,
     BudgetRepository,
     EndUserRepository,
+    ReservationRepository,
     ScopedBudgetRepository,
     WorkspaceBudgetDefaultRepository,
 )
@@ -33,6 +34,7 @@ async def test_a_stored_scope_type_this_build_does_not_know_is_not_found() -> No
             ceilings=ceilings,
             member_policies=Mock(spec=WorkspaceBudgetDefaultRepository),
             end_users=Mock(spec=EndUserRepository),
+            reservations=Mock(spec=ReservationRepository),
         ),
         scopes,
         Mock(spec=OrganizationService),

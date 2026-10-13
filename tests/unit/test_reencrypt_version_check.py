@@ -95,11 +95,12 @@ async def _add_provider(session: AsyncSession, instance: str, api_key: str) -> N
     await session.commit()
 
 
-async def _add_search_tool(session: AsyncSession, name: str, api_key: str) -> None:
+async def _add_search_tool(session: AsyncSession, name: str, api_key: str, *, kind: str = "search") -> None:
     session.add(
         SearchToolCredential(
             name=name,
-            provider="searxng",
+            kind=kind,
+            provider="searxng" if kind == "search" else "exa",
             encrypted_api_key=encrypt_secret(api_key),
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
@@ -247,6 +248,21 @@ class TestSearchToolRotation:
             return await reencrypt_search_tools(session)
 
         assert _run(scenario) == (1, 0, 0)
+
+    def test_a_fetch_rows_key_is_rotated_with_the_search_rows(self) -> None:
+        """Fetch instances share the table, so the one rotation covers both kinds."""
+
+        async def scenario(session: AsyncSession, _db: str) -> tuple[tuple[int, int, int], str]:
+            await _add_search_tool(session, "searxng", "key-search")
+            await _add_search_tool(session, "exa-fetch", "key-fetch", kind="fetch")
+            counts = await reencrypt_search_tools(session)
+            await session.commit()
+            stmt = select(SearchToolCredential).where(SearchToolCredential.name == "exa-fetch")
+            row = (await session.execute(stmt.execution_options(populate_existing=True))).scalar_one()
+            assert row.encrypted_api_key is not None
+            return counts, decrypt_secret(row.encrypted_api_key)
+
+        assert _run(scenario) == ((2, 0, 0), "key-fetch")
 
     def test_a_row_changed_under_the_rotation_is_skipped_not_clobbered(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def scenario(session: AsyncSession, db_path: str) -> tuple[tuple[int, int, int], str]:

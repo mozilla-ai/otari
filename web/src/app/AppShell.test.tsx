@@ -722,6 +722,14 @@ describe("AppShell entitlement gating", () => {
       await screen.findByText("Deployment providers is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
+    // The sidebar is behind a menu on a phone, so the panel carries its own way
+    // out and its copy names the menu.
+    expect(
+      screen.getByText(/Choose another page from the menu/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Go to Overview" }),
+    ).toBeInTheDocument()
   })
 
   it("leaves an operator-only route to the page, whichever way the gate answers", async () => {

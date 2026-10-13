@@ -8,6 +8,8 @@ from any_llm.types.completion import (
     ChatCompletionChunk,
     ChatCompletionMessage,
     Choice,
+    ChoiceDelta,
+    ChunkChoice,
     CompletionUsage,
 )
 from any_llm.types.messages import (
@@ -188,20 +190,50 @@ def test_format_chunk_unchanged_without_inline_cost() -> None:
     )
 
 
-def test_chat_carrier_is_only_terminal_usage_chunk() -> None:
-    assert chat._ADAPTER.is_stream_cost_carrier(_chat_usage_chunk()) is True
-    content_chunk = _chat_usage_chunk().model_copy(
-        update={
-            "choices": [
-                Choice(
-                    finish_reason="stop",
-                    index=0,
-                    message=ChatCompletionMessage(role="assistant", content="hi"),
-                )
-            ]
-        }
+def _chat_chunk(*, finish_reason: Any = None, usage: CompletionUsage | None = None) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id="chunk-1",
+        choices=[ChunkChoice(index=0, delta=ChoiceDelta(content="hi"), finish_reason=finish_reason)],
+        created=0,
+        model="cohere-model",
+        object="chat.completion.chunk",
+        usage=usage,
     )
-    assert chat._ADAPTER.is_stream_cost_carrier(content_chunk) is False
+
+
+_RUNNING_USAGE = CompletionUsage(prompt_tokens=10, completion_tokens=3, total_tokens=13)
+
+
+def test_chat_carrier_is_the_usage_only_chunk() -> None:
+    assert chat._ADAPTER.is_stream_cost_carrier(_chat_usage_chunk()) is True
+
+
+def test_chat_carrier_is_the_finish_chunk_that_reports_usage() -> None:
+    # Cohere (and Gemini) report usage on the chunk that finishes the choice
+    # rather than on a usage-only chunk after it.
+    assert chat._ADAPTER.is_stream_cost_carrier(_chat_chunk(finish_reason="stop", usage=_RUNNING_USAGE)) is True
+
+
+@pytest.mark.parametrize(
+    "chunk",
+    [
+        _chat_chunk(usage=_RUNNING_USAGE),
+        _chat_chunk(finish_reason="stop"),
+        _chat_chunk(),
+    ],
+    ids=["content-with-running-usage", "finish-without-usage", "content"],
+)
+def test_chat_carrier_rejects_non_terminal_or_usageless_chunks(chunk: ChatCompletionChunk) -> None:
+    assert chat._ADAPTER.is_stream_cost_carrier(chunk) is False
+
+
+def test_chat_finish_chunk_carries_inline_cost() -> None:
+    chunk = _chat_chunk(finish_reason="stop", usage=_RUNNING_USAGE)
+    assert chat._ADAPTER.attach_cost(chunk, _SETTLEMENT) is True
+    formatted = chat._ADAPTER.format_chunk(chunk)
+    assert '"cost_usd":"0.012345"' in formatted
+    assert '"pricing_source":"managed"' in formatted
+    assert '"finish_reason":"stop"' in formatted
 
 
 def test_message_start_is_not_carrier() -> None:

@@ -14,6 +14,7 @@ import {
   FiMoon,
   FiSettings,
   FiShield,
+  FiSun,
 } from "react-icons/fi"
 
 import {
@@ -292,7 +293,7 @@ function AppearanceControl() {
   return (
     <MenuItem
       label="Appearance"
-      icon={FiMoon}
+      icon={resolved === "dark" ? FiMoon : FiSun}
       trailing={current}
       hasTrailingGutter
       ariaLabel={`Appearance: ${current}. Switch to ${next}.`}

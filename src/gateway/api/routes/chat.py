@@ -29,7 +29,6 @@ from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDe
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
-    PROVIDER_ERROR_DETAIL,
     DeclaredTools,
     ErrorKind,
     ToolBackends,
@@ -38,6 +37,7 @@ from gateway.api.routes._pipeline import (
     log_usage,
     prepare_gateway_tools,
     provider_error_headers,
+    provider_failure_detail,
     raise_all_streaming_attempts_failed,
     rate_limit_headers,
     resolve_dispatch_provider,
@@ -48,8 +48,9 @@ from gateway.api.routes._pipeline import (
     run_streaming_with_fallback,
     scope_prompt_cache_key,
     stream_error_code,
+    stream_error_message,
 )
-from gateway.api.routes._platform import ResolvedAttempt, SettledCost
+from gateway.api.routes._platform import ResolvedAttempt, SettledCost, with_retry_hint
 from gateway.api.routes._request_tags import RequestMetadata, request_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -63,6 +64,12 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
 from gateway.services.files import FileService, StagedFile
+from gateway.services.inference import (
+    bind_upstream_user,
+    chat_user_fields,
+    is_chat_stream_cost_carrier,
+    with_upstream_user,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -174,6 +181,27 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     metadata: RequestMetadata = None
 
 
+def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
+    """A predicate, for one stream, that holds while every choice seen so far has a ``finish_reason``.
+
+    Every complete chat stream reports one per choice, so with ``n`` above 1 a
+    stream that finishes one choice and cuts another is not complete, in
+    whichever order the choices arrive. A usage-only final chunk has no choices,
+    so it leaves the answer as it was.
+    """
+    seen: set[int] = set()
+    finished: set[int] = set()
+
+    def completes(chunk: ChatCompletionChunk) -> bool:
+        for choice in chunk.choices or ():
+            seen.add(choice.index)
+            if choice.finish_reason:
+                finished.add(choice.index)
+        return bool(finished) and seen <= finished
+
+    return completes
+
+
 class _ChatAdapter:
     """OpenAI Chat Completions edges of the shared pipeline.
 
@@ -184,7 +212,6 @@ class _ChatAdapter:
 
     name = Dialect.CHAT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
-    stream_completion_event: str | None = None
     log_success_without_usage = True
 
     def __init__(self, endpoint: str = USAGE_ENDPOINT) -> None:
@@ -202,21 +229,25 @@ class _ChatAdapter:
     ) -> HTTPException:
         return HTTPException(status_code=status_code, detail=message, headers=headers)
 
-    def provider_error(self, exc: BaseException) -> HTTPException:
-        mapping = classify_provider_error(exc)
+    def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
+        mapping = classify_provider_error(exc, model=model)
         if mapping is not None:
             return HTTPException(
                 status_code=mapping.status_code,
                 detail=mapping.detail,
-                headers=provider_error_headers(exc, mapping.status_code),
+                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=PROVIDER_ERROR_DETAIL,
+            detail=provider_failure_detail(exc),
+            headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
 
+    def stream_completion(self) -> Callable[[Any], bool] | None:
+        return _every_choice_finishes()
+
     def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, stream_error_code(exc))
+        return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
         return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"
@@ -259,16 +290,13 @@ class _ChatAdapter:
         return True
 
     def is_stream_cost_carrier(self, chunk: ChatCompletionChunk) -> bool:
-        # OpenAI's include_usage chunk carries usage and no choices. Requiring
-        # the terminal shape prevents usage stamped onto content chunks from
-        # making an early chunk the carrier and buffering the whole stream.
-        return chunk.usage is not None and not chunk.choices
+        return is_chat_stream_cost_carrier(chunk)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ChatCompletion:
-        return await acompletion(**kwargs)  # type: ignore[return-value]
+        return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChatCompletionChunk]:
-        return await acompletion(**kwargs)  # type: ignore[return-value]
+        return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
     def prepare_stream_kwargs(
         self,
@@ -307,7 +335,7 @@ class _ChatAdapter:
         if use_budget is not None:
             extra["use_budget"] = use_budget
         return await mcp_tool_loop(
-            completion_kwargs=kwargs,
+            completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
             max_iterations=max_iterations,
             **extra,
@@ -326,7 +354,7 @@ class _ChatAdapter:
         if use_budget is not None:
             extra["use_budget"] = use_budget
         return mcp_tool_loop_stream(
-            completion_kwargs=kwargs,
+            completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
             max_iterations=max_iterations,
             **extra,
@@ -360,6 +388,16 @@ class _ChatAdapter:
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return kwargs
+
+
+def _user_fields(kwargs: dict[str, Any], identifier: str) -> dict[str, Any]:
+    implementation, _, _ = str(kwargs.get("model", "")).partition(":")
+    return chat_user_fields(implementation, identifier)
+
+
+def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Put the carried end-user identifier in the field this call's provider reads."""
+    return with_upstream_user(kwargs, _user_fields)
 
 
 _ADAPTER = _ChatAdapter()
@@ -536,6 +574,7 @@ async def run_chat_completion(
             normalize_messages=_normalize,
             tools=request.tools,
             code_execution_policies=tool_ports.code_execution_policy,
+            model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
             tags=request_tags(request.metadata),
         )
@@ -585,6 +624,7 @@ async def run_chat_completion(
     )
     request_fields.pop("metadata", None)
     scope_prompt_cache_key(request_fields, ctx)
+    bind_upstream_user(request_fields, ctx.upstream_user)
     # Dispatch one cap, under the name any-llm understands and knows how to map to
     # any provider (via BaseOpenAIProvider._convert_completion_params). Popped
     # unconditionally so exactly one spelling reaches the provider call, whether

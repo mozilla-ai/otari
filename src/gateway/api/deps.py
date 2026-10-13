@@ -58,7 +58,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
-from gateway.services.inference import IdempotencyService
+from gateway.services.inference import InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -711,6 +711,22 @@ async def get_db_if_needed(
             yield db
 
 
+async def verify_api_key_or_master_key_if_needed(
+    request: Request,
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> tuple[APIKey | None, bool] | None:
+    """Verify the caller's key in standalone mode, otherwise return ``None``.
+
+    The counterpart of ``verify_api_key_or_master_key`` for a data-plane route
+    that serves both modes: a hybrid gateway forwards the key to the control
+    plane, which verifies it while resolving the request.
+    """
+    if db is None:
+        return None
+    return await verify_api_key_or_master_key(request, db, config)
+
+
 def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayConfig) -> FileService:
     """Build Files operations for a scoped output request or cleanup job."""
 
@@ -733,9 +749,12 @@ def _file_backends(request: Request) -> FileBackends | None:
     return FileBackends(storage=storage, provider_files=provider_files)
 
 
-def build_idempotency_service(uow: UnitOfWork, config: GatewayConfig) -> IdempotencyService:
-    """Build idempotency-key handling for a completion request or the expiry sweep."""
-    return IdempotencyService(uow, InferenceRepositories.on(uow), config)
+def build_inference_service(uow: UnitOfWork, config: GatewayConfig) -> InferenceService:
+    """Build the inference service for a request or a worker job, such as the idempotency sweep.
+
+    It receives the Unit of Work and its own domain's repositories over it, never the session.
+    """
+    return InferenceService(uow, InferenceRepositories.on(uow), config)
 
 
 def build_sandbox_file_bridge(
@@ -828,6 +847,14 @@ def get_unit_of_work_if_needed(
 
 
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
+
+
+def get_inference_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> InferenceService:
+    """Build the inference service on the request's Unit of Work, so its writes commit or roll back with the request."""
+    return build_inference_service(uow, config)
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:

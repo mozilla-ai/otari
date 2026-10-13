@@ -15,6 +15,7 @@ async def apply_declared_key(
     config_name: str,
     spec: ApiKeyConfig,
     *,
+    owner: str,
     declared_names: Collection[str],
     end_user_budget_ids: list[str] | None,
     workspace_id: uuid.UUID,
@@ -25,11 +26,11 @@ async def apply_declared_key(
     The key is found by its config name, or else adopted by its secret, which is
     how a key minted through the API comes under config.yml with its id, its end
     users and its ceiling intact. A new key goes in the deployment's default
-    workspace; an existing one stays in its own.
+    workspace; an existing one stays in its own. ``owner`` is the id of the
+    user the key bills to.
     """
     secret = spec.secret.get_secret_value()
     key_hash = hash_key(secret)
-    owner = await keys.owner_user_id(spec.user_id)
 
     key = await keys.get_by_config_name(config_name)
     if key is None:

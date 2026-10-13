@@ -9,6 +9,11 @@ and ``ToolUseBudget`` is the per-request cap on one tool's gateway-run calls.
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
 ``search_provider_catalog`` lists the providers a search or fetch tool may name.
+``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
+``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
+``run_connection_test`` tests an instance with one search or fetch.
+``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with.
+``WEB_SEARCH_TOOL_NAME``, ``WEB_FETCH_TOOL_NAME`` and the two tool definitions name the web tools to the model.
 """
 
 from gateway.services.tools._builtin_tool import BuiltinTool
@@ -48,6 +53,20 @@ from gateway.services.tools._native import (
 )
 from gateway.services.tools._registry import BUILTIN_TOOLS, native_rendering
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
+from gateway.services.tools._search_tool_connection import (
+    check_test_input,
+    instance_to_test,
+    run_connection_test,
+    unsaved_instance_to_test,
+)
+from gateway.services.tools._search_tool_writes import (
+    DefaultPin,
+    check_kind_unchanged,
+    check_tool_entry,
+    check_tool_name_is_free,
+    check_tool_write,
+    default_to_pin,
+)
 from gateway.services.tools._use_budget import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
 from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy
 from gateway.services.tools._web_admission import (
@@ -63,9 +82,18 @@ from gateway.services.tools._web_declarations import (
     web_search_declaration_forms,
     web_search_intercept_enabled,
 )
+from gateway.services.tools._web_names import (
+    WEB_FETCH_TOOL_NAME,
+    WEB_RETRIEVAL_RESULT_MAX_BYTES,
+    WEB_SEARCH_NATIVE_TYPE_PREFIX,
+    WEB_SEARCH_TOOL_NAME,
+    web_fetch_tool_definition,
+    web_search_tool_definition,
+)
+from gateway.services.tools._web_search import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
-from gateway.services.tools._web_search_results import web_search_max_results_baseline
+from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_search_max_results_baseline
 from gateway.services.tools._workspace_defaults import CodeExecutionWorkspaceDefaults
 
 __all__ = [
@@ -117,6 +145,27 @@ __all__ = [
     "resolve_code_executor_preference",
     "web_search_declaration_forms",
     "web_search_intercept_enabled",
+    "DEFAULT_MAX_RESULTS",
     "web_search_max_results_baseline",
     "search_provider_catalog",
+    "DefaultPin",
+    "check_kind_unchanged",
+    "check_test_input",
+    "check_tool_entry",
+    "check_tool_name_is_free",
+    "check_tool_write",
+    "default_to_pin",
+    "instance_to_test",
+    "run_connection_test",
+    "unsaved_instance_to_test",
+    "WEB_FETCH_TOOL_NAME",
+    "WEB_RETRIEVAL_RESULT_MAX_BYTES",
+    "WEB_SEARCH_NATIVE_TYPE_PREFIX",
+    "WEB_SEARCH_TOOL_NAME",
+    "web_fetch_tool_definition",
+    "web_search_tool_definition",
+    "ResolvedFetch",
+    "ResolvedSearch",
+    "resolve_fetch",
+    "resolve_search",
 ]

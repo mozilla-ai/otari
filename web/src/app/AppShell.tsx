@@ -1,5 +1,5 @@
 import { Button, Disclosure, Popover } from "@heroui/react"
-import { Link, Outlet, useLocation } from "@tanstack/react-router"
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { clsx } from "clsx"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -499,6 +499,7 @@ function AppShellChrome() {
   const isVisible = useNavVisibility()
   const recordNavigation = useRecordNavigation()
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   useDocumentTitle(navLabelForPath(pathname) ?? CHROME_TITLES[pathname])
   // A gated-off destination is still reachable by bookmark or shared URL, so the
   // shell answers those with a panel instead of a page whose every request the
@@ -1221,7 +1222,9 @@ function AppShellChrome() {
                   // a registered path can be gated off, so the fallback is there
                   // for the type rather than for a case that happens.
                   title={`${navLabelForPath(pathname) ?? currentItem?.label ?? "That page"} is not available here`}
-                  description="This deployment does not serve that page. Pick a destination from the sidebar."
+                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Overview."
+                  actionLabel={pathname === "/" ? undefined : "Go to Overview"}
+                  onAction={() => void navigate({ to: "/" })}
                 />
               ) : (
                 <Outlet />

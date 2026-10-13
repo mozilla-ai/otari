@@ -78,9 +78,12 @@ export OTARI_AI_TOKEN=gw_your_gateway_token
 otari serve
 ```
 
-Hybrid serves health, bootstrap, Chat Completions, Messages, Responses, direct
-MCP tool execution (`POST /api/v1/mcp/execute`), and the guardrail hook check
-(`POST /api/v1/hooks/check`). It
+Hybrid serves health, bootstrap, Chat Completions, Messages, Responses,
+embeddings, rerank, image generation, audio transcription and speech,
+moderations, direct MCP tool execution (`POST /api/v1/mcp/execute`), and the
+guardrail hook check (`POST /api/v1/hooks/check`). Files, batches, direct search
+and decision calls (`/decisions`, `/systemone`, `/routing/recommend`) are
+standalone only. It
 does not initialize the local management database or use local provider
 configuration. Clients authenticate with an otari.ai user
 token, accepted in the same header forms as standalone mode

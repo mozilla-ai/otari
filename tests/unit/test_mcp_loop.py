@@ -34,8 +34,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.tools import ToolUseBudget
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import WEB_SEARCH_TOOL_NAME, ToolUseBudget
 
 
 def _use_budget(max_uses: int) -> ToolUseBudget:

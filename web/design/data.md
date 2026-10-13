@@ -16,7 +16,7 @@ Anything else on this list is a metric, and lives in [metrics.md](metrics.md):
 DataTable: { ariaLabel, columns, rows, getRowKey, isLoading?, emptyContent?,
   selectionMode?: "none" | "multiple", selectedKeys?, onSelectionChange?,
   disabledKeys?, sortDescriptor?, onSortChange?, onRowAction?, rowClassName?,
-  resizable?, detailKey?, renderDetail? }
+  resizable?, detailKey?, renderDetail?, mobileLayout?: "table" | "cards" }
 
 DataTableColumn: { id, header, cell: (row) => ReactNode, align?: "start" | "end",
   isRowHeader?, allowsSorting?, width?, minWidth? }
@@ -31,6 +31,12 @@ The trailing action column takes `header: "Actions"`, not an empty string: the h
 row is a set of labels and a blank one reads as a missing label, not as a deliberate
 gap. `emptyContent` renders only once loading has finished, so it never flashes
 "nothing matches" during a first fetch.
+
+`mobileLayout="cards"` is for a table too wide to read at phone width. Under 768px it
+renders one card per row instead of the grid: the `isRowHeader` column is the title, a
+column with id `actions` sits beside it, and every other column is a label and value
+line. Selection, `onRowAction` and `renderDetail` carry over; sorting and resize do not.
+Without it the grid stays and scrolls sideways.
 
 A white body on the page canvas, ruled by hairlines. The header is the accent tint
 (`--color-primary-subtle`) set in the `text-overline` role, so it never outweighs

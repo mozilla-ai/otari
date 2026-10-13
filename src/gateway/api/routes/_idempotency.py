@@ -21,7 +21,7 @@ from typing import Annotated, Any
 from fastapi import Depends, Header, Request, Response
 from fastapi.encoders import jsonable_encoder
 
-from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_work_if_needed
+from gateway.api.deps import build_inference_service, get_config, get_unit_of_work_if_needed
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
@@ -39,8 +39,8 @@ from gateway.log_config import logger
 from gateway.services.inference import (
     Admission,
     Claimed,
-    IdempotencyService,
     IdempotentRequest,
+    InferenceService,
     InvalidKey,
     Replay,
     keep_claim_alive,
@@ -120,7 +120,7 @@ class IdempotencyGuard:
     def __init__(
         self,
         raw_request: Request,
-        service: IdempotencyService | None,
+        service: InferenceService | None,
         key: str | None,
         *,
         keep_alive: KeepAlive | None = None,
@@ -225,15 +225,15 @@ async def get_idempotency_guard(
 ) -> AsyncIterator[IdempotencyGuard]:
     """Yield the request's guard, and release its claim if the request did not complete."""
     service = None
-    if uow is not None and idempotency_key is not None and IdempotencyService.is_enabled(config):
-        service = build_idempotency_service(uow, config)
+    if uow is not None and idempotency_key is not None and InferenceService.is_enabled(config):
+        service = build_inference_service(uow, config)
 
     async def keep_alive(request: IdempotentRequest, claimed: Claimed) -> None:
         await keep_claim_alive(
             request,
             claimed,
             config.idempotency_lease_sec,
-            lambda worker_uow: build_idempotency_service(worker_uow, config),
+            lambda worker_uow: build_inference_service(worker_uow, config),
         )
 
     guard = IdempotencyGuard(raw_request, service, idempotency_key, keep_alive=keep_alive)

@@ -210,7 +210,7 @@ def test_decisions_falls_back_to_the_provider_reported_cost(
 
 @pytest.mark.parametrize(
     ("upstream_status", "caller_status"),
-    [(422, 400), (400, 400), (501, 400), (429, 429), (401, 502), (529, 502), (None, 502)],
+    [(422, 400), (400, 400), (501, 400), (429, 429), (401, 424), (403, 424), (529, 502), (None, 502)],
 )
 def test_decisions_maps_provider_failures_and_refunds(
     client: TestClient,
@@ -297,4 +297,5 @@ def test_decisions_require_pricing_refuses_an_unpriced_model(
     finally:
         test_config.require_pricing = False
     assert resp.status_code == 402
+    assert resp.json()["code"] == "pricing_required"
     mock.assert_not_awaited()

@@ -1124,6 +1124,10 @@ export interface paths {
          *     - Master key + user field: Use specified user (must exist)
          *     - API key + user field: Use specified user (must exist)
          *     - API key without user field: Use the shared "default" user
+         *
+         *     A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+         *     USD string) and `pricing_source`, as a chat completion does; an unpriced one
+         *     carries neither.
          */
         post: operations["embeddings-create_embedding"];
         delete?: never;
@@ -1679,8 +1683,11 @@ export interface paths {
          * @description List all available models.
          *
          *     Returns models auto-discovered from configured providers, enriched with
-         *     pricing data from the model_pricing table when available. Models that only
-         *     exist in the pricing table are also included for backward compatibility.
+         *     pricing data from the model_pricing table when available, and with each
+         *     model's token limits: the context window from models.dev, or from
+         *     genai-prices where models.dev has none, and the output limit from models.dev
+         *     alone. A limit neither knows is null. Models that only exist in the pricing
+         *     table are also included for backward compatibility.
          */
         get: operations["models-list_models"];
         put?: never;
@@ -4205,6 +4212,11 @@ export interface paths {
          *     search unit the provider reports, or for one unit when it reports none. A
          *     model priced per token is charged on the input tokens the provider reports.
          *
+         *     ``usage`` carries what the gateway metered: the provider's tokens, the
+         *     search units billed when the model is priced per request, and, when the
+         *     request was priced, ``cost_usd`` and ``pricing_source`` as a completion's
+         *     usage does. ``meta`` is the provider's own billing report, unchanged.
+         *
          *     Authentication modes:
          *     - Master key + user field: Use specified user (must exist)
          *     - API key + user field: Use specified user (must exist)
@@ -4374,8 +4386,9 @@ export interface paths {
          *     parent's model and the model the caller asked for, if any. The recommender
          *     this build binds picks one of the candidate models and the answer names it.
          *     A standalone deployment asks the decision model `agent_recommender_model`
-         *     names to choose among `agent_recommender_candidates`; a hosted build may
-         *     bind a recommender of its own, which the caller never configures. Where
+         *     names to choose among `agent_recommender_candidates` for Claude Code and
+         *     among the request's own `candidates` for pi; a hosted build may bind a
+         *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
          *     and its probability for each candidate.
          *
@@ -4527,17 +4540,24 @@ export interface paths {
         };
         /**
          * List All Search Tools
-         * @description List every search tool ``POST /api/v1/search`` can name.
+         * @description List every search instance ``POST /api/v1/search`` can name, or with ``?kind=fetch`` every fetch instance.
          *
          *     ``stored`` are the editable rows written through this API; ``config`` are the
          *     config-file entries, which are still honored and are reported so the operator
-         *     can see the whole set. Keys are never returned, only ``last4``.
+         *     can see the whole set, ``builtin_fetch`` first among the fetch instances. Keys
+         *     are never returned, only ``last4``.
          */
         get: operations["search-tools-list_all_search_tools"];
         put?: never;
         /**
          * Create Search Tool
-         * @description Add a search tool at runtime. Storing an API key requires OTARI_SECRET_KEY.
+         * @description Add a search or fetch instance at runtime. Storing an API key requires OTARI_SECRET_KEY.
+         *
+         *     Creating a second search instance, while the first is the in-loop default
+         *     only because it is the only one, first sets ``web_search_default_tool`` to
+         *     the first in the same commit, and says so in the response, so that adding
+         *     an instance never turns in-loop search off. That runtime value wins over the
+         *     configuration file until it is cleared.
          */
         post: operations["search-tools-create_search_tool"];
         delete?: never;
@@ -4603,6 +4623,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search-tools/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Unsaved Search Tool
+         * @description Test an instance before saving it, with one search or one fetch.
+         *
+         *     Takes the create request's fields, held to the create's checks against the
+         *     instances this worker has loaded, plus ``query`` for a search instance or
+         *     ``url`` for a fetch instance. Answers whether the provider answered without
+         *     an error, the error's tag when it did not, and how many hits or characters
+         *     came back, never the results or the page.
+         */
+        post: operations["search-tools-test_unsaved_search_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search-tools/{name}": {
         parameters: {
             query?: never;
@@ -4615,23 +4661,51 @@ export interface paths {
         post?: never;
         /**
          * Delete Stored Search Tool
-         * @description Delete a stored search tool. A config-file search tool cannot be deleted here.
+         * @description Delete a stored search or fetch instance. A config-file one, or ``builtin_fetch``, cannot be deleted here.
          */
         delete: operations["search-tools-delete_stored_search_tool"];
         options?: never;
         head?: never;
         /**
          * Update Search Tool
-         * @description Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.
+         * @description Update a stored search or fetch instance. Omitted fields are left as-is; an explicit ``null`` clears them.
          *
          *     ``api_key`` follows the same rule: omit it to keep the stored key, send a new
          *     one to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The
          *     row is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the
          *     write it guards are atomic. The tool as it will be after the update is
          *     validated, so a change that would leave it unusable (clearing the key of a
-         *     provider that needs one) is refused rather than stored.
+         *     provider that needs one) is refused rather than stored. Its options are
+         *     checked against the provider's when the update sets them or changes the
+         *     provider, and ``fetch_tool`` when the update sets it, so rotating the key of
+         *     an instance stored before those rules never trips on them. ``kind`` cannot
+         *     change, so an instance never moves between the search and fetch maps.
          */
         patch: operations["search-tools-update_search_tool"];
+        trace?: never;
+    };
+    "/api/v1/search-tools/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Search Tool
+         * @description Test a configured or stored instance with one search or one fetch.
+         *
+         *     Takes ``query`` for a search instance or ``url`` for a fetch instance, and
+         *     answers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test
+         *     yet, and answers a 400.
+         */
+        post: operations["search-tools-test_search_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/search/{search_tool_name}": {
@@ -6265,6 +6339,13 @@ export interface components {
              */
             agent_type: string;
             /**
+             * Candidates
+             * @description The models the subagent may be sent to, as Otari model ids (`<provider>:<model>`), each with what it is for (or null when the name says enough). Required for `pi`, refused for `claude-code`.
+             */
+            candidates?: {
+                [key: string]: string | null;
+            } | null;
+            /**
              * Description
              * @description The caller's short description of the task.
              * @default
@@ -6272,9 +6353,10 @@ export interface components {
             description: string;
             /**
              * Harness
-             * @description The agent harness asking, such as `claude-code`.
+             * @description The agent harness asking. It decides the candidates: `agent_recommender_candidates`, Claude Code's own aliases, for `claude-code`, and the request's own `candidates` for `pi`.
+             * @enum {string}
              */
-            harness: string;
+            harness: "claude-code" | "pi";
             /**
              * Parent Model
              * @description The model the parent conversation runs on, as the harness names it.
@@ -7846,23 +7928,35 @@ export interface components {
         };
         /**
          * ConfigSearchToolSchema
-         * @description A search tool declared in the config file. Read-only: it cannot be edited here.
+         * @description A search or fetch instance declared in the config file, or ``builtin_fetch``. Read-only here.
          */
         ConfigSearchToolSchema: {
             /** Api Base */
             api_base?: string | null;
             /**
+             * Fetch Tool
+             * @description A search instance's enrichment fetch instance. Null means the fetch default enriches it.
+             */
+            fetch_tool?: string | null;
+            /**
              * Has Api Key
              * @description Whether the config entry carries an API key. The key itself is not shown.
              */
             has_api_key: boolean;
+            /**
+             * Kind
+             * @description Whether this is a search or a fetch instance.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Name */
             name: string;
             /** Provider */
             provider: string;
             /**
              * Shadowed
-             * @description True when a stored search tool of the same name overrides this entry.
+             * @description True when a stored instance of the same name and kind overrides this entry.
              * @default false
              */
             shadowed: boolean;
@@ -8181,7 +8275,7 @@ export interface components {
         };
         /**
          * CreateSearchToolRequest
-         * @description Create a stored search tool. ``api_key`` is write-only and requires OTARI_SECRET_KEY.
+         * @description Create a stored search or fetch instance. ``api_key`` is write-only and requires OTARI_SECRET_KEY.
          * @example {
          *       "api_base": "http://searxng:8080",
          *       "name": "local",
@@ -8200,8 +8294,20 @@ export interface components {
              */
             api_key?: string | null;
             /**
+             * Fetch Tool
+             * @description For a search instance: the fetch instance that enriches its results, a configured or stored one or builtin_fetch. Omit it for the fetch default.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description 'search' or 'fetch'. It cannot change once created.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /**
              * Name
-             * @description Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}.
+             * @description Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}, or that names a fetch instance. It contains no '/' or ':', is not builtin_fetch or none in any case, and is unique across search and fetch instances.
              */
             name: string;
             /**
@@ -8213,7 +8319,7 @@ export interface components {
             } | null;
             /**
              * Provider
-             * @description Search provider, one of: exa, searxng.
+             * @description Provider id. GET /api/v1/search-tools/providers lists the search providers, and with ?kind=fetch the fetch providers.
              */
             provider: string;
             /**
@@ -8321,6 +8427,63 @@ export interface components {
              * @description Unique user identifier
              */
             user_id: string;
+        };
+        /**
+         * CreatedSearchToolSchema
+         * @description A stored instance as created, with the default setting the create also stored, if any.
+         */
+        CreatedSearchToolSchema: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Decryptable
+             * @default true
+             */
+            decryptable: boolean;
+            /**
+             * Fetch Tool
+             * @description A search instance's enrichment fetch instance. Null means the fetch default enriches it.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description Whether this is a search or a fetch instance.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Notice
+             * @description What else the create changed, for the operator to read.
+             */
+            notice?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Pinned Web Search Default Tool
+             * @description Set when this create also stored web_search_default_tool, naming the search instance that was the in-loop default because it was the only one, so that adding a second does not turn in-loop search off. This runtime value wins over the configuration file until it is cleared.
+             */
+            pinned_web_search_default_tool?: string | null;
+            /** Provider */
+            provider: string;
+            /**
+             * Shadows Config
+             * @description True when a config-file search tool of the same name exists; the stored one is in effect.
+             * @default false
+             */
+            shadows_config: boolean;
+            /** Timeout */
+            timeout?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * CurrentPricingPage
@@ -8740,6 +8903,25 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * EmbeddingData
+         * @description One input's embedding, in OpenAI's shape.
+         */
+        EmbeddingData: {
+            /**
+             * Embedding
+             * @description The vector, or its base64 encoding when the request asked for `encoding_format: base64`
+             */
+            embedding: number[] | string;
+            /** Index */
+            index: number;
+            /**
+             * Object
+             * @default embedding
+             * @constant
+             */
+            object: "embedding";
+        };
+        /**
          * EmbeddingRequest
          * @description OpenAI-compatible embedding request.
          */
@@ -8753,10 +8935,53 @@ export interface components {
              * @description Input text to embed
              */
             input: string | string[];
+            /**
+             * Input Type
+             * @description What the input will be used for, for providers whose embedding depends on it: Cohere (`search_document`, `search_query`, `classification`, `clustering`, `image`) and Voyage (`query`, `document`). The provider validates the value. Any other provider answers 400, rather than embedding the input as if the field were absent.
+             */
+            input_type?: string | null;
             /** Model */
             model: string;
             /** User */
             user?: string | null;
+        };
+        /**
+         * EmbeddingResponse
+         * @description An OpenAI-compatible embeddings response, with the gateway's inline cost on ``usage``.
+         */
+        EmbeddingResponse: {
+            /** Data */
+            data: components["schemas"]["EmbeddingData"][];
+            /** Model */
+            model: string;
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
+            /** @description Absent when the provider reported no usage */
+            usage?: components["schemas"]["EmbeddingUsage"] | null;
+        };
+        /**
+         * EmbeddingUsage
+         * @description What an embeddings request was metered at, and what it cost.
+         */
+        EmbeddingUsage: {
+            /**
+             * Cost Usd
+             * @description What the request cost, as a six-decimal USD string; absent when it was not priced
+             */
+            cost_usd?: string | null;
+            /**
+             * Pricing Source
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
+             */
+            pricing_source?: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
         };
         /**
          * EndUserPublic
@@ -10110,6 +10335,8 @@ export interface components {
             deployment_managed: boolean;
             /** Id */
             id: string;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
             /**
              * Object
              * @default model
@@ -11403,7 +11630,7 @@ export interface components {
             effective_to?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M input tokens
+             * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
             input_price_per_million: number;
             /**
@@ -11413,7 +11640,7 @@ export interface components {
             model_key: string;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens
+             * @description Price per 1M output tokens; unused by a rate in requests or images
              */
             output_price_per_million: number;
             /**
@@ -11423,7 +11650,7 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
              * @default tokens
              * @enum {string}
              */
@@ -11529,12 +11756,12 @@ export interface components {
             effective_to?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M input tokens
+             * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
             input_price_per_million: number;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens
+             * @description Price per 1M output tokens; unused by a rate in requests or images
              */
             output_price_per_million: number;
             /**
@@ -11544,7 +11771,7 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
              * @default tokens
              * @enum {string}
              */
@@ -12989,6 +13216,20 @@ export interface components {
             parameters: string[];
         };
         /**
+         * RerankMeta
+         * @description The provider's own billing report, passed through as it sent it.
+         */
+        RerankMeta: {
+            /** Billed Units */
+            billed_units?: {
+                [key: string]: number;
+            } | null;
+            /** Tokens */
+            tokens?: {
+                [key: string]: number;
+            } | null;
+        };
+        /**
          * RerankRequest
          * @description Rerank request.
          */
@@ -13023,6 +13264,72 @@ export interface components {
              * @description User ID for usage attribution
              */
             user?: string | null;
+        };
+        /**
+         * RerankResponse
+         * @description Documents ordered by relevance, with the gateway's metered usage.
+         */
+        RerankResponse: {
+            /**
+             * Id
+             * @description Provider-assigned response ID
+             */
+            id?: string | null;
+            /** @description The provider's own billing report, unchanged */
+            meta?: components["schemas"]["RerankMeta"] | null;
+            /**
+             * Model
+             * @description The model that served the request
+             */
+            model?: string | null;
+            /**
+             * Results
+             * @description Results sorted by relevance_score, highest first
+             */
+            results: components["schemas"]["RerankResult"][];
+            usage: components["schemas"]["RerankUsage"];
+        };
+        /**
+         * RerankResult
+         * @description One document's relevance to the query.
+         */
+        RerankResult: {
+            /**
+             * Index
+             * @description Zero-based index into the request's documents
+             */
+            index: number;
+            /**
+             * Relevance Score
+             * @description Relevance score, higher is more relevant
+             */
+            relevance_score: number;
+        };
+        /**
+         * RerankUsage
+         * @description What a rerank request was metered at, and what it cost.
+         */
+        RerankUsage: {
+            /**
+             * Cost Usd
+             * @description What the request cost, as a six-decimal USD string; absent when it was not priced
+             */
+            cost_usd?: string | null;
+            /**
+             * Pricing Source
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
+             */
+            pricing_source?: string | null;
+            /**
+             * Search Units
+             * @description Search units the request was billed for, present only when the model is priced per request: the provider's count rounded up, or one when it reported none
+             */
+            search_units?: number | null;
+            /**
+             * Total Tokens
+             * @description Tokens the provider reported, or null
+             */
+            total_tokens?: number | null;
         };
         /** ResendVerificationRequest */
         ResendVerificationRequest: {
@@ -13567,8 +13874,99 @@ export interface components {
             url: string;
         };
         /**
+         * SearchToolTestRequest
+         * @description An unsaved search or fetch instance to test, and what to test it with.
+         * @example {
+         *       "api_base": "http://searxng:8080",
+         *       "name": "local",
+         *       "provider": "searxng"
+         *     }
+         */
+        SearchToolTestRequest: {
+            /**
+             * Api Base
+             * @description Backend endpoint. Omit to inherit the provider's default (searxng inherits web_search_url).
+             */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description Provider API key. Stored encrypted; never returned.
+             */
+            api_key?: string | null;
+            /**
+             * Fetch Tool
+             * @description For a search instance: the fetch instance that enriches its results, a configured or stored one or builtin_fetch. Omit it for the fetch default.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description 'search' or 'fetch'. It cannot change once created.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /**
+             * Name
+             * @description Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}, or that names a fetch instance. It contains no '/' or ':', is not builtin_fetch or none in any case, and is unique across search and fetch instances.
+             */
+            name: string;
+            /**
+             * Options
+             * @description Provider-native request fields used as defaults (e.g. exa's 'type', searxng's 'engines').
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Provider
+             * @description Provider id. GET /api/v1/search-tools/providers lists the search providers, and with ?kind=fetch the fetch providers.
+             */
+            provider: string;
+            /**
+             * Query
+             * @description For a search instance: the query to run.
+             */
+            query?: string | null;
+            /**
+             * Timeout
+             * @description Per-request timeout in seconds.
+             */
+            timeout?: number | null;
+            /**
+             * Url
+             * @description For a fetch instance: the page to fetch.
+             */
+            url?: string | null;
+        };
+        /**
+         * SearchToolTestResponse
+         * @description How one search or one fetch went. Never the results or the page.
+         */
+        SearchToolTestResponse: {
+            /**
+             * Characters
+             * @description For a fetch that worked: how many characters of page text came back.
+             */
+            characters?: number | null;
+            /**
+             * Error
+             * @description When not ok, the error's tag: timeout, network, http_error, invalid_response, or the provider's own.
+             */
+            error?: string | null;
+            /**
+             * Hits
+             * @description For a search that worked: how many hits came back.
+             */
+            hits?: number | null;
+            /**
+             * Ok
+             * @description Whether the provider answered the call without an error.
+             */
+            ok: boolean;
+        };
+        /**
          * SearchToolsResponse
-         * @description Every search tool ``POST /api/v1/search`` can name, by where it came from.
+         * @description Every search instance ``POST /api/v1/search`` can name, or every fetch instance, by where it came from.
          */
         SearchToolsResponse: {
             /** Config */
@@ -13709,7 +14107,7 @@ export interface components {
             effective_at?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M input tokens
+             * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
             input_price_per_million: number;
             /**
@@ -13719,7 +14117,7 @@ export interface components {
             model_key: string;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens
+             * @description Price per 1M output tokens; unused by a rate in requests or images
              */
             output_price_per_million: number;
             /**
@@ -13729,7 +14127,7 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation.
+             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).
              * @default tokens
              * @enum {string}
              */
@@ -13802,7 +14200,7 @@ export interface components {
         };
         /**
          * StoredSearchToolSchema
-         * @description A runtime-stored search tool. The API key is never returned, only ``last4``.
+         * @description A runtime-stored search or fetch instance. The API key is never returned, only ``last4``.
          */
         StoredSearchToolSchema: {
             /** Api Base */
@@ -13814,6 +14212,18 @@ export interface components {
              * @default true
              */
             decryptable: boolean;
+            /**
+             * Fetch Tool
+             * @description A search instance's enrichment fetch instance. Null means the fetch default enriches it.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description Whether this is a search or a fetch instance.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Last4 */
             last4?: string | null;
             /** Name */
@@ -13834,6 +14244,22 @@ export interface components {
             timeout?: number | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /**
+         * StoredSearchToolTestRequest
+         * @description What to test a configured or stored instance with.
+         */
+        StoredSearchToolTestRequest: {
+            /**
+             * Query
+             * @description For a search instance: the query to run.
+             */
+            query?: string | null;
+            /**
+             * Url
+             * @description For a fetch instance: the page to fetch.
+             */
+            url?: string | null;
         };
         /**
          * SwitchActiveOrganizationRequest
@@ -14212,7 +14638,7 @@ export interface components {
         };
         /**
          * UpdateSearchToolRequest
-         * @description Update a stored search tool. Omitted fields are unchanged; ``api_key`` rotates in place.
+         * @description Update a stored search or fetch instance. Omitted fields are unchanged; ``api_key`` rotates in place.
          */
         UpdateSearchToolRequest: {
             /** Api Base */
@@ -14227,6 +14653,16 @@ export interface components {
              * @description Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.
              */
             expected_updated_at?: string | null;
+            /**
+             * Fetch Tool
+             * @description For a search instance: the fetch instance that enriches its results. Null clears it.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description Accepted only when it matches the stored kind, which cannot change.
+             */
+            kind?: ("search" | "fetch") | null;
             /** Options */
             options?: {
                 [key: string]: unknown;
@@ -17293,7 +17729,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["EmbeddingResponse"];
                 };
             };
             /** @description Validation Error */
@@ -22667,7 +23103,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["RerankResponse"];
                 };
             };
             /** @description Validation Error */
@@ -23146,7 +23582,10 @@ export interface operations {
     };
     "search-tools-list_all_search_tools": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which instances to list: 'search' (the default) or 'fetch'. */
+                kind?: "search" | "fetch";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -23160,6 +23599,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchToolsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -23183,7 +23631,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoredSearchToolSchema"];
+                    "application/json": components["schemas"]["CreatedSearchToolSchema"];
                 };
             };
             /** @description Validation Error */
@@ -23249,6 +23697,39 @@ export interface operations {
             };
         };
     };
+    "search-tools-test_unsaved_search_tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchToolTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchToolTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "search-tools-delete_stored_search_tool": {
         parameters: {
             query?: never;
@@ -23300,6 +23781,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoredSearchToolSchema"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "search-tools-test_search_tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoredSearchToolTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchToolTestResponse"];
                 };
             };
             /** @description Validation Error */

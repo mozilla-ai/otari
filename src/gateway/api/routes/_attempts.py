@@ -40,11 +40,13 @@ from fastapi import HTTPException, status
 from gateway.api.routes._platform import (
     _provider_failure_http_exc,
     get_shared_rejection,
-    is_provider_billing_error,
     record_abandoned_attempt,
-    upstream_exception_shape,
 )
 from gateway.log_config import logger
+from gateway.services.inference import (
+    is_provider_billing_error,
+    upstream_exception_shape,
+)
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import missing_credential
 from gateway.services.sandbox_backend import SandboxNotReachableError

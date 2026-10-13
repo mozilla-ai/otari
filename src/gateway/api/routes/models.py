@@ -22,15 +22,17 @@ from gateway.exceptions.control_plane_exceptions import ControlPlaneUnavailableE
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.services.catalog import apply_model_limits, load_catalog_metadata
 from gateway.services.control_plane import UNAVAILABLE_DETAIL, ResolveEndpoint, resolve
 from gateway.services.merged_catalog_service import (
     ModelObject,
     alias_model,
     apply_default_pricing,
+    apply_organization_pricing,
     build_merged_catalog,
     catalog_aliases,
     catalog_scope,
-    context_window_for_key,
     created_timestamp,
     get_pricing_map,
     mark_deployment_managed,
@@ -39,6 +41,7 @@ from gateway.services.merged_catalog_service import (
     owner_from_key,
     pricing_info,
     pricing_key_candidates,
+    viewer_organization,
     withheld_as_unadvertised,
 )
 from gateway.services.model_access import is_model_allowed
@@ -47,6 +50,7 @@ from gateway.services.model_catalog_service import (
     background_catalog_enabled,
     build_metadata_map,
     load_models_dev_catalog,
+    token_limit,
 )
 from gateway.services.model_discovery_service import (
     background_discovery_enabled,
@@ -197,13 +201,19 @@ async def list_models(
     """List all available models.
 
     Returns models auto-discovered from configured providers, enriched with
-    pricing data from the model_pricing table when available. Models that only
-    exist in the pricing table are also included for backward compatibility.
+    pricing data from the model_pricing table when available, and with each
+    model's token limits: the context window from models.dev, or from
+    genai-prices where models.dev has none, and the output limit from models.dev
+    alone. A limit neither knows is null. Models that only exist in the pricing
+    table are also included for backward compatibility.
     """
     catalog = await build_merged_catalog(
         db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
     )
-    return ModelListResponse(data=sorted(catalog.models.values(), key=lambda m: m.id))
+    models = sorted(catalog.models.values(), key=lambda m: m.id)
+    organization_id = await viewer_organization(db, auth, session_identity)
+    await apply_organization_pricing(db, config, models, catalog.aliases, organization_id)
+    return ModelListResponse(data=models)
 
 
 # Served before GET /models/{model_id:path}, which FastAPI would otherwise match
@@ -287,6 +297,21 @@ async def get_model(
     model_provider: ModelProviderPortDep,
 ) -> ModelObject:
     """Get details for a specific model."""
+    obj, aliases = await _find_model(db, config, model_id, auth, session_identity, model_provider)
+    organization_id = await viewer_organization(db, auth, session_identity)
+    await apply_organization_pricing(db, config, [obj], aliases, organization_id)
+    return obj
+
+
+async def _find_model(
+    db: AsyncSession,
+    config: GatewayConfig,
+    model_id: str,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    model_provider: ModelProviderPort,
+) -> tuple[ModelObject, dict[str, str]]:
+    """The model ``model_id`` names, priced from the deployment's list, with the caller's aliases."""
     api_key, _is_master_key = auth
     # Same scoping as the listing, the workspace layer included: the caller's own
     # aliases, plus their workspace's and the configured ones. A master-key caller
@@ -319,7 +344,13 @@ async def get_model(
     alias_target = aliases.get(model_id)
     if alias_target is not None:
         pricing_map = await get_pricing_map(db, model_keys=pricing_key_candidates(config, alias_target))
-        return alias_model(config, model_id, alias_target, normalized_pricing_lookup(config, pricing_map))
+        return alias_model(
+            config,
+            model_id,
+            alias_target,
+            normalized_pricing_lookup(config, pricing_map),
+            models_dev=await load_catalog_metadata(config),
+        ), aliases
 
     # Check the pricing table first.
     stmt = (
@@ -365,17 +396,13 @@ async def get_model(
         # consults the same fallback. Reporting 404 for a model that is being
         # charged for is the lie phase 3 of the listing exists to avoid, so
         # answer with the effective rate when there is one.
-        fallback = ModelObject(
-            id=model_id,
-            created=0,
-            owned_by=owner_from_key(model_id),
-            context_window=context_window_for_key(model_id),
-        )
+        fallback = ModelObject(id=model_id, created=0, owned_by=owner_from_key(model_id))
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
+            apply_model_limits(config, await load_catalog_metadata(config), fallback)
             return mark_deployment_managed(
                 config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
-            )
+            ), aliases
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model '{model_id}' not found",
@@ -391,16 +418,20 @@ async def get_model(
             owned_by=discovered_provider,
             pricing=pricing_info(pricing) if pricing else None,
             pricing_source="configured" if pricing else "none",
-            context_window=context_window_for_key(model_key),
         )
         apply_default_pricing(obj)
-        return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
+        apply_model_limits(config, await load_catalog_metadata(config), obj)
+        return mark_deployment_managed(
+            config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
+        ), aliases
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
+    obj = model_from_pricing(pricing)
+    apply_model_limits(config, await load_catalog_metadata(config), obj)
     return mark_deployment_managed(
-        config, model_from_pricing(pricing), deployment_supplied_providers=scope.deployment_supplied_providers
-    )
+        config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
+    ), aliases
 
 
 def _model_from_platform(entry: object) -> ModelObject:
@@ -413,6 +444,8 @@ def _model_from_platform(entry: object) -> ModelObject:
         id=entry["id"],
         created=created if isinstance(created, int) and not isinstance(created, bool) else 0,
         owned_by=owned_by if isinstance(owned_by, str) and owned_by else owner_from_key(entry["id"]),
+        context_window=token_limit(entry.get("context_window")),
+        max_output_tokens=token_limit(entry.get("max_output_tokens")),
     )
 
 

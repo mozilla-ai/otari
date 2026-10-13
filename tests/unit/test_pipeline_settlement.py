@@ -535,9 +535,10 @@ class _Settlement:
 
 
 def _chunk(usage: CompletionUsage | None = None) -> ChatCompletionChunk:
+    """A chunk that finishes its choice, so a stream of these is complete."""
     return ChatCompletionChunk(
         id="c1",
-        choices=[],
+        choices=[ChunkChoice(delta=ChoiceDelta(), finish_reason="stop", index=0)],
         created=0,
         model="m",
         object="chat.completion.chunk",
@@ -546,7 +547,9 @@ def _chunk(usage: CompletionUsage | None = None) -> ChatCompletionChunk:
 
 
 def _reservation(estimate: Decimal = Decimal("0.5")) -> ReservationHandle:
-    return ReservationHandle(user_id="user-1", estimate=estimate, reserved=True, strategy="for_update")
+    return ReservationHandle(
+        user_id="user-1", estimate=estimate, reserved=True, strategy="for_update", scope_ceilings=()
+    )
 
 
 def _build(
@@ -1281,11 +1284,9 @@ def _build_platform(
     )
 
 
-@pytest.mark.parametrize("yields_chunk", [True, False], ids=["no-usage-chunk", "zero-chunk"])
 @pytest.mark.asyncio
 async def test_platform_stream_without_usage_reports_final_success(
     monkeypatch: pytest.MonkeyPatch,
-    yields_chunk: bool,
 ) -> None:
     reports: list[dict[str, Any]] = []
 
@@ -1304,8 +1305,7 @@ async def test_platform_stream_without_usage_reports_final_success(
     monkeypatch.setattr(pipeline, "_schedule_usage_report", fake_schedule)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        if yields_chunk:
-            yield _chunk()
+        yield _chunk()
 
     await _drain(_build_platform(stream()))
 
@@ -1624,11 +1624,15 @@ def _content_chunk(chunk_id: str, text: str) -> ChatCompletionChunk:
     )
 
 
-def _usage_chunk(chunk_id: str, prompt_tokens: int) -> ChatCompletionChunk:
-    """An OpenAI ``include_usage`` chunk: usage, no choices."""
+def _usage_chunk(chunk_id: str, prompt_tokens: int, *, finishes: bool = False) -> ChatCompletionChunk:
+    """An OpenAI ``include_usage`` chunk: usage, no choices.
+
+    ``finishes`` puts the finished choice on it as well, as Cohere and Gemini
+    report usage, so a stream ending on it is complete.
+    """
     return ChatCompletionChunk(
         id=chunk_id,
-        choices=[],
+        choices=[ChunkChoice(delta=ChoiceDelta(), finish_reason="stop", index=0)] if finishes else [],
         created=0,
         model="gpt-4",
         object="chat.completion.chunk",
@@ -1695,7 +1699,7 @@ async def test_intermediate_usage_chunk_does_not_hold_the_final_answer(
         yield _usage_chunk("u1", 10)  # iteration 1's usage chunk, not terminal
         yield _content_chunk("c1", "final")
         yield _content_chunk("c2", "answer")
-        yield _usage_chunk("u2", 20)  # the real terminal carrier
+        yield _usage_chunk("u2", 20, finishes=True)  # the real terminal carrier
 
     iterator = _build_platform_stream(stream())
 
@@ -1742,7 +1746,7 @@ async def test_carrier_overflow_resumes_streaming_and_settles_on_a_later_carrier
         yield _usage_chunk("u1", 10)
         for index in range(6):
             yield _content_chunk(f"c{index}", f"part-{index}")
-        yield _usage_chunk("u2", 20)
+        yield _usage_chunk("u2", 20, finishes=True)
 
     emitted = [part async for part in _build_platform_stream(stream())]
 
@@ -1778,7 +1782,7 @@ async def test_buffered_terminal_carrier_is_relabeled_to_the_display_model(
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
         yield _content_chunk("c0", "hi")
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
     emitted = [part async for part in _build_platform_stream(stream(), display_model="my-alias")]
 
@@ -1817,7 +1821,7 @@ async def test_keepalives_continue_while_terminal_settlement_is_pending(
     reporter.install(monkeypatch)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
     iterator = _build_platform_stream(
         stream(),
@@ -1846,7 +1850,7 @@ async def test_cancellation_while_settling_leaves_the_report_running(
     reporter.install(monkeypatch)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
     iterator = _build_platform_stream(stream())
     pending = asyncio.ensure_future(iterator.__anext__())
@@ -2926,7 +2930,12 @@ async def test_standalone_non_stream_marks_budget_exempt_rows(monkeypatch: pytes
     settlement.install(monkeypatch)
 
     exempt = ReservationHandle(
-        user_id="user-1", estimate=Decimal(0), reserved=False, strategy="for_update", counts_toward_budget=False
+        user_id="user-1",
+        estimate=Decimal(0),
+        reserved=False,
+        strategy="for_update",
+        counts_toward_budget=False,
+        scope_ceilings=(),
     )
     await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=exempt)
 
@@ -3009,6 +3018,76 @@ async def test_standalone_stream_has_no_first_chunk_deadline(monkeypatch: pytest
 
     assert chunks, "the slow first chunk was dropped: a first-chunk deadline is being applied"
     assert settlement.reconciled == [0.25]
+
+
+def test_the_first_chunk_hold_defaults_to_fifteen_seconds_and_rejects_a_negative() -> None:
+    assert GatewayConfig().streaming_first_chunk_hold_ms == 15000
+    assert GatewayConfig(streaming_first_chunk_hold_ms=0).streaming_first_chunk_hold_ms == 0
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        GatewayConfig(streaming_first_chunk_hold_ms=-1)
+
+
+def _failing_on_first_read(started: list[bool]) -> Callable[..., Awaitable[AsyncIterator[ChatCompletionChunk]]]:
+    async def _acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        async def gen() -> AsyncIterator[ChatCompletionChunk]:
+            started.append(True)
+            raise TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'")
+            yield  # unreachable; makes this a generator
+
+        return gen()
+
+    return _acompletion
+
+
+@pytest.mark.asyncio
+async def test_a_held_stream_that_fails_before_its_first_chunk_raises_the_unstreamed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    started: list[bool] = []
+    monkeypatch.setattr(chat, "acompletion", _failing_on_first_read(started))
+
+    config = GatewayConfig()
+    ctx = _ctx(config, db=object(), log_writer=object(), reservation=_reservation())
+    with pytest.raises(HTTPException) as raised:
+        await run_single_attempt_stream(
+            adapter=chat._ADAPTER,
+            ctx=ctx,
+            tool_ctx=_tool_ctx(config=config),
+            call_kwargs={"model": "cohere:command-r", "messages": [{"role": "user", "content": "hi"}], "n": 1},
+            provider=LLMProvider.COHERE,
+            model="command-r",
+        )
+
+    assert raised.value.status_code == 400
+    assert started == [True]
+
+
+@pytest.mark.asyncio
+async def test_with_the_hold_off_the_stream_is_not_read_before_the_response_is_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    started: list[bool] = []
+    monkeypatch.setattr(chat, "acompletion", _failing_on_first_read(started))
+
+    config = GatewayConfig(streaming_first_chunk_hold_ms=0)
+    ctx = _ctx(config, db=object(), log_writer=object(), reservation=_reservation())
+    response = await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(config=config),
+        call_kwargs={"model": "cohere:command-r", "messages": [{"role": "user", "content": "hi"}], "n": 1},
+        provider=LLMProvider.COHERE,
+        model="command-r",
+    )
+
+    assert response.status_code == 200
+    assert started == []
+    chunks = await _drain(response)
+    assert any('"code": "provider_error"' in chunk for chunk in chunks)
 
 
 @pytest.mark.parametrize(

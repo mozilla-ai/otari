@@ -1286,12 +1286,106 @@ describe("KeysPage", () => {
     await user.click(
       screen.getByRole("button", { name: "Create your first key" }),
     )
-    // Owner is empty: Create is blocked.
+    // Owner is empty: Create is blocked, and the dialog says why and which
+    // field to fill rather than leaving a dead button.
     expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled()
+    expect(screen.getByRole("combobox", { name: /Owner/ })).toBeRequired()
+    expect(
+      screen.getByText("Choose an owner to create this key."),
+    ).toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText(/Pick a user/), "team-checkout")
     await user.keyboard("{Escape}")
     expect(screen.getByRole("button", { name: "Create key" })).toBeEnabled()
+    expect(
+      screen.queryByText("Choose an owner to create this key."),
+    ).not.toBeInTheDocument()
+  })
+
+  describe("default owner", () => {
+    const ME = "aaaaaaaa-0000-4000-8000-000000000001"
+    const OTHER = "bbbbbbbb-0000-4000-8000-000000000002"
+    const roster = [
+      organizationMember({
+        organization_member_id: "om-1",
+        attribution_user_id: ME,
+        full_name: "Alice Example",
+        email: "alice@example.com",
+      }),
+      organizationMember({
+        organization_member_id: "om-2",
+        attribution_user_id: OTHER,
+        full_name: "Bob Example",
+        email: "bob@example.com",
+      }),
+    ]
+    const people = [
+      { user_id: ME, alias: null },
+      { user_id: OTHER, alias: null },
+    ] as User[]
+
+    it("preselects the signed-in user, so Create is ready without a pick", async () => {
+      mockApi({ keys: [], members: roster, users: people })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: /Owner/ })).toHaveValue(
+          "Alice Example",
+        ),
+      )
+      expect(screen.getByRole("button", { name: "Create key" })).toBeEnabled()
+      expect(
+        screen.queryByText("Choose an owner to create this key."),
+      ).not.toBeInTheDocument()
+    })
+
+    it("lets the operator change it, and clearing it brings the hint back", async () => {
+      mockApi({ keys: [], members: roster, users: people })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+      const owner = screen.getByRole("combobox", { name: /Owner/ })
+      await waitFor(() => expect(owner).toHaveValue("Alice Example"))
+
+      await user.click(owner)
+      await user.click(await screen.findByRole("option", { name: /Bob/ }))
+      expect(owner).toHaveValue("Bob Example")
+
+      await user.clear(owner)
+      await user.keyboard("{Escape}")
+      expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled()
+      expect(
+        screen.getByText("Choose an owner to create this key."),
+      ).toBeInTheDocument()
+    })
+
+    it("asks for an owner when the signed-in user is not in the list", async () => {
+      mockApi({ keys: [], members: [roster[1]], users: people })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+
+      await screen.findByRole("combobox", { name: /Owner/ })
+      expect(screen.getByRole("combobox", { name: /Owner/ })).toHaveValue("")
+      expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled()
+      expect(
+        screen.getByText("Choose an owner to create this key."),
+      ).toBeInTheDocument()
+    })
   })
 
   it("frames the per-key scope as narrowing within the owner's access", async () => {
@@ -1602,6 +1696,9 @@ describe("KeysPage", () => {
         screen.queryByPlaceholderText(/Pick a user/),
       ).not.toBeInTheDocument()
       expect(screen.getByRole("button", { name: "Create key" })).toBeEnabled()
+      expect(
+        screen.queryByText("Choose an owner to create this key."),
+      ).not.toBeInTheDocument()
 
       await usr.click(screen.getByRole("button", { name: "Advanced" }))
       expect(

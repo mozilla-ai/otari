@@ -264,6 +264,7 @@ function AddToolDialog({
     create.mutate(
       {
         name: name.trim(),
+        kind: "search",
         provider,
         api_base: apiBase.trim() === "" ? null : apiBase.trim(),
         api_key: apiKey === "" ? null : apiKey,

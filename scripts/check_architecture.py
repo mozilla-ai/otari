@@ -1446,16 +1446,15 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/repositories/tenancy/organization_member_repository.py",
             "gateway/services/budgets/_organization_surface.py",
             "gateway/services/budgets/_reservations.py",
-            "gateway/services/budgets/_scoped_enforcement.py",
         ),
     },
     "gateway.models.budgets.BudgetReservation": {
-        "repository": None,
-        "baseline": ("gateway/services/budgets/_ledger.py",),
+        "repository": "gateway/repositories/budgets/reservation_repository.py",
+        "baseline": (),
     },
     "gateway.models.budgets.BudgetReservationScope": {
-        "repository": None,
-        "baseline": ("gateway/services/budgets/_ledger.py",),
+        "repository": "gateway/repositories/budgets/reservation_repository.py",
+        "baseline": (),
     },
     "gateway.models.budgets.BudgetResetLog": {
         "repository": "gateway/repositories/budgets/budget_repository.py",
@@ -1473,7 +1472,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/budgets/_member_policies.py",
             "gateway/services/budgets/_organization_surface.py",
             "gateway/services/budgets/_retiming.py",
-            "gateway/services/budgets/_scoped_enforcement.py",
         ),
     },
     "gateway.models.budgets.WorkspaceBudgetDefault": {
@@ -1728,7 +1726,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.tools.SearchToolCredential": {
-        "repository": None,
+        "repository": "gateway/repositories/tools/search_tool_repository.py",
         "baseline": ("gateway/services/search_tool_store_service.py",),
     },
     "gateway.models.tools.WorkspaceCodeExecutionPolicy": {

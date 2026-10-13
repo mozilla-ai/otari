@@ -423,6 +423,12 @@ function OrganizationOverview() {
   const activeKeys = summary.data?.active_keys ?? 0
   const activeMembers = summary.data?.active_members ?? 0
 
+  const needsFirstSteps =
+    models.isSuccess &&
+    models.data.data.length === 0 &&
+    recent.isSuccess &&
+    (recent.data?.length ?? 0) === 0
+
   // Recent activity is excluded for the operator page's reason: it renders its
   // own inline banner, so including it here would double-report. The previous
   // window is included: its only reader is the trend chips, so its failure
@@ -463,6 +469,20 @@ function OrganizationOverview() {
       {/* Offered to whoever manages the workspace, which on a multi-tenant
           deployment is this caller. It decides for itself whether to render. */}
       <SetupGuide canServeRequests={(models.data?.data.length ?? 0) > 0} />
+
+      {/* The guide holds back until a request could succeed; without this a new
+          account with nothing to route to has no next step. Waits for the
+          catalog and the log so it never flashes in on a set-up account. */}
+      {needsFirstSteps ? (
+        <GetStartedStrip
+          description={
+            managesSpend
+              ? "Add a provider key to start serving models, then create an API key and send your first request."
+              : "Ask an owner or admin of this organization to add a provider key. Once models are available, you can create an API key and send a request."
+          }
+          action={managesSpend ? "organization-provider-key" : null}
+        />
+      ) : null}
 
       <ErrorBanner error={loadError} />
 
@@ -810,13 +830,13 @@ function OverviewHeader({
 // both provider pages and this prefers the deployment's own, which is not the
 // obvious answer once there are two. It is the right one because of who reaches
 // this button: `OverviewIndex` hands a caller who does not operate the
-// deployment to `OrganizationOverview`, which draws no getting-started strip, so
-// the only person who can press this is the operator, and `/providers` is where
-// a fresh gateway is set up and carries the first-run panel that continues the
-// flow. Gating on the caller here too would restate a rule already guaranteed
-// one level up. Hosted and a control plane report no `providers` surface, so
-// naming it unconditionally would point an operator at the shell's "not
-// available here" panel.
+// deployment to `OrganizationOverview`, which links to the organization's
+// provider-key page, so the only person who can press this is the operator, and
+// `/providers` is where a fresh gateway is set up and carries the first-run
+// panel that continues the flow. Gating on the caller here too would restate a
+// rule already guaranteed one level up. Hosted and a control plane report no
+// `providers` surface, so naming it unconditionally would point an operator at
+// the shell's "not available here" panel.
 //
 // Only correct for *adding* one, which is why provider health does not use it:
 // `/providers/health` reports on `config.providers`, the process-global
@@ -828,7 +848,14 @@ function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
   return serves("providers") ? "/providers" : "/organization/provider-keys"
 }
 
-function GetStartedStrip() {
+function GetStartedStrip({
+  description = "Add a provider to begin serving models. Once it is configured, this page will show your gateway\u2019s traffic, spend, and health.",
+  action = "provider",
+}: {
+  description?: string
+  /** The button, or none for a caller who may not act on it. */
+  action?: "provider" | "organization-provider-key" | null
+}) {
   const navigate = useNavigate()
   const addProviderRoute = useAddProviderRoute()
 
@@ -844,19 +871,27 @@ function GetStartedStrip() {
         <Dot className="mt-2.5 bg-accent" />
         <div>
           <h2 className="text-display-sub">Get started with Otari</h2>
-          <p className="mt-1 text-sm text-muted">
-            Add a provider to begin serving models. Once it is configured, this
-            page will show your gateway&rsquo;s traffic, spend, and health.
-          </p>
+          <p className="mt-1 text-sm text-muted">{description}</p>
         </div>
       </div>
-      <Button
-        variant="primary"
-        className="shrink-0"
-        onPress={() => navigate({ to: addProviderRoute })}
-      >
-        Add your first provider
-      </Button>
+      {action === null ? null : (
+        <Button
+          variant="primary"
+          className="shrink-0"
+          onPress={() =>
+            navigate({
+              to:
+                action === "provider"
+                  ? addProviderRoute
+                  : "/organization/provider-keys",
+            })
+          }
+        >
+          {action === "provider"
+            ? "Add your first provider"
+            : "Add a provider key"}
+        </Button>
+      )}
     </Section>
   )
 }

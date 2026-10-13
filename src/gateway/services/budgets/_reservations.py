@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import uuid
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
+from math import ceil
 from typing import Any, Literal
 
 from any_llm import AnyLLM
@@ -27,20 +29,25 @@ from gateway.models.budgets import (
     BudgetResetLog,
 )
 from gateway.models.money import to_usd
-from gateway.models.pricing import ModelPricing
+from gateway.models.pricing import MAX_REPORTED_UNITS, ModelPricing
 from gateway.models.users import User
+from gateway.repositories.budgets import ApplicableCeiling, HeldAmounts
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
+from gateway.services.budgets._refusals import BlockedAxis, blocked_on, refusal_detail
 from gateway.services.budgets._scoped_enforcement import (
     ApplicableBudget,
     BudgetScopeRequest,
-    applicable_budgets,
     blocked_axis,
+    get_provider_ceilings,
+    get_scope_ceilings,
+    roll_and_list_applicable,
 )
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
 from gateway.services.budgets._scoped_enforcement import settle as settle_scoped
+from gateway.services.pricing import price_usage
 from gateway.services.pricing_service import find_model_pricing, is_free_pricing, search_unit_cost
 from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
@@ -227,7 +234,7 @@ def _blocked_axis(
     held_tokens: int,
     held_requests: int,
     new_request: bool,
-) -> str:
+) -> BlockedAxis:
     """Which capped axis had no room, for the refusal message.
 
     The gate is one conditional UPDATE that matches no row, so nothing in its
@@ -246,7 +253,8 @@ def _blocked_axis(
     dollar refusal has always sent byte for byte, which callers and their tests
     key on, and the ask this answers was for signal on the two axes that had
     none. A refusal that changes wording for the case that already worked buys
-    nothing and breaks readers.
+    nothing and breaks readers. The one dollar refusal it was false for, a hold
+    larger than the headroom left, carries both amounts instead (``BlockedAxis``).
 
     ``amount=None`` is the free-model request, whose dollar axis the gate does not
     ask about at all. It is skipped here for the same reason: naming an axis the
@@ -272,18 +280,19 @@ def _blocked_axis(
     for name, cap, committed, wanted in axes:
         if cap is None:
             continue
-        # The second clause of the gate: this hold would push the axis past its
-        # cap. Exact for a top-up, which is asked only that.
-        if committed + wanted > cap:
-            return name
-        # And the first, which only an arrival is asked: the axis is already at or
-        # over its cap, so even a hold of nothing is refused.
-        if new_request and committed >= cap:
-            return name
+        blocked = blocked_on(
+            name,
+            committed=Decimal(str(committed)),
+            cap=Decimal(str(cap)),
+            wanted=Decimal(str(wanted)),
+            new_request=new_request,
+        )
+        if blocked is not None:
+            return blocked
     # Every capped axis has room, so the row moved under this request between the
     # gate and here, or the user was deleted. Neither is an axis, and naming one
     # would be a guess.
-    return "budget"
+    return BlockedAxis("budget")
 
 
 def _normalize_strategy(strategy: str | None) -> str:
@@ -325,16 +334,36 @@ class ReservationHandle:
     # it, so the ceiling loses that headroom for the rest of its window.
     token_estimate: int = 0
     scoped_token_estimate: int = 0
-    # Not split, because a request count never grows: a top-up belongs to a
-    # request already counted, so both legs hold what they held at admission.
     request_estimate: int = 0
+    scoped_request_estimate: int = 0
     # This is None when the request holds nothing: a free model, a budget-exempt key, or no budget and no ceiling.
     reservation_id: str | None = None
+    # The time to live of a ledger row written for this reservation after admission.
+    reservation_ttl_sec: int = DEFAULT_RESERVATION_TTL_SEC
+    # Every ceiling on the request's scopes, whichever provider it caps, so a fallback finds its own without a query.
+    # It has no default, so a construction site cannot leave out the ceilings a fallback must pass.
+    scope_ceilings: tuple[ApplicableCeiling, ...] = field(kw_only=True)
 
     @property
     def scoped_budget_ids(self) -> tuple[str, ...]:
         """The ids of the scoped ceilings this reservation holds against."""
         return tuple(applicable.budget_id for applicable in self.scoped_budgets)
+
+
+@dataclass(frozen=True)
+class EstimateInputs:
+    """The size of a request, which its budget estimate on any model is computed from."""
+
+    prompt_chars: int
+    max_output_tokens: int | None
+    default_output_tokens: int
+    cache_write_ttl: Literal["5m", "1h"] | None = None
+
+    def get_reserved_output_tokens(self, pricing: ModelPricing | None) -> int | None:
+        """Return the output tokens an estimate on ``pricing`` assumes, or None where a lower limit cannot shrink it."""
+        if pricing is None or priced_per_request(pricing) or pricing.output_price_per_million <= 0:
+            return None
+        return self.max_output_tokens if self.max_output_tokens is not None else self.default_output_tokens
 
 
 def estimate_tokens(
@@ -397,31 +426,52 @@ def estimate_cost(
     )
 
 
-def rerank_estimate(pricing: ModelPricing | None, *, prompt_chars: int) -> Decimal:
+# A search unit is one query over up to this many documents, and a document
+# longer than ``_SEARCH_CHUNK_TOKENS`` with the query is split into chunks that
+# each count as a document (Cohere's rule, the provider that bills per unit).
+_DOCUMENTS_PER_SEARCH_UNIT = 100
+_SEARCH_CHUNK_TOKENS = 500
+
+
+def rerank_estimate(pricing: ModelPricing | None, *, query_chars: int, document_chars: Sequence[int]) -> Decimal:
     """Upper bound a rerank request holds against its budgets before dispatch.
 
-    A per-request rate holds one search unit: the provider decides how many a
-    query bills, one is the floor, and settlement reconciles the rest. A
+    A per-request rate holds the search units the documents imply, so a request
+    over many or long documents cannot settle at several times what it held. A
     per-token rate holds the input tokens estimated from the query and documents.
     """
     if priced_per_request(pricing):
-        return search_unit_cost(1, pricing)
+        chunks = sum(max(1, ceil((query_chars + chars) / 4 / _SEARCH_CHUNK_TOKENS)) for chars in document_chars)
+        return search_unit_cost(max(1, ceil(chunks / _DOCUMENTS_PER_SEARCH_UNIT)), pricing)
+    prompt_chars = query_chars + sum(document_chars)
     return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
+
+
+def count_estimate(pricing: ModelPricing | None, *, meter: str, count: int) -> Decimal:
+    """What a request billed by ``count`` under ``meter`` holds: exactly what that count settles at."""
+    clamped = min(max(count, 0), MAX_REPORTED_UNITS)
+    charge = price_usage(pricing, tokens=None, units={meter: clamped}, legacy_unit_reading=True)
+    return charge.cost if charge is not None else ZERO
+
+
+def _ceiling_held(scoped: tuple[ApplicableBudget, ...], usd: Decimal | None, tokens: int, requests: int) -> HeldAmounts:
+    """Return what each of ``scoped`` holds, which is nothing when the request holds no ceiling."""
+    if not scoped:
+        return HeldAmounts(amount=ZERO, tokens=0, requests=0)
+    return HeldAmounts(amount=usd or ZERO, tokens=tokens, requests=requests)
 
 
 async def _held_handle(
     db: AsyncSession,
     *,
     user_id: str,
-    estimate: Decimal,
     user_reserved: bool,
+    user_held: HeldAmounts,
     strategy: str,
     counts_toward_budget: bool,
     scoped: tuple[ApplicableBudget, ...],
-    scoped_estimate: Decimal,
-    token_estimate: int,
-    scoped_token_estimate: int,
-    request_estimate: int,
+    ceiling_held: HeldAmounts,
+    scope_ceilings: tuple[ApplicableCeiling, ...],
     ttl_seconds: int,
     record_reservation: bool,
     user_hold_uncommitted: bool = False,
@@ -452,13 +502,10 @@ async def _held_handle(
                 reservation_id = await ledger.record(
                     db,
                     user_id=user_id,
-                    estimate=estimate,
                     user_reserved=user_reserved,
+                    user_held=user_held,
                     scoped_budgets=scoped,
-                    scoped_estimate=scoped_estimate,
-                    token_estimate=token_estimate,
-                    scoped_token_estimate=scoped_token_estimate,
-                    request_estimate=request_estimate,
+                    ceiling_held=ceiling_held,
                     ttl_seconds=ttl_seconds,
                     commit=False,
                 )
@@ -471,9 +518,9 @@ async def _held_handle(
                 await release_scoped(
                     db,
                     [item.budget_id for item in scoped],
-                    scoped_estimate,
-                    tokens=scoped_token_estimate,
-                    requests=request_estimate,
+                    ceiling_held.amount,
+                    tokens=ceiling_held.tokens,
+                    requests=ceiling_held.requests,
                 )
             raise
         try:
@@ -491,9 +538,7 @@ async def _held_handle(
                         reservation_id,
                         user_id=user_id,
                         scoped_budget_ids=[item.budget_id for item in scoped],
-                        amount=scoped_estimate,
-                        tokens=scoped_token_estimate,
-                        requests=request_estimate,
+                        held=ceiling_held,
                     )
                 except DATABASE_ERRORS:
                     with contextlib.suppress(*DATABASE_ERRORS):
@@ -509,13 +554,10 @@ async def _held_handle(
             reservation_id = await ledger.record(
                 db,
                 user_id=user_id,
-                estimate=estimate,
                 user_reserved=user_reserved,
+                user_held=user_held,
                 scoped_budgets=scoped,
-                scoped_estimate=scoped_estimate,
-                token_estimate=token_estimate,
-                scoped_token_estimate=scoped_token_estimate,
-                request_estimate=request_estimate,
+                ceiling_held=ceiling_held,
                 ttl_seconds=ttl_seconds,
             )
         except SQLAlchemyError:
@@ -531,16 +573,19 @@ async def _held_handle(
             )
     return ReservationHandle(
         user_id=user_id,
-        estimate=estimate,
+        estimate=user_held.amount,
         reserved=user_reserved,
         strategy=strategy,
         counts_toward_budget=counts_toward_budget,
         scoped_budgets=scoped,
-        scoped_estimate=scoped_estimate,
-        token_estimate=token_estimate,
-        scoped_token_estimate=scoped_token_estimate,
-        request_estimate=request_estimate,
+        scoped_estimate=ceiling_held.amount,
+        token_estimate=user_held.tokens,
+        scoped_token_estimate=ceiling_held.tokens,
+        request_estimate=user_held.requests,
+        scoped_request_estimate=ceiling_held.requests,
         reservation_id=reservation_id,
+        reservation_ttl_sec=ttl_seconds,
+        scope_ceilings=scope_ceilings,
     )
 
 
@@ -561,6 +606,7 @@ async def reserve_budget(
     model_is_free: bool | None = None,
     reservation_ttl_sec: int = DEFAULT_RESERVATION_TTL_SEC,
     record_reservation: bool = True,
+    reserved_output_tokens: int | None = None,
 ) -> ReservationHandle:
     """Atomically pre-debit an estimated cost against every budget that applies.
 
@@ -575,6 +621,7 @@ async def reserve_budget(
     ``scope`` adds the tenancy-scoped ceilings, and every one of them must also admit the estimate.
     The scoped ceilings are held first and released if the per-user gate refuses, so a refused request leaves no hold.
     ``record_reservation=False`` writes no ledger row, for a top-up whose request already has one.
+    ``reserved_output_tokens`` is the output allowance ``estimate`` was priced at, for a refusal to name.
 
     NOTE: The caller must pass the returned handle to :func:`reconcile_reservation` or :func:`refund_reservation`.
     """
@@ -623,12 +670,11 @@ async def reserve_budget(
             reserved=False,
             strategy=normalized,
             counts_toward_budget=False,
+            scope_ceilings=(),
         )
 
-    no_reservation = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized)
-
     if normalized == "disabled":
-        return no_reservation
+        return ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized, scope_ceilings=())
 
     budget = attached_budget
 
@@ -644,7 +690,19 @@ async def reserve_budget(
     # Resolved after the per-user lookup so a caller that passes no scope keeps
     # the original fast path exactly, and skipped entirely when there is nothing
     # to hold against on either mechanism.
-    scoped = await applicable_budgets(db, user_id=user_id, scope=scope) if scope is not None else ()
+    ceilings: tuple[ApplicableCeiling, ...] = ()
+    scoped: tuple[ApplicableBudget, ...] = ()
+    if scope is not None:
+        ceilings = await get_scope_ceilings(db, user_id=user_id, scope=scope)
+        scoped = await roll_and_list_applicable(db, get_provider_ceilings(ceilings, scope.provider_instance))
+    no_reservation = ReservationHandle(
+        user_id=user_id,
+        estimate=ZERO,
+        reserved=False,
+        strategy=normalized,
+        reservation_ttl_sec=reservation_ttl_sec,
+        scope_ceilings=ceilings,
+    )
     if budget is None and not scoped:
         return no_reservation
 
@@ -694,7 +752,7 @@ async def reserve_budget(
         )
         if refused is not None:
             BUDGET_EXCEEDED.inc()
-            axis = await blocked_axis(
+            blocked = await blocked_axis(
                 db,
                 refused,
                 amount=usd,
@@ -704,7 +762,12 @@ async def reserve_budget(
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{refused.subject} has exceeded {axis} limit",
+                detail=refusal_detail(
+                    refused.subject,
+                    blocked,
+                    new_request=new_request,
+                    reserved_output_tokens=reserved_output_tokens,
+                ),
                 headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
             )
 
@@ -714,17 +777,15 @@ async def reserve_budget(
         return await _held_handle(
             db,
             user_id=user_id,
-            estimate=ZERO,
             user_reserved=False,
+            # Reachable only with ceilings held and no per-user budget, so the
+            # user leg holds nothing on any axis and the ceilings hold everything.
+            user_held=HeldAmounts(amount=ZERO, tokens=0, requests=0),
             strategy=normalized,
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
-            scoped_estimate=usd or ZERO,
-            # Reachable only with ceilings held and no per-user budget, so the
-            # user leg holds nothing on any axis and the ceilings hold everything.
-            token_estimate=0,
-            scoped_token_estimate=held_tokens,
-            request_estimate=held_requests,
+            ceiling_held=HeldAmounts(amount=usd or ZERO, tokens=held_tokens, requests=held_requests),
+            scope_ceilings=ceilings,
             ttl_seconds=reservation_ttl_sec,
             record_reservation=record_reservation,
         )
@@ -745,16 +806,14 @@ async def reserve_budget(
         return await _held_handle(
             db,
             user_id=user_id,
-            estimate=usd or ZERO,
             user_reserved=True,
             user_hold_uncommitted=True,
+            user_held=HeldAmounts(amount=usd or ZERO, tokens=held_tokens, requests=held_requests),
             strategy=normalized,
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
-            scoped_estimate=(usd or ZERO) if scoped else ZERO,
-            token_estimate=held_tokens,
-            scoped_token_estimate=held_tokens if scoped else 0,
-            request_estimate=held_requests,
+            ceiling_held=_ceiling_held(scoped, usd, held_tokens, held_requests),
+            scope_ceilings=ceilings,
             ttl_seconds=reservation_ttl_sec,
             record_reservation=record_reservation,
         )
@@ -811,7 +870,7 @@ async def reserve_budget(
         # are the ones on the row now, and the refusal path can afford a query
         # where the admission path cannot.
         refused_on = await get_active_user(db, user_id)
-        axis = (
+        blocked = (
             _blocked_axis(
                 budget,
                 spend=refused_on.spend,
@@ -826,27 +885,30 @@ async def reserve_budget(
                 new_request=new_request,
             )
             if refused_on is not None
-            else "budget"
+            else BlockedAxis("budget")
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{user_id}' has exceeded {axis} limit",
+            detail=refusal_detail(
+                f"User '{user_id}'",
+                blocked,
+                new_request=new_request,
+                reserved_output_tokens=reserved_output_tokens,
+            ),
             headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope="user"),
         )
 
     return await _held_handle(
         db,
         user_id=user_id,
-        estimate=usd or ZERO,
         user_reserved=True,
         user_hold_uncommitted=True,
+        user_held=HeldAmounts(amount=usd or ZERO, tokens=held_tokens, requests=held_requests),
         strategy=normalized,
         counts_toward_budget=counts_toward_budget,
         scoped=scoped,
-        scoped_estimate=(usd or ZERO) if scoped else ZERO,
-        token_estimate=held_tokens,
-        scoped_token_estimate=held_tokens if scoped else 0,
-        request_estimate=held_requests,
+        ceiling_held=_ceiling_held(scoped, usd, held_tokens, held_requests),
+        scope_ceilings=ceilings,
         ttl_seconds=reservation_ttl_sec,
         record_reservation=record_reservation,
     )
@@ -974,8 +1036,8 @@ async def reconcile_reservation(
         held=ZERO if reclaimed_early else handle.scoped_estimate,
         actual_tokens=settled_tokens,
         held_tokens=0 if reclaimed_early else handle.scoped_token_estimate,
-        requests=handle.request_estimate,
-        held_requests=0 if reclaimed_early else handle.request_estimate,
+        requests=handle.scoped_request_estimate,
+        held_requests=0 if reclaimed_early else handle.scoped_request_estimate,
         counts_toward_budget=handle.counts_toward_budget,
         commit=False,
     )
@@ -1007,7 +1069,7 @@ async def record_external_spend(db: AsyncSession, user_id: str, cost: Decimal | 
     batch-heavy workloads in dollars. Moving that boundary means giving this path
     a window to count over, not passing a token count through it.
     """
-    handle = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy="disabled")
+    handle = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy="disabled", scope_ceilings=())
     await reconcile_reservation(db, handle, cost)
 
 
@@ -1048,7 +1110,7 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
         handle.scoped_budget_ids,
         handle.scoped_estimate,
         tokens=handle.scoped_token_estimate,
-        requests=handle.request_estimate,
+        requests=handle.scoped_request_estimate,
         commit=False,
     )
     # One commit, for the reason given in :func:`reconcile_reservation`.
@@ -1058,9 +1120,9 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
 async def increase_reservation(
     db: AsyncSession,
     handle: ReservationHandle,
-    additional_estimate: Decimal | float,
     *,
-    additional_tokens: int = 0,
+    estimate: Decimal | float,
+    tokens: int = 0,
     model: str | None = None,
     model_is_free: bool | None = None,
     strategy: str = "for_update",
@@ -1068,8 +1130,10 @@ async def increase_reservation(
     """Grow an existing reservation atomically when the request size increases.
 
     Used when the billable size grows after the initial reservation, e.g. the
-    content normalizer expands an attachment into extracted prompt text. The
-    delta is reserved with the same atomic conditional UPDATE as
+    content normalizer expands an attachment into extracted prompt text.
+    ``estimate`` and ``tokens`` are the request's new size.
+    Each leg grows by what it lacks of that size, because the two legs can hold different amounts.
+    The delta is reserved with the same atomic conditional UPDATE as
     :func:`reserve_budget` (so the budget gate stays effective on the true
     size), then folded into ``handle`` so the existing reconcile/refund path
     releases the full held amount.
@@ -1077,7 +1141,7 @@ async def increase_reservation(
     Like :func:`reserve_budget`, this raises on budget rejection and does *not*
     clean up the prior hold: the caller owns refunding ``handle`` on failure (the
     request routes wrap the whole post-reservation setup in a refund-on-error
-    block). No-op only when neither the dollar nor the token delta is positive.
+    block). No-op when no leg lacks any of the new size.
 
     The scoped ceilings are grown on exactly the rows the original reservation
     took, not re-resolved: the request scope has not changed, and re-resolving
@@ -1087,30 +1151,33 @@ async def increase_reservation(
     the same request the original reserve already counted, and holding a second
     one would spend a request cap twice on it.
     """
-    # Both axes are normalized before either is tested, because they grow
-    # independently: attachments that expand the prompt raise the token estimate
-    # while a model priced at zero leaves the dollar one untouched, and returning
-    # on the dollar delta alone would let those tokens go unheld.
-    additional = max(to_usd(additional_estimate), ZERO)
     # Clamped here, not only inside the per-user call below: the scoped hold is
-    # taken first, so a delta bounded after it has already gone out is a delta the
+    # taken first, so a size bounded after it has already gone out is one the
     # ceilings added to a BIGINT unbounded. Same overflow that turns a 403 into a
     # 500 as the admission estimate's clamp prevents.
-    grown_tokens = min(max(additional_tokens, 0), MAX_COUNT_LIMIT)
-    if additional <= ZERO and grown_tokens == 0:
+    size = max(to_usd(estimate), ZERO)
+    size_tokens = min(max(tokens, 0), MAX_COUNT_LIMIT)
+    # Both axes are measured before either is tested, because they grow
+    # independently: attachments that expand the prompt raise the token estimate
+    # while a model priced at zero leaves the dollar one untouched.
+    additional = max(size - handle.scoped_estimate, ZERO) if handle.scoped_budgets else ZERO
+    grown_tokens = max(size_tokens - handle.scoped_token_estimate, 0) if handle.scoped_budgets else 0
+    user_additional = max(size - handle.estimate, ZERO)
+    user_grown_tokens = max(size_tokens - handle.token_estimate, 0)
+    if additional <= ZERO and grown_tokens == 0 and user_additional <= ZERO and user_grown_tokens == 0:
         return
     # A budget-exempt request never grows a reservation: there is nothing to hold and
     # nothing to gate. Without this, the top-up path would silently re-enter the
     # enforced flow and reserve against the user's budget.
     if not handle.counts_toward_budget:
         return
-    if handle.scoped_budgets:
+    if additional > ZERO or grown_tokens > 0:
         refused = await reserve_scoped(
             db, handle.scoped_budgets, additional, tokens=grown_tokens, requests=0, new_request=False
         )
         if refused is not None:
             BUDGET_EXCEEDED.inc()
-            axis = await blocked_axis(
+            blocked = await blocked_axis(
                 db,
                 refused,
                 amount=additional,
@@ -1120,7 +1187,7 @@ async def increase_reservation(
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{refused.subject} has exceeded {axis} limit",
+                detail=refusal_detail(refused.subject, blocked, new_request=False),
                 headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
             )
         # Recorded here, next to the hold it describes, and before the per-user
@@ -1134,22 +1201,28 @@ async def increase_reservation(
     # ``record_reservation=False`` for the same reason in the ledger: this request
     # already has a row, and a second one would carry its own TTL and could be
     # reclaimed on its own, handing back part of a live hold.
-    delta = await reserve_budget(
-        db,
-        handle.user_id,
-        additional,
-        estimated_tokens=grown_tokens,
-        requests=0,
-        new_request=False,
-        model=model,
-        model_is_free=model_is_free,
-        strategy=strategy,
-        record_reservation=False,
-    )
-    if delta.reserved:
-        handle.estimate += delta.estimate
-        handle.token_estimate += delta.token_estimate
-        handle.reserved = True
+    delta: ReservationHandle | None = None
+    if user_additional > ZERO or user_grown_tokens > 0:
+        grown_user_leg = await reserve_budget(
+            db,
+            handle.user_id,
+            user_additional,
+            estimated_tokens=user_grown_tokens,
+            requests=0,
+            new_request=False,
+            model=model,
+            model_is_free=model_is_free,
+            strategy=strategy,
+            record_reservation=False,
+        )
+        if grown_user_leg.reserved:
+            delta = grown_user_leg
+            handle.estimate += delta.estimate
+            handle.token_estimate += delta.token_estimate
+            handle.reserved = True
+    # A per-user leg with no budget takes no hold, so the row has nothing to record when the ceilings took none either.
+    if delta is None and additional <= ZERO and grown_tokens == 0:
+        return
 
     # Fold both deltas into the row under one guard, after both holds have landed,
     # for the same reason the original reserve writes its row last: the ledger must
@@ -1164,10 +1237,11 @@ async def increase_reservation(
     grown = await ledger.grow(
         db,
         handle.reservation_id,
-        user_delta=delta.estimate if delta.reserved else ZERO,
-        scoped_delta=additional if handle.scoped_budgets else ZERO,
-        token_delta=delta.token_estimate if delta.reserved else 0,
-        scoped_token_delta=grown_tokens if handle.scoped_budgets else 0,
+        user_delta=delta.estimate if delta is not None else ZERO,
+        user_grew=delta is not None,
+        scoped_delta=additional,
+        token_delta=delta.token_estimate if delta is not None else 0,
+        scoped_token_delta=grown_tokens,
     )
     if not grown:
         logger.warning(
@@ -1175,11 +1249,11 @@ async def increase_reservation(
             "Raise budget_reservation_ttl_sec above the slowest request served.",
             handle.reservation_id,
         )
-        if handle.scoped_budgets:
+        if additional > ZERO or grown_tokens > 0:
             await release_scoped(db, handle.scoped_budget_ids, additional, tokens=grown_tokens, requests=0)
             handle.scoped_estimate -= additional
             handle.scoped_token_estimate -= grown_tokens
-        if delta.reserved:
+        if delta is not None:
             values: dict[str, object] = {"reserved": _release_reserved(delta.estimate)}
             if delta.token_estimate:
                 values["reserved_tokens"] = ledger.release_reserved_count_expression(

@@ -1,5 +1,6 @@
 """Data access for the tools the gateway runs itself."""
 
+from gateway.repositories.tools.search_tool_repository import SearchToolRepository
 from gateway.repositories.tools.web_search_key_repository import (
     OrgWebSearchKeyRepository,
     SearchKeyCandidate,
@@ -14,6 +15,7 @@ from gateway.repositories.tools.workspace_code_execution_policy_repository impor
 __all__ = [
     "OrgWebSearchKeyRepository",
     "SearchKeyCandidate",
+    "SearchToolRepository",
     "WebSearchKeyConflict",
     "WorkspaceCodeExecutionPolicyRepository",
     "WorkspaceWebSearchKeyOverrideRepository",

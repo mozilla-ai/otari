@@ -41,7 +41,10 @@ import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import {
+  useCurrentOwnerId,
+  useMemberAttributionLabels,
+} from "@/features/organization/attribution"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import {
@@ -440,7 +443,9 @@ function CreateKeyDialog({
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [userId, setUserId] = useState("")
+  // Undefined until the operator touches the picker; "" is a deliberate clear.
+  const [pickedOwner, setPickedOwner] = useState<string>()
+  const currentOwnerId = useCurrentOwnerId()
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     undefined,
   )
@@ -462,6 +467,12 @@ function CreateKeyDialog({
 
   const expiresInPast =
     expiresAt !== "" && new Date(expiresAt).getTime() < Date.now()
+  // Defaults to the signed-in user, but only if the picker offers them.
+  const defaultOwner =
+    currentOwnerId && ownerOptions.some((u) => u.user_id === currentOwnerId)
+      ? currentOwnerId
+      : ""
+  const userId = pickedOwner ?? defaultOwner
   // User-first: an operator's key must name its owner (an existing user or a new
   // id, which the API creates as a named user). This is what keeps the dashboard
   // from minting the anonymous virtual users an omitted id would. A member's key
@@ -494,7 +505,7 @@ function CreateKeyDialog({
   const { isDirty } = useDirtySnapshot({
     keyName,
     expiresAt,
-    userId,
+    pickedOwner,
     allowedModels,
     excludeFromBudget,
     serviceKey,
@@ -506,7 +517,7 @@ function CreateKeyDialog({
     setKeyName("")
     setExpiresAt("")
     setShowAdvanced(false)
-    setUserId("")
+    setPickedOwner(undefined)
     setAllowedModels(undefined)
     setExcludeFromBudget(false)
     setServiceKey(NO_SERVICE_KEY)
@@ -613,6 +624,11 @@ function CreateKeyDialog({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={isBlocked}
+      footerStart={
+        ownerMissing ? (
+          <p className="text-caption">Choose an owner to create this key.</p>
+        ) : undefined
+      }
       error={create.error}
       isDirty={isDirty}
     >
@@ -642,8 +658,9 @@ function CreateKeyDialog({
       {isDeploymentWide ? (
         <UserComboBox
           value={userId}
-          onChange={setUserId}
+          onChange={setPickedOwner}
           users={ownerOptions}
+          isRequired
         />
       ) : (
         <p className="text-caption">

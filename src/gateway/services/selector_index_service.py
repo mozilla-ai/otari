@@ -28,6 +28,7 @@ from gateway.services.catalog import (
     OrganizationSelectors,
     build_organization_selectors,
     build_selector_index,
+    metadata_entry,
     set_selector_index,
 )
 from gateway.services.merged_catalog_service import (
@@ -36,14 +37,7 @@ from gateway.services.merged_catalog_service import (
     ModelObject,
     build_merged_catalog,
 )
-from gateway.services.model_catalog_service import (
-    ModelCatalogEntry,
-    background_catalog_enabled,
-    cached_models_dev_catalog,
-    load_models_dev_catalog,
-    models_dev_provider_id,
-    parse_entry,
-)
+from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.model_identity import ModelIdentity, OfferingSeed, group_offerings
 from gateway.services.pricing_service import (
     OverridePeriod,
@@ -66,24 +60,6 @@ def split_offering_selector(obj: ModelObject) -> tuple[str, str]:
     if not separator:
         return obj.owned_by, obj.id
     return instance, model_id
-
-
-def metadata_entry(catalog: dict[str, Any] | None, provider_type: str, model_id: str) -> ModelCatalogEntry | None:
-    """models.dev's entry for a model under a provider type, or None.
-
-    Looked up directly rather than through ``build_metadata_map`` so an
-    organization's key, which is not a ``providers:`` instance, is enriched too.
-    """
-    if not catalog:
-        return None
-    provider = catalog.get(models_dev_provider_id(provider_type))
-    if not isinstance(provider, dict):
-        return None
-    models = provider.get("models")
-    if not isinstance(models, dict):
-        return None
-    model = models.get(model_id)
-    return parse_entry(model) if isinstance(model, dict) else None
 
 
 def real_offerings(merged: MergedCatalog) -> list[ModelObject]:
@@ -256,11 +232,7 @@ async def rebuild_selector_index(
         # Indexed by real offering, so an aliased model keeps its selectors.
         withhold_alias_targets=False,
     )
-    catalog = (
-        await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
-        if fetch
-        else cached_models_dev_catalog(config)
-    )
+    catalog = merged.models_dev
     rows: list[OfferingRow] = []
     seeds: list[OfferingSeed] = []
     for obj in real_offerings(merged):

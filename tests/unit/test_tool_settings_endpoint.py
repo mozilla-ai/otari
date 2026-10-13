@@ -7,10 +7,13 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from gateway.api.routes import tool_settings
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
+from gateway.models.tools import SearchToolCredential
 
 AUTH = {"Authorization": "Bearer sk-test-master"}
 
@@ -458,9 +461,13 @@ def test_a_database_timeout_while_checking_a_default_is_a_clean_500(
 def test_patch_refuses_a_fetch_default_a_stored_search_tool_has_displaced(tmp_path: Path) -> None:
     """A stored search tool of the same name leaves a fetch instance out, even one this worker has not seen yet."""
     with _client(tmp_path, fetch_tools={"shared": {"provider": "fake"}}) as client:
-        created = client.post(f"{API_ROOT}/search-tools", headers=AUTH, json={"name": "shared", "provider": "fake"})
-        assert created.status_code in (200, 201), created.text
-        # As on a replica whose overlay has not refreshed since the write.
-        client.app.state.config.search_tools = {}  # type: ignore[attr-defined]
+        # Stored before the configuration file named a fetch instance the same,
+        # since the API now refuses the name, and not yet seen by this worker.
+        engine = create_engine(f"sqlite:///{tmp_path / 'tool-settings-test.db'}")
+        try:
+            with Session(engine) as session, session.begin():
+                session.add(SearchToolCredential(name="shared", provider="fake", options={}))
+        finally:
+            engine.dispose()
         resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_fetch_default_tool": "shared"})
     assert resp.status_code == 422, resp.text

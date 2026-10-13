@@ -125,6 +125,8 @@ interface Bodies {
   activation?: unknown
   /** Model ids the caller's catalog reports, which is what the guide gates on. */
   models?: string[]
+  /** Answers the catalog with a server error instead of a list. */
+  modelsFail?: boolean
 }
 
 /** The catalog shape `${API_ROOT}/models` answers, which is the setup guide's gate. */
@@ -810,10 +812,9 @@ describe("OverviewIndex routing", () => {
   })
 
   it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
-    // The deployment's own credentials. Standalone serves both provider pages
-    // now, and this one stays right because only a deployment operator reaches
-    // this strip at all: a caller who is not one gets `OrganizationOverview`,
-    // which does not draw it.
+    // The deployment's own credentials: only a deployment operator is sent to
+    // `/providers`, since `OrganizationOverview` links to the organization's
+    // provider-key page.
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(<OverviewIndex />)
@@ -976,6 +977,7 @@ function mockScopedApi(b: Bodies): string[] {
       return jsonResponse(b.activation ?? workspaceActivation())
     }
     if (url.includes(`${API_ROOT}/models`)) {
+      if (b.modelsFail) return jsonResponse({ detail: "catalog down" }, 500)
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     return jsonResponse({ detail: "forbidden" }, 403)
@@ -1563,5 +1565,89 @@ describe("the setup guide on either Overview", () => {
       screen.queryByRole("heading", { name: "Send your first request" }),
     ).not.toBeInTheDocument()
     expect(requested.some((url) => url.includes("/activation"))).toBe(false)
+  })
+})
+
+describe("the first-steps strip on the tenant Overview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  const GET_STARTED = "Get started with Otari"
+
+  it("points an admin of a brand-new organization at adding a provider key", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES, models: [] })
+    const user = userEvent.setup()
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText(GET_STARTED)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Add a provider key" }))
+    expect(await screen.findByTestId("loc")).toHaveTextContent(
+      "/organization/provider-keys",
+    )
+  })
+
+  it("tells a member who to ask, and offers no button they cannot use", async () => {
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "member" },
+      models: [],
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText(GET_STARTED)).toBeInTheDocument()
+    expect(screen.getByText(/Ask an owner or admin/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Add a provider key" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("is absent once there is something to route to, where the guide takes over", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await screen.findByRole("heading", { name: "Send your first request" })
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+
+  it("is absent when the account already has traffic", async () => {
+    mockScopedApi({
+      context: TWO_WORKSPACES,
+      models: [],
+      logs: [
+        {
+          id: "1",
+          user_id: null,
+          api_key_id: null,
+          timestamp: "2026-07-22T00:00:00Z",
+          model: "gpt-5.6",
+          provider: "openai",
+          endpoint: "/v1/chat/completions",
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          cost: 0.5,
+          status: "success",
+          error_message: null,
+          latency_ms: 120,
+        },
+      ],
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+
+  it("stays out of the way when the catalog cannot be read", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES, modelsFail: true })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
+    })
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
   })
 })

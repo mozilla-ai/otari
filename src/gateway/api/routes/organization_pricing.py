@@ -79,8 +79,12 @@ _EFFECTIVE_TO_DESCRIPTION = (
 class OrganizationModelPricingRates(BaseModel):
     """The rates and period shared by the create and update bodies."""
 
-    input_price_per_million: float = Field(ge=0, description="Price per 1M input tokens")
-    output_price_per_million: float = Field(ge=0, description="Price per 1M output tokens")
+    input_price_per_million: float = Field(
+        ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
+    )
+    output_price_per_million: float = Field(
+        ge=0, description="Price per 1M output tokens; unused by a rate in requests or images"
+    )
     cache_read_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cached-input tokens"
     )
@@ -99,7 +103,8 @@ class OrganizationModelPricingRates(BaseModel):
     unit: Literal["tokens", "requests", "images"] = Field(
         default="tokens",
         description=(
-            "What the rates are per: tokens for a model, requests or images for a non-token endpoint. "
+            "What the rates are per: tokens for a model, requests or images for a non-token endpoint, "
+            "each priced per million. "
             "A completion model priced per requests is charged one request per successful call."
         ),
     )

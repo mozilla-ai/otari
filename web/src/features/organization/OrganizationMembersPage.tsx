@@ -38,6 +38,7 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Disclosure } from "@/design-system/navigation/Disclosure"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { budgetLabeler } from "@/features/budgets/budgetLabel"
 import {
@@ -281,6 +282,7 @@ function InviteMemberForm({
         // only here, so the acknowledgement is the way out.
         isDismissable={unsent === 0}
         submitLabel="Done"
+        hideCancel
         onSubmit={onClose}
         isPending={false}
       >
@@ -337,6 +339,7 @@ function InviteMemberForm({
         // the way out rather than one of two.
         isDismissable={result.mail_sent}
         submitLabel="Done"
+        hideCancel
         onSubmit={onClose}
         isPending={false}
       >
@@ -378,7 +381,7 @@ function InviteMemberForm({
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
-      title="Invitation"
+      title="Invite member"
       submitLabel={
         addresses.length > 1
           ? `Invite ${addresses.length} members`
@@ -1192,10 +1195,35 @@ export function OrganizationMembersPage() {
             member's name and the Spend column, neither of which a caller who
             does not operate the deployment is shown, so they are only told to
             one. */}
-        {isOperator
-          ? "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever operates the gateway. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
-          : "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever operates the gateway."}
+        Who belongs to this organization and what each of them may do. Owners
+        and admins manage it; members and viewers read the workspaces they
+        belong to.
       </PageIntro>
+
+      <div className="-mt-2 mb-4 max-w-[38.75rem]">
+        <Disclosure heading="How roles work">
+          <div className="flex flex-col gap-2 text-sm text-muted">
+            <p>
+              Roles are fixed. Owners and admins manage the organization (its
+              workspaces, provider keys, guardrails, pricing and this roster)
+              and read its usage in full, while members and viewers read the
+              workspaces they belong to. No role set here reaches the
+              deployment's own pages, such as Settings and Accounts, which
+              belong to whoever operates the gateway.
+            </p>
+            {/* Access and Spend are shown only to an operator, so only an
+                operator is told about them. */}
+            {isOperator ? (
+              <p>
+                Budgets and API keys do not attach to this list; they attach to
+                the gateway identity a member is linked to, which is what lets a
+                key be issued to them by name. A member with no such link yet
+                shows no access or spend, and cannot own a key until one exists.
+              </p>
+            ) : null}
+          </div>
+        </Disclosure>
+      </div>
 
       {/* `remove.error`/`revoke.error` are deliberately absent: their confirm
           dialogs render each mutation's error themselves, and listing it here
@@ -1253,6 +1281,7 @@ export function OrganizationMembersPage() {
 
       <TableScrollFrame className="otari-members-table">
         <DataTable
+          mobileLayout="cards"
           ariaLabel="Organization members"
           columns={columns}
           rows={rows}

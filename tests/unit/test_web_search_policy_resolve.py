@@ -14,7 +14,7 @@ from gateway.adapters import web_search_policy_adapter
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
-from gateway.models.tools import WebSearchCredential, WebTool
+from gateway.models.tools import WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.ports.web_search_policy_port import WebSearchPolicyScope
 from gateway.services.tools import WorkspaceSearchKeys
 
@@ -74,6 +74,24 @@ async def test_resolve_reads_the_policy(control_plane_transport: InstallControlP
     assert captured["url"].endswith("/gateway/web-search/resolve")
     assert captured["headers"]["X-Gateway-Token"] == "gw_test_token"
     assert captured["headers"]["X-User-Token"] == "tk_user"
+
+
+@pytest.mark.asyncio
+async def test_a_remote_answer_carries_the_control_planes_credential(
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    _answer(
+        httpx.Response(200, json={"enabled": True, "credential": {"provider": "tavily", "api_key": "tvly-workspace"}}),
+        control_plane_transport,
+    )
+
+    policy = await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH])
+
+    assert policy is not None
+    assert policy.credential == WebSearchCredential(
+        provider="tavily", source=WebToolCredentialSource.HYBRID, api_key="tvly-workspace"
+    )
+    assert policy.fetch_credential is None
 
 
 @pytest.mark.asyncio
@@ -229,7 +247,7 @@ def _local(search_keys: _SearchKeys, monkeypatch: pytest.MonkeyPatch) -> LocalWe
 @pytest.mark.asyncio
 async def test_a_local_search_carries_the_workspaces_own_key(monkeypatch: pytest.MonkeyPatch) -> None:
     workspace_id = uuid.uuid4()
-    credential = WebSearchCredential(provider="brave", api_key="brv-own")
+    credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brv-own")
     search_keys = _SearchKeys(credential)
 
     policy = await _local(search_keys, monkeypatch).resolve(
@@ -252,7 +270,9 @@ async def test_a_local_search_with_no_key_uses_the_deployments_search(monkeypatc
 
 @pytest.mark.asyncio
 async def test_a_fetch_alone_never_reads_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    search_keys = _SearchKeys(WebSearchCredential(provider="brave", api_key="brv-own"))
+    search_keys = _SearchKeys(
+        WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brv-own")
+    )
 
     await _local(search_keys, monkeypatch).resolve(
         WebSearchPolicyScope(workspace_id=uuid.uuid4(), user_token=None), [WebTool.FETCH]

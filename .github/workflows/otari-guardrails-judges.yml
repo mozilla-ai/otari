@@ -126,6 +126,9 @@ jobs:
           API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # NOTE: The CLI runs five judge gates by default. CI raises this to the
+          # CLI's ceiling so that every applicable gate runs on a pull request.
+          OTARI_HOOK_MAX_JUDGES: "20"
         run: |
           if [ -n "$OAUTH_TOKEN" ]; then
             export CLAUDE_CODE_OAUTH_TOKEN="$OAUTH_TOKEN"

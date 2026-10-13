@@ -22,6 +22,7 @@ from gateway.api.routes import chat
 from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services import pricing_service
 from gateway.services.budgets import ReservationHandle, estimate_tokens
 from gateway.types.normalization_target import NormalizationTarget
@@ -72,7 +73,9 @@ class _Recorder:
 
         async def fake_reserve(*args: Any, **kwargs: Any) -> ReservationHandle:
             self.reserve_calls.append(kwargs)
-            return ReservationHandle(user_id="user-1", estimate=Decimal(0), reserved=True, strategy="for_update")
+            return ReservationHandle(
+                user_id="user-1", estimate=Decimal(0), reserved=True, strategy="for_update", scope_ceilings=()
+            )
 
         async def fake_increase(*args: Any, **kwargs: Any) -> None:
             if topup_status is not None:
@@ -140,6 +143,7 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         master_key_user_required_detail="user required",
         user_forbidden_detail="forbidden",
         code_execution_policies=cast(CodeExecutionPolicyPort, object()),
+        model_provider=cast(ModelProviderPort, object()),
         normalize_messages=_normalize_with_vision,
     )
 
@@ -220,6 +224,9 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
             max_output_tokens=None,
             default_output_tokens=_config().budget_estimate_default_output_tokens,
         ),
+        # The output allowance a refusal names, left out here because the stub
+        # above prices nothing, so a lower output limit could not shrink the estimate.
+        "reserved_output_tokens": None,
     }
     # The scoped ceilings narrow on the same resolved provider the pricing does,
     # and bill to the key that authenticated the request.

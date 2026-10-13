@@ -352,6 +352,94 @@ def test_user_exceeded_budget_blocked_on_paid_model(
     assert "budget" in response.json()["detail"].lower()
 
 
+def _too_large_setup(
+    client: TestClient, master_key_header: dict[str, str], user_id: str, model_key: str, prices: tuple[float, float]
+) -> None:
+    """A $0.0015 budget with nothing spent, and a price for ``model_key``."""
+    budget_id = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0015}, headers=master_key_header).json()[
+        "budget_id"
+    ]
+    client.post(f"{API_ROOT}/users", json={"user_id": user_id, "budget_id": budget_id}, headers=master_key_header)
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": model_key, "input_price_per_million": prices[0], "output_price_per_million": prices[1]},
+        headers=master_key_header,
+    )
+
+
+def test_a_first_request_too_large_for_the_budget_says_so(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_messages: list[dict[str, str]],
+) -> None:
+    """Nothing is spent, so the refusal names the estimate and what remains, not an exceeded limit.
+
+    The estimate prices the default output allowance when the request sets no
+    output limit, which is what the refusal points the caller at.
+    """
+    _too_large_setup(client, master_key_header, "too-large-user", "openai:gpt-4o", (2.5, 10.0))
+
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": test_messages, "user": "too-large-user"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "budget_exceeded"
+    assert response.headers["Otari-Budget-Scope"] == "user"
+    detail = response.json()["detail"]
+    assert detail.startswith("User 'too-large-user' has $0.0015 of budget remaining, less than this request's")
+    assert "exceeded" not in detail
+    assert detail.endswith(
+        "The estimate assumes 1024 output tokens; a lower output token limit on the request may let it fit"
+    )
+
+
+def test_a_responses_refusal_names_its_own_output_limit(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Responses spells the limit max_output_tokens, so the refusal names the figure and not a field."""
+    _too_large_setup(client, master_key_header, "too-large-responses-user", "openai:gpt-4o", (2.5, 10.0))
+
+    response = client.post(
+        f"{API_ROOT}/responses",
+        json={
+            "model": "openai:gpt-4o",
+            "input": "Hello",
+            "max_output_tokens": 500,
+            "user": "too-large-responses-user",
+        },
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert "500 output tokens" in detail
+    assert "max_tokens" not in detail
+
+
+def test_an_input_only_price_gets_no_output_limit_advice(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_messages: list[dict[str, str]],
+) -> None:
+    """Output that costs nothing does not move the estimate, so lowering its limit is not offered."""
+    _too_large_setup(client, master_key_header, "input-only-user", "openai:input-only", (1_000_000.0, 0.0))
+
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:input-only", "messages": test_messages, "user": "input-only-user"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail.startswith("User 'input-only-user' has $0.0015 of budget remaining, less than this request's")
+    assert "output token" not in detail
+
+
 def test_user_exceeded_budget_allowed_on_free_model(
     client: TestClient,
     master_key_header: dict[str, str],

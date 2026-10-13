@@ -685,6 +685,36 @@
             "title": "Agent Type",
             "type": "string"
           },
+          "candidates": {
+            "anyOf": [
+              {
+                "maxProperties": 255,
+                "minProperties": 2,
+                "patternProperties": {
+                  "^[^:\\s]+:\\S+$": {
+                    "anyOf": [
+                      {
+                        "maxLength": 1024,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 256
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The models the subagent may be sent to, as Otari model ids (`<provider>:<model>`), each with what it is for (or null when the name says enough). Required for `pi`, refused for `claude-code`.",
+            "title": "Candidates"
+          },
           "description": {
             "default": "",
             "description": "The caller's short description of the task.",
@@ -693,9 +723,11 @@
             "type": "string"
           },
           "harness": {
-            "description": "The agent harness asking, such as `claude-code`.",
-            "maxLength": 64,
-            "minLength": 1,
+            "description": "The agent harness asking. It decides the candidates: `agent_recommender_candidates`, Claude Code's own aliases, for `claude-code`, and the request's own `candidates` for `pi`.",
+            "enum": [
+              "claude-code",
+              "pi"
+            ],
             "title": "Harness",
             "type": "string"
           },
@@ -4119,7 +4151,7 @@
         "type": "object"
       },
       "ConfigSearchToolSchema": {
-        "description": "A search tool declared in the config file. Read-only: it cannot be edited here.",
+        "description": "A search or fetch instance declared in the config file, or ``builtin_fetch``. Read-only here.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -4132,10 +4164,32 @@
             ],
             "title": "Api Base"
           },
+          "fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A search instance's enrichment fetch instance. Null means the fetch default enriches it.",
+            "title": "Fetch Tool"
+          },
           "has_api_key": {
             "description": "Whether the config entry carries an API key. The key itself is not shown.",
             "title": "Has Api Key",
             "type": "boolean"
+          },
+          "kind": {
+            "default": "search",
+            "description": "Whether this is a search or a fetch instance.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
           },
           "name": {
             "title": "Name",
@@ -4147,7 +4201,7 @@
           },
           "shadowed": {
             "default": false,
-            "description": "True when a stored search tool of the same name overrides this entry.",
+            "description": "True when a stored instance of the same name and kind overrides this entry.",
             "title": "Shadowed",
             "type": "boolean"
           }
@@ -4940,7 +4994,7 @@
         "type": "object"
       },
       "CreateSearchToolRequest": {
-        "description": "Create a stored search tool. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
+        "description": "Create a stored search or fetch instance. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
         "example": {
           "api_base": "http://searxng:8080",
           "name": "local",
@@ -4971,9 +5025,32 @@
             "description": "Provider API key. Stored encrypted; never returned.",
             "title": "Api Key"
           },
+          "fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a search instance: the fetch instance that enriches its results, a configured or stored one or builtin_fetch. Omit it for the fetch default.",
+            "title": "Fetch Tool"
+          },
+          "kind": {
+            "default": "search",
+            "description": "'search' or 'fetch'. It cannot change once created.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "name": {
-            "description": "Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}.",
+            "description": "Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}, or that names a fetch instance. It contains no '/' or ':', is not builtin_fetch or none in any case, and is unique across search and fetch instances.",
             "minLength": 1,
+            "pattern": "^[^/:]+$",
             "title": "Name",
             "type": "string"
           },
@@ -4991,7 +5068,7 @@
             "title": "Options"
           },
           "provider": {
-            "description": "Search provider, one of: exa, searxng.",
+            "description": "Provider id. GET /api/v1/search-tools/providers lists the search providers, and with ?kind=fetch the fetch providers.",
             "title": "Provider",
             "type": "string"
           },
@@ -5193,6 +5270,142 @@
           "user_id"
         ],
         "title": "CreateUserRequest",
+        "type": "object"
+      },
+      "CreatedSearchToolSchema": {
+        "description": "A stored instance as created, with the default setting the create also stored, if any.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
+          "fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A search instance's enrichment fetch instance. Null means the fetch default enriches it.",
+            "title": "Fetch Tool"
+          },
+          "kind": {
+            "default": "search",
+            "description": "Whether this is a search or a fetch instance.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What else the create changed, for the operator to read.",
+            "title": "Notice"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "pinned_web_search_default_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when this create also stored web_search_default_tool, naming the search instance that was the in-loop default because it was the only one, so that adding a second does not turn in-loop search off. This runtime value wins over the configuration file until it is cleared.",
+            "title": "Pinned Web Search Default Tool"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "shadows_config": {
+            "default": false,
+            "description": "True when a config-file search tool of the same name exists; the stored one is in effect.",
+            "title": "Shadows Config",
+            "type": "boolean"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "provider"
+        ],
+        "title": "CreatedSearchToolSchema",
         "type": "object"
       },
       "CurrentPricingPage": {
@@ -6006,6 +6219,42 @@
         "title": "EmbeddedResource",
         "type": "object"
       },
+      "EmbeddingData": {
+        "description": "One input's embedding, in OpenAI's shape.",
+        "properties": {
+          "embedding": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "The vector, or its base64 encoding when the request asked for `encoding_format: base64`",
+            "title": "Embedding"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "object": {
+            "const": "embedding",
+            "default": "embedding",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "embedding"
+        ],
+        "title": "EmbeddingData",
+        "type": "object"
+      },
       "EmbeddingRequest": {
         "description": "OpenAI-compatible embedding request.",
         "properties": {
@@ -6046,6 +6295,19 @@
             "description": "Input text to embed",
             "title": "Input"
           },
+          "input_type": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the input will be used for, for providers whose embedding depends on it: Cohere (`search_document`, `search_query`, `classification`, `clustering`, `image`) and Voyage (`query`, `document`). The provider validates the value. Any other provider answers 400, rather than embedding the input as if the field were absent.",
+            "title": "Input Type"
+          },
           "model": {
             "title": "Model",
             "type": "string"
@@ -6067,6 +6329,89 @@
           "input"
         ],
         "title": "EmbeddingRequest",
+        "type": "object"
+      },
+      "EmbeddingResponse": {
+        "description": "An OpenAI-compatible embeddings response, with the gateway's inline cost on ``usage``.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/EmbeddingData"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmbeddingUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent when the provider reported no usage"
+          }
+        },
+        "required": [
+          "data",
+          "model"
+        ],
+        "title": "EmbeddingResponse",
+        "type": "object"
+      },
+      "EmbeddingUsage": {
+        "description": "What an embeddings request was metered at, and what it cost.",
+        "properties": {
+          "cost_usd": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+\\.\\d{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the request cost, as a six-decimal USD string; absent when it was not priced",
+            "title": "Cost Usd"
+          },
+          "pricing_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced",
+            "title": "Pricing Source"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "total_tokens"
+        ],
+        "title": "EmbeddingUsage",
         "type": "object"
       },
       "EndUserPublic": {
@@ -8822,6 +9167,17 @@
             "title": "Id",
             "type": "string"
           },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
           "object": {
             "default": "model",
             "title": "Object",
@@ -11392,7 +11748,7 @@
             "title": "Effective To"
           },
           "input_price_per_million": {
-            "description": "Price per 1M input tokens",
+            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
@@ -11406,7 +11762,7 @@
             "type": "string"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens",
+            "description": "Price per 1M output tokens; unused by a rate in requests or images",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -11428,7 +11784,7 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.",
             "enum": [
               "tokens",
               "requests",
@@ -11624,13 +11980,13 @@
             "title": "Effective To"
           },
           "input_price_per_million": {
-            "description": "Price per 1M input tokens",
+            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens",
+            "description": "Price per 1M output tokens; unused by a rate in requests or images",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -11652,7 +12008,7 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.",
             "enum": [
               "tokens",
               "requests",
@@ -14581,6 +14937,41 @@
         "title": "RequirementGroup",
         "type": "object"
       },
+      "RerankMeta": {
+        "description": "The provider's own billing report, passed through as it sent it.",
+        "properties": {
+          "billed_units": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Billed Units"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens"
+          }
+        },
+        "title": "RerankMeta",
+        "type": "object"
+      },
       "RerankRequest": {
         "description": "Rerank request.",
         "properties": {
@@ -14648,6 +15039,140 @@
           "documents"
         ],
         "title": "RerankRequest",
+        "type": "object"
+      },
+      "RerankResponse": {
+        "description": "Documents ordered by relevance, with the gateway's metered usage.",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider-assigned response ID",
+            "title": "Id"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankMeta"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's own billing report, unchanged"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model that served the request",
+            "title": "Model"
+          },
+          "results": {
+            "description": "Results sorted by relevance_score, highest first",
+            "items": {
+              "$ref": "#/components/schemas/RerankResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/RerankUsage"
+          }
+        },
+        "required": [
+          "results",
+          "usage"
+        ],
+        "title": "RerankResponse",
+        "type": "object"
+      },
+      "RerankResult": {
+        "description": "One document's relevance to the query.",
+        "properties": {
+          "index": {
+            "description": "Zero-based index into the request's documents",
+            "title": "Index",
+            "type": "integer"
+          },
+          "relevance_score": {
+            "description": "Relevance score, higher is more relevant",
+            "title": "Relevance Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "index",
+          "relevance_score"
+        ],
+        "title": "RerankResult",
+        "type": "object"
+      },
+      "RerankUsage": {
+        "description": "What a rerank request was metered at, and what it cost.",
+        "properties": {
+          "cost_usd": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+\\.\\d{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the request cost, as a six-decimal USD string; absent when it was not priced",
+            "title": "Cost Usd"
+          },
+          "pricing_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced",
+            "title": "Pricing Source"
+          },
+          "search_units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search units the request was billed for, present only when the model is priced per request: the provider's count rounded up, or one when it reported none",
+            "title": "Search Units"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens the provider reported, or null",
+            "title": "Total Tokens"
+          }
+        },
+        "title": "RerankUsage",
         "type": "object"
       },
       "ResendVerificationRequest": {
@@ -16024,8 +16549,185 @@
         "title": "SearchResultItem",
         "type": "object"
       },
+      "SearchToolTestRequest": {
+        "description": "An unsaved search or fetch instance to test, and what to test it with.",
+        "example": {
+          "api_base": "http://searxng:8080",
+          "name": "local",
+          "provider": "searxng"
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Backend endpoint. Omit to inherit the provider's default (searxng inherits web_search_url).",
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider API key. Stored encrypted; never returned.",
+            "title": "Api Key"
+          },
+          "fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a search instance: the fetch instance that enriches its results, a configured or stored one or builtin_fetch. Omit it for the fetch default.",
+            "title": "Fetch Tool"
+          },
+          "kind": {
+            "default": "search",
+            "description": "'search' or 'fetch'. It cannot change once created.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}, or that names a fetch instance. It contains no '/' or ':', is not builtin_fetch or none in any case, and is unique across search and fetch instances.",
+            "minLength": 1,
+            "pattern": "^[^/:]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider-native request fields used as defaults (e.g. exa's 'type', searxng's 'engines').",
+            "title": "Options"
+          },
+          "provider": {
+            "description": "Provider id. GET /api/v1/search-tools/providers lists the search providers, and with ?kind=fetch the fetch providers.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a search instance: the query to run.",
+            "title": "Query"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-request timeout in seconds.",
+            "title": "Timeout"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a fetch instance: the page to fetch.",
+            "title": "Url"
+          }
+        },
+        "required": [
+          "name",
+          "provider"
+        ],
+        "title": "SearchToolTestRequest",
+        "type": "object"
+      },
+      "SearchToolTestResponse": {
+        "description": "How one search or one fetch went. Never the results or the page.",
+        "properties": {
+          "characters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a fetch that worked: how many characters of page text came back.",
+            "title": "Characters"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When not ok, the error's tag: timeout, network, http_error, invalid_response, or the provider's own.",
+            "title": "Error"
+          },
+          "hits": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a search that worked: how many hits came back.",
+            "title": "Hits"
+          },
+          "ok": {
+            "description": "Whether the provider answered the call without an error.",
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "SearchToolTestResponse",
+        "type": "object"
+      },
       "SearchToolsResponse": {
-        "description": "Every search tool ``POST /api/v1/search`` can name, by where it came from.",
+        "description": "Every search instance ``POST /api/v1/search`` can name, or every fetch instance, by where it came from.",
         "properties": {
           "config": {
             "items": {
@@ -16256,7 +16958,7 @@
             "title": "Effective At"
           },
           "input_price_per_million": {
-            "description": "Price per 1M input tokens",
+            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
@@ -16267,7 +16969,7 @@
             "type": "string"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens",
+            "description": "Price per 1M output tokens; unused by a rate in requests or images",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -16289,7 +16991,7 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation.",
+            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).",
             "enum": [
               "tokens",
               "requests",
@@ -16445,7 +17147,7 @@
         "type": "object"
       },
       "StoredSearchToolSchema": {
-        "description": "A runtime-stored search tool. The API key is never returned, only ``last4``.",
+        "description": "A runtime-stored search or fetch instance. The API key is never returned, only ``last4``.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -16473,6 +17175,28 @@
             "default": true,
             "title": "Decryptable",
             "type": "boolean"
+          },
+          "fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A search instance's enrichment fetch instance. Null means the fetch default enriches it.",
+            "title": "Fetch Tool"
+          },
+          "kind": {
+            "default": "search",
+            "description": "Whether this is a search or a fetch instance.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
           },
           "last4": {
             "anyOf": [
@@ -16532,6 +17256,39 @@
           "provider"
         ],
         "title": "StoredSearchToolSchema",
+        "type": "object"
+      },
+      "StoredSearchToolTestRequest": {
+        "description": "What to test a configured or stored instance with.",
+        "properties": {
+          "query": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a search instance: the query to run.",
+            "title": "Query"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a fetch instance: the page to fetch.",
+            "title": "Url"
+          }
+        },
+        "title": "StoredSearchToolTestRequest",
         "type": "object"
       },
       "SwitchActiveOrganizationRequest": {
@@ -17445,7 +18202,7 @@
         "type": "object"
       },
       "UpdateSearchToolRequest": {
-        "description": "Update a stored search tool. Omitted fields are unchanged; ``api_key`` rotates in place.",
+        "description": "Update a stored search or fetch instance. Omitted fields are unchanged; ``api_key`` rotates in place.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -17481,6 +18238,34 @@
             ],
             "description": "Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
             "title": "Expected Updated At"
+          },
+          "fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a search instance: the fetch instance that enriches its results. Null clears it.",
+            "title": "Fetch Tool"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "search",
+                  "fetch"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accepted only when it matches the stored kind, which cannot change.",
+            "title": "Kind"
           },
           "options": {
             "anyOf": [
@@ -24457,7 +25242,7 @@
     },
     "/api/v1/embeddings": {
       "post": {
-        "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; an unpriced one\ncarries neither.",
         "operationId": "embeddings-create_embedding",
         "requestBody": {
           "content": {
@@ -24473,7 +25258,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -26254,7 +27041,7 @@
     },
     "/api/v1/models": {
       "get": {
-        "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available. Models that only\nexist in the pricing table are also included for backward compatibility.",
+        "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's token limits: the context window from models.dev, or from\ngenai-prices where models.dev has none, and the output limit from models.dev\nalone. A limit neither knows is null. Models that only exist in the pricing\ntable are also included for backward compatibility.",
         "operationId": "models-list_models",
         "parameters": [
           {
@@ -34883,7 +35670,7 @@
     },
     "/api/v1/rerank": {
       "post": {
-        "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: requests``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: requests``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\n``usage`` carries what the gateway metered: the provider's tokens, the\nsearch units billed when the model is priced per request, and, when the\nrequest was priced, ``cost_usd`` and ``pricing_source`` as a completion's\nusage does. ``meta`` is the provider's own billing report, unchanged.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "rerank-create_rerank",
         "requestBody": {
           "content": {
@@ -34899,7 +35686,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RerankResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -35293,7 +36082,7 @@
     },
     "/api/v1/routing/recommend": {
       "post": {
-        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nA standalone deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates`; a hosted build may\nbind a recommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nA standalone deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a hosted build may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
         "operationId": "routing-recommend_model_for_agent",
         "requestBody": {
           "content": {
@@ -35774,8 +36563,26 @@
     },
     "/api/v1/search-tools": {
       "get": {
-        "description": "List every search tool ``POST /api/v1/search`` can name.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set. Keys are never returned, only ``last4``.",
+        "description": "List every search instance ``POST /api/v1/search`` can name, or with ``?kind=fetch`` every fetch instance.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set, ``builtin_fetch`` first among the fetch instances. Keys\nare never returned, only ``last4``.",
         "operationId": "search-tools-list_all_search_tools",
+        "parameters": [
+          {
+            "description": "Which instances to list: 'search' (the default) or 'fetch'.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "search",
+              "description": "Which instances to list: 'search' (the default) or 'fetch'.",
+              "enum": [
+                "search",
+                "fetch"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -35786,6 +36593,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -35802,7 +36619,7 @@
         ]
       },
       "post": {
-        "description": "Add a search tool at runtime. Storing an API key requires OTARI_SECRET_KEY.",
+        "description": "Add a search or fetch instance at runtime. Storing an API key requires OTARI_SECRET_KEY.\n\nCreating a second search instance, while the first is the in-loop default\nonly because it is the only one, first sets ``web_search_default_tool`` to\nthe first in the same commit, and says so in the response, so that adding\nan instance never turns in-loop search off. That runtime value wins over the\nconfiguration file until it is cleared.",
         "operationId": "search-tools-create_search_tool",
         "requestBody": {
           "content": {
@@ -35819,7 +36636,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StoredSearchToolSchema"
+                  "$ref": "#/components/schemas/CreatedSearchToolSchema"
                 }
               }
             },
@@ -35942,9 +36759,59 @@
         ]
       }
     },
+    "/api/v1/search-tools/test": {
+      "post": {
+        "description": "Test an instance before saving it, with one search or one fetch.\n\nTakes the create request's fields, held to the create's checks against the\ninstances this worker has loaded, plus ``query`` for a search instance or\n``url`` for a fetch instance. Answers whether the provider answered without\nan error, the error's tag when it did not, and how many hits or characters\ncame back, never the results or the page.",
+        "operationId": "search-tools-test_unsaved_search_tool",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchToolTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchToolTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Unsaved Search Tool",
+        "tags": [
+          "search-tools"
+        ]
+      }
+    },
     "/api/v1/search-tools/{name}": {
       "delete": {
-        "description": "Delete a stored search tool. A config-file search tool cannot be deleted here.",
+        "description": "Delete a stored search or fetch instance. A config-file one, or ``builtin_fetch``, cannot be deleted here.",
         "operationId": "search-tools-delete_stored_search_tool",
         "parameters": [
           {
@@ -35986,7 +36853,7 @@
         ]
       },
       "patch": {
-        "description": "Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The\nrow is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the\nwrite it guards are atomic. The tool as it will be after the update is\nvalidated, so a change that would leave it unusable (clearing the key of a\nprovider that needs one) is refused rather than stored.",
+        "description": "Update a stored search or fetch instance. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The\nrow is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the\nwrite it guards are atomic. The tool as it will be after the update is\nvalidated, so a change that would leave it unusable (clearing the key of a\nprovider that needs one) is refused rather than stored. Its options are\nchecked against the provider's when the update sets them or changes the\nprovider, and ``fetch_tool`` when the update sets it, so rotating the key of\nan instance stored before those rules never trips on them. ``kind`` cannot\nchange, so an instance never moves between the search and fetch maps.",
         "operationId": "search-tools-update_search_tool",
         "parameters": [
           {
@@ -36040,6 +36907,67 @@
           }
         ],
         "summary": "Update Search Tool",
+        "tags": [
+          "search-tools"
+        ]
+      }
+    },
+    "/api/v1/search-tools/{name}/test": {
+      "post": {
+        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test\nyet, and answers a 400.",
+        "operationId": "search-tools-test_search_tool",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoredSearchToolTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchToolTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Search Tool",
         "tags": [
           "search-tools"
         ]

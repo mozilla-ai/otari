@@ -1259,6 +1259,7 @@ export function ActivityPage() {
 
       <TableScrollFrame className="otari-activity-table">
         <DataTable
+          mobileLayout="cards"
           ariaLabel="Activity log"
           columns={columns}
           rows={rows}

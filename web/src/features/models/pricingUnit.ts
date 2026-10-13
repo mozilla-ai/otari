@@ -19,12 +19,16 @@ export function pricingUnitOf(value: string | null | undefined): PricingUnit {
   return value === "requests" || value === "images" ? value : "tokens"
 }
 
-// The one usage label a per-request price answers to without asking. Only the
-// endpoints whose providers bill per call or per image are mapped, and every
-// other endpoint is priced by its tokens.
+// The unit a rate for a request on each pass-through endpoint is most likely in.
+// A rate's unit decides what it bills, and audio and moderations report no
+// tokens, so a token rate there is read per request only until the gateway
+// reads rates strictly. Every other endpoint is priced by its tokens.
 const ENDPOINT_UNITS: Readonly<Record<string, PricingUnit>> = {
   "/v1/rerank": "requests",
   "/v1/images/generations": "images",
+  "/v1/audio/transcriptions": "requests",
+  "/v1/audio/speech": "requests",
+  "/v1/moderations": "requests",
 }
 
 /** The unit a price for a request on `endpoint` is most likely to be in. */

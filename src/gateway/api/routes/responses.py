@@ -29,7 +29,6 @@ from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentRepla
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
-    PROVIDER_ERROR_DETAIL,
     DeclaredTools,
     ErrorKind,
     ToolBackends,
@@ -38,6 +37,7 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     prepare_gateway_tools,
     provider_error_headers,
+    provider_failure_detail,
     raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
@@ -48,8 +48,16 @@ from gateway.api.routes._pipeline import (
     run_streaming_with_fallback,
     scope_prompt_cache_key,
     stream_error_code,
+    stream_error_message,
 )
-from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
+from gateway.api.routes._platform import (
+    ResolvedAttempt,
+    SettledCost,
+    UnsupportedAttemptProviderError,
+    attempt_provider,
+    build_attempt_client_args,
+    with_retry_hint,
+)
 from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -59,7 +67,14 @@ from gateway.core.usage import GatewayUsage
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.files import StagedFile
-from gateway.services.inference import call_responses, serves_responses, strip_gateway_minted_items
+from gateway.services.inference import (
+    bind_upstream_user,
+    call_responses,
+    responses_user_fields,
+    serves_responses,
+    strip_gateway_minted_items,
+    with_upstream_user,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
@@ -252,7 +267,6 @@ class _ResponsesAdapter:
     name = Dialect.RESPONSES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = RESPONSES_STREAM_FORMAT
-    stream_completion_event: str | None = None
     log_success_without_usage = True
 
     def error(
@@ -264,21 +278,27 @@ class _ResponsesAdapter:
     ) -> HTTPException:
         return HTTPException(status_code=status_code, detail=message, headers=headers)
 
-    def provider_error(self, exc: BaseException) -> HTTPException:
-        mapping = classify_provider_error(exc)
+    def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
+        mapping = classify_provider_error(exc, model=model)
         if mapping is not None:
             return HTTPException(
                 status_code=mapping.status_code,
                 detail=mapping.detail,
-                headers=provider_error_headers(exc, mapping.status_code),
+                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=PROVIDER_ERROR_DETAIL,
+            detail=provider_failure_detail(exc),
+            headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
 
+    def stream_completion(self) -> Callable[[Any], bool] | None:
+        # Not checked yet: the chat-completions bridge synthesizes the terminal
+        # event whatever the upstream sent, so it cannot tell a cut stream here.
+        return None
+
     def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, stream_error_code(exc))
+        return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -319,10 +339,10 @@ class _ResponsesAdapter:
         )
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ResponsesResponse:
-        return await call_responses(aresponses, kwargs)  # type: ignore[no-any-return]
+        return await call_responses(aresponses, _with_upstream_user(kwargs))  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ResponseStreamEvent]:
-        return await call_responses(aresponses, kwargs)  # type: ignore[no-any-return]
+        return await call_responses(aresponses, _with_upstream_user(kwargs))  # type: ignore[no-any-return]
 
     def prepare_stream_kwargs(
         self,
@@ -354,7 +374,7 @@ class _ResponsesAdapter:
         if native_tools:
             extra["native_tools"] = native_tools
         return await responses_tool_loop(
-            completion_kwargs=kwargs,
+            completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
             max_iterations=max_iterations,
             **extra,
@@ -375,7 +395,7 @@ class _ResponsesAdapter:
         if native_tools:
             extra["native_tools"] = native_tools
         return responses_tool_loop_stream(
-            completion_kwargs=kwargs,
+            completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
             max_iterations=max_iterations,
             **extra,
@@ -401,12 +421,12 @@ class _ResponsesAdapter:
         kwargs: dict[str, Any] = {"api_key": attempt.api_key}
         if attempt.api_base:
             kwargs["api_base"] = attempt.api_base
-        request_fields = _with_codex_extra_body(base_request_fields, LLMProvider(attempt.provider))
+        request_fields = _with_codex_extra_body(base_request_fields, attempt_provider(attempt))
         merged = {
             **kwargs,
             **{k: v for k, v in request_fields.items() if k != "provider"},
             "model": attempt.model,
-            "provider": LLMProvider(attempt.provider),
+            "provider": attempt_provider(attempt),
         }
         # client_args (built from extra_params, e.g. Bedrock's region_name) is
         # platform-trusted, so it's merged in last: it can never be shadowed
@@ -444,6 +464,11 @@ class _ResponsesAdapter:
         provider = LLMProvider(provider_str)
         kwargs["provider"] = provider
         return _with_codex_extra_body(kwargs, provider)
+
+
+def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Put the carried end-user identifier in the field this call's provider reads."""
+    return with_upstream_user(kwargs, lambda out, identifier: responses_user_fields(out.get("provider"), identifier))
 
 
 _ADAPTER = _ResponsesAdapter()
@@ -530,6 +555,7 @@ async def create_response(
             normalize_messages=_normalize,
             tools=request_body.tools,
             code_execution_policies=tool_ports.code_execution_policy,
+            model_provider=model_provider,
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=request_tags(request_body.metadata),
         )
@@ -547,7 +573,11 @@ async def create_response(
         assert route is not None  # guaranteed by the hybrid-mode preamble
         try:
             for attempt in route.attempts:
-                _ensure_provider_supports_responses(LLMProvider(attempt.provider))
+                try:
+                    provider = attempt_provider(attempt)
+                except UnsupportedAttemptProviderError as exc:
+                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None
+                _ensure_provider_supports_responses(provider)
         except HTTPException:
             if route.attempts:
                 # No provider call ran, so attach the preflight rejection to
@@ -641,12 +671,8 @@ async def create_response(
     input_payload, codex_extra_body = _codex_extra_body(request_fields.pop("input"), client_metadata)
     stream = bool(request_fields.pop("stream", False))
     request_fields.pop("model", None)
-    request_fields.pop("user", None)
-    # Standalone mode forwards the resolved user_id to the upstream provider
-    # for analytics; hybrid mode handles attribution server-side via the
-    # correlation id.
-    if not ctx.hybrid_mode and ctx.user_id:
-        request_fields["user"] = ctx.user_id
+    request_fields.pop("safety_identifier", None)
+    bind_upstream_user(request_fields, ctx.upstream_user)
 
     # base_request_fields is what gets merged with per-attempt creds; it
     # includes ``provider`` and ``input_data`` so each attempt has the full

@@ -952,6 +952,7 @@ export function WorkspacesPage() {
       ) : (
         <TableScrollFrame className="otari-workspaces-table">
           <DataTable
+            mobileLayout="cards"
             ariaLabel="Workspaces"
             columns={columns}
             rows={rows}

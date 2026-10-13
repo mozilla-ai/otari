@@ -51,6 +51,7 @@ from gateway.api.routes._pipeline import (
     error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
+    provider_failure_detail,
     raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
@@ -65,13 +66,11 @@ from gateway.api.routes._platform import (
     ResolvedAttempt,
     SettledCost,
     _resolve_platform_credentials,
-    upstream_exception_chain,
-    upstream_exception_shape,
+    with_retry_hint,
 )
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
     AnthropicRequestMetadata,
-    anthropic_metadata,
     request_tags,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
@@ -86,6 +85,13 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.code_execution import ContainerLease, check_container_on_credential
 from gateway.services.files import StagedFile
+from gateway.services.inference import (
+    bind_upstream_user,
+    messages_user_fields,
+    upstream_exception_chain,
+    upstream_exception_shape,
+    with_upstream_user,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
@@ -153,6 +159,17 @@ def _serves_messages_natively(dispatch_model: Any) -> bool:
         return native is not getattr(AnyLLM, "_amessages", None)
     except Exception:  # noqa: BLE001 - any-llm raises its own types for an unknown provider
         return True
+
+
+def _user_fields(kwargs: dict[str, Any], identifier: str) -> dict[str, Any]:
+    model = kwargs.get("model")
+    implementation, _, _ = str(model).partition(":")
+    return messages_user_fields(implementation, identifier, native=_serves_messages_natively(model))
+
+
+def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Put the carried end-user identifier in the field this call's provider reads."""
+    return with_upstream_user(kwargs, _user_fields)
 
 
 def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -474,6 +491,20 @@ _STREAM_ERROR_MESSAGES = {
     _ERR_RATE_LIMIT: "The upstream provider rate limited the request. Retry the request later.",
 }
 _INCOMPLETE_STREAM_MESSAGE = "The upstream provider ended the stream before completing the message."
+
+
+def _reached_message_stop() -> Callable[[Any], bool]:
+    """A predicate, for one stream, that holds from its ``message_stop`` on."""
+    stopped = False
+
+    def completes(chunk: Any) -> bool:
+        nonlocal stopped
+        stopped = stopped or getattr(chunk, "type", None) == "message_stop"
+        return stopped
+
+    return completes
+
+
 _STREAM_ERROR_STATUS_TYPES = {
     status.HTTP_429_TOO_MANY_REQUESTS: _ERR_RATE_LIMIT,
     529: _ERR_OVERLOADED,
@@ -584,11 +615,6 @@ class _MessagesAdapter:
     name = Dialect.MESSAGES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = ANTHROPIC_STREAM_FORMAT
-    # Every complete Messages stream ends in ``message_stop``. A non-Anthropic
-    # provider reaches here through any-llm's bridge, which emits nothing at all
-    # for an upstream that produced no chunks, and a tool-loop round can end the
-    # same way after ``message_start`` went out.
-    stream_completion_event: str | None = "message_stop"
     # A successful non-streaming call without provider usage data skips the
     # usage-log row (only the reservation is settled), matching the wire
     # behavior this endpoint has always had.
@@ -603,17 +629,29 @@ class _MessagesAdapter:
     ) -> HTTPException:
         return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code, headers)
 
-    def provider_error(self, exc: BaseException) -> HTTPException:
-        mapping = classify_provider_error(exc)
+    def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
+        mapping = classify_provider_error(exc, model=model)
         if mapping is not None:
             error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(mapping.status_code)]
             return _anthropic_error(
                 error_type,
                 mapping.detail,
                 mapping.status_code,
-                provider_error_headers(exc, mapping.status_code),
+                with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
             )
-        return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return _anthropic_error(
+            _ERR_API,
+            provider_failure_detail(exc, _PROVIDER_ERROR),
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            with_retry_hint(exc, status.HTTP_500_INTERNAL_SERVER_ERROR, None),
+        )
+
+    def stream_completion(self) -> Callable[[Any], bool] | None:
+        # Every complete Messages stream ends in ``message_stop``. A non-Anthropic
+        # provider reaches here through any-llm's bridge, which emits nothing at all
+        # for an upstream that produced no chunks, and a tool-loop round can end the
+        # same way after ``message_start`` went out.
+        return _reached_message_stop()
 
     def stream_error_payload(self, exc: BaseException) -> str:
         if isinstance(exc, IncompleteStreamError):
@@ -664,11 +702,11 @@ class _MessagesAdapter:
         return isinstance(chunk, MessageDeltaEvent)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
-        provider_kwargs, _ = _split_client_betas(kwargs)
+        provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
         return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
-        provider_kwargs, _ = _split_client_betas(kwargs)
+        provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
         return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     def prepare_stream_kwargs(
@@ -703,7 +741,7 @@ class _MessagesAdapter:
             extra["native_tools"] = native_tools
         if container is not None:
             extra["container"] = container
-        provider_kwargs, _ = _split_client_betas(kwargs)
+        provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
         return await anthropic_tool_loop(
             completion_kwargs=provider_kwargs,
             pool=pool,
@@ -721,7 +759,7 @@ class _MessagesAdapter:
         use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
-        provider_kwargs, emit_native_mcp = _split_client_betas(kwargs)
+        provider_kwargs, emit_native_mcp = _split_client_betas(_with_upstream_user(kwargs))
         extra: dict[str, Any] = {}
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
@@ -873,6 +911,7 @@ async def create_message(
             normalize_messages=_normalize,
             tools=request.tools,
             code_execution_policies=tool_ports.code_execution_policy,
+            model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
             tags=request_tags(request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
         )
@@ -946,8 +985,10 @@ async def create_message(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
-    anthropic_metadata(request_fields)
+    # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
+    request_fields.pop("metadata", None)
     scope_prompt_cache_key(request_fields, ctx)
+    bind_upstream_user(request_fields, ctx.upstream_user)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
     if tool_ctx.use_sandbox:

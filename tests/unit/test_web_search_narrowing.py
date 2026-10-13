@@ -27,6 +27,7 @@ from gateway.services.tenancy.workspace_web_search_service import (
 )
 from gateway.services.tools._web_access import narrow_web_search_tool_entry
 from gateway.services.tools._web_admission import _canonicalize_web_search_request_domains
+from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, canonicalize_domain_rule
 
 
@@ -405,6 +406,11 @@ def test_a_whitespace_only_hint_from_the_control_plane_reads_as_absent() -> None
 def test_a_malformed_control_plane_answer_fails_closed(answer: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         read_web_search_policy(answer)
+
+
+def test_the_policy_repeats_the_backends_ceiling() -> None:
+    """The policy cannot import the backend's cap without an import cycle, so this pins the two together."""
+    assert _MAX_RESULTS == MAX_RESULTS_CAP
 
 
 @pytest.mark.parametrize(

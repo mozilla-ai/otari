@@ -47,6 +47,11 @@ def _load(tmp_path: Path, text: str) -> GatewayConfig:
     return load_config(str(config_file))
 
 
+def _config(**fields: Any) -> GatewayConfig:
+    """Build a config from raw values, as config.yml would give them."""
+    return GatewayConfig(**fields)
+
+
 def _key(secret: str = SECRET, **fields: Any) -> dict[str, Any]:
     return {"secret": secret, **fields}
 
@@ -71,7 +76,7 @@ def test_the_mlpa_example_loads_with_its_secret_from_the_environment(tmp_path: P
 
 
 def test_the_secret_appears_in_no_rendering_of_the_config() -> None:
-    config = GatewayConfig(api_keys={"mlpa": _key()})
+    config = _config(api_keys={"mlpa": _key()})
 
     assert SECRET not in repr(config)
     assert SECRET not in str(config.model_dump())
@@ -95,11 +100,12 @@ def test_an_unset_secret_variable_fails_the_load(tmp_path: Path) -> None:
         ("tk-" + "changeme" * 7, "placeholder"),
         ("tk-" + "a" * 60, "placeholder"),
     ],
+    ids=["empty", "whitespace", "prefix", "short", "charset", "word", "repeat"],
 )
 def test_a_weak_or_malformed_secret_is_refused_without_being_quoted(secret: str, problem: str) -> None:
     assert problem in (declared_secret_problem(secret) or "")
 
-    config = GatewayConfig(api_keys={"mlpa": _key(secret)})
+    config = _config(api_keys={"mlpa": _key(secret)})
     with pytest.raises(ValueError, match=r"api_keys\.mlpa\.secret") as refused:
         config.validate_declared_access()
     if secret.strip():
@@ -108,11 +114,11 @@ def test_a_weak_or_malformed_secret_is_refused_without_being_quoted(secret: str,
 
 def test_a_minted_shape_secret_is_accepted() -> None:
     assert declared_secret_problem(SECRET) is None
-    GatewayConfig(api_keys={"mlpa": _key()}).validate_declared_access()
+    _config(api_keys={"mlpa": _key()}).validate_declared_access()
 
 
 def test_two_keys_may_not_share_a_secret() -> None:
-    config = GatewayConfig(api_keys={"one": _key(), "two": _key()})
+    config = _config(api_keys={"one": _key(), "two": _key()})
 
     with pytest.raises(ValueError, match=r"api_keys\.two\.secret is the same as api_keys\.one\.secret") as refused:
         config.validate_declared_access()
@@ -120,7 +126,7 @@ def test_two_keys_may_not_share_a_secret() -> None:
 
 
 def test_a_secret_may_not_be_the_master_key() -> None:
-    config = GatewayConfig(master_key=SECRET, api_keys={"mlpa": _key()})
+    config = _config(master_key=SECRET, api_keys={"mlpa": _key()})
 
     with pytest.raises(ValueError, match="must differ from the master key"):
         config.validate_declared_access()
@@ -128,9 +134,9 @@ def test_a_secret_may_not_be_the_master_key() -> None:
 
 def test_a_hybrid_gateway_refuses_declarations() -> None:
     with pytest.raises(ValueError, match="hybrid gateway holds neither"):
-        GatewayConfig(mode="hybrid", budgets={"b": {"max_budget": 1}}).validate_declared_access()
+        _config(mode="hybrid", budgets={"b": {"max_budget": 1}}).validate_declared_access()
     with pytest.raises(ValueError, match="hybrid gateway holds neither"):
-        GatewayConfig(mode="hybrid", api_keys={"mlpa": _key()}).validate_declared_access()
+        _config(mode="hybrid", api_keys={"mlpa": _key()}).validate_declared_access()
 
 
 @pytest.mark.parametrize(
@@ -145,7 +151,7 @@ def test_a_hybrid_gateway_refuses_declarations() -> None:
 )
 def test_a_malformed_key_is_refused_without_quoting_its_secret(api_keys: Any) -> None:
     with pytest.raises(ValidationError) as refused:
-        GatewayConfig(api_keys=api_keys)
+        _config(api_keys=api_keys)
 
     assert SECRET not in str(refused.value)
     assert SECRET not in repr(refused.value.errors())
@@ -158,7 +164,7 @@ def test_the_default_end_user_budget_must_be_on_the_list() -> None:
 
 def test_a_key_name_must_be_an_identifier() -> None:
     with pytest.raises(ValidationError, match="api key name 'my key'"):
-        GatewayConfig(api_keys={"my key": _key()})
+        _config(api_keys={"my key": _key()})
 
 
 @pytest.mark.parametrize(
@@ -173,16 +179,16 @@ def test_a_key_name_must_be_an_identifier() -> None:
 )
 def test_an_invalid_budget_is_refused(budget: dict[str, Any], message: str) -> None:
     with pytest.raises(ValidationError, match=message):
-        GatewayConfig(budgets={"b": budget})
+        _config(budgets={"b": budget})
 
 
 def test_a_budget_id_must_match_the_api_rule() -> None:
     with pytest.raises(ValidationError, match="budget id '-b'"):
-        GatewayConfig(budgets={"-b": {"max_budget": 1}})
+        _config(budgets={"-b": {"max_budget": 1}})
 
 
 def test_nothing_declared_is_valid() -> None:
-    config = GatewayConfig()
+    config = _config()
 
     assert config.budgets == {}
     assert config.api_keys == {}
@@ -190,4 +196,4 @@ def test_nothing_declared_is_valid() -> None:
 
 
 def test_a_different_secret_per_key_is_valid() -> None:
-    GatewayConfig(api_keys={"one": _key(), "two": _key(OTHER_SECRET)}).validate_declared_access()
+    _config(api_keys={"one": _key(), "two": _key(OTHER_SECRET)}).validate_declared_access()

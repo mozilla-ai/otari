@@ -13,7 +13,12 @@ caller send what the catalog shows:
   The other offerings follow in the same order;
 - a **pinned selector**, ``instance:<catalog id>``
   (``nebius:deepseek/deepseek-v4.1-flash``), which resolves to that model's
-  best offering on that instance by the same order and never leaves it.
+  best offering on that instance by the same order and never leaves it;
+- an **undated selector** on an organization's own key,
+  ``anthropic:claude-haiku-4-5``, which resolves to the one dated build the
+  key serves under that name (``anthropic:claude-haiku-4-5-20251001``). Only an
+  organization's key needs it: a ``providers:`` instance sends any id to the
+  provider as written, while a key that offers models serves those alone.
 
 The index is process-wide and rebuilt at startup and on a schedule from the
 deployment's own catalog view (the configured instances, priced from the
@@ -36,6 +41,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
+from gateway.services.catalog._dated import undated_spellings
 from gateway.services.model_identity import own_providers_for_vendor_slug
 
 
@@ -82,6 +88,9 @@ class OrganizationSelectors:
     models: dict[str, str] = field(default_factory=dict)
     offerings: dict[str, tuple[str, ...]] = field(default_factory=dict)
     model_selectors: dict[str, str] = field(default_factory=dict)
+
+    undated: dict[str, str] = field(default_factory=dict)
+    """``instance:<name>`` to the one dated build of it the organization serves, matched case-sensitively."""
 
 
 @dataclass(frozen=True)
@@ -164,6 +173,21 @@ def resolve_catalog_selector(
         if (hit := getattr(index, attr).get(spelling)) is not None:
             return str(hit)
     return None
+
+
+def resolve_undated_selector(model_selector: str, *, workspace_id: uuid.UUID | None = None) -> str | None:
+    """The dated build an undated ``instance:<name>`` stands for on the caller's organization's key, or None.
+
+    Separate from :func:`resolve_catalog_selector` because it applies only to
+    a selector that reaches an organization's key: the caller asks it only
+    when the selector names no ``providers:`` instance, which sends any id as
+    written. Matched case-sensitively, because it is a provider's own id.
+    """
+    index = _index
+    view = _organization_view(index, workspace_id, None)
+    if view is None or _names_an_offering(index, view, model_selector):
+        return None
+    return view.undated.get(model_selector)
 
 
 def resolve_catalog_offerings(
@@ -307,6 +331,7 @@ def build_organization_selectors(
     A catalog ID the organization offers at a price resolves to its own key first,
     even where another offering is cheaper.
     One it offers nothing of is left to the deployment's view.
+    An undated name resolves to the one dated build of it the organization serves.
     """
     own = frozenset(row.selector for row in organization)
     maps = _build_maps([*deployment, *organization], identities, own=own)
@@ -323,4 +348,5 @@ def build_organization_selectors(
         model_selectors={
             selector: spelling for selector, spelling in maps.model_selectors.items() if selector in touched_selectors
         },
+        undated=undated_spellings(own),
     )

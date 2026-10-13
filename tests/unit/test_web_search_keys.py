@@ -15,15 +15,18 @@ from gateway.models.tools import (
     ResolvedWebSearchConfig,
     WebSearchCredential,
     WebTool,
+    WebToolCredentialSource,
     WorkspaceWebSearchKeyOverride,
 )
 from gateway.repositories.tools import resolve_web_search_key
 from gateway.services import search_backend
 from gateway.services.search_backend import SearchQuery
+from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tools import _web_search_keys, apply_web_access_policy
 from gateway.services.web_search_providers import WebSearchProviderError
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
+_ORG = WebToolCredentialSource.ORG
 
 
 def _key(name: str, *, provider: str = "tavily", default: bool = False, age: int = 0) -> OrgWebSearchKey:
@@ -96,11 +99,29 @@ def test_no_usable_key_means_the_deployments_search() -> None:
     assert _chosen() is None
 
 
-def test_a_credential_never_prints_its_key() -> None:
-    credential = WebSearchCredential(provider="tavily", api_key="tvly-secret")
+def test_a_credential_never_prints_its_key_endpoint_or_options() -> None:
+    credential = WebSearchCredential(
+        provider="tavily",
+        source=_ORG,
+        api_key="tvly-secret",
+        api_base="https://user:pass@search.internal",
+        options={"topic": "news-secret"},
+    )
 
-    assert "tvly-secret" not in repr(credential)
-    assert "tvly-secret" not in str(credential)
+    for printed in (repr(credential), str(credential)):
+        assert "tvly-secret" not in printed
+        assert "search.internal" not in printed
+        assert "news-secret" not in printed
+
+
+def test_an_organization_key_is_a_credential_from_the_organization(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    key = _key("ours", provider="brave")
+    key.encrypted_api_key = encrypt_secret("brv-own")
+
+    assert _web_search_keys.search_key_credential(key) == WebSearchCredential(
+        provider="brave", source=WebToolCredentialSource.ORG, api_key="brv-own"
+    )
 
 
 def test_the_workspace_key_wins_over_the_deployments_provider() -> None:
@@ -109,7 +130,7 @@ def test_the_workspace_key_wins_over_the_deployments_provider() -> None:
     backend = _build_web_retrieval_backend(
         base_url="http://searxng:8080",
         search_tool_entry={},
-        credential=WebSearchCredential(provider="tavily", api_key="workspace-key"),
+        credential=WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key"),
         config=config,
     )
 
@@ -132,7 +153,7 @@ def test_without_a_workspace_key_the_deployments_provider_is_used() -> None:
 def test_admission_carries_the_key_only_for_a_declared_search(
     search_entry: dict[str, str] | None, carried: bool
 ) -> None:
-    credential = WebSearchCredential(provider="tavily", api_key="k")
+    credential = WebSearchCredential(provider="tavily", source=_ORG, api_key="k")
     policy = ResolvedWebSearchConfig(
         enabled=True,
         max_results=None,
@@ -179,7 +200,7 @@ async def test_direct_search_on_a_workspace_key_reads_the_providers_hits(monkeyp
         ]
 
     monkeypatch.setattr(search_backend, "provider_search", fake_provider_search)
-    credential = WebSearchCredential(provider="tavily", api_key="workspace-key")
+    credential = WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key")
 
     outcome = await search_backend.run_keyed_search(
         credential, SearchQuery(query="q", max_results=2, domain_filter=("-dropped.example",)), timeout_s=3.0
@@ -201,7 +222,9 @@ async def test_direct_search_on_a_workspace_key_reports_a_provider_failure(monke
 
     with pytest.raises(search_backend.SearchProviderError) as raised:
         await search_backend.run_keyed_search(
-            WebSearchCredential(provider="tavily", api_key="workspace-key"), SearchQuery(query="q"), timeout_s=3.0
+            WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key"),
+            SearchQuery(query="q"),
+            timeout_s=3.0,
         )
 
     assert "workspace-key" not in str(raised.value)
@@ -220,7 +243,7 @@ async def test_direct_search_on_a_workspace_key_localizes_to_the_requested_count
     monkeypatch.setattr(search_backend, "provider_search", fake_provider_search)
 
     await search_backend.run_keyed_search(
-        WebSearchCredential(provider="brave", api_key="workspace-key"),
+        WebSearchCredential(provider="brave", source=_ORG, api_key="workspace-key"),
         SearchQuery(query="q", max_results=2, country="de"),
         timeout_s=3.0,
     )
@@ -260,7 +283,7 @@ async def test_the_choice_reads_only_the_keys_it_reaches(
     keys.append(_key("default", default=True, age=60))
 
     def credential(key: OrgWebSearchKey) -> WebSearchCredential | None:
-        return WebSearchCredential(provider=key.provider, api_key="k") if key.name == usable_name else None
+        return WebSearchCredential(provider=key.provider, source=_ORG, api_key="k") if key.name == usable_name else None
 
     monkeypatch.setattr(_web_search_keys, "search_key_credential", credential)
     overrides = _Overrides(keys)

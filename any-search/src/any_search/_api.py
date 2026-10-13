@@ -1,6 +1,7 @@
 """The provider interface and the one-call helper."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from types import TracebackType
 from typing import Any, ClassVar, Self, get_args
 
@@ -15,6 +16,24 @@ from any_search._types import ProviderMetadata, SearchResult, TimeRange
 
 DEFAULT_TIMEOUT = 15.0
 """Seconds per request when the caller names no timeout."""
+
+SHARED_PARAMETERS = ("max_results", "time_range")
+"""The parameters every provider takes beside its native options, which a host tells apart by this list."""
+
+
+def shared_parameter_problems(parameters: Mapping[str, Any]) -> dict[str, str]:
+    """Each shared parameter in ``parameters`` whose value ``search`` refuses, with why.
+
+    Other names, and a value of ``None``, which means unset, are not checked.
+    """
+    problems: dict[str, str] = {}
+    count = parameters.get("max_results")
+    if count is not None and (not isinstance(count, int) or isinstance(count, bool) or count < 1):
+        problems["max_results"] = "max_results must be a whole number of at least 1"
+    time_range = parameters.get("time_range")
+    if time_range is not None and time_range not in get_args(TimeRange):
+        problems["time_range"] = f"time_range must be one of {', '.join(get_args(TimeRange))}"
+    return problems
 
 
 class AnySearch(ABC):
@@ -90,10 +109,8 @@ class AnySearch(ABC):
         for name in options:
             if name not in known:
                 raise UnsupportedParameterError(self.METADATA.name, name)
-        if max_results is not None and max_results < 1:
-            raise ValueError("max_results must be at least 1")
-        if time_range is not None and time_range not in get_args(TimeRange):
-            raise ValueError(f"time_range must be one of {', '.join(get_args(TimeRange))}")
+        if problems := shared_parameter_problems({"max_results": max_results, "time_range": time_range}):
+            raise ValueError("; ".join(problems.values()))
         with provider_call(self.METADATA.name):
             return await self._search(query, max_results=max_results, time_range=time_range, options=options)
 

@@ -35,6 +35,7 @@ INHERITED_HEADERS = {
     "X-Subscription-Token": "The Brave Search API's own header.",
     "X-Gateway-Token": "Platform wire contract; the platform must accept a new name first.",
     "X-User-Token": "Platform wire contract; the platform must accept a new name first.",
+    "x-should-retry": "The OpenAI and Anthropic SDKs' retry override, read under this name only.",
 }
 
 # Literals of the same shape that name no header at all.

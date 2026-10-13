@@ -23,7 +23,7 @@ import any_search
 from gateway import features
 from gateway.api.deps import (
     build_file_service,
-    build_idempotency_service,
+    build_inference_service,
     get_budget_service,
     get_membership_listener,
     get_unit_of_work,
@@ -247,7 +247,7 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
 def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None]:
     """Return the idempotency record sweep, which runs even while the header is ignored so stored records expire."""
     return run_idempotency_sweeper(
-        config.idempotency_sweep_interval_sec, lambda uow: build_idempotency_service(uow, config)
+        config.idempotency_sweep_interval_sec, lambda uow: build_inference_service(uow, config)
     )
 
 
@@ -502,6 +502,16 @@ def _validate_rate_limit_store(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+def _refuse_shared_secret(name: str, value: str, config: GatewayConfig) -> None:
+    """Refuse a secret equal to the master key or an ``OTARI_SECRET_KEY`` key, naming it by ``name``."""
+    if value == config.master_key:
+        msg = f"{name} must differ from the master key"
+        raise ValueError(msg)
+    if shares_secret_key(value):
+        msg = f"{name} must differ from every OTARI_SECRET_KEY key"
+        raise ValueError(msg)
+
+
 def _validate_provider_account_pepper(config: GatewayConfig) -> None:
     """Refuse to start a deployment that makes provider copies without its own pepper.
 
@@ -519,12 +529,25 @@ def _validate_provider_account_pepper(config: GatewayConfig) -> None:
             "set it to a random value of at least 32 characters, or turn provider copies off"
         )
         raise ValueError(msg)
-    if pepper == config.master_key:
-        msg = "OTARI_PROVIDER_ACCOUNT_PEPPER must differ from the master key"
-        raise ValueError(msg)
-    if shares_secret_key(pepper):
-        msg = "OTARI_PROVIDER_ACCOUNT_PEPPER must differ from every OTARI_SECRET_KEY key"
-        raise ValueError(msg)
+    _refuse_shared_secret("OTARI_PROVIDER_ACCOUNT_PEPPER", pepper, config)
+
+
+def _validate_provider_user_identifier_key(config: GatewayConfig) -> None:
+    """Refuse an end-user identifier key that shares a value with another secret.
+
+    A missing key only warns: refusing to start would take down every deployment
+    that upgrades with the identifier on, which is the default.
+    """
+    key = config.provider_user_identifier_key
+    if key is None:
+        if config.provider_user_identifier_enabled:
+            logger.warning(
+                "provider_user_identifier_enabled is on with no OTARI_PROVIDER_USER_IDENTIFIER_KEY, so the "
+                "end-user identifier sent to providers is an unkeyed digest: anyone who knows a workspace id "
+                "can test a guessed user tag against it. Set the key to a random value of at least 32 characters."
+            )
+        return
+    _refuse_shared_secret("OTARI_PROVIDER_USER_IDENTIFIER_KEY", key, config)
 
 
 async def apply_declared_access(config: GatewayConfig, session: "AsyncSession", key_format: ApiKeyFormatPort) -> None:
@@ -669,6 +692,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # ``provider_instance_type``: that normalizes ``openai-compatible`` to
         # ``openai``, which names a wire protocol rather than a vendor.
         configure_provider_types(config.provider_pricing_implementation)
+        _validate_provider_user_identifier_key(config)
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
         feature_workers: list[tuple[asyncio.Task[None], str]] = []

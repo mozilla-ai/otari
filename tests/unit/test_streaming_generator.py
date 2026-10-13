@@ -807,3 +807,39 @@ async def test_a_stream_that_reaches_its_completing_chunk_is_unaffected_by_the_c
     assert events == ["data: hello\n\n", "data: usage\n\n", "data: stop\n\n", ANTHROPIC_STREAM_FORMAT.done_marker]
     assert errors == []
     assert settled == ["complete"]
+
+
+class _ClosableStream:
+    """An endless stream recording whether it was closed."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __aiter__(self) -> "_ClosableStream":
+        return self
+
+    async def __anext__(self) -> str:
+        return "chunk"
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_a_stream_the_client_abandons_closes_its_source() -> None:
+    """The source is closed on teardown, so the provider's connection does not wait for garbage collection."""
+    source = _ClosableStream()
+    gen = streaming_generator(
+        stream=source,
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+    )
+
+    assert await gen.__anext__() == "data: chunk\n\n"
+    await gen.aclose()
+
+    assert source.closed

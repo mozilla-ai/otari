@@ -191,7 +191,7 @@ def _axis(budget: Budget, *, new_request: bool = True, **counters: object) -> st
         "held_requests": 0,
     }
     base.update(counters)
-    return _blocked_axis(budget, new_request=new_request, **base)  # type: ignore[arg-type]
+    return _blocked_axis(budget, new_request=new_request, **base).name  # type: ignore[arg-type]
 
 
 def test_the_refusal_names_an_axis_already_at_its_cap() -> None:

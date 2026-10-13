@@ -365,7 +365,7 @@ export function PricingOverrideDialog({
           setUnit(pricingUnitOf(value))
         }}
         options={PRICING_UNIT_OPTIONS}
-        description="Rerank and other per-call endpoints are billed per request; image generation per image."
+        description="What the rate bills: tokens the provider reports, each call (or rerank search unit), or each image returned. Price audio and moderation models per request."
       />
       {isTokens ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

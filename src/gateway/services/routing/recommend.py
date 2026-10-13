@@ -15,9 +15,10 @@ into the recommender port's own terms; the call in between is the adapter's.
 
 from collections.abc import Mapping
 
-from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
+from gateway.exceptions.routing_exceptions import CandidatesNotAllowedError, UnreadableRecommendationError
 from gateway.ports.agent_model_recommender_port import ModelRecommendation, RecommendationUsage, SubagentSpawn
 from gateway.schemas.inference import ChoiceQuestion, DecisionRequest, DecisionResponse
+from gateway.schemas.routing import Harness
 from gateway.services.inference import reported_charge
 
 RECOMMENDATION_QUESTION = "model"
@@ -36,6 +37,31 @@ _INSTRUCTIONS = (
     "cheapest option whose description fits the task, and a stronger one only when the "
     "task needs it."
 )
+
+
+def candidates_for(
+    harness: Harness,
+    *,
+    sent: Mapping[str, str | None] | None,
+    claude_code: Mapping[str, str | None],
+) -> Mapping[str, str | None]:
+    """The models a subagent of ``harness`` may be sent to, each with what it is for.
+
+    Claude Code's Agent tool takes only its own aliases, so it chooses among
+    ``claude_code`` and may not send a list. pi-otari decides its candidates on
+    the laptop, as Otari model ids, so pi must send them.
+
+    Raises :class:`CandidatesNotAllowedError` when the sent list does not fit the harness.
+    """
+    if harness == "pi":
+        if sent is None:
+            msg = "pi must send the candidates its subagent may be sent to."
+            raise CandidatesNotAllowedError(msg)
+        return sent
+    if sent is not None:
+        msg = "claude-code chooses among agent_recommender_candidates and may not send candidates."
+        raise CandidatesNotAllowedError(msg)
+    return claude_code
 
 
 def build_decision_request(
