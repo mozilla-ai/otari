@@ -409,11 +409,10 @@ def test_a_web_policy_read_for_two_tools_is_read_once(
 
 
 @pytest.mark.parametrize(
-    ("tool", "policy", "status"),
+    ("tool", "policy"),
     [
-        ("code", {"enabled": False}, 403),
-        ("search", {"enabled": False}, 403),
-        ("fetch", {"enabled": True, "authorized_tools": ["web_search"]}, 403),
+        ("search", {"enabled": False}),
+        ("fetch", {"enabled": True, "authorized_tools": ["web_search"]}),
     ],
 )
 def test_a_fallback_that_would_be_refused_decides_the_request_as_a_whole(
@@ -421,17 +420,34 @@ def test_a_fallback_that_would_be_refused_decides_the_request_as_a_whole(
     control_plane_transport: InstallControlPlane,
     tool: str,
     policy: dict[str, Any],
-    status: int,
 ) -> None:
-    """No attempt is skipped in hybrid, so the request is admitted as one, as it was before."""
+    """No attempt is skipped in hybrid, so a web tool is decided by every attempt, as it was before."""
     response, text, seen = _post(
         platform_client, control_plane_transport, providers=["anthropic", "vertexai"], tool=tool, policy=policy
     )
 
-    assert response.status_code == status, text
+    assert response.status_code == 403, text
     assert seen.provider_calls == []
     assert seen.loop_calls == []
     assert len(seen.resolved(_POLICY_PATHS[tool])) == 1
+
+
+def test_a_fallback_that_would_be_refused_leaves_the_code_to_a_head_that_runs_it(
+    platform_client: TestClient, control_plane_transport: InstallControlPlane
+) -> None:
+    """Decided as a whole, the code follows the head, as it did before: one that runs it itself keeps it."""
+    response, text, seen = _post(
+        platform_client,
+        control_plane_transport,
+        providers=["anthropic", "vertexai"],
+        tool="code",
+        policy={"enabled": False},
+    )
+
+    assert response.status_code == 200, text
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [{_DECLARATIONS["code"]["type"]}]
+    assert seen.loop_calls == []
+    assert len(seen.resolved(_POLICY_PATHS["code"])) == 1
 
 
 @pytest.mark.parametrize("tool", _TOOLS)

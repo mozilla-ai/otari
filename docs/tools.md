@@ -35,8 +35,10 @@ Function tools remain the caller's responsibility.
 In [hybrid mode](modes.md) each attempt the platform plans is decided the same
 way, except that none is skipped, because the control plane expects a report for
 every attempt it planned: a request one of whose attempts Otari's tool could
-not serve (the workspace has the tool off, say) is decided as a whole, with
-Otari's tool on every attempt or the request refused. A route with one attempt is dispatched as it
+not serve (the workspace has the tool off, say) is decided as a whole, as it was
+before: search and fetch run on Otari for every attempt if any attempt needs
+it, and code execution follows the first attempt, so a first model that runs
+the code itself keeps it. A refusal then refuses the request. A route with one attempt is dispatched as it
 always was, and the control plane's code-execution and Web Access policies are
 each asked once per request.
 
@@ -374,8 +376,8 @@ addresses the provider's container, not the sandbox.
 
 In hybrid mode a workspace the control plane has not enabled still has a
 declaration its provider runs natively served by that provider. A route with a
-fallback that would need the sandbox is decided as a whole (see
-[Who runs a tool](#who-runs-a-tool)).
+fallback that would need the sandbox is decided as a whole, by the first
+attempt (see [Who runs a tool](#who-runs-a-tool)).
 
 **Upgrading from 0.6.** A deployment with `sandbox_url` set that forwarded
 `code_interpreter`, `code_execution_<date>` or `code_execution` to a provider

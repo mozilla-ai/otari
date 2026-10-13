@@ -36,9 +36,15 @@ def _declared(
     *,
     backend: bool = True,
     uniform: bool = False,
+    follow_head: bool = False,
 ) -> ProviderToolDeclaration:
     return ProviderToolDeclaration(
-        tool=tool, entry=entry, preference=preference, backend_configured=backend, uniform=uniform
+        tool=tool,
+        entry=entry,
+        preference=preference,
+        backend_configured=backend,
+        uniform=uniform,
+        follow_head=follow_head,
     )
 
 
@@ -85,6 +91,18 @@ def test_a_uniform_declaration_is_claimed_for_every_candidate_where_any_needs_it
 
     assert _claimed([declaration], ["anthropic", "vertexai"]) == [{CODE}, {CODE}]
     assert _claimed([declaration], ["anthropic", "anthropic"]) == [set(), set()]
+
+
+def test_a_head_following_declaration_is_decided_for_every_candidate_as_the_head_is() -> None:
+    declaration = _declared(CODE_EXECUTION_TOOL, ANTHROPIC_CODE, CodeExecutor.AUTO, follow_head=True)
+
+    assert _claimed([declaration], ["anthropic", "vertexai"]) == [set(), set()]
+    assert _claimed([declaration], ["vertexai", "anthropic"]) == [{CODE}, {CODE}]
+    [head, fallback] = decide_candidate_tools(
+        [declaration], providers=["anthropic", "vertexai"], dialect=Dialect.MESSAGES
+    )
+    assert head.native == {CODE}
+    assert fallback.native == frozenset()
 
 
 def test_each_tool_is_decided_on_its_own_answer() -> None:

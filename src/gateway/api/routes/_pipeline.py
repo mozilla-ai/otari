@@ -3430,7 +3430,8 @@ async def prepare_gateway_tools(
     share one answer are admitted together. A refusal of one answer skips only its
     candidates, and refuses the request only where no candidate is left. A hybrid
     attempt is never skipped, so where one answer would be refused, hybrid mode
-    decides every candidate alike, as one request.
+    decides every candidate alike, as one request: a web tool by every candidate,
+    and the code by the head.
 
     NOTE: callers must not release the budget reservation after a refusal from here.
     """
@@ -3457,7 +3458,7 @@ async def prepare_gateway_tools(
         if answers is None:
             candidates = _combined(
                 _decide_for_candidates(adapter, ctx, _web_declarations(ctx, declared, uniform=True)),
-                _decide_for_candidates(adapter, ctx, [code.provider_declaration(uniform=True)]),
+                _decide_for_candidates(adapter, ctx, [code.provider_declaration(follow_head=True)]),
             )
             answers = await _admit_candidates(
                 adapter, ctx, code, candidates, mcp_servers=mcp_servers, web_policy=web_policy, whole=False
