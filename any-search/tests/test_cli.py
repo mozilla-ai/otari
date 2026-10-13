@@ -122,6 +122,14 @@ def test_describe_marks_operator_only_options_and_the_test_tier(capsys: pytest.C
     assert "Operator only: a host lets only its operator set it" in out
 
 
+def test_describe_says_when_the_key_and_the_query_travel_in_the_url(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("mojeek", capsys)
+    assert "API key: required, from MOJEEK_API_KEY" in out
+    assert "The key travels in the request URL.\nThe query travels in the request URL." in out
+    assert "  date (boolean), default true" in out
+    assert "The key travels" not in _describe("exa", capsys)
+
+
 def test_describe_refuses_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         main(["--describe", "nope"])

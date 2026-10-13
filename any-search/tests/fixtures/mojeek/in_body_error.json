@@ -1,0 +1,22 @@
+{
+  "status": 200,
+  "body": {
+    "response": {
+      "status": "Access Denied: invalid key/password",
+      "head": {
+        "query": "python",
+        "nword": 0,
+        "rankm": 168,
+        "dups": 0,
+        "nph": 0,
+        "more": 0,
+        "timer": 0,
+        "start": 1,
+        "return": 0,
+        "exact": false,
+        "results": 0
+      },
+      "results": []
+    }
+  }
+}

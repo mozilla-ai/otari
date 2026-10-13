@@ -71,14 +71,15 @@ The four cases a fixture can record:
 |---|---|
 | `normal` | A successful answer with content. |
 | `empty` | A successful answer with nothing in it: no hits, or a page with no text. |
-| `error` | A failed call. A key the provider refuses is the easiest to record. |
+| `error` | A failed call, with an HTTP status. A key the provider refuses is the easiest to record, unless it refuses keys inside a 200; then try a malformed parameter. |
 | `in_body_error` | An error inside a 200. Leave it out when the provider has none. |
 
 ## Search checklist (any-search)
 
 - `METADATA`: `max_results` is the provider's own limit; `query_in_url` and `key_in_url` say
   whether either travels in the URL. When one does, build the URL yourself and never pass it to a
-  logger.
+  logger, and add a test over a real socket (a local server) that no log record and no transport
+  error carries the key or the query: `httpx.MockTransport` skips httpcore, which logs below httpx.
 - Map `max_results`, and also cut the hits to it, since a replayed fixture does not honor it. A
   native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
   `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
@@ -141,3 +142,30 @@ What each adapter does is in its library's README; these are the lessons for the
   cannot answer without (`results`), take the rest as optional but type-checked, and let the live
   tests' `EXPECTED` require what the host relies on, such as a reported cost, so its absence is
   noticed without failing every call.
+
+### 2026-10-13, Mojeek (iteration two, any-search)
+
+The first search provider with the key in the URL and errors inside a 200.
+
+- A key in the URL: pass the key and the query to `self._http.request` as `params`, never format
+  the URL yourself, and set `query_in_url` and `key_in_url`. httpx logs the URL at INFO, which the
+  log filter redacts during a provider call. httpcore, below it, logs at DEBUG only the method, the
+  host and the response headers, so a redirect's `Location` would be the one way the key reached
+  it; Mojeek sent none in any case tried. Only a test over a real socket shows this.
+- Errors inside a 200 can be the only way a provider refuses a key: Mojeek answers a bad key with
+  HTTP 200 and `response.status` `Access Denied: invalid key/password`, not the `ERROR: ...` its
+  documentation shows. That key records the `in_body_error` fixture; the `error` one came from a
+  malformed parameter (`-o s=abc`), which Mojeek answers with a 503.
+- Turn a status text into a tag of the adapter's own, by how it starts, with a fallback, so none of
+  the provider's text reaches an error.
+- A documentation can list fields a default answer never carries. Mojeek's lists `pdate`,
+  `timestamp`, `date`, `size` and `cfs` on every result, but its request parameters turn `date` and
+  `size` on, and `pdate` never came. Check what a default answer carries, live, before deciding
+  which fields are required, and send what the envelope needs (`date=1` for a date).
+- A provider can mean "unknown" by a value that parses: Mojeek sends a `timestamp` of 0, the Unix
+  epoch, for a page it has no time for. Read the recorded fixtures for such values.
+- A provider can cap or refuse quietly: Mojeek returns 10 results for `t=50` on its entry plan,
+  and no results with status `OK` for a `since` it does not take (`week`) or for `t=0`. Map the
+  shared parameters to values the provider takes, since nothing else will say they were wrong.
+- Mojeek reports no cost, so the live tests' `EXPECTED` says so, and says what the host relies on
+  instead: dated hits and a snippet, since a hit carries no page text.

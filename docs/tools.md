@@ -696,5 +696,14 @@ The request, the response and the errors are in the
   10 adds to it, so a workspace's `max_results` ceiling also bounds what one search
   can cost. A search with no results reported a cost of 0 when the adapter was
   written.
+- **Mojeek** (`mojeek`) needs an API key, read from the tool's `api_key`, such as
+  `${MOJEEK_API_KEY}`. Mojeek takes the key and the query in the request URL,
+  which Otari keeps out of its logs. It reports no cost, so a search is billed at
+  the tool's rate, `mojeek:<search-tool-name>`. Mojeek's
+  [pricing](https://www.mojeek.com/services/search/web-search-api/), read
+  2026-10-13, is per search, in pounds before taxes: £2 per 1,000 on the Startup
+  plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what
+  your plan costs you. A search returns at most 10 results, the Startup plan's
+  limit, whatever the plan, and its hits carry a snippet but no page text.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate.
