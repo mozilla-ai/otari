@@ -348,3 +348,127 @@ def test_repeated_reset_requests_get_throttled(tmp_path: Path) -> None:
 
         throttled = client.post(f"{API_ROOT}/auth/password/reset", json={"email": "nobody@example.com"})
         assert throttled.status_code == 429
+
+
+def _reset_token_hash(tmp_path: Path, *, email: str) -> str | None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+    with engine.begin() as connection:
+        token_hash: str | None = connection.execute(
+            text('SELECT password_reset_token_hash FROM "user" WHERE email = :email'), {"email": email}
+        ).scalar_one()
+    engine.dispose()
+    return token_hash
+
+
+def _complete_reset(client: TestClient, log_text: str) -> None:
+    confirmed = client.post(
+        f"{API_ROOT}/auth/password/reset/confirm",
+        json={"token": _extract_token(log_text), "new_password": NEW_PASSWORD},
+    )
+    assert confirmed.status_code == 204, confirmed.text
+
+
+def _invite(client: TestClient, *, email: str) -> str:
+    """Invite an address, as an admin would, and return the invitation's id."""
+    response = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": email, "role": "member"},
+        headers={"Otari-Key": MASTER_KEY},
+    )
+    assert response.status_code == 201, response.text
+    return str(response.json()["invitation_id"])
+
+
+def test_reset_claims_an_identity_an_admin_added_and_nobody_signed_in_to(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Forgot password is what someone added by an admin tries first, and it used to mail nothing."""
+    with _client(tmp_path) as client:
+        added = client.post(
+            f"{API_ROOT}/organizations/me/members",
+            json={"email": "ada@example.com", "role": "member"},
+            headers={"Otari-Key": MASTER_KEY},
+        )
+        assert added.status_code == 201, added.text
+
+        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
+        assert status_code == 200
+        _complete_reset(client, log_text)
+
+        # No separate verification: the reset link already proved the mailbox.
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": NEW_PASSWORD})
+        assert signed_in.status_code == 200, signed_in.text
+        assert client.get(f"{API_ROOT}/organizations/me").status_code == 200
+
+
+def test_reset_claims_an_invitee_who_then_finds_the_invitation_waiting(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        _invite(client, email="ada@example.com")
+
+        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
+        assert status_code == 200
+        _complete_reset(client, log_text)
+
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": NEW_PASSWORD})
+        assert signed_in.status_code == 200, signed_in.text
+        pending = client.get(f"{API_ROOT}/organizations/me/pending-memberships")
+        assert pending.json()["count"] == 1
+
+
+def test_reset_before_verification_lets_the_identity_sign_in(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A lost verification email is recovered by a reset, whose link proves the same mailbox."""
+    with _client(tmp_path) as client:
+        client.post(
+            f"{API_ROOT}/organizations/me/members",
+            json={"email": "ada@example.com", "role": "member"},
+            headers={"Otari-Key": MASTER_KEY},
+        )
+        _with_logs(
+            client,
+            caplog,
+            lambda: client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": PASSWORD}),
+        )
+
+        _, log_text = _request_reset(client, caplog, email="ada@example.com")
+        _complete_reset(client, log_text)
+
+        assert (
+            client.post(
+                f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": NEW_PASSWORD}
+            ).status_code
+            == 200
+        )
+
+
+def test_reset_sends_nothing_for_a_revoked_invitee_where_signup_is_closed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The rule the signup form and a provider sign-in follow, so a reset is not a third way round it."""
+    with _client(tmp_path) as client:
+        invitation_id = _invite(client, email="eve@example.com")
+        revoked = client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{invitation_id}", headers={"Otari-Key": MASTER_KEY}
+        )
+        assert revoked.status_code == 200, revoked.text
+
+        status_code, log_text = _request_reset(client, caplog, email="eve@example.com")
+
+        assert status_code == 200
+        assert "mail:console" not in log_text
+    assert _reset_token_hash(tmp_path, email="eve@example.com") is None
+
+
+def test_reset_claims_a_revoked_invitee_where_signup_is_open(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Open signup would let the same address sign up, so refusing the reset would protect nothing."""
+    with _client(tmp_path, open_signup=True) as client:
+        invitation_id = _invite(client, email="eve@example.com")
+        client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{invitation_id}", headers={"Otari-Key": MASTER_KEY}
+        )
+
+        status_code, log_text = _request_reset(client, caplog, email="eve@example.com")
+
+        assert status_code == 200
+        assert "mail:console" in log_text
