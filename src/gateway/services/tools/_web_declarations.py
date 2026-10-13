@@ -37,10 +37,8 @@ if TYPE_CHECKING:
 # same vocabulary and for the same reason as ``CODE_EXECUTION_HEADER``. It can
 # add a claim but never remove one ``web_search_intercept`` makes.
 WEB_SEARCH_HEADER = "Otari-Web-Search"
-# The same choice for a provider-named web-fetch declaration. A header of its own,
-# because a caller may want the provider's fetch and the gateway's search or the
-# reverse, and because widening the search header would change what an existing
-# ``Otari-Web-Search`` caller's fetch declaration does.
+# The same choice for a provider-named web-fetch declaration, separate because a
+# caller may want the provider's fetch and the gateway's search, or the reverse.
 WEB_FETCH_HEADER = "Otari-Web-Fetch"
 
 

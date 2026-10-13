@@ -2930,7 +2930,7 @@ class ToolContext:
         self.tally = ToolUsageTally()
         # The request's trace, handed to each backend beside the tally for the same reasons.
         self.trace = trace
-        # Successful Search and Fetch calls spend the caller's caps across all routing attempts.
+        # Successful calls spend the caller's caps across all routing attempts.
         caps = {
             name: cap
             for name, cap in (

@@ -263,7 +263,7 @@ class CountTokensResponse(BaseModel):
 
 
 def _is_gateway_minted_result(block: Any) -> bool:
-    """Whether a ``web_search_tool_result`` or ``web_fetch_tool_result`` block was minted by this gateway.
+    """Whether a web search or fetch result block was minted by this gateway.
 
     Provenance is the reserved id prefix the gateway mints its ``server_tool_use``
     with (:data:`~gateway.services.tools.SERVER_TOOL_USE_ID_PREFIX`), matched here on the
