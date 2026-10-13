@@ -83,11 +83,12 @@ REQUEST_ID_HEADER = "Otari-Request-ID"
 # standalone gateway resolves no attempts to name.
 ATTEMPT_ID_HEADER = "Otari-Attempt-ID"
 # Response headers describing how a standalone completion was served: the
-# provider instance that answered (its name, never its base URL), how many
-# candidates were sent the request, whether a candidate other than the plan's
-# first served it, and how long the gateway took to answer. See
+# provider instance that answered (its name, never its base URL), the model it
+# was sent, how many candidates were sent the request, whether a candidate other
+# than the plan's first served it, and how long the gateway took to answer. See
 # docs/routing.md#what-is-billed-and-what-the-caller-sees.
 PROVIDER_HEADER = "Otari-Provider"
+MODEL_HEADER = "Otari-Model"
 ATTEMPT_COUNT_HEADER = "Otari-Attempt-Count"
 FALLBACK_HEADER = "Otari-Fallback"
 RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"

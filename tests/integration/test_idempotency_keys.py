@@ -37,6 +37,7 @@ from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
     CONVERSATION_HEADER,
     FALLBACK_HEADER,
+    MODEL_HEADER,
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
     RESPONSE_DURATION_HEADER,
@@ -142,7 +143,7 @@ def test_retry_replays_the_original_response_without_billing_again(
     assert second.json() == first.json()
     assert second.json()["usage"]["cost_usd"] == first.json()["usage"]["cost_usd"]
     assert second.headers[REQUEST_ID_HEADER] == first.headers[REQUEST_ID_HEADER]
-    for name in (PROVIDER_HEADER, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER):
+    for name in (PROVIDER_HEADER, MODEL_HEADER, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER):
         assert second.headers[name] == first.headers[name]
     # The original's duration would misdescribe a replay, which never reached a provider.
     assert RESPONSE_DURATION_HEADER in first.headers

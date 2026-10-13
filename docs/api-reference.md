@@ -116,9 +116,9 @@ no way to send them back.
 Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
 header, streaming or not. In hybrid mode it is the platform's id for the
 request; a standalone gateway mints its own. A standalone gateway also names the
-provider instance that served the request, whether a fallback did, and how long
-it took, in `Otari-Provider`, `Otari-Attempt-Count`, `Otari-Fallback` and
-`Otari-Response-Duration-Ms`; see
+provider instance and model that served the request, whether a fallback did, and
+how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
+`Otari-Fallback` and `Otari-Response-Duration-Ms`; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,

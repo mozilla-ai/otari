@@ -113,6 +113,7 @@ from gateway.core.config import (
     ATTEMPT_ID_HEADER,
     END_USER_BUDGET_HEADER,
     FALLBACK_HEADER,
+    MODEL_HEADER,
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
     RESPONSE_DURATION_HEADER,
@@ -1319,8 +1320,10 @@ def _end_user_headers(ctx: RequestContext) -> dict[str, str]:
     return {END_USER_BUDGET_HEADER: ctx.end_user_budget_id} if ctx.end_user_budget_id else {}
 
 
-def _served_by_headers(ctx: RequestContext, provider: Any, chosen: Attempt | None, sent: int) -> dict[str, str]:
-    """The headers naming the instance that served a standalone request and how it was reached.
+def _served_by_headers(
+    ctx: RequestContext, provider: Any, model: str, chosen: Attempt | None, sent: int
+) -> dict[str, str]:
+    """The headers naming the instance and model that served a standalone request and how it was reached.
 
     ``sent`` counts the candidates the request was sent to, so a candidate the walk
     skipped without calling (a model a rate limit had no room on) is not in it, while
@@ -1329,8 +1332,12 @@ def _served_by_headers(ctx: RequestContext, provider: Any, chosen: Attempt | Non
     opening for a streamed one.
     """
     fell_back = chosen is not None and ctx.plan is not None and ctx.plan.is_fallback(chosen)
-    return {
-        PROVIDER_HEADER: provider_key(provider),
+    headers = {PROVIDER_HEADER: provider_key(provider)}
+    # A plain request's model is the caller's own string, and one a provider accepted
+    # but a header cannot carry would fail the response after the provider answered.
+    if model.isascii() and model.isprintable():
+        headers[MODEL_HEADER] = model
+    return headers | {
         ATTEMPT_COUNT_HEADER: str(sent),
         FALLBACK_HEADER: "true" if fell_back else "false",
         RESPONSE_DURATION_HEADER: str(_elapsed_ms(ctx.started_at)),
@@ -5272,14 +5279,14 @@ async def run_single_attempt_stream(
                 await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             stream_attribution = _attribution_for(ctx, chosen)
-            served_by = _served_by_headers(ctx, provider, chosen, sent)
+            served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
             stream_attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
-            served_by = _served_by_headers(ctx, provider, None, 1)
+            served_by = _served_by_headers(ctx, provider, model, None, 1)
     except HTTPException:
         await release_reservation(ctx)
         raise
@@ -5989,8 +5996,8 @@ async def run_standalone_non_stream(
     mapping the error to the format's wire envelope.
 
     ``display_model`` (a configured alias) relabels the result's ``model`` field
-    before returning, so the underlying provider/model stays hidden; billing and
-    logging above still key on the resolved target ``model``/``provider``.
+    before returning, so the body names the alias rather than its target; billing
+    and logging above still key on the resolved target ``model``/``provider``.
 
     When ``ctx.plan`` holds more than one candidate (the caller named a routing
     policy with an ``on_failure`` chain) the dispatch walks them, and
@@ -6059,7 +6066,7 @@ async def run_standalone_non_stream(
                 await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)
-            served_by = _served_by_headers(ctx, provider, chosen, sent)
+            served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
@@ -6067,7 +6074,7 @@ async def run_standalone_non_stream(
             # both belong on the row: "served by its default target" is the answer to
             # the same question a fallover answers differently.
             attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
-            served_by = _served_by_headers(ctx, provider, None, 1)
+            served_by = _served_by_headers(ctx, provider, model, None, 1)
         response.headers.update(served_by)
         if ctx.rate_limit_info:
             for key, value in rate_limit_headers(ctx.rate_limit_info).items():

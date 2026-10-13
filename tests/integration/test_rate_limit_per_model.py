@@ -26,6 +26,7 @@ from gateway.core.config import (
     API_ROOT,
     ATTEMPT_COUNT_HEADER,
     FALLBACK_HEADER,
+    MODEL_HEADER,
     PROVIDER_HEADER,
     GatewayConfig,
     RateLimitRule,
@@ -153,6 +154,7 @@ def test_a_spilled_request_is_a_fallback_sent_to_one_candidate(first_capped: Tes
 
     assert sent == [SECOND]
     assert response.headers[PROVIDER_HEADER] == "anthropic"
+    assert response.headers[MODEL_HEADER] == "claude-sonnet-4-5"
     # The full model was skipped without being called, so one candidate was sent the request.
     assert response.headers[ATTEMPT_COUNT_HEADER] == "1"
     assert response.headers[FALLBACK_HEADER] == "true"

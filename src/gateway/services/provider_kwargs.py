@@ -582,8 +582,8 @@ class ResolvedProvider:
     """Display name the caller used when the selector was a configured alias.
 
     ``None`` for an ordinary selector. When set, response ``model`` fields are
-    relabeled to this so the underlying provider/model stays hidden; pricing,
-    budgets, and usage logs still key on the resolved target.
+    relabeled to this rather than naming the target; pricing, budgets, and usage
+    logs still key on the resolved target.
     """
     owned_endpoint: "OwnedEndpoint | None" = None
     """The caller's own endpoint when the selector named one, else ``None``.
