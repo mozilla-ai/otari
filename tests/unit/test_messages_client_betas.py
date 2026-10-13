@@ -3,7 +3,7 @@
 Two never reach a provider: the gateway's own MCP client capability, and every
 beta at all when the dispatched model is served with no Anthropic Messages API,
 where any-llm refuses the whole request and a model swap would otherwise stop
-working.
+working. Bedrock gets none either, since it refuses a beta it does not support.
 """
 
 from __future__ import annotations
@@ -103,14 +103,12 @@ def test_a_bridged_model_is_not_native(model: str) -> None:
     assert not _serves_messages_natively(model)
 
 
-def test_bedrock_keeps_betas_for_claude_and_drops_them_for_other_models() -> None:
-    betas = [MCP_CLIENT_BETA, THINKING_BETA]
+@pytest.mark.parametrize("model", [BEDROCK_CLAUDE, BEDROCK_CLAUDE_PROFILE, BEDROCK_LLAMA])
+def test_bedrock_drops_client_betas_for_every_model(model: str) -> None:
+    forwarded, saw_mcp = _split_client_betas({"model": model, "betas": [MCP_CLIENT_BETA, THINKING_BETA]})
 
-    claude, _ = _split_client_betas({"model": BEDROCK_CLAUDE_PROFILE, "betas": betas})
-    llama, _ = _split_client_betas({"model": BEDROCK_LLAMA, "betas": betas})
-
-    assert claude["betas"] == [THINKING_BETA]
-    assert "betas" not in llama
+    assert "betas" not in forwarded
+    assert saw_mcp is True
 
 
 class _Stop(Exception):
@@ -149,12 +147,12 @@ async def _dispatch_to_bedrock(model: str) -> dict[str, dict[str, Any]]:
 
 
 @pytest.mark.asyncio
-async def test_bedrock_claude_reaches_invoke_model_with_its_betas_and_identifier() -> None:
+async def test_bedrock_claude_reaches_invoke_model_with_its_identifier_and_no_client_betas() -> None:
     calls = await _dispatch_to_bedrock(BEDROCK_CLAUDE_PROFILE)
 
     request = calls["invoke_model"]
     body = json.loads(request["body"])
-    assert body["anthropic_beta"] == [THINKING_BETA]
+    assert "anthropic_beta" not in body
     assert body["metadata"] == {"user_id": "id"}
     assert "requestMetadata" not in request
 
