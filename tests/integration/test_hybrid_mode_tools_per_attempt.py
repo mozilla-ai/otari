@@ -439,7 +439,7 @@ def test_a_fallback_that_would_be_refused_decides_the_request_as_a_whole(
 def test_provider_forwards_the_tool_to_every_attempt(
     platform_client: TestClient, control_plane_transport: InstallControlPlane, tool: str, stream: bool
 ) -> None:
-    """Hybrid reports every attempt it dispatches, so one that cannot run the tool is sent it, not skipped."""
+    """As in standalone, ``provider`` sends the provider's own tool to every attempt and never runs Otari's."""
     response, text, seen = _post(
         platform_client,
         control_plane_transport,

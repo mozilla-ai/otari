@@ -499,16 +499,21 @@ def test_otari_runs_otaris_tool_on_every_candidate(
 
 
 @pytest.mark.parametrize("tool", ["search", "fetch"])
-def test_without_a_header_the_keyword_is_forwarded_to_every_candidate(
-    client: TestClient, api_key_header: dict[str, str], tool: str
+@pytest.mark.parametrize("header", [None, "provider"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_without_a_header_or_under_provider_the_keyword_is_forwarded_to_every_candidate(
+    client: TestClient, api_key_header: dict[str, str], tool: str, header: str | None, stream: bool
 ) -> None:
-    response, seen = _post_messages(
-        client, api_key_header, _messages_body("claude-then-vertex", _DECLARATIONS[tool]), provider_fails=True
-    )
+    headers = {**api_key_header, _HEADERS[tool]: header} if header is not None else api_key_header
+    body = _messages_body("claude-then-vertex", _DECLARATIONS[tool], **({"stream": True} if stream else {}))
+
+    response, seen = _post_messages(client, headers, body, provider_fails=True)
 
     assert response.status_code == 200, response.text
+    assert "via-provider" in response.text
     assert [seen.tool_types(call) for call in seen.provider_calls] == [{_DECLARATIONS[tool]["type"]}] * 2
     assert seen.loop_calls == []
+    assert seen.web_backends == []
 
 
 def test_code_and_search_on_a_fallback_that_runs_neither_is_skipped_as_one_request_would_be(
