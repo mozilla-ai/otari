@@ -5,7 +5,8 @@ search or fetch keyword, which ``decide_candidate_tools`` then answers per candi
 For the candidates that share one answer, the pipeline calls the rest in order:
 :func:`extract_web_tools` takes the managed web tools out of the request, refusing an
 ambiguous declaration, :func:`check_web_tools_alone` refuses them beside a sandbox or MCP
-server, and :func:`admit_web_access` applies the workspace's web search policy.
+server, and :func:`admit_web_access` applies the workspace's web search policy, read once
+for the whole request.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, read_d
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
-    from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
+    from gateway.models.tools import ResolvedWebSearchConfig
 
 WEB_SEARCH_HEADER_INVALID_DETAIL = f"{WEB_SEARCH_HEADER} must be one of auto, otari, provider"
 WEB_FETCH_HEADER_INVALID_DETAIL = f"{WEB_FETCH_HEADER} must be one of auto, otari, provider"
@@ -236,6 +237,15 @@ class DeclaredWebTools:
     def declared_any(self) -> bool:
         return self.search_tool_entry is not None or self.fetch_tool_entry is not None
 
+    @property
+    def requested_tools(self) -> list[WebTool]:
+        """The managed web tools declared, Search before Fetch."""
+        return [
+            tool
+            for tool, entry in ((WebTool.SEARCH, self.search_tool_entry), (WebTool.FETCH, self.fetch_tool_entry))
+            if entry is not None
+        ]
+
 
 def extract_web_tools(
     tools: list[dict[str, Any]] | None,
@@ -297,29 +307,21 @@ def check_web_tools_alone(web: DeclaredWebTools, *, use_sandbox: bool, mcp_serve
         raise WebToolDeclarationError(WEB_SEARCH_CONFLICT_DETAIL)
 
 
-async def admit_web_access(
+def admit_web_access(
     web: DeclaredWebTools,
     *,
-    port: WebSearchPolicyPort,
-    scope: WebSearchPolicyScope,
+    policy: ResolvedWebSearchConfig | None,
     config: GatewayConfig,
 ) -> WebAccessGrant:
-    """Narrow the declared web tools to what the workspace's web search policy permits.
+    """Narrow the declared web tools to what the workspace's web search ``policy`` permits.
 
     Raises:
-        WebSearchPolicyResolutionFailedError: the policy could not be resolved.
         WebAccessRefusedError: the policy refuses the request, and the subclass says why.
         WorkspaceWebSearchDomainsExcludedError: the request's domains share nothing with the workspace's.
     """
-    requested_tools = [
-        tool
-        for tool, entry in ((WebTool.SEARCH, web.search_tool_entry), (WebTool.FETCH, web.fetch_tool_entry))
-        if entry is not None
-    ]
-    policy = await port.resolve(scope, requested_tools)
     return apply_web_access_policy(
         policy,
-        requested_tools=requested_tools,
+        requested_tools=web.requested_tools,
         search_tool_entry=web.search_tool_entry,
         fetch_tool_entry=web.fetch_tool_entry,
         config=config,

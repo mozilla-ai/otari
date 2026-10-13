@@ -32,6 +32,15 @@ A provider-native code-execution type is decided by the request's
 own, so a fallback can run Otari's tool where the first model ran its own.
 Function tools remain the caller's responsibility.
 
+In [hybrid mode](modes.md) each attempt the platform plans is decided the same
+way, except that none is skipped, because the control plane expects a report for
+every attempt it planned. Under `provider` every attempt is sent the provider's
+tool, and a request one of whose attempts Otari's tool could not serve (the
+workspace has the tool off, say) is decided as a whole: Otari's tool on every
+attempt, or the request refused. A route with one attempt is dispatched as it
+always was, and the control plane's code-execution and Web Access policies are
+each asked once per request.
+
 ### Web-search interception
 
 Some clients can declare only provider-native search types: `web_search`,
@@ -303,11 +312,10 @@ or pays for one. A fallback that cannot run on the sandbox (code execution off
 for the workspace, no sandbox price under `require_pricing`, a container id
 from another provider, or Otari's web tools on the same attempt or MCP servers,
 which the sandbox cannot be combined with yet) is skipped rather than refusing
-the whole request. A refusal that applies to the first attempt still refuses
-the request. Two cases decide every attempt alike instead, running the code on
-the sandbox unless every model runs it natively: a request that also declares
-`otari_code_execution`, and a request served in [hybrid mode](modes.md), whose
-attempts the platform plans.
+the whole request, and the request is refused only when no attempt can run. A
+request that also declares `otari_code_execution` decides every attempt alike
+instead, running the code on the sandbox unless every model runs it natively.
+[Hybrid mode](#who-runs-a-tool) skips no attempt.
 
 An `anthropic-beta` header travels only as far as it can be honored: against a
 provider with no Messages API of its own it is dropped rather than refused,
@@ -365,9 +373,10 @@ into Otari's store under the provider's own ID. See
 session still lives for one request, so a `container` id from a previous turn
 addresses the provider's container, not the sandbox.
 
-In hybrid mode the control plane's policy is consulted only once the decision
-already points at the sandbox, so a declaration the provider serves natively is
-never turned into a 403 for a workspace the control plane has not enabled.
+In hybrid mode a workspace the control plane has not enabled still has a
+declaration its provider runs natively served by that provider. A route with a
+fallback that would need the sandbox is decided as a whole (see
+[Who runs a tool](#who-runs-a-tool)).
 
 **Upgrading from 0.6.** A deployment with `sandbox_url` set that forwarded
 `code_interpreter`, `code_execution_<date>` or `code_execution` to a provider

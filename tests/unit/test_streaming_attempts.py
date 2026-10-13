@@ -288,3 +288,27 @@ async def test_default_extra_is_zero_preserves_uniform_cap() -> None:
         )
 
     assert failures == [("only", "timeout")]
+
+
+@pytest.mark.asyncio
+async def test_each_attempt_can_carry_its_own_first_chunk_budget() -> None:
+    """An attempt's own budget replaces the shared one, so a fallback that runs a tool loop can wait longer."""
+    build_stream, classify_error, on_attempt_failed, failures = _harness()
+    attempts = [
+        _attempt("primary", delay=_WITHIN_GRACE_DELAY, chunks=("primary-chunk",)),
+        _attempt("fallback", delay=_WITHIN_GRACE_DELAY, chunks=("fallback-chunk",)),
+    ]
+    budgets = {"primary": (_BUDGET_SECONDS, 0.0), "fallback": (_BUDGET_SECONDS + _GRACE_SECONDS, 0.0)}
+
+    chosen, stream = await iterate_streaming_attempts(
+        attempts=attempts,
+        build_stream=build_stream,
+        classify_error=classify_error,
+        on_attempt_failed=on_attempt_failed,
+        first_chunk_timeout_seconds=_BUDGET_SECONDS,
+        first_chunk_timeouts=lambda attempt: budgets[attempt.name],
+    )
+
+    assert chosen.name == "fallback"
+    assert await _drain(stream) == ["fallback-chunk"]
+    assert failures == [("primary", "timeout")]

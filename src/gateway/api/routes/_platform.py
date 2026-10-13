@@ -410,6 +410,7 @@ async def run_platform_attempts(
     report_attempt_outcome: Callable[[ResolvedAttempt, str, Any, str | None, bool], None],
     on_success: Callable[[ResolvedAttempt], None],
     max_tool_iterations: int,
+    prepare_attempt: Callable[[ResolvedAttempt], dict[str, Any]] | None = None,
 ) -> T:
     """Iterate ``attempts``, returning the first one that succeeds.
 
@@ -421,7 +422,9 @@ async def run_platform_attempts(
     upstream response — locking the request in to the current attempt. The
     runner is agnostic to the response shape; ``extract_usage`` pulls the
     usage object out for reporting and ``on_success`` lets the caller mutate
-    the FastAPI response object on success.
+    the FastAPI response object on success. ``prepare_attempt`` is called just
+    before each attempt runs, with the request fields that attempt is sent in
+    place of ``base_request_fields``.
 
     Lock-in semantics: once ``on_first_response`` has fired on an attempt,
     any subsequent error from that attempt terminates the request instead of
@@ -484,7 +487,8 @@ async def run_platform_attempts(
         try:
             # Built inside the ``try``: an attempt naming a provider this gateway
             # cannot reach falls through to the next one like any failed attempt.
-            result = await run_attempt(default_attempt_kwargs(attempt, base_request_fields), _mark_locked_in)
+            fields = prepare_attempt(attempt) if prepare_attempt is not None else base_request_fields
+            result = await run_attempt(default_attempt_kwargs(attempt, fields), _mark_locked_in)
         except HTTPException:
             raise
         except MaxToolIterationsExceeded as exc:

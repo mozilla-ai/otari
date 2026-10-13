@@ -439,6 +439,7 @@ async def iterate_streaming_attempts(
     on_attempt_failed: Callable[[A, StreamingAttemptFailure], Awaitable[None]],
     first_chunk_timeout_seconds: float = DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS,
     final_attempt_extra_seconds: float = 0.0,
+    first_chunk_timeouts: Callable[[A], tuple[float, float]] | None = None,
 ) -> tuple[A, AsyncIterator[C]]:
     """Iterate over ``attempts`` until one yields its first chunk; return that
     attempt and an iterator that re-emits the chunk followed by the rest of
@@ -469,6 +470,9 @@ async def iterate_streaming_attempts(
     failed attempt, retryable failures skip-and-continue, non-retryable
     failures propagate immediately, and the last exception is raised if every
     attempt is exhausted with retryable failures.
+
+    ``first_chunk_timeouts`` gives an attempt its own pair of those two values,
+    in place of the ones above.
 
     Latency contract: zero added latency in the success case — we hold the
     first chunk only long enough to call this function's caller. In the
@@ -502,9 +506,13 @@ async def iterate_streaming_attempts(
         # The failover cap only buys something when a next attempt exists, so the
         # sole/final attempt gets extra grace on top of it rather than being cut
         # off with nothing to fall over to.
-        attempt_timeout = first_chunk_timeout_seconds
+        attempt_timeout, final_extra = (
+            first_chunk_timeouts(attempt)
+            if first_chunk_timeouts is not None
+            else (first_chunk_timeout_seconds, final_attempt_extra_seconds)
+        )
         if is_final_attempt:
-            attempt_timeout += final_attempt_extra_seconds
+            attempt_timeout += final_extra
 
         first_chunk: C
         try:

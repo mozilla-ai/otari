@@ -190,8 +190,12 @@ Each tool's admission step (web, code execution, MCP) lives in `services/tools/`
 answer (a `CandidateVariant`) and renders their refusals; a refusal skips only
 those candidates (`CandidateCannotServe`) and refuses the request only where
 none is left, and each walker dispatches a candidate with
-`ToolContext.for_candidate`. Hybrid, and a request that also declares the
-explicit code type, decide every candidate alike. The workspace policy is read
+`ToolContext.for_candidate`. A request that also declares the explicit code
+type decides every candidate alike. A hybrid attempt is never skipped, so hybrid
+sends a `provider` tool to every attempt and decides a request one of whose
+attempts would be refused as a whole; its walkers take each attempt's request
+fields and tools, and the web policy is read once per request
+(`_RequestWebPolicy`). The workspace's code execution policy is read
 once, in the request preamble, and reused at admission; the same decision says
 where a referenced upload goes, staged for the gateway's sandbox or copied, for
 each candidate as it is dispatched, into the provider account whose container

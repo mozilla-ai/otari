@@ -155,7 +155,7 @@ decided on its own. `auto` keeps the provider's own tool on an attempt whose
 model runs it natively and runs Otari's on one that does not. `otari` always
 runs Otari's. `provider` is strict: the provider's own tool only, so a fallback
 that cannot run it is skipped, and the request fails with
-`native_tool_unavailable` if none can. See
+`native_tool_unavailable` if none can. A hybrid gateway skips no attempt. See
 [Who runs a tool](tools.md#who-runs-a-tool).
 
 ### Provider-specific fields

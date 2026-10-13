@@ -36,6 +36,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import operator
 import re
 import time
 import uuid
@@ -45,6 +46,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, StrEnum, auto
+from functools import reduce
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
 from urllib.parse import ParseResult, urlparse
 
@@ -183,7 +185,13 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing, PriceSource
-from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, WebSearchCredential
+from gateway.models.tools import (
+    CodeExecutor,
+    ResolvedCodeExecutionPolicy,
+    ResolvedWebSearchConfig,
+    WebSearchCredential,
+    WebTool,
+)
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.ports.code_execution_port import CodeExecutionPort
@@ -3433,21 +3441,40 @@ async def prepare_gateway_tools(
     A built-in tool declared in a provider's own words is decided for each candidate
     the request may be sent to (``decide_candidate_tools``), and the candidates that
     share one answer are admitted together. A refusal of one answer skips only its
-    candidates, and refuses the request only where no candidate is left. Hybrid mode
-    decides every candidate alike, since the platform's attempts share one set of tools.
+    candidates, and refuses the request only where no candidate is left. A hybrid
+    attempt is never skipped, so where one answer would be refused, hybrid mode
+    decides every candidate alike, as one request.
 
     NOTE: callers must not release the budget reservation after a refusal from here.
     """
+    web_policy = _RequestWebPolicy(
+        backends.ports.web_search_policy,
+        WebSearchPolicyScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token),
+    )
     try:
         web_candidates = _admit_web_declarations(adapter, ctx, declared)
         await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         code = await _declare_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
-        code_candidates = _decide_for_candidates(adapter, ctx, [code.provider_declaration(uniform=ctx.hybrid_mode)])
-        candidates = [web | code_tools for web, code_tools in zip(web_candidates, code_candidates, strict=True)]
+        candidates = _combined(web_candidates, _decide_for_candidates(adapter, ctx, [code.provider_declaration()]))
         answers = await _admit_candidates(
-            adapter, ctx, declared, code, candidates, mcp_servers=mcp_servers, port=backends.ports.web_search_policy
+            adapter,
+            ctx,
+            code,
+            candidates,
+            mcp_servers=mcp_servers,
+            web_policy=web_policy,
+            whole=ctx.hybrid_mode and len(set(map(_variant_key, candidates))) > 1,
         )
+        if answers is None:
+            candidates = _combined(
+                _decide_for_candidates(adapter, ctx, _web_declarations(ctx, declared, uniform=True)),
+                _decide_for_candidates(adapter, ctx, [code.provider_declaration(uniform=True)]),
+            )
+            answers = await _admit_candidates(
+                adapter, ctx, code, candidates, mcp_servers=mcp_servers, web_policy=web_policy, whole=False
+            )
+            assert answers is not None
         if not any(isinstance(answer, _AdmittedTools) for answer in answers.values()):
             refusal = _answering_refusal(adapter, answers, candidates)
             if refusal.unpriced_tool is not None:
@@ -3533,6 +3560,7 @@ async def prepare_gateway_tools(
     # The first candidate that can be served is the one the request's own fields are built for.
     tool_ctx = next(contexts[key] for key in map(_variant_key, candidates) if key in contexts)
     if len(answers) > 1:
+        assert not ctx.hybrid_mode or len(admitted) == len(answers), "a hybrid attempt cannot be skipped"
         variants = {
             key: CandidateVariant(tools=answer.error, unserved=key[1])
             if isinstance(answer, _ToolRefusal)
@@ -3544,6 +3572,14 @@ async def prepare_gateway_tools(
             for provider, candidate in zip(_candidate_provider_names(ctx), candidates, strict=True)
         }
     return tool_ctx
+
+
+@dataclass(frozen=True)
+class _DeclaredClaims:
+    """The built-in tools the candidates that share one answer are sent, before the web policy applies."""
+
+    code: AdmittedCodeExecution
+    web: DeclaredWebTools
 
 
 @dataclass(frozen=True)
@@ -3611,69 +3647,104 @@ def _answering_refusal(
     return _ToolRefusal(domain_error(adapter, NativeToolUnavailableError(unserved)))
 
 
+def _combined(*decided: Sequence[CandidateTools]) -> list[CandidateTools]:
+    """Each candidate's answers for every set of declarations, taken together, head first."""
+    return [reduce(operator.or_, answers) for answers in zip(*decided, strict=True)]
+
+
 async def _admit_candidates(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
-    declared: DeclaredTools,
     code: DeclaredCodeExecution,
     candidates: Sequence[CandidateTools],
     *,
     mcp_servers: list[McpServerConfig] | None,
-    port: WebSearchPolicyPort,
-) -> dict[_VariantKey, _AdmittedTools | _ToolRefusal]:
+    web_policy: _RequestWebPolicy,
+    whole: bool,
+) -> dict[_VariantKey, _AdmittedTools | _ToolRefusal] | None:
     """The tools each set of claims among ``candidates`` is admitted with, or why it is refused, head's first.
 
     The checks admission makes for a whole request, made once for the candidates that
     share one answer. A candidate whose provider cannot run a tool asked of it alone
-    is refused without them. Nothing is logged for a refusal here: the walk records
-    each candidate it skips, and the caller logs the one that answers the request.
+    is refused without them. The web policy is read once, for every web tool the
+    answers declare between them, and only after each answer's own checks. Where
+    ``whole``, a refusal of any answer returns ``None`` instead, without reading the
+    policy if it had not been read. Nothing is logged for a refusal here: the walk
+    records each candidate it skips, and the caller logs the one that answers the request.
     """
     beside_sandbox = any(CODE_EXECUTION_TOOL_NAME in candidate.claimed for candidate in candidates)
-    answers: dict[_VariantKey, _AdmittedTools | _ToolRefusal] = {}
+    claims: dict[_VariantKey, _DeclaredClaims | _ToolRefusal] = {}
     for candidate in candidates:
         key = _variant_key(candidate)
-        if key in answers:
+        if key in claims:
             continue
         if candidate.unserved:
-            answers[key] = _ToolRefusal(domain_error(adapter, NativeToolUnavailableError(candidate.unserved)))
+            claims[key] = _ToolRefusal(domain_error(adapter, NativeToolUnavailableError(candidate.unserved)))
         else:
-            answers[key] = await _admit_claims(
+            claims[key] = await _declare_claims(
                 adapter,
                 ctx,
-                declared,
                 code,
                 candidate.claimed,
                 beside_sandbox=beside_sandbox,
                 mcp_servers_declared=bool(mcp_servers),
-                port=port,
             )
+    if whole and any(isinstance(claim, _ToolRefusal) for claim in claims.values()):
+        return None
+    requested = [
+        tool
+        for tool in (WebTool.SEARCH, WebTool.FETCH)
+        if any(isinstance(claim, _DeclaredClaims) and tool in claim.web.requested_tools for claim in claims.values())
+    ]
+    answers: dict[_VariantKey, _AdmittedTools | _ToolRefusal] = {}
+    for key, claim in claims.items():
+        if isinstance(claim, _ToolRefusal):
+            answers[key] = claim
+        else:
+            answers[key] = await _admit_claims(adapter, ctx, claim, web_policy=web_policy, requested=requested)
+    if whole and any(isinstance(answer, _ToolRefusal) for answer in answers.values()):
+        return None
     return answers
 
 
-async def _admit_claims(
+async def _declare_claims(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
-    declared: DeclaredTools,
     code: DeclaredCodeExecution,
     claimed: frozenset[str],
     *,
     beside_sandbox: bool,
     mcp_servers_declared: bool,
-    port: WebSearchPolicyPort,
-) -> _AdmittedTools | _ToolRefusal:
-    """The tools a candidate is dispatched with where Otari runs the provider keywords in ``claimed``."""
+) -> _DeclaredClaims | _ToolRefusal:
+    """What a candidate is sent where Otari runs the provider keywords in ``claimed``, or why it cannot be."""
     try:
         admitted = await code.admit(claimed=CODE_EXECUTION_TOOL_NAME in claimed, beside_sandbox=beside_sandbox)
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
         return _ToolRefusal(domain_error(adapter, exc))
-    claims = WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
+    web_claims = WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
     try:
-        web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=claims)
+        web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
         check_web_tools_alone(web, use_sandbox=admitted.use_sandbox, mcp_servers_declared=mcp_servers_declared)
     except WebToolDeclarationError as exc:
         return _ToolRefusal(domain_error(adapter, exc))
+    return _DeclaredClaims(code=admitted, web=web)
+
+
+async def _admit_claims(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    claim: _DeclaredClaims,
+    *,
+    web_policy: _RequestWebPolicy,
+    requested: Sequence[WebTool],
+) -> _AdmittedTools | _ToolRefusal:
+    """The tools a candidate is dispatched with, once the web policy and tool pricing allow them.
+
+    ``requested`` is every web tool the request's candidates declare between them, which the policy is read for.
+    """
+    admitted, web = claim.code, claim.web
     try:
-        web_access = await _admit_web_access(adapter, ctx, web, port)
+        web_access = await _admit_web_access(adapter, ctx, web, web_policy, requested)
     except HTTPException as exc:
         return _ToolRefusal(exc)
     billed = [
@@ -3691,6 +3762,39 @@ async def _admit_claims(
         error = adapter.error(402, _unpriced_tool_detail(unpriced), ErrorKind.INVALID_REQUEST)
         return _ToolRefusal(error, unpriced_tool=unpriced)
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
+
+
+class _RequestWebPolicy:
+    """The workspace's web search policy, read at most once per request.
+
+    It is read for every web tool the request's candidates declare between them, so
+    a request whose candidates need different tools asks for the same tools, and as
+    often, as one that decides them all alike.
+    """
+
+    def __init__(self, port: WebSearchPolicyPort, scope: WebSearchPolicyScope) -> None:
+        self._port = port
+        self._scope = scope
+        self._read = False
+        self._policy: ResolvedWebSearchConfig | None = None
+        self._failure: WebSearchPolicyResolutionFailedError | None = None
+
+    async def read(self, requested_tools: Sequence[WebTool]) -> ResolvedWebSearchConfig | None:
+        """The policy, read for ``requested_tools`` the first time it is asked for.
+
+        Raises:
+            WebSearchPolicyResolutionFailedError: the policy could not be resolved.
+            ControlPlaneError: a peer that holds the policy refused or could not answer.
+        """
+        if not self._read:
+            try:
+                self._policy = await self._port.resolve(self._scope, requested_tools)
+            except WebSearchPolicyResolutionFailedError as exc:
+                self._failure = exc
+            self._read = True
+        if self._failure is not None:
+            raise self._failure
+        return self._policy
 
 
 async def _admit_guardrails(
@@ -3728,6 +3832,22 @@ async def _admit_mcp_servers(
         raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
 
+def _web_declarations(ctx: RequestContext, declared: DeclaredTools, *, uniform: bool) -> list[ProviderToolDeclaration]:
+    """The provider web keywords the request declared, and who it asked to run each.
+
+    Raises:
+        WebToolDeclarationError: a header cannot be read.
+        WebSearchInterceptedError: the header hands the provider a search this deployment runs itself.
+    """
+    return read_web_declarations(
+        declared.tools,
+        web_search_header=declared.web_search_header,
+        web_fetch_header=declared.web_fetch_header,
+        config=ctx.config,
+        uniform=uniform,
+    )
+
+
 def _admit_web_declarations(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools
 ) -> list[CandidateTools]:
@@ -3735,16 +3855,10 @@ def _admit_web_declarations(
 
     A declaration ambiguous whatever a candidate claims is refused here, before any
     network or database work; one ambiguous for only some candidates refuses them alone.
+    In hybrid mode it refuses the request, as deciding every candidate alike would.
     """
     try:
-        declarations = read_web_declarations(
-            declared.tools,
-            web_search_header=declared.web_search_header,
-            web_fetch_header=declared.web_fetch_header,
-            config=ctx.config,
-            uniform=ctx.hybrid_mode,
-        )
-        candidates = _decide_for_candidates(adapter, ctx, declarations)
+        candidates = _decide_for_candidates(adapter, ctx, _web_declarations(ctx, declared, uniform=False))
         distinct = dict.fromkeys(
             WebClaims(search=WEB_SEARCH_TOOL_NAME in candidate.claimed, fetch=WEB_FETCH_TOOL_NAME in candidate.claimed)
             for candidate in candidates
@@ -3755,7 +3869,7 @@ def _admit_web_declarations(
                 validate_web_declarations(declared.tools, claims=claims)
             except WebToolDeclarationError as exc:
                 refusals.append(exc)
-        if refusals and len(refusals) == len(distinct):
+        if refusals and (ctx.hybrid_mode or len(refusals) == len(distinct)):
             raise refusals[0]
     except (WebToolDeclarationError, WebSearchInterceptedError) as exc:
         raise domain_error(adapter, exc) from exc
@@ -3797,9 +3911,16 @@ class _AdmittedWebAccess:
 
 
 async def _admit_web_access(
-    adapter: FormatAdapter[Any, Any], ctx: RequestContext, web: DeclaredWebTools, port: WebSearchPolicyPort
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    web: DeclaredWebTools,
+    web_policy: _RequestWebPolicy,
+    requested: Sequence[WebTool],
 ) -> _AdmittedWebAccess:
-    """Narrow the declared web tools to what the workspace's web search policy permits."""
+    """Narrow the declared web tools to what the workspace's web search policy permits.
+
+    ``requested`` is what the policy is read for, where this is the first to read it.
+    """
     search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
     if not web.declared_any:
         return _AdmittedWebAccess(
@@ -3815,9 +3936,8 @@ async def _admit_web_access(
         and url_targets_platform(search_url, ctx.config.platform.get("base_url"))
     ):
         search_auth_token = ctx.config.platform_token
-    scope = WebSearchPolicyScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token)
     try:
-        grant = await admit_web_access(web, port=port, scope=scope, config=ctx.config)
+        grant = admit_web_access(web, policy=await web_policy.read(requested), config=ctx.config)
     except WebSearchPolicyResolutionFailedError as exc:
         raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
@@ -5741,31 +5861,44 @@ async def run_streaming_with_fallback(
     or a client-aware "restart" event (breaks SDK compatibility).
 
     Tool-loop modes are layered on top with the same pre-first-chunk fallback
-    semantics; the tool backend (including the MCP pool) is opened eagerly
-    once on an ``AsyncExitStack`` shared across attempts, so gateway-side
-    dependency failures surface as a normal HTTP error and each retried
-    attempt starts with a clean conversation slate.
+    semantics. Each attempt is dispatched with its own tools, and the backend
+    they run on (including the MCP pool) is opened once on an ``AsyncExitStack``
+    for the attempts that share it: the head's eagerly, so its gateway-side
+    dependency failures surface as a normal HTTP error, and a fallback's only
+    when that attempt is reached. Each retried attempt starts with a clean
+    conversation slate, and each attempt's own tools set its first-chunk budget.
     """
-    tool_mode = tool_ctx.use_tool_loop
-    first_chunk_timeout = stream_first_chunk_timeout_seconds(config, tool_mode=tool_mode)
-    final_attempt_extra = stream_final_attempt_extra_seconds(
-        config,
-        tool_mode=tool_mode,
-        has_forwarded_tools=bool(tool_ctx.remaining_user_tools),
-    )
+    head_tools = tool_ctx.for_candidate(route.attempts[0].provider) if route.attempts else tool_ctx
+
+    def _tools_for(attempt: ResolvedAttempt) -> ToolContext:
+        return tool_ctx.for_candidate(attempt.provider)
+
+    def _first_chunk_timeouts_of(tools: ToolContext) -> tuple[float, float]:
+        return (
+            stream_first_chunk_timeout_seconds(config, tool_mode=tools.use_tool_loop),
+            stream_final_attempt_extra_seconds(
+                config, tool_mode=tools.use_tool_loop, has_forwarded_tools=bool(tools.remaining_user_tools)
+            ),
+        )
+
+    first_chunk_timeout, final_attempt_extra = _first_chunk_timeouts_of(head_tools)
 
     # Only tool backends go on this stack, because a failure to close it is logged rather than raised.
     backend_stack = AsyncExitStack()
-    pool_for_loop: Any = None
+    # The backend each set of tools runs on, by the tools' identity, and the kind of the first one opened.
+    pools: dict[int, Any] = {}
+    opened: list[_ToolBackendKind] = []
+
+    async def _pool_for(tools: ToolContext) -> Any:
+        if id(tools) not in pools:
+            pool = await _enter_tool_backend(backend_stack, tools)
+            if pool is not None:
+                opened.append(_ToolBackendKind.of(tools))
+            pools[id(tools)] = pool
+        return pools[id(tools)]
+
     try:
-        if tool_ctx.mcp_server_configs:
-            pool_for_loop = await backend_stack.enter_async_context(
-                MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace)
-            )
-        elif tool_ctx.use_sandbox:
-            pool_for_loop = await backend_stack.enter_async_context(tool_ctx.build_sandbox_backend())
-        elif tool_ctx.use_web_search or tool_ctx.use_web_fetch:
-            pool_for_loop = await backend_stack.enter_async_context(tool_ctx.build_web_retrieval_backend())
+        await _pool_for(head_tools)
     except BaseException:
         # Eager-open failure (e.g. SandboxNotReachableError): propagate so the
         # route handler maps it to the existing HTTP status. Nothing to clean
@@ -5774,23 +5907,25 @@ async def run_streaming_with_fallback(
         raise
 
     async def _build_for_attempt(attempt: ResolvedAttempt) -> AsyncIterator[ChunkT]:
+        tools = _tools_for(attempt)
         completion_kwargs = adapter.prepare_stream_kwargs(
-            adapter.attempt_kwargs(attempt, base_request_fields),
+            adapter.attempt_kwargs(attempt, tool_ctx.request_fields_for(attempt.provider, base_request_fields)),
             require_usage=True,
         )
+        pool_for_loop = await _pool_for(tools)
         if pool_for_loop is None:
             return await adapter.open_provider_stream(completion_kwargs)
         kwargs = adapter.inject_hints(
             completion_kwargs,
             pool_for_loop.purpose_hints(),
-            header=tool_ctx.tools_header,
+            header=tools.tools_header,
         )
         return adapter.open_tool_loop_stream(
             kwargs,
             pool_for_loop,
-            tool_ctx.max_tool_iterations,
-            **_native_loop_options(adapter, tool_ctx),
-            **_loop_options(tool_ctx),
+            tools.max_tool_iterations,
+            **_native_loop_options(adapter, tools),
+            **_loop_options(tools),
         )
 
     # See run_platform_non_stream: BackgroundTasks only run after a successful
@@ -5841,6 +5976,9 @@ async def run_streaming_with_fallback(
             on_attempt_failed=_on_attempt_failed,
             first_chunk_timeout_seconds=first_chunk_timeout,
             final_attempt_extra_seconds=final_attempt_extra,
+            first_chunk_timeouts=(
+                (lambda attempt: _first_chunk_timeouts_of(_tools_for(attempt))) if tool_ctx.candidate_variants else None
+            ),
         )
     except BaseException as exc:
         # No attempt yielded a first chunk: the request ends in an error
@@ -5865,6 +6003,7 @@ async def run_streaming_with_fallback(
             raise with_attempt_id(shared, last_attempt_id) from exc
         raise_all_streaming_attempts_failed(adapter, exc, route, last_attempt_id)
 
+    tool_mode = _tools_for(chosen).use_tool_loop
     if tool_mode:
         logger.info(
             "Tool-loop streaming lock-in request_id=%s position=%d provider=%s model=%s",
@@ -5875,8 +6014,8 @@ async def run_streaming_with_fallback(
         )
 
     stream_to_return: AsyncIterator[ChunkT] = stream
-    if pool_for_loop is not None:
-        stream_to_return = _stream_with_stack_cleanup(stream, backend_stack, _ToolBackendKind.of(tool_ctx))
+    if opened:
+        stream_to_return = _stream_with_stack_cleanup(stream, backend_stack, opened[0])
 
     return build_streaming_response(
         adapter=adapter,
@@ -5897,6 +6036,19 @@ async def run_streaming_with_fallback(
         tool_tally=tool_ctx.tally,
         tool_loop=tool_mode,
     )
+
+
+async def _enter_tool_backend(stack: AsyncExitStack, tools: ToolContext) -> Any:
+    """Open the backend ``tools`` run their tool loop on, onto ``stack``; ``None`` where they run none."""
+    if tools.mcp_server_configs:
+        return await stack.enter_async_context(
+            MCPClientPool(tools.mcp_server_configs, tally=tools.tally, trace=tools.trace)
+        )
+    if tools.use_sandbox:
+        return await stack.enter_async_context(tools.build_sandbox_backend())
+    if tools.use_web_search or tools.use_web_fetch:
+        return await stack.enter_async_context(tools.build_web_retrieval_backend())
+    return None
 
 
 async def _stream_with_stack_cleanup(
@@ -5986,6 +6138,14 @@ async def run_platform_non_stream(
         logger.error("Platform returned empty attempts list request_id=%s", route.request_id)
         raise adapter.error(502, NO_RESOLVABLE_PROVIDER_DETAIL, ErrorKind.API)
 
+    # The tools of the attempt about to run, which ``_prepare_attempt`` sets just before it does.
+    attempt_tools = tool_ctx
+
+    def _prepare_attempt(attempt: ResolvedAttempt) -> dict[str, Any]:
+        nonlocal attempt_tools
+        attempt_tools = tool_ctx.for_candidate(attempt.provider)
+        return tool_ctx.request_fields_for(attempt.provider, base_request_fields)
+
     async def _run_attempt(
         completion_kwargs: dict[str, Any],
         on_first_response: Callable[[], None],
@@ -5993,7 +6153,7 @@ async def run_platform_non_stream(
         call_kwargs = adapter.prepare_platform_call_kwargs(completion_kwargs)
         return await dispatch_non_stream(
             adapter=adapter,
-            tool_ctx=tool_ctx,
+            tool_ctx=attempt_tools,
             call_kwargs=call_kwargs,
             on_first_response=on_first_response,
         )
@@ -6055,6 +6215,7 @@ async def run_platform_non_stream(
             report_attempt_outcome=_report_attempt_outcome,
             on_success=_on_attempt_success,
             max_tool_iterations=tool_ctx.max_tool_iterations,
+            prepare_attempt=_prepare_attempt,
         )
     except SandboxNotReachableError as exc:
         # Error responses drop queued tasks; flush earlier attempt reports.

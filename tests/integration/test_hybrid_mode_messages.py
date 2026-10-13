@@ -1718,18 +1718,22 @@ def test_a_disabled_workspace_still_has_its_native_declaration_served_by_the_pro
     assert "code_execution_20250825" in forwarded
 
 
-def test_a_route_with_a_fallback_that_cannot_run_the_code_runs_it_here_throughout(
+def test_a_route_whose_head_runs_the_code_itself_leaves_it_there_despite_its_fallback(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
-    """Hybrid walks the platform's attempts with one set of tools, so no attempt is handed a tool it cannot run."""
-    direct, looped, _ = _native_code_execution_route(
+    """Each attempt is decided on its own, so only a Bedrock fallback would run the code here.
+
+    The rest of the per-attempt contract is in ``test_hybrid_mode_tools_per_attempt.py``.
+    """
+    direct, looped, resolved = _native_code_execution_route(
         monkeypatch, control_plane_transport, {"enabled": True}, fallback_provider="bedrock"
     )
 
     response = _post_native_code_execution(platform_client)
 
     assert response.status_code == 200, response.text
-    assert looped, "the sandbox loop never ran"
-    assert direct == []
+    assert looped == []
+    assert [{tool.get("type") for tool in call.get("tools") or []} for call in direct] == [{"code_execution_20250825"}]
+    assert len(resolved) == 1
