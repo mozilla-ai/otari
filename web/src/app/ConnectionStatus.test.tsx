@@ -76,6 +76,54 @@ describe("ConnectionStatus", () => {
     )
   })
 
+  it("stays quiet for one dropped request that succeeds when asked again", async () => {
+    // A laptop waking or a proxy closing an idle connection drops one request;
+    // the gateway is fine, so the recheck succeeds and nothing is shown.
+    let calls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls += 1
+      if (calls === 1) throw new TypeError("Failed to fetch")
+      return jsonResponse({ ok: true })
+    })
+    renderWithProbe()
+
+    await waitFor(() => expect(calls).toBe(2))
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    )
+  })
+
+  it("is not held up by a failure a page left behind once requests succeed", async () => {
+    const online = true
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).includes("/left-behind") || !online) {
+        throw new TypeError("Failed to fetch")
+      }
+      return jsonResponse({ ok: true })
+    })
+    const { client } = renderWithProbe()
+    await waitFor(() =>
+      expect(client.getQueryState(["probe"])?.status).toBe("success"),
+    )
+
+    // A query no page displays any more fails, and keeps failing when rechecked.
+    await client
+      .fetchQuery({
+        queryKey: ["left-behind"],
+        queryFn: () => apiFetch(`${API_ROOT}/left-behind`),
+      })
+      .catch(() => undefined)
+    await screen.findByRole("alert")
+
+    // The query stays in error, but the gateway is answering everything else.
+    await client.refetchQueries({ queryKey: ["probe"] })
+
+    expect(client.getQueryState(["left-behind"])?.status).toBe("error")
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    )
+  })
+
   it("stays quiet for an error that is not a lost connection", async () => {
     // A 500 means the backend answered; that is a page-level error, not "offline".
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
