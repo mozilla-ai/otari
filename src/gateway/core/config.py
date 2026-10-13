@@ -1412,7 +1412,8 @@ class GatewayConfig(
             "attempt's model runs the tool natively, and runs it on this gateway's sandbox otherwise, so a "
             "request written for a frontier model keeps working when the model is swapped or falls back. "
             "'otari' always runs it "
-            "on the sandbox; 'provider' always forwards it. A workspace policy may pin a value and the "
+            "on the sandbox; 'provider' only ever leaves it with a provider that runs it itself, skipping a "
+            "model that does not. A workspace policy may pin a value and the "
             "Otari-Code-Execution header may choose one per request where the workspace has not. "
             "The explicit otari_code_execution type is always run by the gateway."
         ),

@@ -153,7 +153,7 @@ class CodeExecutor(StrEnum):
     OTARI = "otari"
     """Always the configured code-execution backend, whatever the provider offers."""
     PROVIDER = "provider"
-    """Always the provider: the declaration is forwarded untouched."""
+    """Only the provider's own tool: an attempt whose model does not run it natively is skipped."""
 
     @classmethod
     def parse(cls, value: object) -> "CodeExecutor | None":

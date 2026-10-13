@@ -173,27 +173,29 @@ The walker's `admit_attempt` step moves the reservation onto the budgets of each
 
 ## Tools, MCP, and guardrails
 
-An `otari_*` tool type always runs in the gateway. Who runs a provider-native
-web-search type is described in
-[web-search interception](../../docs/tools.md#web-search-interception) and
-decided by `claims_provider_web_search` in `services/tools/_web_declarations.py`;
-Anthropic's web-fetch type by `claims_provider_web_fetch` beside it.
-Each tool's admission step (web, code execution, MCP) lives in `services/tools/`, and
-`prepare_gateway_tools` only calls them and renders their refusals. A provider-native
-code-execution type is decided by the executor (`models/tools.py`,
-resolved in `services/tools/_code_execution_declarations.py`): a workspace pin wins over everything, the
-`Otari-Code-Execution` header wins over the deployment default, and `auto`
-decides each candidate's attempt: the provider where its model runs the
-declaration natively, the sandbox where it does not. A request split that way
-is admitted both ways (`ToolContext.code_split`), a refusal of the other way
-skips only the candidates that need it (`CandidateCannotServe`), and each
-walker dispatches a candidate with `ToolContext.for_candidate`. Hybrid, and a
-request that also declares the explicit type, decide every candidate alike.
-The workspace policy is read once, in the request preamble, and reused at
-admission; the same decision says where a referenced upload goes,
-staged for the gateway's sandbox or copied, for each candidate as it is
-dispatched, into the provider account whose container will read it
-(`FileService.provider_file_ids`). The tool loop is in
+An `otari_*` tool type always runs in the gateway. A built-in tool declared in
+a provider's own words (code execution, web search, Anthropic's web fetch) is
+decided per candidate by `decide_candidate_tools`
+(`services/tools/_candidate_tools.py`), from the preference the request
+resolves once and the tool's own `BuiltinTool.runs_natively` answer: `otari`
+runs it here on every candidate, `auto` only where the candidate's provider does
+not run it natively, and `provider` never, skipping a candidate whose provider
+cannot run it. Code execution's preference is the workspace pin, then the
+`Otari-Code-Execution` header, then the deployment default
+(`services/tools/_code_execution_declarations.py`); search's is
+`web_search_intercept`, then `Otari-Web-Search`, and fetch's `Otari-Web-Fetch`
+(`services/tools/_web_declarations.py`), where no header forwards the keyword.
+Each tool's admission step (web, code execution, MCP) lives in `services/tools/`.
+`prepare_gateway_tools` calls them once for the candidates that share one
+answer (a `CandidateVariant`) and renders their refusals; a refusal skips only
+those candidates (`CandidateCannotServe`) and refuses the request only where
+none is left, and each walker dispatches a candidate with
+`ToolContext.for_candidate`. Hybrid, and a request that also declares the
+explicit code type, decide every candidate alike. The workspace policy is read
+once, in the request preamble, and reused at admission; the same decision says
+where a referenced upload goes, staged for the gateway's sandbox or copied, for
+each candidate as it is dispatched, into the provider account whose container
+will read it (`FileService.provider_file_ids`). The tool loop is in
 `services/mcp_loop.py`, sandbox and search backends under `services/`, and
 outbound URL checks in `services/url_safety.py`.
 

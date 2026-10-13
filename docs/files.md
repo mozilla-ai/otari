@@ -132,7 +132,8 @@ document. Where a file goes follows who runs the code, decided from the
 workspace pin, the header and the deployment default for each attempt: a
 request whose first model runs the code itself and whose fallback runs it on
 the sandbox has the file copied to the provider for the one and seeded into the
-sandbox for the other.
+sandbox for the other. Under `provider`, a model that cannot run the code itself
+is skipped, so nothing is placed for it.
 
 ### A file the provider's own code execution reads
 
