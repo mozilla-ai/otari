@@ -429,7 +429,6 @@ async def _declare(
         config=GatewayConfig(sandbox_url="http://sandbox:8080" if sandbox else None),
         resolve_policy=_policy,
         container_registry=None,
-        mcp_servers_declared=False,
     )
 
 

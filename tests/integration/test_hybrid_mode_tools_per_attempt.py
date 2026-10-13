@@ -169,9 +169,11 @@ def _post(
     stream: bool = False,
     head_fails: bool = False,
     policy: dict[str, Any] | None = None,
+    also: tuple[str, ...] = (),
 ) -> tuple[Any, str, _Seen]:
     """POST a Messages request declaring ``tool`` in Anthropic's words, over a route to ``providers``.
 
+    ``also`` declares more tools beside it, each under ``auto``.
     Returns the response, its body as read, and what the request did.
     """
     seen = _Seen()
@@ -216,11 +218,12 @@ def _post(
     headers = {"Authorization": "Bearer user_test_token"}
     if header is not None:
         headers[_HEADERS[tool]] = header
+    headers |= {_HEADERS[other]: "auto" for other in also}
     body = {
         "model": _CLAUDE,
         "messages": [{"role": "user", "content": "go"}],
         "max_tokens": 100,
-        "tools": [dict(_DECLARATIONS[tool])],
+        "tools": [dict(_DECLARATIONS[name]) for name in (tool, *also)],
         **({"stream": True} if stream else {}),
     }
     with ExitStack() as stack:
@@ -351,6 +354,39 @@ def test_a_head_that_fails_before_output_hands_the_fallback_otaris_tool(
         _report(_FALLBACK),
     ]
     assert len(seen.resolved(_POLICY_PATHS[tool])) == 1
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_a_fallback_runs_code_and_search_in_one_loop_where_its_head_ran_both_itself(
+    platform_client: TestClient, control_plane_transport: InstallControlPlane, stream: bool
+) -> None:
+    """The fallback's answer combines two of Otari's tools, which is admitted for that attempt alone."""
+    response, text, seen = _post(
+        platform_client,
+        control_plane_transport,
+        providers=["anthropic", "vertexai"],
+        tool="code",
+        also=("search",),
+        stream=stream,
+        head_fails=True,
+    )
+
+    assert response.status_code == 200, text
+    assert "via-otari" in text
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [
+        {_DECLARATIONS["code"]["type"], _DECLARATIONS["search"]["type"]}
+    ]
+    [(loop_kwargs, loop_extra)] = seen.loop_calls
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == frozenset({CODE_EXECUTION_TOOL_NAME, WEB_SEARCH_TOOL_NAME})
+    assert sorted(seen.backends) == ["sandbox", "web"]
+    assert response.headers["Otari-Attempt-ID"] == _FALLBACK
+    assert _pinned(seen.usage_reports) == [
+        _report(_HEAD, status="error", error_class="http_503", final=False),
+        _report(_FALLBACK),
+    ]
+    assert len(seen.resolved(_POLICY_PATHS["code"])) == 1
+    assert seen.resolved(_POLICY_PATHS["search"]) == [{"requested_tools": [WEB_SEARCH_TOOL_NAME]}]
 
 
 @pytest.mark.parametrize("stream", [False, True])

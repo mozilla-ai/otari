@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools import (
     WEB_FETCH_HEADER,
     WEB_FETCH_TOOL_NAME,
@@ -516,33 +517,44 @@ def test_without_a_header_or_under_provider_the_keyword_is_forwarded_to_every_ca
     assert seen.web_backends == []
 
 
-def test_code_and_search_on_a_fallback_that_runs_neither_is_skipped_as_one_request_would_be(
-    client: TestClient, api_key_header: dict[str, str], db_session: Session
+@pytest.mark.parametrize("stream", [False, True])
+def test_code_and_search_on_a_fallback_that_runs_neither_run_together_on_otari(
+    client: TestClient, api_key_header: dict[str, str], db_session: Session, stream: bool
 ) -> None:
-    """The sandbox and the web tools still cannot share an attempt, which now refuses only that attempt."""
+    """The head runs Anthropic's own two tools, and the fallback runs Otari's sandbox and search in one loop."""
     headers = {**_auto(api_key_header, "search"), _CODE_HEADER: "auto"}
-    body = _messages_body("claude-then-vertex", _CODE, _SEARCH)
+    body = _messages_body("claude-then-vertex", _CODE, _SEARCH, **({"stream": True} if stream else {}))
 
     served, served_seen = _post_messages(client, headers, body)
     assert served.status_code == 200, served.text
     assert [served_seen.tool_types(call) for call in served_seen.provider_calls] == [
         {"code_execution_20250825", "web_search_20250305"}
     ]
+    assert served_seen.sandboxes == []
+    assert served_seen.web_backends == []
 
-    failed, seen = _post_messages(client, headers, body, provider_fails=True)
+    response, seen = _post_messages(client, headers, body, provider_fails=True)
 
-    assert failed.status_code >= 500, failed.text
-    assert seen.loop_calls == []
-    assert seen.sandboxes == []
-    skipped = [row for row in _rows(db_session) if row.status == "absorbed" and row.provider == "vertexai"]
-    assert len(skipped) == 1
-    assert "cannot be combined" in (skipped[0].error_message or "")
+    assert response.status_code == 200, response.text
+    assert "via-otari" in response.text
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [
+        {"code_execution_20250825", "web_search_20250305"}
+    ]
+    [(loop_kwargs, loop_extra)] = seen.loop_calls
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == frozenset({CODE_EXECUTION_TOOL_NAME, WEB_SEARCH_TOOL_NAME})
+    assert len(seen.sandboxes) == len(seen.web_backends) == 1
+    if not stream:
+        assert {(row.provider, row.status) for row in _rows(db_session)} >= {
+            ("anthropic", "absorbed"),
+            ("vertexai", "success"),
+        }
 
 
-def test_otaris_search_beside_the_providers_own_code_is_one_attempt_the_rule_allows(
-    client: TestClient, api_key_header: dict[str, str], db_session: Session
+def test_otaris_search_beside_the_providers_own_code_falls_back_to_running_both_on_otari(
+    client: TestClient, api_key_header: dict[str, str]
 ) -> None:
-    """The head runs Anthropic's code and Otari's search; the fallback would need the sandbox too, so it is skipped."""
+    """The head runs Anthropic's code beside Otari's search; the fallback runs both on Otari."""
     headers = {**api_key_header, WEB_SEARCH_HEADER: "otari", _CODE_HEADER: "auto"}
     body = _messages_body("claude-then-vertex", _CODE, _SEARCH)
 
@@ -554,14 +566,15 @@ def test_otaris_search_beside_the_providers_own_code_is_one_attempt_the_rule_all
     assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
     assert served_seen.sandboxes == []
 
-    failed, seen = _post_messages(client, headers, body, loop_fails=True)
+    response, seen = _post_messages(client, headers, body, loop_fails=True)
 
-    assert failed.status_code >= 500, failed.text
-    assert len(seen.loop_calls) == 1
-    assert seen.sandboxes == []
-    skipped = [row for row in _rows(db_session) if row.status == "absorbed" and row.provider == "vertexai"]
-    assert len(skipped) == 1
-    assert "cannot be combined" in (skipped[0].error_message or "")
+    assert response.status_code == 200, response.text
+    (head_kwargs, _), (fallback_kwargs, fallback_extra) = seen.loop_calls
+    assert seen.tool_types(head_kwargs) == {"code_execution_20250825"}
+    assert seen.tool_types(fallback_kwargs) == set()
+    assert fallback_extra.get("native_tools") == frozenset({CODE_EXECUTION_TOOL_NAME, WEB_SEARCH_TOOL_NAME})
+    assert len(seen.sandboxes) == 1, "only the fallback runs the code on the sandbox"
+    assert len(seen.web_backends) == 2
 
 
 def test_caps_are_shared_by_attempts_that_run_different_tools(
