@@ -292,19 +292,20 @@ roughly four characters per token, plus its whole output token limit. A request
 with `max_tokens: 8192` therefore holds the price of 8192 output tokens however
 few the model ends up writing, and a user close to the cap is refused once that
 hold no longer fits, even when the answer would have cost a fraction of it.
-The trade is deliberate: a request is admitted only when its worst case fits, so
-an admitted request cannot take a budget past its cap, at the price of refusing
-some requests near the cap that would have fit. A client that sends a realistic output limit,
-rather than the model's maximum, keeps more of its allowance usable near the
-cap.
+The trade is deliberate: a request is admitted only when its estimated worst
+case fits, at the price of refusing some requests near the cap that would have
+fit. The prompt side is an estimate, and settlement records what the request
+actually cost, so a request can still settle a little past its hold (and its
+budget past the cap) when the prompt tokenizes heavier than the estimate
+assumes. A client that sends a realistic output limit, rather than the model's
+maximum, keeps more of its allowance usable near the cap.
 
 Holds are also what bound concurrent requests from one user or end user. Each
 admitted request keeps its hold until it settles, and a new request is admitted
 only while recorded spend, every hold still in flight and its own hold together
 fit under the cap, checked in one conditional update so two requests cannot both
 take the last of it. Ten parallel requests near the cap are therefore admitted
-only as far as their combined worst case fits, and the rest are refused rather
-than overspending. A hold a crashed request leaves behind is returned after
+only as far as their combined worst case fits, and the rest are refused. A hold a crashed request leaves behind is returned after
 `budget_reservation_ttl_sec` (15 minutes by default). Scoped ceilings hold the
 same way, so a key's ceiling bounds all of its end users' in-flight requests
 together.
