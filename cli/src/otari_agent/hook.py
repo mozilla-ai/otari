@@ -91,7 +91,15 @@ _HOOK_COMMAND_TOOL_FIELDS = {"Bash": "command"}
 _HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS = {
     "claude-code": _HOOK_COMMAND_TOOL_FIELDS,
     "codex": {"Bash": "command", "code_mode_exec": "command", "exec": "command"},
+    # pi's own lowercase built-in tool names, with pi-native tool_input.
+    "pi": {"bash": "command"},
 }
+
+# pi's edit/write/read tools name their target in `path` (absolute, or
+# relative to cwd). The pi-otari extension forwards pi's own tool_input
+# unchanged, so these are keyed by pi's lowercase tool names.
+_PI_EDIT_TOOL_PATH_FIELDS = {"edit": "path", "write": "path"}
+_PI_READ_TOOL_PATH_FIELDS = {"read": "path"}
 
 # Codex's own edit tool, sharing Claude Code's apply_patch envelope
 # convention: unlike Edit/Write, tool_input carries no bare file_path;
@@ -2075,7 +2083,7 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
 )
 @click.option(
     "--harness",
-    type=click.Choice(["claude-code", "codex"]),
+    type=click.Choice(["claude-code", "codex", "pi"]),
     default="claude-code",
     show_default=True,
     help="Agent integration sending this callback.",
@@ -2191,6 +2199,8 @@ def hook(
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return
+    if not isinstance(payload, dict):
+        return
 
     event = payload.get("hook_event_name")
     repo = Path(payload.get("cwd") or Path.cwd())
@@ -2274,8 +2284,10 @@ def hook(
         # A tool call is an edit, a read or a shell command, never more than
         # one, so at most one of these evidence lists is ever populated per
         # call.
-        path_field = None if is_apply_patch else _HOOK_EDIT_TOOL_PATH_FIELDS.get(tool_name)
-        read_field = _HOOK_READ_TOOL_PATH_FIELDS.get(tool_name)
+        edit_fields = _PI_EDIT_TOOL_PATH_FIELDS if harness == "pi" else _HOOK_EDIT_TOOL_PATH_FIELDS
+        read_fields = _PI_READ_TOOL_PATH_FIELDS if harness == "pi" else _HOOK_READ_TOOL_PATH_FIELDS
+        path_field = None if is_apply_patch else edit_fields.get(tool_name)
+        read_field = read_fields.get(tool_name)
         command_field = command_fields.get(tool_name)
         if is_apply_patch:
             # apply_patch carries no bare file_path the way Edit/Write do:
@@ -2356,10 +2368,22 @@ def hook(
         # read a failed collection as a clean pass instead of the unresolved
         # `unknown` it actually is (see docs/agent-guardrails.md).
         transcript_path = payload.get("transcript_path")
-        collect_transcript_commands = (
-            _hook_collect_codex_transcript_commands if harness == "codex" else _hook_collect_transcript_commands
-        )
-        commands = collect_transcript_commands(Path(transcript_path)) if transcript_path else None
+        if harness == "pi":
+            # pi's session file is not Claude-format, so it is never parsed
+            # here (nor handed to the judge gates as a transcript): the
+            # extension sends the session's commands as `bash_commands`.
+            transcript_path = None
+            bash_commands = payload.get("bash_commands")
+            commands = (
+                list(bash_commands)
+                if isinstance(bash_commands, list) and all(isinstance(c, str) for c in bash_commands)
+                else None
+            )
+        else:
+            collect_transcript_commands = (
+                _hook_collect_codex_transcript_commands if harness == "codex" else _hook_collect_transcript_commands
+            )
+            commands = collect_transcript_commands(Path(transcript_path)) if transcript_path else None
         command_scope = "session"
         if commands:
             # Same truncation the PreToolUse Bash branch applies to its one
@@ -2716,7 +2740,7 @@ _HOOK_SETUP_BY_HARNESS = {
 @hook.command(name="setup")
 @click.option(
     "--harness",
-    type=click.Choice(["claude-code", "codex"]),
+    type=click.Choice(["claude-code", "codex", "pi"]),
     default="claude-code",
     show_default=True,
     help="Agent integration to configure.",
@@ -2734,6 +2758,15 @@ def hook_setup(harness: str) -> None:
     whatever gates the guardrail turns out to have; Stop needs no matcher;
     see docs/agent-guardrails.md for why both are registered unconditionally.
     """
+    if harness == "pi":
+        # pi has no hook settings file: the pi-otari extension registers the
+        # callback itself and invokes `otari hook --harness pi`.
+        click.echo(
+            "pi is wired by the pi-otari extension, not a settings file; nothing was written. "
+            "Install pi-otari in pi to enable Agent Guardrails there."
+        )
+        return
+
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
         raise click.ClickException("Not inside a Git repository.")

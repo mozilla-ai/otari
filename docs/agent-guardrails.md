@@ -111,6 +111,17 @@ session running through Codex's own Code Mode receives no `PreToolUse` dispatch
 for a shell or `apply_patch` call wrapped in JS (openai/codex#23411, open
 upstream), so only the `Stop` event reaches it.
 
+### pi
+
+pi is wired by the pi-otari extension, not by a settings file, so
+`otari hook setup --harness pi` writes nothing and only says so. The extension
+calls `otari hook --harness pi` with pi's own tool names (`bash`, `read`,
+`edit`, `write`) and `tool_input` (`command` or `path`). An `edit` or `write`
+path is an edit target, a `read` path is a read target, and a `bash` command is
+a command. On `Stop` the extension sends the session's commands as
+`bash_commands`; pi's session file is never parsed. Exit codes and output are
+the same as for Claude Code.
+
 ## Writing a gate
 
 A gate is one mapping under `gates:` in a guardrail file:

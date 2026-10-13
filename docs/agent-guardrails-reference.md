@@ -1150,6 +1150,24 @@ Git-status fallback and its own transcript scan (Codex's rollout JSONL, a
 different shape from Claude Code's Message-API transcript) still do, since
 neither depends on `PreToolUse` firing.
 
+## Registering it for pi
+
+pi has no hook settings file. The pi-otari extension registers with pi and runs
+`otari hook --harness pi`, so `otari hook setup --harness pi` writes nothing.
+The payload uses pi's lowercase tool names and native `tool_input`:
+
+| pi tool | `tool_input` | Evidence surface |
+| --- | --- | --- |
+| `edit`, `write` | `{path}` | `pre_tool_use.edit_target` |
+| `read` | `{path}` | `pre_tool_use.read_target` |
+| `bash` | `{command}` | `pre_tool_use.command` |
+
+A `path` may be relative to `cwd`. Any other tool name is allowed. On `Stop`,
+`bash_commands` (a list of strings) replaces the transcript scan as command
+evidence; when it is absent, command evidence is `unknown`. `transcript_path`
+is ignored for pi, including by judge gates, because pi's session file is not
+Claude-format. Exit codes, output and fail-open behavior match Claude Code.
+
 ## Checking a guardrail before it runs
 
 A guardrail is otherwise only checked when it runs, which is the worst moment
