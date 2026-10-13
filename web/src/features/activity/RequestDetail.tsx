@@ -46,13 +46,16 @@ export function RequestDetail({
   onPriceModel: ((model: string, endpoint: string) => void) | null
 }) {
   const memberLabels = useMemberAttributionLabels()
-  // A row with no cost (cost IS NULL, the same test the "Priced?" filter uses)
-  // is either a model the gateway has no price for or a request refused before
-  // it could be billed. Both are the same fix, and the row holds what the
-  // selector was, which a provider without model discovery would never have put
-  // in the catalog. A $0 cost is a real price, so it is deliberately not
-  // treated as uncosted.
-  const isUncosted = entry.cost === null
+  // A served request with no cost (cost IS NULL, the same test the "Priced?"
+  // filter uses) was metered without a price, and pricing the model is the fix;
+  // the row holds the selector, which a provider without model discovery would
+  // never have put in the catalog. A failed attempt carries no cost because
+  // nothing was billed, whatever the cause (a provider 404 for an unknown model,
+  // a provider 402 for an exhausted balance), so offering a price there points
+  // at the wrong fix; its error, shown above, names the cause, including the
+  // gateway's own refusal of an unpriced model. A $0 cost is a real price, so it
+  // is deliberately not treated as uncosted.
+  const isUnpricedServed = entry.status === "success" && entry.cost === null
   const pricingKey = findPricingSelector(entry)
   const isSkipped = isSkippedAttempt(entry)
   return (
@@ -169,7 +172,7 @@ export function RequestDetail({
           {entry.id}
         </DetailField>
       </div>
-      {isUncosted ? (
+      {isUnpricedServed ? (
         <div className="flex flex-wrap items-center gap-3">
           {onPriceModel ? (
             <Button

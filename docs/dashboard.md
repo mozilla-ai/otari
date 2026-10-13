@@ -136,8 +136,10 @@ which. A request or image rate is entered per 1,000, the way providers publish
 one: $2 per 1,000 searches for a rerank model is entered as 2 and stored as 2000
 per million, which is how every rate travels on the wire. The model lists name
 such a rate by its unit, for example "$0.002 per request". The same choice is on
-Activity's "Price this model", which opens per request for a rerank, audio or
-moderation request and per image for an image generation. The unit decides what
+Activity's "Price this model", offered on a served request that carried no cost
+(a failed attempt billed nothing, so its error is the guide instead), which
+opens per request for a rerank, audio or moderation request and per image for
+an image generation. The unit decides what
 a rate bills. A token rate on an audio or moderation request is still read per
 request for now and logs a warning; a later release reads it strictly, as
 tokens, which those requests do not report, so price them per request.

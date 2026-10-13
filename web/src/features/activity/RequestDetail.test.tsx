@@ -200,6 +200,40 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it.each([
+    [404, "The model `gpt-5-nonexistent` does not exist."],
+    [402, "Your credit balance is too low to access the API."],
+    [
+      402,
+      "No pricing is configured for model 'openai:gpt-4o', and require_pricing is on, so it cannot be billed.",
+    ],
+  ])(
+    "does not offer a price for a failed attempt (%i), which billed nothing",
+    async (statusCode, message) => {
+      // Nothing was billed, whatever the cause, so a price is not the fix; the
+      // error above names the cause, the gateway's own pricing refusal included.
+      mockApi()
+      renderPage(
+        <RequestDetail
+          entry={entry({
+            cost: null,
+            status: "error",
+            status_code: statusCode,
+            error_message: message,
+          })}
+          onPriceModel={vi.fn()}
+        />,
+      )
+      await flushRouter()
+
+      expect(screen.getByText(message)).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Price this model" }),
+      ).not.toBeInTheDocument()
+      expect(screen.queryByText(/carries no cost/)).not.toBeInTheDocument()
+    },
+  )
+
   it("treats a zero cost as a real price, not as uncosted", async () => {
     mockApi()
     renderPage(
