@@ -47,6 +47,7 @@ from gateway.core.config import (
     RESPONSE_DURATION_HEADER,
     GatewayConfig,
 )
+from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_ERROR
 from gateway.models.routing import RoutingConfig
 from gateway.services import catalog as selectors
 
@@ -339,6 +340,58 @@ def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
     assert "x-should-retry" not in resp.headers
+
+
+def _empty_completion(model: str) -> ChatCompletion:
+    """A 200 from the provider with nothing in it: no choices, usage still reported."""
+    return ChatCompletion(
+        id="cmpl-empty",
+        choices=[],
+        created=0,
+        model=model,
+        object="chat.completion",
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=0, total_tokens=10),
+    )
+
+
+def test_an_empty_completion_is_a_provider_error(client: TestClient) -> None:
+    _create_user(client)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_empty_completion("gpt-5-mini"))):
+        resp = _chat(client, "openai:gpt-5-mini")
+
+    assert resp.status_code == 502, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == PROVIDER_ERROR
+    assert resp.json()["code"] == PROVIDER_ERROR
+    assert resp.json()["detail"] == "The provider returned a completion with no choices"
+    rows = _usage_rows(client)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "error"
+    assert rows[0]["status_code"] == 502
+    assert rows[0]["error_message"] == "The provider returned a completion with no choices"
+
+
+def test_an_empty_completion_fails_over_to_the_next_candidate(client: TestClient) -> None:
+    _create_user(client)
+    calls: list[str] = []
+
+    async def empty_then_served(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-5-mini":
+            return _empty_completion("gpt-5-mini")
+        return _completion("claude-haiku-4-5")
+
+    with patch("gateway.api.routes.chat.acompletion", new=empty_then_served):
+        resp = _chat(client, "fast")
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert resp.json()["choices"][0]["message"]["content"] == "hello"
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    rows = _usage_rows(client)
+    absorbed = [r for r in rows if r["status"] == "absorbed"]
+    assert [r["model"] for r in absorbed] == ["gpt-5-mini"]
+    assert absorbed[0]["error_message"] == "The provider returned a completion with no choices"
+    assert [r["model"] for r in rows if r["status"] == "success"] == ["claude-haiku-4-5"]
 
 
 def test_all_candidates_failing_is_a_generic_502(client: TestClient) -> None:

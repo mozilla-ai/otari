@@ -765,6 +765,83 @@ def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
     assert error_reports[0]["error_class"] == "http_400_billing"
 
 
+def test_hybrid_mode_falls_through_on_an_empty_completion(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """A 200 with no choices is the first attempt's failure, reported as such, and the next attempt serves."""
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "empty-req-1",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "empty-att-blank",
+                            "position": 0,
+                            "provider": "gemini",
+                            "model": "gemini-2.5-flash",
+                            "api_key": "sk-blank",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "empty-att-good",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-good",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        choices: list[Choice] = []
+        if kwargs["api_key"] == "sk-good":
+            choices = [
+                Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hello"), finish_reason="stop")
+            ]
+        return ChatCompletion(
+            id="chatcmpl-empty",
+            object="chat.completion",
+            created=1700000000,
+            model=kwargs["model"],
+            choices=choices,
+            usage=CompletionUsage(prompt_tokens=5, completion_tokens=1, total_tokens=6),
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "anything", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["Otari-Attempt-ID"] == "empty-att-good"
+    error_reports = [r for r in usage_reports if r.get("status") == "error"]
+    assert len(error_reports) == 1
+    assert error_reports[0]["correlation_id"] == "empty-att-blank"
+    assert error_reports[0]["error_class"] == "empty_completion"
+
+
 def test_hybrid_mode_refuses_with_a_424_when_every_attempt_rejects_its_credential(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

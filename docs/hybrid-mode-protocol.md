@@ -900,6 +900,7 @@ waiting forever for usage reports that will never arrive.
 | `conn_err` | `httpx.NetworkError`, or the OpenAI/Anthropic SDKs' own `APIConnectionError` |
 | `http_<code>` | Provider returned an HTTP status code (e.g. `http_429`, `http_401`) |
 | `http_<code>_billing` | Provider returned a 400 or 422 whose message identifies account billing exhaustion (e.g. Anthropic's "credit balance is too low"), or any 402 Payment Required, including one whose SDK discarded the response message. Reported as `http_400_billing` etc., keeping an empty provider wallet separable from a malformed request. Like every provider error before lock-in, it advances to the next attempt. |
+| `empty_completion` | The provider answered a non-streamed chat completion with no choices. It advances to the next candidate. |
 | `unknown` | Any other exception class. It still advances to the next candidate. |
 
 Treat `error_class` as an open set of strings, not a closed enum: new tags are

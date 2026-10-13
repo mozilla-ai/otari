@@ -3,6 +3,7 @@ whether an upstream failure falls through to the next routing-policy attempt.
 """
 
 import asyncio
+from typing import Any
 
 import httpx
 import pytest
@@ -14,7 +15,9 @@ from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APIStatusError as OpenAIAPIStatusError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
+from gateway.api.routes._attempts import classify_local_attempt_error
 from gateway.api.routes._platform import _classify_upstream_error
+from gateway.services.inference import EmptyCompletionError
 
 
 def _http_error(status: int) -> httpx.HTTPStatusError:
@@ -55,6 +58,11 @@ def test_network_and_timeout_errors_are_retryable(exc: BaseException, expected_c
     retryable, error_class = _classify_upstream_error(exc)
     assert retryable is True
     assert error_class == expected_class
+
+
+@pytest.mark.parametrize("classify", [_classify_upstream_error, classify_local_attempt_error])
+def test_an_empty_completion_falls_through_under_its_own_class(classify: Any) -> None:
+    assert classify(EmptyCompletionError()) == (True, "empty_completion")
 
 
 def test_error_without_status_is_unknown_and_falls_through() -> None:

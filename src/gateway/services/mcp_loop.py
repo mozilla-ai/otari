@@ -36,6 +36,7 @@ from gateway.services._tool_loop import (
     run_tool_loop_stream,
     tool_failure_detail,
 )
+from gateway.services.inference import require_choices
 from gateway.services.providers import acompletion
 from gateway.services.tools import MAX_TOOL_ITERATIONS_CAP, MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
 
@@ -607,6 +608,9 @@ async def mcp_tool_loop(
     ``on_first_response`` follows the provider lock-in contract documented on
     :func:`gateway.services._tool_loop.run_tool_loop`; the hybrid-mode attempt
     loop in :mod:`gateway.api.routes.chat` is the consumer.
+
+    A first response with no choices is a provider failure, as on a call without
+    tools. A later one is returned as the answer, so the rounds before it are billed.
     """
     return await run_tool_loop(
         strategy=_strategy_for(use_budget),
@@ -614,4 +618,5 @@ async def mcp_tool_loop(
         pool=pool,
         max_iterations=max_iterations,
         on_first_response=on_first_response,
+        check_first_response=require_choices,
     )

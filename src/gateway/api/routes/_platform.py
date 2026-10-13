@@ -42,6 +42,7 @@ from gateway.metrics import REGISTRY, Counter
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.control_plane import ResolveEndpoint, resolve, transport
 from gateway.services.inference import (
+    is_empty_completion,
     is_provider_billing_error,
     is_retry_futile,
     is_upstream_request_fault,
@@ -777,6 +778,8 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
         return True, "missing_credential"
     if isinstance(exc, UnsupportedAttemptProviderError):
         return True, "unsupported_provider"
+    if is_empty_completion(exc):
+        return True, "empty_completion"
 
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:

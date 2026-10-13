@@ -26,6 +26,7 @@ from any_llm.types.completion import (
 
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
+from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     _accumulate_tool_call_deltas,
@@ -532,6 +533,27 @@ async def test_loop_folds_usage_when_final_completion_has_empty_choices(monkeypa
     assert out.usage.total_tokens == 27
     assert out.usage.prompt_tokens_details is not None
     assert out.usage.prompt_tokens_details.cached_tokens == 10
+
+
+@pytest.mark.asyncio
+async def test_loop_refuses_an_empty_first_completion_before_locking_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing ran yet, so an empty first answer is a provider failure the attempt walker can fall over on."""
+    empty = ChatCompletion(id="cmpl-empty", choices=[], created=0, model="fake", object="chat.completion")
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return empty
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    locked_in: list[bool] = []
+
+    with pytest.raises(EmptyCompletionError):
+        await mcp_tool_loop(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=_FakePool(tool_names=["fetch_url"]),
+            max_iterations=5,
+            on_first_response=lambda: locked_in.append(True),
+        )
+    assert locked_in == []
 
 
 @pytest.mark.asyncio

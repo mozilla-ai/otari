@@ -37,8 +37,9 @@ PROVIDER_NOT_CONFIGURED = "provider_not_configured"
 PROVIDER_CREDENTIAL_REJECTED = "provider_credential_rejected"
 # A request body or parameter that failed schema validation (a 422).
 INVALID_REQUEST = "invalid_request"
-# Sent only in a stream's error event: the provider failed after the stream
-# started, for a reason no more specific code names.
+# The provider failed after the stream started, for a reason no more specific
+# code names (a stream's error event), or answered a chat completion with no
+# choices (a 502).
 PROVIDER_ERROR = "provider_error"
 # Sent only in a stream's error event: the provider's stream ended before it
 # finished, by closing without its final event or cutting the connection.

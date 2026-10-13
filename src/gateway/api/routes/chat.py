@@ -68,6 +68,7 @@ from gateway.services.inference import (
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
+    require_choices,
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
@@ -294,7 +295,8 @@ class _ChatAdapter:
         return is_chat_stream_cost_carrier(chunk)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ChatCompletion:
-        return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
+        completion: ChatCompletion = await acompletion(**_with_upstream_user(kwargs))  # type: ignore[assignment]
+        return require_choices(completion)
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChatCompletionChunk]:
         return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]

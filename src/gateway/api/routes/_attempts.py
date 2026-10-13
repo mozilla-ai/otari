@@ -44,6 +44,7 @@ from gateway.api.routes._platform import (
 )
 from gateway.log_config import logger
 from gateway.services.inference import (
+    is_empty_completion,
     is_provider_billing_error,
     upstream_exception_shape,
 )
@@ -105,6 +106,8 @@ def classify_local_attempt_error(exc: BaseException) -> tuple[bool, str]:
     """
     if missing_credential(exc) is not None:
         return True, "missing_credential"
+    if is_empty_completion(exc):
+        return True, "empty_completion"
 
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:

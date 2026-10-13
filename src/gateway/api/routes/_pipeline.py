@@ -226,6 +226,7 @@ from gateway.services.inference import (
     UnidentifiedEndUserError,
     UnknownCaller,
     end_user_identifier,
+    is_empty_completion,
     is_provider_billing_error,
     is_upstream_connect_failure,
     is_upstream_request_fault,
@@ -430,6 +431,7 @@ PROVIDER_ACCOUNT_QUOTA_DETAIL = (
     "Raise the quota, or route this model to another provider."
 )
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
+PROVIDER_EMPTY_COMPLETION_DETAIL = "The provider returned a completion with no choices"
 
 
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
@@ -759,6 +761,8 @@ def classify_provider_error(
     missing = missing_credential(exc)
     if missing is not None:
         return ProviderErrorMapping(missing.status_code, missing.detail)
+    if is_empty_completion(exc):
+        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_EMPTY_COMPLETION_DETAIL)
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
@@ -838,7 +842,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     always carry. Restricted to the 429: on the statuses that surface as a
     fixed-detail 502 the header would describe the gateway's own upstream
     account, which is not the caller's to read. A 424 names which of the
-    gateway's credentials failed it, missing or rejected, and nothing more.
+    gateway's credentials failed it, missing or rejected, and nothing more. A
+    completion with no choices is the one 502 with a code, ``provider_error``.
     """
     if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
@@ -849,6 +854,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
         return error_headers(missing.code)
     if status_code == status.HTTP_424_FAILED_DEPENDENCY and is_provider_credential_rejection(exc):
         return error_headers(PROVIDER_CREDENTIAL_REJECTED)
+    if status_code == status.HTTP_502_BAD_GATEWAY and is_empty_completion(exc):
+        return error_headers(PROVIDER_ERROR)
     if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
         return None
     headers = error_headers(UPSTREAM_RATE_LIMITED)

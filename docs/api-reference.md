@@ -444,6 +444,14 @@ either. A provider timeout answers 504, and any other provider failure 502
 `The provider closed the connection before answering`, or
 `The gateway could not connect to the provider`. A failure Otari cannot place
 keeps the fixed `LLM provider error`.
+A non-streamed Chat Completions response with no choices is a provider failure
+too, not an answer: it is refused with a 502,
+`The provider returned a completion with no choices` and the code
+`provider_error`, recorded on the usage row as an error, and a routing policy
+moves on to its next candidate. Inside a gateway tool loop this applies to the
+model's first response; a later one is returned as the answer, since the rounds
+before it were already billed. Messages and Responses are not checked: an empty
+`content` or `output` can be a legitimate answer there.
 When the request named a model alias,
 a provider message that names the alias's target names the alias instead.
 
@@ -493,7 +501,7 @@ reworded.
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
-| `provider_error` | 200, in a stream's error event only | The provider failed after the stream started, for a reason no other code names | |
+| `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
 | `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason`, or the connection carrying it was cut. The output received so far is truncated | |
 
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded

@@ -35,6 +35,8 @@ refused with `424 provider_not_configured`. A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) counts as one too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
 request is refused with `424 provider_credential_rejected`.
+A Chat Completions candidate that answers with no choices has failed too, so the
+policy moves on to the next.
 
 ```yaml
 routing:
