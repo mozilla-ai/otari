@@ -503,3 +503,50 @@ def test_a_malformed_settlement_attaches_no_inline_cost(
 
     assert response.status_code == 200, response.text
     assert response.json()["usage"] == {"prompt_tokens": 10, "total_tokens": 10}
+
+
+def test_an_attempt_naming_a_provider_this_gateway_cannot_reach_falls_through(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """A newer control plane can name a provider an older gateway predates: a capability gap, not a crash."""
+    plane = _ControlPlane(
+        [
+            _attempt("att-a", "future-embed", provider="brand-new-provider"),
+            _attempt("att-b", "text-embedding-3-small", position=1),
+        ]
+    )
+    control_plane_transport(plane)
+    monkeypatch.setattr("gateway.api.routes.embeddings.aembedding", _fake(_embedding_response()))
+
+    response = platform_client.post(
+        f"{API_ROOT}/embeddings", json={"model": "text-embedding", "input": "hello"}, headers=_AUTH
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["Otari-Attempt-ID"] == "att-b"
+    reports = {report["correlation_id"]: report for report in plane.wait_for_reports(2)}
+    assert reports["att-a"] == {
+        "correlation_id": "att-a",
+        "status": "error",
+        "is_final_attempt": False,
+        "error_class": "unsupported_provider",
+    }
+
+
+def test_a_lone_attempt_naming_an_unknown_provider_is_a_502_not_a_crash(
+    platform_client: TestClient,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    plane = _ControlPlane([_attempt("att-a", "future-embed", provider="brand-new-provider")])
+    control_plane_transport(plane)
+
+    response = platform_client.post(
+        f"{API_ROOT}/embeddings", json={"model": "future-embed", "input": "hello"}, headers=_AUTH
+    )
+
+    assert response.status_code == 502
+    assert plane.reports == [
+        {"correlation_id": "att-a", "status": "error", "is_final_attempt": True, "error_class": "unsupported_provider"}
+    ]

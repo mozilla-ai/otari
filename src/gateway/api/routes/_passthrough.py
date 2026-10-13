@@ -34,7 +34,6 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Generic, Protocol, TypeVar
 
-from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import CompletionUsage
 from fastapi import Depends, HTTPException, Request, Response, status
@@ -67,6 +66,7 @@ from gateway.api.routes._platform import (
     _classify_upstream_error,
     _report_platform_usage,
     _resolve_platform_credentials,
+    attempt_provider,
     build_attempt_client_args,
     run_platform_attempts,
     with_retry_hint,
@@ -722,7 +722,7 @@ def _platform_resolved_provider(attempt: ResolvedAttempt) -> ResolvedProvider:
         kwargs["client_args"] = client_args
     return ResolvedProvider(
         instance=attempt.provider,
-        provider=LLMProvider(attempt.provider),
+        provider=attempt_provider(attempt),
         model=attempt.model,
         kwargs=kwargs,
     )
@@ -792,12 +792,13 @@ async def _run_platform_passthrough(
             )
         )
 
-    # The runner calls ``run_attempt`` once per attempt, in order, without
-    # passing the attempt, so the attempts are read off in the same order.
-    remaining = iter(route.attempts)
+    # The runner walks ``route.attempts`` in order and reports every attempt that
+    # fails before it moves to the next, including one that fails before
+    # ``run_attempt`` is called, so the position advances on that report.
+    position = 0
 
     async def run_attempt(_kwargs: dict[str, Any], _on_first_response: Callable[[], None]) -> ResultT:
-        attempt = next(remaining)
+        attempt = route.attempts[position]
         resolved = resolved_by_attempt[attempt.attempt_id] = _platform_resolved_provider(attempt)
         try:
             return await call_provider(resolved)
@@ -817,9 +818,11 @@ async def _run_platform_passthrough(
     def report_attempt_outcome(
         attempt: ResolvedAttempt, outcome: str, _result: Any, error_class: str | None, is_final_attempt: bool
     ) -> None:
+        nonlocal position
         # The success report is sent below, once the result's usage is read.
         if outcome != "success":
             report_error(attempt, error_class, is_final_attempt)
+            position += 1
 
     def on_success(attempt: ResolvedAttempt) -> None:
         nonlocal winner

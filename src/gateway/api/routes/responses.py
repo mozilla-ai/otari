@@ -50,7 +50,14 @@ from gateway.api.routes._pipeline import (
     stream_error_code,
     stream_error_message,
 )
-from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args, with_retry_hint
+from gateway.api.routes._platform import (
+    ResolvedAttempt,
+    SettledCost,
+    UnsupportedAttemptProviderError,
+    attempt_provider,
+    build_attempt_client_args,
+    with_retry_hint,
+)
 from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -414,12 +421,12 @@ class _ResponsesAdapter:
         kwargs: dict[str, Any] = {"api_key": attempt.api_key}
         if attempt.api_base:
             kwargs["api_base"] = attempt.api_base
-        request_fields = _with_codex_extra_body(base_request_fields, LLMProvider(attempt.provider))
+        request_fields = _with_codex_extra_body(base_request_fields, attempt_provider(attempt))
         merged = {
             **kwargs,
             **{k: v for k, v in request_fields.items() if k != "provider"},
             "model": attempt.model,
-            "provider": LLMProvider(attempt.provider),
+            "provider": attempt_provider(attempt),
         }
         # client_args (built from extra_params, e.g. Bedrock's region_name) is
         # platform-trusted, so it's merged in last: it can never be shadowed
@@ -566,7 +573,11 @@ async def create_response(
         assert route is not None  # guaranteed by the hybrid-mode preamble
         try:
             for attempt in route.attempts:
-                _ensure_provider_supports_responses(LLMProvider(attempt.provider))
+                try:
+                    provider = attempt_provider(attempt)
+                except UnsupportedAttemptProviderError as exc:
+                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None
+                _ensure_provider_supports_responses(provider)
         except HTTPException:
             if route.attempts:
                 # No provider call ran, so attach the preflight rejection to

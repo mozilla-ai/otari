@@ -187,6 +187,31 @@ class _AttemptFailure:
     error: BaseException = field(repr=False)
 
 
+class UnsupportedAttemptProviderError(Exception):
+    """The control plane named a provider this gateway's any-llm does not know.
+
+    A newer control plane can offer a provider an older gateway predates. The
+    attempt is a gateway capability gap, not a provider failure, and is reported
+    as one so the platform does not blame the provider.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"This gateway cannot reach provider {provider!r}")
+        self.provider = provider
+
+
+def attempt_provider(attempt: ResolvedAttempt) -> LLMProvider:
+    """The any-llm provider ``attempt`` names.
+
+    Raises:
+        UnsupportedAttemptProviderError: This gateway does not know the provider.
+    """
+    try:
+        return LLMProvider(attempt.provider)
+    except ValueError:
+        raise UnsupportedAttemptProviderError(attempt.provider) from None
+
+
 def build_attempt_client_args(attempt: ResolvedAttempt) -> dict[str, Any] | None:
     """Build the ``client_args`` any-llm needs to construct this attempt's
     provider client, or ``None`` when the attempt carries no ``extra_params``.
@@ -210,7 +235,7 @@ def build_attempt_client_args(attempt: ResolvedAttempt) -> dict[str, Any] | None
     """
     if not attempt.extra_params:
         return None
-    if LLMProvider(attempt.provider) == LLMProvider.BEDROCK:
+    if attempt_provider(attempt) == LLMProvider.BEDROCK:
         return build_bedrock_client_args(attempt.api_key, attempt.extra_params)
     return dict(attempt.extra_params)
 
@@ -228,14 +253,14 @@ def default_attempt_kwargs(
     shadowed by a same-named field in the caller's own request body,
     matching how ``api_key``/``model`` are already non-overridable.
     """
-    attempt_provider = LLMProvider(attempt.provider)
+    provider = attempt_provider(attempt)
     kwargs: dict[str, Any] = {"api_key": attempt.api_key}
     if attempt.api_base:
         kwargs["api_base"] = attempt.api_base
     merged = {
         **kwargs,
         **base_request_fields,
-        "model": f"{attempt_provider.value}:{attempt.model}",
+        "model": f"{provider.value}:{attempt.model}",
     }
     client_args = build_attempt_client_args(attempt)
     if client_args is not None:
@@ -436,7 +461,6 @@ async def run_platform_attempts(
     last_exc: BaseException | None = None
 
     for index, attempt in enumerate(attempts):
-        completion_kwargs = default_attempt_kwargs(attempt, base_request_fields)
         is_last_planned_attempt = index == len(attempts) - 1
 
         # Per-attempt lock-in flag. Flipped the moment the upstream returns
@@ -457,7 +481,9 @@ async def run_platform_attempts(
             )
 
         try:
-            result = await run_attempt(completion_kwargs, _mark_locked_in)
+            # Built inside the ``try``: an attempt naming a provider this gateway
+            # cannot reach falls through to the next one like any failed attempt.
+            result = await run_attempt(default_attempt_kwargs(attempt, base_request_fields), _mark_locked_in)
         except HTTPException:
             raise
         except MaxToolIterationsExceeded as exc:
@@ -749,6 +775,8 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     """
     if missing_credential(exc) is not None:
         return True, "missing_credential"
+    if isinstance(exc, UnsupportedAttemptProviderError):
+        return True, "unsupported_provider"
 
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:
