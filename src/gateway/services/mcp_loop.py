@@ -707,6 +707,7 @@ class _ChatToolLoopStrategy:
         async for chunk in self._run_reported(state, pool, results):
             yield chunk
         transcript.append({"role": "assistant", "tool_calls": state.mcp_calls})
+        transcript.extend(results)
 
     async def _run_reported(
         self, state: _ChatStreamState, pool: ToolBackend, results: list[dict[str, Any]]
