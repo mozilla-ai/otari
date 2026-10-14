@@ -28297,6 +28297,9 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Signup is closed and the caller is not an active member of any organization."
+          },
           "422": {
             "content": {
               "application/json": {

@@ -532,13 +532,17 @@ class OrganizationService:
         for a deployment that keeps signup closed: there, an identity whose every
         membership has ended (revoked, removed) would otherwise make itself a
         tenant by creating one, so the caller must already be an active member
-        somewhere.
+        somewhere. That membership is locked until the creation commits, so a
+        removal cannot land between the check and the new owner row.
         """
-        if require_existing_membership and await self.members.get_first_active_for_user(user.id) is None:
-            raise NotAuthorizedError("Only a member of an organization can create another one")
         name = _validated_organization_name(request.name)
         try:
             async with self._require_unit_of_work():
+                if (
+                    require_existing_membership
+                    and await self.members.get_first_active_for_user(user.id, lock=True) is None
+                ):
+                    raise NotAuthorizedError("Only a member of an organization can create another one")
                 organization = await self.organizations.create_organization(
                     name=name,
                     slug=_generated_slug(name),

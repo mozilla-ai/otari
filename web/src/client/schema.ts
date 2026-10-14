@@ -19624,6 +19624,13 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationPublic"];
                 };
             };
+            /** @description Signup is closed and the caller is not an active member of any organization. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {

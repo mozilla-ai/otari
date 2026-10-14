@@ -109,7 +109,15 @@ def get_organization_domain_service(db: Annotated[AsyncSession, Depends(get_db)]
 OrganizationDomainServiceDep = Annotated[OrganizationDomainService, Depends(get_organization_domain_service)]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Signup is closed and the caller is not an active member of any organization."
+        }
+    },
+)
 async def create_organization(
     service: OrganizationServiceDep,
     current_identity: CurrentIdentity,
