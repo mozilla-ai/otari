@@ -874,6 +874,41 @@ async def test_stream_loop_reports_gateway_tool_activity_when_asked(monkeypatch:
 
 
 @pytest.mark.asyncio
+async def test_stream_loop_reports_each_result_before_the_next_call_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _chunk(tool_calls=[(0, "call_1", "fetch_url", "{}"), (1, "call_2", "fetch_url", "{}")]),
+                _chunk(finish="tool_calls"),
+            ),
+            _async_iter(_chunk(content="all done", finish="stop")),
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=_FakePool(tool_names=["fetch_url"]),
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    assert [(a["type"], a["id"]) for a in _activity_of(chunks)] == [
+        ("tool_call", "call_1"),
+        ("tool_result", "call_1"),
+        ("tool_call", "call_2"),
+        ("tool_result", "call_2"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_stream_loop_flags_a_failed_gateway_tool_in_its_activity(monkeypatch: pytest.MonkeyPatch) -> None:
     _two_round_acompletion(monkeypatch)
     pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "[tool error] boom"})

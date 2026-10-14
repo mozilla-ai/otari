@@ -27,6 +27,7 @@ from any_llm.types.completion import ChoiceDelta, ChunkChoice, PromptTokensDetai
 
 from gateway.core.env import otari_env
 from gateway.log_config import logger
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.services._tool_loop import (
     MaxToolIterationsExceeded,
     StreamAction,
@@ -62,6 +63,7 @@ __all__ = [
     "inject_purpose_hints",
     "mcp_tool_loop",
     "mcp_tool_loop_stream",
+    "reports_tool_activity",
 ]
 
 
@@ -277,6 +279,11 @@ TOOL_ACTIVITY_FIELD = "otari_tool_activity"
 # A tool result can be a whole fetched page; the transcript shows a preview.
 _ACTIVITY_RESULT_LIMIT = 8_000
 _TOOL_ERROR_PREFIX = "[tool error]"
+
+
+def reports_tool_activity(endpoint: str) -> bool:
+    """Whether a completion served at ``endpoint`` streams gateway-run tool activity: the Playground's does."""
+    return endpoint == PLAYGROUND_USAGE_ENDPOINT
 
 
 def _activity_chunk(template: ChatCompletionChunk, payload: dict[str, Any]) -> ChatCompletionChunk:
@@ -606,13 +613,16 @@ class _ChatToolLoopStrategy:
     ) -> AsyncIterator[ChatCompletionChunk]:
         """Execute ``calls`` into ``results``, reporting each around its run when opted in."""
         template = state.template if self._emit_activity else None
-        if template is not None:
-            for call in calls:
-                yield _activity_chunk(template, _call_activity(call))
-        results.extend(await _execute_mcp_calls(pool, calls, budget=self._budget))
-        if template is not None:
-            for call, message in zip(calls, results, strict=True):
-                yield _activity_chunk(template, _result_activity(call, message))
+        if template is None:
+            results.extend(await _execute_mcp_calls(pool, calls, budget=self._budget))
+            return
+        # One call at a time, so each result is reported as soon as it exists
+        # instead of after the slowest call in the batch.
+        for call in calls:
+            yield _activity_chunk(template, _call_activity(call))
+            (message,) = await _execute_mcp_calls(pool, [call], budget=self._budget)
+            results.append(message)
+            yield _activity_chunk(template, _result_activity(call, message))
 
 
 _CHAT_STRATEGY = _ChatToolLoopStrategy()
