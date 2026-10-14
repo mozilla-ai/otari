@@ -22,24 +22,33 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
         return result.scalar_one_or_none()
 
     async def page(
-        self, owner_user_id: str, *, budget_id: str | None, blocked: bool | None, skip: int, limit: int
+        self,
+        owner_user_id: str,
+        *,
+        external_id: str | None,
+        budget_id: str | None,
+        blocked: bool | None,
+        skip: int,
+        limit: int,
     ) -> list[User]:
-        """Return a page of the owner's live end users, oldest first, narrowed by budget and blocked state."""
+        """Return a page of the owner's live end users, oldest first, narrowed by id, budget and blocked state."""
         result = await self.db.execute(
             select(User)
-            .where(*_live_end_users(owner_user_id, budget_id=budget_id, blocked=blocked))
+            .where(*_live_end_users(owner_user_id, external_id=external_id, budget_id=budget_id, blocked=blocked))
             .order_by(User.created_at, User.user_id)
             .offset(skip)
             .limit(limit)
         )
         return list(result.scalars().all())
 
-    async def count_matching(self, owner_user_id: str, *, budget_id: str | None, blocked: bool | None) -> int:
+    async def count_matching(
+        self, owner_user_id: str, *, external_id: str | None, budget_id: str | None, blocked: bool | None
+    ) -> int:
         """Count the owner's live end users that ``page`` would list across every page."""
         result = await self.db.execute(
             select(func.count())
             .select_from(User)
-            .where(*_live_end_users(owner_user_id, budget_id=budget_id, blocked=blocked))
+            .where(*_live_end_users(owner_user_id, external_id=external_id, budget_id=budget_id, blocked=blocked))
         )
         return int(result.scalar_one())
 
@@ -49,7 +58,10 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
             return {}
         result = await self.db.execute(
             select(User.budget_id, func.count(), func.count().filter(User.blocked.is_(True)))
-            .where(*_live_end_users(owner_user_id, budget_id=None, blocked=None), User.budget_id.in_(budget_ids))
+            .where(
+                *_live_end_users(owner_user_id, external_id=None, budget_id=None, blocked=None),
+                User.budget_id.in_(budget_ids),
+            )
             .group_by(User.budget_id)
         )
         return {str(budget_id): (int(total), int(blocked)) for budget_id, total, blocked in result.all()}
@@ -67,12 +79,16 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
         return True
 
 
-def _live_end_users(owner_user_id: str, *, budget_id: str | None, blocked: bool | None) -> list[ColumnElement[bool]]:
+def _live_end_users(
+    owner_user_id: str, *, external_id: str | None, budget_id: str | None, blocked: bool | None
+) -> list[ColumnElement[bool]]:
     conditions = [
         User.parent_user_id == owner_user_id,
         User.external_id.is_not(None),
         User.deleted_at.is_(None),
     ]
+    if external_id is not None:
+        conditions.append(User.external_id == external_id)
     if budget_id is not None:
         conditions.append(User.budget_id == budget_id)
     if blocked is not None:

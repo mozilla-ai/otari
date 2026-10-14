@@ -1972,7 +1972,7 @@
         {
           "name": "List End Users",
           "request": {
-            "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed.",
+            "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed. ``external_id`` reads one end user by any id, one containing '/'\nincluded, as a list of zero or one.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2010,20 +2010,108 @@
                   "value": ""
                 },
                 {
+                  "description": "Only the end user the service names with this `user` value: zero or one.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
                   "description": "Also count every matching end user, in the Otari-Total-Count response header.",
                   "disabled": true,
                   "key": "include_total",
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/end-users?skip=&limit=&budget_id=&blocked=&include_total="
+              "raw": "{{baseUrl}}/api/v1/end-users?skip=&limit=&budget_id=&blocked=&external_id=&include_total="
+            }
+          }
+        },
+        {
+          "name": "Put End User By Query",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"budget_id\": \"string\"\n}"
+            },
+            "description": "Put the end user named by ``external_id`` on a budget from the key's list, creating it if needed.\n\nThe same as ``PUT /end-users/{external_id}``, for any id, one containing '/' included.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-users"
+              ],
+              "query": [
+                {
+                  "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+                  "disabled": false,
+                  "key": "external_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-users?external_id="
+            }
+          }
+        },
+        {
+          "name": "Update End User By Query",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"blocked\": false,\n  \"budget_id\": \"string\"\n}"
+            },
+            "description": "Block, unblock or move the end user named by ``external_id``.\n\nThe same as ``PATCH /end-users/{external_id}``, for any id, one containing '/' included.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-users"
+              ],
+              "query": [
+                {
+                  "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+                  "disabled": false,
+                  "key": "external_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-users?external_id="
             }
           }
         },
         {
           "name": "Get End User",
           "request": {
-            "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404.",
+            "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404. An id with a '.' or '..'\nsegment is refused with 400; ``GET /end-users?external_id=`` reads any end user.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2059,7 +2147,7 @@
               },
               "raw": "{\n  \"budget_id\": \"string\"\n}"
             },
-            "description": "Put an end user of the calling service key on a budget from the key's list, creating it if needed.\n\nRequires a service key. Answers 201 when the end user was created. An end user already on the budget keeps its\ncurrent period, so repeating the call changes nothing. A budget that is not on the key's ``end_user_budget_ids``\nis refused with 403 and ``end_user_budget_not_allowed``.",
+            "description": "Put an end user of the calling service key on a budget from the key's list, creating it if needed.\n\nRequires a service key. Answers 201 when the end user was created. An end user already on the budget keeps its\ncurrent period, so repeating the call changes nothing. A budget that is not on the key's ``end_user_budget_ids``\nis refused with 403 and ``end_user_budget_not_allowed``. An id with a '.' or '..' segment is refused with 400;\n``PUT /end-users?external_id=`` takes any id.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2100,7 +2188,7 @@
               },
               "raw": "{\n  \"blocked\": false,\n  \"budget_id\": \"string\"\n}"
             },
-            "description": "Block, unblock or move an end user of the calling service key.\n\nRequires a service key. A move restarts the end user's period on the new budget but keeps what it has spent and\nused so far. The budget must be on the key's ``end_user_budget_ids``, or the move is refused with 403 and\n``end_user_budget_not_allowed``.",
+            "description": "Block, unblock or move an end user of the calling service key.\n\nRequires a service key. A move restarts the end user's period on the new budget but keeps what it has spent and\nused so far. The budget must be on the key's ``end_user_budget_ids``, or the move is refused with 403 and\n``end_user_budget_not_allowed``. An id with a '.' or '..' segment is refused with 400;\n``PATCH /end-users?external_id=`` takes any id.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2754,9 +2842,175 @@
           }
         },
         {
+          "name": "List End Users",
+          "request": {
+            "description": "List the end users of a service key, oldest first.\n\nEnd users belong to the key's user, so every service key of one user lists the same end users. A deleted end\nuser is not listed. ``external_id`` reads one end user by any id, one containing '/' included, as a list of zero\nor one.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "end-users"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "Only end users on this budget.",
+                  "disabled": true,
+                  "key": "budget_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only end users that are, or are not, blocked.",
+                  "disabled": true,
+                  "key": "blocked",
+                  "value": ""
+                },
+                {
+                  "description": "Only the end user the service names with this `user` value: zero or one.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+                  "disabled": true,
+                  "key": "include_total",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-users?skip=&limit=&budget_id=&blocked=&external_id=&include_total=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Put End User By Query",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"budget_id\": \"string\"\n}"
+            },
+            "description": "Put the end user named by ``external_id`` on a budget from the key's list, creating it if it does not exist yet.\n\nThe same as ``PUT /keys/{key_id}/end-users/{external_id}``, for any id, one containing '/' included.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "end-users"
+              ],
+              "query": [
+                {
+                  "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+                  "disabled": false,
+                  "key": "external_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-users?external_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update End User By Query",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"blocked\": false,\n  \"budget_id\": \"string\"\n}"
+            },
+            "description": "Block, unblock or move the end user of a service key named by ``external_id``.\n\nThe same as ``PATCH /keys/{key_id}/end-users/{external_id}``, for any id, one containing '/' included.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "end-users"
+              ],
+              "query": [
+                {
+                  "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+                  "disabled": false,
+                  "key": "external_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-users?external_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Get End User",
           "request": {
-            "description": "Get an end user of a service key by the id the service names it by.\n\nEnd users belong to the key's user, so every service key of one user reaches the same end users.",
+            "description": "Get an end user of a service key by the id the service names it by.\n\nEnd users belong to the key's user, so every service key of one user reaches the same end users. An id with a\n'.' or '..' segment is refused with 400; ``GET /keys/{key_id}/end-users?external_id=`` reads any end user.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2799,7 +3053,7 @@
               },
               "raw": "{\n  \"budget_id\": \"string\"\n}"
             },
-            "description": "Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.\n\nAnswers 201 when the end user was created, so one can be placed on a budget before its first request. An end\nuser already on the budget keeps its current period, so repeating the call changes nothing. A budget that is\nnot on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``.",
+            "description": "Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.\n\nAnswers 201 when the end user was created, so one can be placed on a budget before its first request. An end\nuser already on the budget keeps its current period, so repeating the call changes nothing. A budget that is\nnot on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``. An id with a\n'.' or '..' segment is refused with 400; ``PUT /keys/{key_id}/end-users?external_id=`` takes any id.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2847,7 +3101,7 @@
               },
               "raw": "{\n  \"blocked\": false,\n  \"budget_id\": \"string\"\n}"
             },
-            "description": "Block, unblock or move an end user of a service key.\n\nA move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users\nAPI does. The budget must be on the key's ``end_user_budget_ids``.",
+            "description": "Block, unblock or move an end user of a service key.\n\nA move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users\nAPI does. The budget must be on the key's ``end_user_budget_ids``. An id with a '.' or '..' segment is refused\nwith 400; ``PATCH /keys/{key_id}/end-users?external_id=`` takes any id.",
             "header": [
               {
                 "key": "Content-Type",

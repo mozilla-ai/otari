@@ -103,6 +103,84 @@ def test_a_service_key_puts_reads_blocks_and_moves_its_end_user(
     assert _chat(client, mlpa, "fxa1:ai").status_code == 200
 
 
+def test_a_service_key_reaches_an_end_user_whose_id_contains_a_slash(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """An App Attest key id is standard base64, so about half of them contain '/'."""
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    device = "/Ab+cd//ef0123456789ABCDEFghijklmnopqrstuvw="
+    named = {"external_id": device}
+
+    served = _chat(client, mlpa, device)
+    read = client.get(END_USERS, params=named, headers=mlpa)
+    blocked = client.patch(END_USERS, params=named, json={"blocked": True}, headers=mlpa)
+    refused = _chat(client, mlpa, device)
+    moved = client.patch(END_USERS, params=named, json={"blocked": False, "budget_id": "eu-memories"}, headers=mlpa)
+    created = client.put(
+        END_USERS, params={"external_id": "org/alice"}, json={"budget_id": "eu-memories"}, headers=mlpa
+    )
+    repeated = client.put(
+        END_USERS, params={"external_id": "org/alice"}, json={"budget_id": "eu-memories"}, headers=mlpa
+    )
+    nobody = client.get(END_USERS, params={"external_id": "org", "include_total": True}, headers=mlpa)
+
+    assert served.status_code == 200, served.text
+    assert read.status_code == 200, read.text
+    assert [user["external_id"] for user in read.json()] == [device]
+    assert read.json()[0]["owner_user_id"] == "mlpa"
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["blocked"] is True
+    assert refused.status_code == 403
+    assert refused.headers["Otari-Error-Code"] == "user_blocked"
+    assert moved.status_code == 200
+    assert moved.json() | {"external_id": device, "blocked": False, "budget_id": "eu-memories"} == moved.json()
+    assert created.status_code == 201, created.text
+    assert created.json()["external_id"] == "org/alice"
+    assert repeated.status_code == 200
+    assert nobody.json() == []
+    assert nobody.headers["Otari-Total-Count"] == "0"
+    assert _chat(client, mlpa, device).status_code == 200
+
+
+def test_the_query_form_names_only_the_calling_keys_end_users(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    other = _service_key(client, master_key_header, "other-svc")
+    named = {"external_id": "org/alice"}
+    assert client.put(END_USERS, params=named, json={"budget_id": "eu-memories"}, headers=mlpa).status_code == 201
+
+    read = client.get(END_USERS, params=named, headers=other)
+    patched = client.patch(END_USERS, params=named, json={"blocked": True}, headers=other)
+    unnamed = client.patch(END_USERS, json={"blocked": True}, headers=mlpa)
+    empty = client.put(END_USERS, params={"external_id": ""}, json={"budget_id": "eu-ai"}, headers=mlpa)
+
+    assert read.json() == []
+    assert patched.status_code == 404
+    assert unnamed.status_code == 422
+    assert empty.status_code == 422
+    assert client.get(END_USERS, params=named, headers=mlpa).json()[0]["blocked"] is False
+
+
+def test_a_dot_segment_is_refused_only_in_a_path(client: TestClient, master_key_header: dict[str, str]) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+
+    for dots in (".", "..", "a/./b"):
+        created = client.put(END_USERS, params={"external_id": dots}, json={"budget_id": "eu-ai"}, headers=mlpa)
+        assert created.status_code == 201, dots
+    # Encoded, so the client does not collapse them before Otari sees them.
+    for encoded in ("%2E", "%2E%2E", "a/%2E/b"):
+        path = f"{END_USERS}/{encoded}"
+        refused = client.get(path, headers=mlpa)
+        assert refused.status_code == 400, encoded
+        assert "external_id" in refused.json()["detail"]
+        assert client.put(path, json={"budget_id": "eu-ai"}, headers=mlpa).status_code == 400, encoded
+        assert client.patch(path, json={"blocked": True}, headers=mlpa).status_code == 400, encoded
+
+
 def test_a_service_key_cannot_move_an_end_user_off_its_list(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
@@ -166,6 +244,8 @@ def test_only_a_service_key_authenticates(client: TestClient, master_key_header:
         ("GET", f"{END_USERS}/alice", None),
         ("PUT", f"{END_USERS}/alice", {"budget_id": "eu-ai"}),
         ("PATCH", f"{END_USERS}/alice", {"blocked": True}),
+        ("PUT", f"{END_USERS}?external_id=org%2Falice", {"budget_id": "eu-ai"}),
+        ("PATCH", f"{END_USERS}?external_id=org%2Falice", {"blocked": True}),
         ("GET", END_USER_BUDGETS, None),
     ]
 

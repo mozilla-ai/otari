@@ -17,6 +17,7 @@ from gateway.api.deps import (
     require_deployment_operator,
 )
 from gateway.api.routes._helpers import database_error
+from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -26,6 +27,7 @@ from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.workspace_scope import organization_default_workspace_id
 
@@ -579,6 +581,92 @@ async def delete_key(
 
 
 ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]
+ExternalIdParam = Annotated[
+    str,
+    Query(
+        min_length=1,
+        description="The id the service names the end user by in a request's user field, any id, '/' included",
+    ),
+]
+
+# An end user is named in the path, or by the ``external_id`` query parameter on
+# ``/{key_id}/end-users`` itself, which names any id intact, one with '/' included
+# (see ``routes/end_users.py``). No ``{external_id:path}`` route matches that path.
+
+
+@router.get("/{key_id}/end-users")
+async def list_end_users(
+    key_id: str,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    budget_id: Annotated[str | None, Query(description="Only end users on this budget.")] = None,
+    blocked: Annotated[bool | None, Query(description="Only end users that are, or are not, blocked.")] = None,
+    external_id: Annotated[
+        str | None, Query(description="Only the end user the service names with this `user` value: zero or one.")
+    ] = None,
+    include_total: Annotated[
+        bool, Query(description="Also count every matching end user, in the Otari-Total-Count response header.")
+    ] = False,
+) -> list[EndUserPublic]:
+    """List the end users of a service key, oldest first.
+
+    End users belong to the key's user, so every service key of one user lists the same end users. A deleted end
+    user is not listed. ``external_id`` reads one end user by any id, one containing '/' included, as a list of zero
+    or one.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    if include_total:
+        total = await budgets.count_end_users(
+            api_key=key, external_id=external_id, budget_id=budget_id, blocked=blocked
+        )
+        response.headers[TOTAL_COUNT_HEADER] = str(total)
+    return await budgets.list_end_users(
+        api_key=key, external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
+    )
+
+
+@router.put(
+    "/{key_id}/end-users",
+    responses={status.HTTP_201_CREATED: {"model": EndUserPublic, "description": "The end user was created"}},
+)
+async def put_end_user_by_query(
+    key_id: str,
+    external_id: ExternalIdParam,
+    request: EndUserPut,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+) -> EndUserPublic:
+    """Put the end user named by ``external_id`` on a budget from the key's list, creating it if it does not exist yet.
+
+    The same as ``PUT /keys/{key_id}/end-users/{external_id}``, for any id, one containing '/' included.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await _put_end_user(budgets, key, external_id, request, response)
+
+
+@router.patch("/{key_id}/end-users")
+async def update_end_user_by_query(
+    key_id: str,
+    external_id: ExternalIdParam,
+    request: EndUserUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+) -> EndUserPublic:
+    """Block, unblock or move the end user of a service key named by ``external_id``.
+
+    The same as ``PATCH /keys/{key_id}/end-users/{external_id}``, for any id, one containing '/' included.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await budgets.update_end_user(
+        api_key=key, external_id=external_id, blocked=request.blocked, budget_id=request.budget_id
+    )
 
 
 @router.get("/{key_id}/end-users/{external_id:path}")
@@ -591,8 +679,10 @@ async def get_end_user(
 ) -> EndUserPublic:
     """Get an end user of a service key by the id the service names it by.
 
-    End users belong to the key's user, so every service key of one user reaches the same end users.
+    End users belong to the key's user, so every service key of one user reaches the same end users. An id with a
+    '.' or '..' segment is refused with 400; ``GET /keys/{key_id}/end-users?external_id=`` reads any end user.
     """
+    check_path_external_id(external_id)
     key = await _load_key_in_organization(db, key_id, organization_id)
     return await budgets.get_end_user(api_key=key, external_id=external_id)
 
@@ -614,13 +704,12 @@ async def put_end_user(
 
     Answers 201 when the end user was created, so one can be placed on a budget before its first request. An end
     user already on the budget keeps its current period, so repeating the call changes nothing. A budget that is
-    not on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``.
+    not on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``. An id with a
+    '.' or '..' segment is refused with 400; ``PUT /keys/{key_id}/end-users?external_id=`` takes any id.
     """
+    check_path_external_id(external_id)
     key = await _load_key_in_organization(db, key_id, organization_id)
-    end_user, created = await budgets.put_end_user(api_key=key, external_id=external_id, budget_id=request.budget_id)
-    if created:
-        response.status_code = status.HTTP_201_CREATED
-    return end_user
+    return await _put_end_user(budgets, key, external_id, request, response)
 
 
 @router.patch("/{key_id}/end-users/{external_id:path}")
@@ -635,9 +724,20 @@ async def update_end_user(
     """Block, unblock or move an end user of a service key.
 
     A move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users
-    API does. The budget must be on the key's ``end_user_budget_ids``.
+    API does. The budget must be on the key's ``end_user_budget_ids``. An id with a '.' or '..' segment is refused
+    with 400; ``PATCH /keys/{key_id}/end-users?external_id=`` takes any id.
     """
+    check_path_external_id(external_id)
     key = await _load_key_in_organization(db, key_id, organization_id)
     return await budgets.update_end_user(
         api_key=key, external_id=external_id, blocked=request.blocked, budget_id=request.budget_id
     )
+
+
+async def _put_end_user(
+    budgets: BudgetService, key: APIKey, external_id: str, request: EndUserPut, response: Response
+) -> EndUserPublic:
+    end_user, created = await budgets.put_end_user(api_key=key, external_id=external_id, budget_id=request.budget_id)
+    if created:
+        response.status_code = status.HTTP_201_CREATED
+    return end_user

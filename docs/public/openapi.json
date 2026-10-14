@@ -26000,7 +26000,7 @@
     },
     "/api/v1/end-users": {
       "get": {
-        "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed.",
+        "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed. ``external_id`` reads one end user by any id, one containing '/'\nincluded, as a list of zero or one.",
         "operationId": "end-users-list_end_users",
         "parameters": [
           {
@@ -26063,6 +26063,24 @@
             }
           },
           {
+            "description": "Only the end user the service names with this `user` value: zero or one.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user the service names with this `user` value: zero or one.",
+              "title": "External Id"
+            }
+          },
+          {
             "description": "Also count every matching end user, in the Otari-Total-Count response header.",
             "in": "query",
             "name": "include_total",
@@ -26113,11 +26131,145 @@
         "tags": [
           "end-users"
         ]
+      },
+      "patch": {
+        "description": "Block, unblock or move the end user named by ``external_id``.\n\nThe same as ``PATCH /end-users/{external_id}``, for any id, one containing '/' included.",
+        "operationId": "end-users-update_end_user_by_query",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+            "in": "query",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update End User By Query",
+        "tags": [
+          "end-users"
+        ]
+      },
+      "put": {
+        "description": "Put the end user named by ``external_id`` on a budget from the key's list, creating it if needed.\n\nThe same as ``PUT /end-users/{external_id}``, for any id, one containing '/' included.",
+        "operationId": "end-users-put_end_user_by_query",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+            "in": "query",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "The end user was created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put End User By Query",
+        "tags": [
+          "end-users"
+        ]
       }
     },
     "/api/v1/end-users/{external_id}": {
       "get": {
-        "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404.",
+        "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404. An id with a '.' or '..'\nsegment is refused with 400; ``GET /end-users?external_id=`` reads any end user.",
         "operationId": "end-users-get_end_user",
         "parameters": [
           {
@@ -26168,7 +26320,7 @@
         ]
       },
       "patch": {
-        "description": "Block, unblock or move an end user of the calling service key.\n\nRequires a service key. A move restarts the end user's period on the new budget but keeps what it has spent and\nused so far. The budget must be on the key's ``end_user_budget_ids``, or the move is refused with 403 and\n``end_user_budget_not_allowed``.",
+        "description": "Block, unblock or move an end user of the calling service key.\n\nRequires a service key. A move restarts the end user's period on the new budget but keeps what it has spent and\nused so far. The budget must be on the key's ``end_user_budget_ids``, or the move is refused with 403 and\n``end_user_budget_not_allowed``. An id with a '.' or '..' segment is refused with 400;\n``PATCH /end-users?external_id=`` takes any id.",
         "operationId": "end-users-update_end_user",
         "parameters": [
           {
@@ -26229,7 +26381,7 @@
         ]
       },
       "put": {
-        "description": "Put an end user of the calling service key on a budget from the key's list, creating it if needed.\n\nRequires a service key. Answers 201 when the end user was created. An end user already on the budget keeps its\ncurrent period, so repeating the call changes nothing. A budget that is not on the key's ``end_user_budget_ids``\nis refused with 403 and ``end_user_budget_not_allowed``.",
+        "description": "Put an end user of the calling service key on a budget from the key's list, creating it if needed.\n\nRequires a service key. Answers 201 when the end user was created. An end user already on the budget keeps its\ncurrent period, so repeating the call changes nothing. A budget that is not on the key's ``end_user_budget_ids``\nis refused with 403 and ``end_user_budget_not_allowed``. An id with a '.' or '..' segment is refused with 400;\n``PUT /end-users?external_id=`` takes any id.",
         "operationId": "end-users-put_end_user",
         "parameters": [
           {
@@ -27366,9 +27518,305 @@
         ]
       }
     },
+    "/api/v1/keys/{key_id}/end-users": {
+      "get": {
+        "description": "List the end users of a service key, oldest first.\n\nEnd users belong to the key's user, so every service key of one user lists the same end users. A deleted end\nuser is not listed. ``external_id`` reads one end user by any id, one containing '/' included, as a list of zero\nor one.",
+        "operationId": "keys-list_end_users",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only end users on this budget.",
+            "in": "query",
+            "name": "budget_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users on this budget.",
+              "title": "Budget Id"
+            }
+          },
+          {
+            "description": "Only end users that are, or are not, blocked.",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users that are, or are not, blocked.",
+              "title": "Blocked"
+            }
+          },
+          {
+            "description": "Only the end user the service names with this `user` value: zero or one.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user the service names with this `user` value: zero or one.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserPublic"
+                  },
+                  "title": "Response Keys-List End Users",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List End Users",
+        "tags": [
+          "keys"
+        ]
+      },
+      "patch": {
+        "description": "Block, unblock or move the end user of a service key named by ``external_id``.\n\nThe same as ``PATCH /keys/{key_id}/end-users/{external_id}``, for any id, one containing '/' included.",
+        "operationId": "keys-update_end_user_by_query",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+            "in": "query",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update End User By Query",
+        "tags": [
+          "keys"
+        ]
+      },
+      "put": {
+        "description": "Put the end user named by ``external_id`` on a budget from the key's list, creating it if it does not exist yet.\n\nThe same as ``PUT /keys/{key_id}/end-users/{external_id}``, for any id, one containing '/' included.",
+        "operationId": "keys-put_end_user_by_query",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+            "in": "query",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "The end user was created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put End User By Query",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
     "/api/v1/keys/{key_id}/end-users/{external_id}": {
       "get": {
-        "description": "Get an end user of a service key by the id the service names it by.\n\nEnd users belong to the key's user, so every service key of one user reaches the same end users.",
+        "description": "Get an end user of a service key by the id the service names it by.\n\nEnd users belong to the key's user, so every service key of one user reaches the same end users. An id with a\n'.' or '..' segment is refused with 400; ``GET /keys/{key_id}/end-users?external_id=`` reads any end user.",
         "operationId": "keys-get_end_user",
         "parameters": [
           {
@@ -27428,7 +27876,7 @@
         ]
       },
       "patch": {
-        "description": "Block, unblock or move an end user of a service key.\n\nA move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users\nAPI does. The budget must be on the key's ``end_user_budget_ids``.",
+        "description": "Block, unblock or move an end user of a service key.\n\nA move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users\nAPI does. The budget must be on the key's ``end_user_budget_ids``. An id with a '.' or '..' segment is refused\nwith 400; ``PATCH /keys/{key_id}/end-users?external_id=`` takes any id.",
         "operationId": "keys-update_end_user",
         "parameters": [
           {
@@ -27498,7 +27946,7 @@
         ]
       },
       "put": {
-        "description": "Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.\n\nAnswers 201 when the end user was created, so one can be placed on a budget before its first request. An end\nuser already on the budget keeps its current period, so repeating the call changes nothing. A budget that is\nnot on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``.",
+        "description": "Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.\n\nAnswers 201 when the end user was created, so one can be placed on a budget before its first request. An end\nuser already on the budget keeps its current period, so repeating the call changes nothing. A budget that is\nnot on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``. An id with a\n'.' or '..' segment is refused with 400; ``PUT /keys/{key_id}/end-users?external_id=`` takes any id.",
         "operationId": "keys-put_end_user",
         "parameters": [
           {

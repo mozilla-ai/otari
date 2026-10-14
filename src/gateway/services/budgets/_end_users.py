@@ -11,6 +11,7 @@ from gateway.exceptions.budget_exceptions import (
     EndUserIdInvalidError,
     EndUserNotFoundError,
     EndUserOwnerUnavailableError,
+    EndUserPathInvalidError,
     NotAServiceKeyError,
 )
 from gateway.models.api_keys import APIKey
@@ -68,7 +69,6 @@ class _EndUsers:
                 existing.deleted_at = None
             return ResolvedEndUser(existing.user_id, existing.budget_id)
 
-        _check_new_external_id(external_id)
         budget = requested
         if budget is None and api_key.end_user_budget_id:
             budget = await self._repositories.budgets.get(api_key.end_user_budget_id)
@@ -93,7 +93,6 @@ class _EndUsers:
         owner_user_id = await self._available_owner(api_key)
         user = await self._repositories.end_users.find(owner_user_id, external_id)
         if user is None:
-            _check_new_external_id(external_id)
             user = _new_end_user(owner_user_id, external_id, budget)
             if await self._repositories.end_users.add(user):
                 return EndUserPublic.from_model(user), True
@@ -117,20 +116,29 @@ class _EndUsers:
         return EndUserPublic.from_model(user)
 
     async def page(
-        self, api_key: APIKey, *, budget_id: str | None, blocked: bool | None, skip: int, limit: int
+        self,
+        api_key: APIKey,
+        *,
+        external_id: str | None,
+        budget_id: str | None,
+        blocked: bool | None,
+        skip: int,
+        limit: int,
     ) -> list[EndUserPublic]:
         """A page of the key owner's end users."""
         _require_service_key(api_key)
         users = await self._repositories.end_users.page(
-            str(api_key.user_id), budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
+            str(api_key.user_id), external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
         )
         return [EndUserPublic.from_model(user) for user in users]
 
-    async def count(self, api_key: APIKey, *, budget_id: str | None, blocked: bool | None) -> int:
+    async def count(
+        self, api_key: APIKey, *, external_id: str | None, budget_id: str | None, blocked: bool | None
+    ) -> int:
         """How many of the key owner's end users ``page`` lists across every page."""
         _require_service_key(api_key)
         return await self._repositories.end_users.count_matching(
-            str(api_key.user_id), budget_id=budget_id, blocked=blocked
+            str(api_key.user_id), external_id=external_id, budget_id=budget_id, blocked=blocked
         )
 
     async def budgets(self, api_key: APIKey) -> list[EndUserBudgetPublic]:
@@ -204,16 +212,14 @@ def _check_external_id(external_id: str) -> None:
         raise EndUserIdInvalidError(f"must be at most {MAX_EXTERNAL_ID_LENGTH} characters")
 
 
-def _check_new_external_id(external_id: str) -> None:
-    """Refuse an id for a new end user that the end-user routes could not address as one path segment.
+def check_path_external_id(external_id: str) -> None:
+    """Refuse an end user's id with a '.' or '..' segment where a URL path carries it.
 
-    Checked on creation only, so an end user created before the rule still bills.
+    HTTP clients collapse dot segments, so a path naming one can reach another end user or another route. Only the
+    path form refuses them: an end user may go by any id, and the other form names it intact.
     """
-    if "/" in external_id:
-        raise EndUserIdInvalidError("must not contain '/'")
-    # HTTP clients collapse these as dot segments, so a request for one reaches another route.
-    if external_id in (".", ".."):
-        raise EndUserIdInvalidError("must not be '.' or '..'")
+    if any(segment in (".", "..") for segment in external_id.split("/")):
+        raise EndUserPathInvalidError(external_id)
 
 
 def _require_service_key(api_key: APIKey) -> None:

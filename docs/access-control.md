@@ -122,8 +122,9 @@ Each distinct `user` value creates an end user, whether or not the request is
 then admitted, and nothing else caps how many a key can create. Set a rate
 limit on a deployment that issues service keys, and send a stable id per end
 user rather than a per-session or per-request value. An id is at most 256
-characters, and a new one may not contain `/` or be `.` or `..`, so that it
-can be named in the path of the end user routes below.
+characters and may otherwise be any string, `/` included, such as a base64 key
+id. The routes below name every end user with the `external_id` query
+parameter, which carries any id intact.
 
 ### Several budgets on one key
 
@@ -205,23 +206,32 @@ by the id it names it by. It needs neither the master key nor its key's id:
 | Request | Does |
 |---|---|
 | `GET /api/v1/end-users` | Lists the end users, oldest first |
-| `GET /api/v1/end-users/{external_id}` | Reads the end user: its budget, counters and whether it is blocked |
-| `PUT /api/v1/end-users/{external_id}` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
-| `PATCH /api/v1/end-users/{external_id}` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+| `GET /api/v1/end-users?external_id=...` | Reads the end user: its budget, counters and whether it is blocked, as a list of one, or none when no end user goes by the id |
+| `PUT /api/v1/end-users?external_id=...` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
+| `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
 | `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
 
 ```http
-PATCH /api/v1/end-users/fxa123:memories
+PATCH /api/v1/end-users?external_id=fxa123:memories
 Authorization: Bearer <service key>
 
 {"budget_id": "end-user-budget-ai"}
 ```
 
+The query parameter names any end user, so use it for an id that may contain
+`/`, and URL-encode the id as any query value is (`/` as `%2F`, `+` as `%2B`).
+The id can also go in the path, `/api/v1/end-users/{external_id}`, for `GET`,
+`PUT` and `PATCH`, which answer as their query forms do (the `GET` with the
+end user itself, or 404). That form suits an id without `/`: a
+proxy can merge the `//` of an id like `ab//cd`, and an HTTP client collapses
+`.` and `..` segments, so in a path such an id can reach another end user. An
+id with a `.` or `..` segment is refused there with 400.
+
 These routes take only a service key: another API key is refused with 403,
 and the master key and a dashboard session do not authenticate them.
 `GET /api/v1/end-users` takes `skip` and `limit` (up to 1000), narrows on
-`budget_id` and `blocked`, and with `include_total=true` counts every match in
-the `Otari-Total-Count` header. Its list and the counts on
+`budget_id`, `blocked` and `external_id`, and with `include_total=true` counts
+every match in the `Otari-Total-Count` header. Its list and the counts on
 `/api/v1/end-user-budgets` leave out deleted end users, and the counts include
 blocked ones, which `blocked_end_user_count` also gives on its own.
 
@@ -240,8 +250,10 @@ its own user to keep their end users apart.
 
 A deployment operator reaches any service key's end users through the same
 routes under the key, with the master key:
-`GET`, `PUT` and `PATCH /api/v1/keys/{key_id}/end-users/{external_id}`. A budget
-set there must be on that key's list too. The users API lists end users across
+`GET`, `PUT` and `PATCH /api/v1/keys/{key_id}/end-users?external_id=...`, with
+`GET` taking the list's other parameters too, and the path form
+`/api/v1/keys/{key_id}/end-users/{external_id}`. A budget set there must be on
+that key's list too. The users API lists end users across
 keys, where each one carries `parent_user_id` (the key's user) and
 `external_id`: `GET /api/v1/users?parent_user_id=...&external_id=...` filters on
 them, and it can put an end user on any deployment budget, not only one on a

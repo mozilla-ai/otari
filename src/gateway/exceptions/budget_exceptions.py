@@ -267,6 +267,16 @@ class EndUserIdInvalidError(TenancyValidationError):
         super().__init__(f"'user' {requirement} to name an end user")
 
 
+class EndUserPathInvalidError(TenancyValidationError):
+    """An end user was named in a URL path by an id that a path cannot carry intact."""
+
+    def __init__(self, external_id: str):
+        super().__init__(
+            f"End user '{external_id}' has a '.' or '..' segment, which HTTP clients collapse in a path; "
+            "name it with the external_id query parameter instead"
+        )
+
+
 class EndUserOwnerUnavailableError(TenancyForbiddenError):
     """The service key's own user is blocked or deleted, so none of its end users may spend."""
 
@@ -282,6 +292,7 @@ __all__ = [
     "EndUserIdInvalidError",
     "EndUserNotFoundError",
     "EndUserOwnerUnavailableError",
+    "EndUserPathInvalidError",
     "MemberBudgetPolicyAlreadyExistsError",
     "NotAServiceKeyError",
     "OrganizationBudgetHeldElsewhereError",
