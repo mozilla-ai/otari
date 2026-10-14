@@ -36,7 +36,8 @@ ExternalIdParam = Annotated[
     ),
 ]
 ExternalIdFilter = Annotated[
-    str | None, Query(description="Only the end user the service names with this `user` value: zero or one.")
+    str | None,
+    Query(min_length=1, description="Only the end user the service names with this `user` value: zero or one."),
 ]
 
 

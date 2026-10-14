@@ -156,11 +156,13 @@ def test_the_query_form_names_only_the_calling_keys_end_users(
     patched = client.patch(END_USERS, params=named, json={"blocked": True}, headers=other)
     unnamed = client.patch(END_USERS, json={"blocked": True}, headers=mlpa)
     empty = client.put(END_USERS, params={"external_id": ""}, json={"budget_id": "eu-ai"}, headers=mlpa)
+    empty_filter = client.get(END_USERS, params={"external_id": ""}, headers=mlpa)
 
     assert read.json() == []
     assert patched.status_code == 404
     assert unnamed.status_code == 422
     assert empty.status_code == 422
+    assert empty_filter.status_code == 422
     assert client.get(END_USERS, params=named, headers=mlpa).json()[0]["blocked"] is False
 
 
