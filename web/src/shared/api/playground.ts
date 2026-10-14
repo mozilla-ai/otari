@@ -342,8 +342,8 @@ export function useReplacePlaygroundFavoriteModels(
  *
  * The gateway consumes its own tool calls and a plain Chat Completions stream
  * hides them. The Playground's route reports them in an `otari_tool_activity`
- * field of the delta, one record when a call starts and one when it finishes,
- * joined by `id`.
+ * field beside a chunk's `choices`, one record when a call starts and one when
+ * it finishes, joined by `id`.
  */
 export type ToolActivity =
   | { type: "tool_call"; id: string; name: string; arguments: string }
@@ -421,13 +421,8 @@ interface StreamChunk {
   error?: string
   // Some models stream chain-of-thought in a field of its own rather than in
   // inline `<think>` tags; both are surfaced.
-  choices?: {
-    delta?: {
-      content?: string
-      reasoning?: string
-      otari_tool_activity?: WireToolActivity
-    }
-  }[]
+  choices?: { delta?: { content?: string; reasoning?: string } }[]
+  otari_tool_activity?: WireToolActivity
   // Present on the final chunk only, because the gateway is asked for it.
   usage?: StreamUsage | null
 }
@@ -531,8 +526,8 @@ export async function streamPlaygroundChat({
         if (delta?.content || delta?.reasoning) {
           onDelta({ content: delta.content, reasoning: delta.reasoning })
         }
-        const toolActivity = delta?.otari_tool_activity
-          ? toolActivityOf(delta.otari_tool_activity)
+        const toolActivity = chunk.otari_tool_activity
+          ? toolActivityOf(chunk.otari_tool_activity)
           : undefined
         if (toolActivity) onDelta({ toolActivity })
       }

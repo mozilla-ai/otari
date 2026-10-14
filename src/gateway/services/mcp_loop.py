@@ -350,9 +350,11 @@ def _fold_usage(
         completion.usage.prompt_tokens_details = PromptTokensDetails(cached_tokens=cache_read_total)
 
 
-# The delta field a tool activity chunk carries. The Chat wire has no vocabulary
-# for a gateway-run tool call, so an opted-in stream (the Playground's) reports
-# it in a field of its own, which an OpenAI client ignores as an unknown key.
+# The field a tool activity chunk carries. The Chat wire has no vocabulary for a
+# gateway-run tool call, so an opted-in stream (the Playground's) reports it in a
+# field of its own, beside ``choices`` for the reason ``otari_tool_calls`` sits
+# there (``services/tools/_chat_tool_calls.py``). In the delta it would also be
+# copied under ``provider_specific_fields``, sending every record twice.
 TOOL_ACTIVITY_FIELD = "otari_tool_activity"
 
 # A tool result can be a whole fetched page; the transcript shows a preview.
@@ -366,10 +368,16 @@ def reports_tool_activity(endpoint: str) -> bool:
 
 
 def _activity_chunk(template: ChatCompletionChunk, payload: dict[str, Any]) -> ChatCompletionChunk:
-    """A content-free chunk carrying one tool activity record, shaped like ``template``."""
-    delta = ChoiceDelta.model_validate({TOOL_ACTIVITY_FIELD: payload})
-    choice = ChunkChoice(index=0, delta=delta, finish_reason=None)
-    return template.model_copy(update={"choices": [choice], "usage": None})
+    """A content-free chunk carrying one tool activity record, with ``template``'s ``id``, ``model`` and ``created``."""
+    chunk = ChatCompletionChunk(
+        id=template.id,
+        object="chat.completion.chunk",
+        created=template.created,
+        model=template.model,
+        choices=[ChunkChoice(index=0, delta=ChoiceDelta(), finish_reason=None)],
+    )
+    setattr(chunk, TOOL_ACTIVITY_FIELD, payload)
+    return chunk
 
 
 def _call_activity(call: dict[str, Any]) -> dict[str, Any]:

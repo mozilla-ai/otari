@@ -517,7 +517,7 @@ describe("sending a question", () => {
   it("shows the tools the gateway ran, with their arguments and results", async () => {
     mockApi()
     const activity = (payload: Record<string, unknown>) =>
-      JSON.stringify({ choices: [{ delta: { otari_tool_activity: payload } }] })
+      JSON.stringify({ choices: [{ delta: {} }], otari_tool_activity: payload })
     mockStream([
       activity({
         type: "tool_call",

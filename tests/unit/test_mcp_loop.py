@@ -820,7 +820,7 @@ async def test_stream_loop_runs_mcp_tool_and_continues(monkeypatch: pytest.Monke
 def _activity_of(chunks: list[ChatCompletionChunk]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for c in chunks:
-        extra = getattr(c.choices[0].delta, mcp_loop_module.TOOL_ACTIVITY_FIELD, None) if c.choices else None
+        extra = getattr(c, mcp_loop_module.TOOL_ACTIVITY_FIELD, None)
         if extra is not None:
             out.append(extra)
     return out

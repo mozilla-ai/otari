@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -42,7 +43,7 @@ async def _chunks(*chunks: ChatCompletionChunk) -> AsyncIterator[ChatCompletionC
         yield chunk
 
 
-async def _run(adapter: chat_routes._ChatAdapter, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+async def _stream(adapter: chat_routes._ChatAdapter, monkeypatch: pytest.MonkeyPatch) -> list[ChatCompletionChunk]:
     rounds = iter(
         [
             _chunks(
@@ -68,12 +69,12 @@ async def _run(adapter: chat_routes._ChatAdapter, monkeypatch: pytest.MonkeyPatc
         return next(rounds)
 
     monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
-    activity: list[dict[str, Any]] = []
-    async for chunk in adapter.open_tool_loop_stream({"model": "fake", "messages": []}, _Pool(), 5):
-        found = getattr(chunk.choices[0].delta, TOOL_ACTIVITY_FIELD, None) if chunk.choices else None
-        if found is not None:
-            activity.append(found)
-    return activity
+    return [chunk async for chunk in adapter.open_tool_loop_stream({"model": "fake", "messages": []}, _Pool(), 5)]
+
+
+async def _run(adapter: chat_routes._ChatAdapter, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    chunks = await _stream(adapter, monkeypatch)
+    return [found for chunk in chunks if (found := getattr(chunk, TOOL_ACTIVITY_FIELD, None)) is not None]
 
 
 @pytest.mark.asyncio
@@ -85,3 +86,18 @@ async def test_the_playground_adapter_reports_gateway_tool_activity(monkeypatch:
 @pytest.mark.asyncio
 async def test_the_public_adapter_keeps_gateway_tool_activity_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
     assert await _run(chat_routes._ADAPTER, monkeypatch) == []
+
+
+@pytest.mark.asyncio
+async def test_the_playground_sse_carries_each_activity_record_once_beside_choices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = chat_routes._PLAYGROUND_ADAPTER
+    events = [adapter.format_chunk(chunk) for chunk in await _stream(adapter, monkeypatch)]
+    carrying = [event for event in events if TOOL_ACTIVITY_FIELD in event]
+    assert len(carrying) == 2
+    for event in carrying:
+        assert event.count(TOOL_ACTIVITY_FIELD) == 1
+        body = json.loads(event.removeprefix("data: "))
+        assert body[TOOL_ACTIVITY_FIELD]["type"] in {"tool_call", "tool_result"}
+        assert body["choices"][0]["delta"].get("provider_specific_fields") is None
