@@ -501,6 +501,43 @@ describe("OAuthCallbackPage", () => {
     expect(window.location.hash).toBe("#/auth/google/callback")
   })
 
+  it.each([
+    [
+      "the page the sign-in started from",
+      "#/organization/billing",
+      "#/organization/billing",
+    ],
+    [
+      "home when that page is not one to return to",
+      "#/reset-password?token=t",
+      "#/",
+    ],
+  ])("continues from that notice to %s", async (_, remembered, continueTo) => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    window.sessionStorage.setItem(RETURN_KEY, remembered)
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        expires_at: "2026-09-01T00:00:00Z",
+        password_removed: true,
+      }),
+    )
+
+    render(
+      <AppProviders>
+        <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
+          <OAuthCallbackPage
+            provider="google"
+            hash="#/auth/google/callback?code=the-code&state=the-state"
+          />
+        </DeploymentProvider>
+      </AppProviders>,
+    )
+
+    expect(
+      await screen.findByRole("link", { name: "Continue" }),
+    ).toHaveAttribute("href", continueTo)
+  })
+
   it("replaces its own history entry on success, so Back skips it", async () => {
     window.location.hash =
       "#/auth/google/callback?code=the-code&state=the-state"

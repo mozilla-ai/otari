@@ -77,7 +77,11 @@ export function OAuthCallbackPage({
     returnHash: string
   }>()
   const [needsTerms, setNeedsTerms] = useState(false)
-  const [passwordRemoved, setPasswordRemoved] = useState(false)
+  // Set when the sign-in removed the account's earlier password, holding the
+  // page the notice continues to.
+  const [passwordRemoved, setPasswordRemoved] = useState<{
+    returnHash: string
+  }>()
   // The effect below signs somebody in, so it must run once and not once per
   // render. React's development StrictMode mounts an effect twice on purpose,
   // and the second run would post a code the first already spent, turning every
@@ -156,7 +160,7 @@ export function OAuthCallbackPage({
           })
           login()
           if (result.passwordRemoved) {
-            setPasswordRemoved(true)
+            setPasswordRemoved({ returnHash })
             return
           }
           // Signing in is not enough to stop this page rendering, and leaving
@@ -194,7 +198,9 @@ export function OAuthCallbackPage({
         footer={
           <>
             <PublicAuthLink to="#/account">Set a new password</PublicAuthLink>
-            <PublicAuthLink to="#/">Continue</PublicAuthLink>
+            <PublicAuthLink to={passwordRemoved.returnHash}>
+              Continue
+            </PublicAuthLink>
           </>
         }
       >
