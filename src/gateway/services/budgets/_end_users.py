@@ -148,6 +148,11 @@ class _EndUsers:
             for budget_id in budget_ids
         ]
 
+    async def require_owner(self, api_key: APIKey) -> None:
+        """Refuse a service key whose own user is blocked or deleted."""
+        _require_service_key(api_key)
+        await self._available_owner(api_key)
+
     async def _available_owner(self, api_key: APIKey) -> str:
         """The key's user, refused when it is blocked or deleted, since its end users bill through it."""
         owner_user_id = str(api_key.user_id)

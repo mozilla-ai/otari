@@ -285,6 +285,11 @@ class BudgetService:
         async with self._uow:
             return await self._end_users.resolve(api_key, external_id, requested_budget_id)
 
+    async def require_end_user_owner(self, *, api_key: APIKey) -> None:
+        """Refuse a service key whose own user is blocked or deleted, so it manages none of its end users."""
+        async with self._uow:
+            await self._end_users.require_owner(api_key)
+
     async def get_end_user(self, *, api_key: APIKey, external_id: str) -> EndUserPublic:
         """Return the end user of the key's owner that the service named ``external_id``."""
         async with self._uow:

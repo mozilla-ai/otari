@@ -239,3 +239,30 @@ def test_a_service_key_counts_its_end_users_on_each_of_its_budgets(
         {"budget_id": "eu-ai", "is_default": True, "end_user_count": 2, "blocked_end_user_count": 1},
         {"budget_id": "eu-memories", "is_default": False, "end_user_count": 1, "blocked_end_user_count": 0},
     ]
+
+
+def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    url = f"{END_USERS}/alice"
+    assert client.put(url, json={"budget_id": "eu-ai"}, headers=mlpa).status_code == 201
+    assert client.patch(url, json={"blocked": True}, headers=mlpa).status_code == 200
+    assert client.patch(f"{API_ROOT}/users/mlpa", json={"blocked": True}, headers=master_key_header).status_code == 200
+
+    requests = [
+        ("GET", END_USERS, None),
+        ("GET", url, None),
+        ("PUT", url, {"budget_id": "eu-memories"}),
+        ("PATCH", url, {"blocked": False, "budget_id": "eu-memories"}),
+        ("GET", END_USER_BUDGETS, None),
+    ]
+    for method, target, body in requests:
+        refused = client.request(method, target, json=body, headers=mlpa)
+        assert refused.status_code == 403, (method, target, refused.text)
+
+    client.patch(f"{API_ROOT}/users/mlpa", json={"blocked": False}, headers=master_key_header)
+    read = client.get(url, headers=mlpa)
+    assert read.json()["blocked"] is True
+    assert read.json()["budget_id"] == "eu-ai"
