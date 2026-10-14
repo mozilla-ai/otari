@@ -87,6 +87,8 @@ _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     LLMProvider.OTARI: None,
     # Embeddings only.
     LLMProvider.VOYAGE: None,
+    # No chat or Messages API.
+    LLMProvider.TYPESAFE: None,
 }
 
 

@@ -3,7 +3,7 @@
 Two never reach a provider: the gateway's own MCP client capability, and every
 beta at all when the dispatched model is served with no Anthropic Messages API,
 where any-llm refuses the whole request and a model swap would otherwise stop
-working. Bedrock gets none either, since it refuses a beta it does not support.
+working. Bedrock Claude keeps the rest, and any-llm drops those Bedrock does not support.
 """
 
 from __future__ import annotations
@@ -24,6 +24,11 @@ BEDROCK_CLAUDE = "bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0"
 BEDROCK_CLAUDE_PROFILE = "bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 BEDROCK_LLAMA = "bedrock:meta.llama3-70b-instruct-v1:0"
 THINKING_BETA = "interleaved-thinking-2025-05-14"
+CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27"
+THINKING_DISPLAY_UPDATES_BETA = "thinking-display-updates-2026-08-18"
+# An Anthropic beta Bedrock does not support.
+FILES_API_BETA = "files-api-2025-04-14"
+STRUCTURED_OUTPUT = {"type": "json_schema", "schema": {"type": "object", "properties": {"a": {"type": "string"}}}}
 
 
 def test_a_native_provider_keeps_its_betas() -> None:
@@ -103,9 +108,25 @@ def test_a_bridged_model_is_not_native(model: str) -> None:
     assert not _serves_messages_natively(model)
 
 
-@pytest.mark.parametrize("model", [BEDROCK_CLAUDE, BEDROCK_CLAUDE_PROFILE, BEDROCK_LLAMA])
-def test_bedrock_drops_client_betas_for_every_model(model: str) -> None:
+@pytest.mark.parametrize("model", [BEDROCK_CLAUDE, BEDROCK_CLAUDE_PROFILE])
+def test_bedrock_claude_keeps_client_betas(model: str) -> None:
     forwarded, saw_mcp = _split_client_betas({"model": model, "betas": [MCP_CLIENT_BETA, THINKING_BETA]})
+
+    assert forwarded["betas"] == [THINKING_BETA]
+    assert saw_mcp is True
+
+
+def test_bedrock_claude_with_structured_output_drops_client_betas() -> None:
+    kwargs = {"model": BEDROCK_CLAUDE, "betas": [MCP_CLIENT_BETA, THINKING_BETA], "output_format": STRUCTURED_OUTPUT}
+
+    forwarded, saw_mcp = _split_client_betas(kwargs)
+
+    assert "betas" not in forwarded
+    assert saw_mcp is True
+
+
+def test_other_bedrock_models_drop_client_betas() -> None:
+    forwarded, saw_mcp = _split_client_betas({"model": BEDROCK_LLAMA, "betas": [MCP_CLIENT_BETA, THINKING_BETA]})
 
     assert "betas" not in forwarded
     assert saw_mcp is True
@@ -130,14 +151,14 @@ class _BedrockRuntime:
         raise _Stop
 
 
-async def _dispatch_to_bedrock(model: str, **extra: Any) -> dict[str, dict[str, Any]]:
-    """Send a Messages request with a beta and an end-user identifier through any-llm's Bedrock provider."""
+async def _dispatch_to_bedrock(model: str, betas: list[str] | None = None, **extra: Any) -> dict[str, dict[str, Any]]:
+    """Send a Messages request with betas and an end-user identifier through any-llm's Bedrock provider."""
     client = _BedrockRuntime()
     kwargs = {
         "model": model,
         "max_tokens": 16,
         "messages": [{"role": "user", "content": "hi"}],
-        "betas": [THINKING_BETA],
+        "betas": betas if betas is not None else [THINKING_BETA],
         UPSTREAM_USER_FIELD: "id",
         **extra,
     }
@@ -148,14 +169,27 @@ async def _dispatch_to_bedrock(model: str, **extra: Any) -> dict[str, dict[str, 
 
 
 @pytest.mark.asyncio
-async def test_bedrock_claude_reaches_invoke_model_with_its_identifier_and_no_client_betas() -> None:
-    calls = await _dispatch_to_bedrock(BEDROCK_CLAUDE_PROFILE)
+async def test_bedrock_claude_reaches_invoke_model_with_its_identifier_and_the_betas_bedrock_supports() -> None:
+    calls = await _dispatch_to_bedrock(
+        BEDROCK_CLAUDE_PROFILE, betas=[MCP_CLIENT_BETA, THINKING_BETA, FILES_API_BETA, CONTEXT_MANAGEMENT_BETA]
+    )
 
     request = calls["invoke_model"]
     body = json.loads(request["body"])
-    assert "anthropic_beta" not in body
+    assert body["anthropic_beta"] == [THINKING_BETA, CONTEXT_MANAGEMENT_BETA]
     assert body["metadata"] == {"user_id": "id"}
     assert "requestMetadata" not in request
+
+
+@pytest.mark.asyncio
+async def test_bedrock_claude_thinking_updates_reach_invoke_model_with_their_beta() -> None:
+    calls = await _dispatch_to_bedrock(
+        BEDROCK_CLAUDE_PROFILE, betas=[], thinking={"type": "adaptive", "display": "updates"}
+    )
+
+    body = json.loads(calls["invoke_model"]["body"])
+    assert body["anthropic_beta"] == [THINKING_DISPLAY_UPDATES_BETA]
+    assert body["thinking"] == {"type": "adaptive", "display": "updates"}
 
 
 @pytest.mark.asyncio
@@ -169,8 +203,7 @@ async def test_other_bedrock_models_reach_converse_with_request_metadata_and_no_
 
 @pytest.mark.asyncio
 async def test_bedrock_claude_with_structured_output_reaches_converse_with_request_metadata() -> None:
-    schema = {"type": "json_schema", "schema": {"type": "object", "properties": {"a": {"type": "string"}}}}
-    calls = await _dispatch_to_bedrock(BEDROCK_CLAUDE_PROFILE, output_format=schema)
+    calls = await _dispatch_to_bedrock(BEDROCK_CLAUDE_PROFILE, output_format=STRUCTURED_OUTPUT)
 
     request = calls["converse"]
     assert request["requestMetadata"] == {"otari_user": "id"}

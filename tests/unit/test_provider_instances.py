@@ -242,8 +242,9 @@ def test_credential_env_names_none_for_unknown_provider() -> None:
 # gemini raises `MissingApiKeyError` when neither GEMINI_API_KEY nor
 # GOOGLE_API_KEY resolves; azure and azureopenai tolerate a missing key only for
 # an Entra ID deployment, which still needs an endpoint from config and so never
-# reaches the port with empty kwargs.
-_KEYED_DESPITE_OVERRIDING = frozenset({"gemini", "azure", "azureopenai"})
+# reaches the port with empty kwargs. typesafe tolerates one only off its hosted
+# API, and serves no chat or Messages request otari could route to it anyway.
+_KEYED_DESPITE_OVERRIDING = frozenset({"gemini", "azure", "azureopenai", "typesafe"})
 
 
 def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
