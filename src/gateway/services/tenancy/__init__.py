@@ -17,9 +17,11 @@ from gateway.services.tenancy.organization_domain_service import OrganizationDom
 from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import (
+    describe_caller,
     forget_unproven_access,
     report_new_account,
     unverified_identity_is_claimable,
+    update_full_name,
 )
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
@@ -30,8 +32,10 @@ __all__ = [
     "OrganizationDomainService",
     "OrganizationService",
     "WorkspaceService",
+    "describe_caller",
     "ensure_bootstrap_identity",
     "forget_unproven_access",
     "report_new_account",
     "unverified_identity_is_claimable",
+    "update_full_name",
 ]

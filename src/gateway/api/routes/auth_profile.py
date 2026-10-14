@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH, CallerIdentityPublic
-from gateway.services.tenancy.user_service import describe_caller, update_full_name
+from gateway.services.tenancy import describe_caller, update_full_name
 
 # Declared on the router rather than left to arrive through ``CurrentIdentity``,
 # matching `auth_password.py`: the credential check is then a property of the
