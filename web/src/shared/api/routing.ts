@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useIsFetching,
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   AliasResponse,
   CreateAliasRequest,
@@ -91,9 +97,22 @@ export function useRoutingPolicies(workspaceId?: string) {
   })
 }
 
+// Whether a routing write or a refetch of the routing lists is in flight, so a
+// form that writes a whole policy from the cached copy can wait for it.
+export function useRoutingSyncing(): boolean {
+  const writing =
+    useIsMutating({ mutationKey: [ROUTING_POLICIES] }) +
+    useIsMutating({ mutationKey: [ALIASES] })
+  const refetching =
+    useIsFetching({ queryKey: [ROUTING_POLICIES] }) +
+    useIsFetching({ queryKey: [ALIASES] })
+  return writing + refetching > 0
+}
+
 export function useSetRoutingPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [ROUTING_POLICIES],
     mutationFn: (body: SetRoutingPolicyRequest) =>
       apiFetch<RoutingPolicyResponse>("/routing/policies", {
         method: "POST",
@@ -162,6 +181,7 @@ function invalidateRoutingLists(
 export function useSetOrganizationRoutingPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [ROUTING_POLICIES],
     mutationFn: (body: SetRoutingPolicyRequest & { workspace_id: string }) =>
       apiFetch<RoutingPolicyResponse>("/organizations/me/routing-policies", {
         method: "POST",
@@ -192,6 +212,7 @@ export function useDeleteOrganizationRoutingPolicy() {
 export function useCreateOrganizationAlias() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [ALIASES],
     mutationFn: (body: CreateAliasRequest & { workspace_id: string }) =>
       apiFetch<AliasResponse>("/organizations/me/aliases", {
         method: "POST",
@@ -243,6 +264,7 @@ export function useRouterStatus(userId: string | null) {
 export function useCreateAlias() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [ALIASES],
     mutationFn: (body: CreateAliasRequest) =>
       apiFetch<AliasResponse>("/aliases", {
         method: "POST",
