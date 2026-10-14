@@ -25,12 +25,14 @@ import { BackupList } from "./BackupList"
 import { nameProblemOf, PolicyNameField } from "./PolicyNameField"
 import { PolicyPreview } from "./PolicyPreview"
 import {
+  backupProblems,
   buildSpec,
   fallthroughOf,
   INTENTS,
   type Intent,
   isAtModelCap,
   isDraftReady,
+  isFallbackReady,
   isRouted,
   seedDraft,
 } from "./policyDraft"
@@ -137,7 +139,8 @@ export function CreatePolicyDialog({
     name.trim() !== "" &&
     nameProblem === "" &&
     scopeReady &&
-    isDraftReady(draft)
+    isDraftReady(draft) &&
+    (intent !== "fallback" || isFallbackReady(draft))
   const isDirty =
     intent !== undefined &&
     (name.trim() !== "" ||
@@ -290,6 +293,9 @@ export function CreatePolicyDialog({
             <BackupList
               backups={draft.backups}
               onChange={(backups) => setDraft((prev) => ({ ...prev, backups }))}
+              // Only here: an existing policy, on its own page, may have none.
+              isRequired
+              problems={backupProblems(draft.backups, draft.target)}
               isAtCap={isAtModelCap(draft)}
               maxModels={MAX_CANDIDATES}
             />

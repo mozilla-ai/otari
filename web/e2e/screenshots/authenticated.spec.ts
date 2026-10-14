@@ -476,7 +476,6 @@ test.describe("the routing policy dialog", () => {
     await page.getByRole("button", { name: "Create policy" }).first().click()
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("button", { name: "Continue" }).click()
-    await dialog.getByRole("button", { name: "Add a backup" }).click()
     await expect(
       dialog.getByRole("combobox", { name: "Backup 1" }),
     ).toBeVisible()

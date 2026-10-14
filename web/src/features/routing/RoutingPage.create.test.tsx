@@ -66,6 +66,16 @@ async function typeModel(user: TestUser, name: RegExp, text: string) {
   await user.keyboard("{Escape}")
 }
 
+/** Everything a fallback needs: a name, a main model and its one backup. */
+async function fillFallback(
+  user: TestUser,
+  name: string,
+  target = "openai:gpt-5-nano",
+) {
+  await nameAndServe(user, name, target)
+  await typeModel(user, /^backup 1$/i, "anthropic:claude-haiku-4-5")
+}
+
 /** Choose people under "Applies to", the way an operator does. */
 async function pickUsers(user: TestUser, queries: string[]) {
   await user.click(dialog().getByRole("button", { name: /^Applies to/ }))
@@ -123,6 +133,9 @@ describe("Creating a routing policy", () => {
     expect(screen.getByRole("dialog")).toHaveAccessibleName("New fallback")
     expect(dialog().getByText("If unavailable, use")).toBeInTheDocument()
     expect(
+      dialog().getByRole("combobox", { name: /^backup 1$/i }),
+    ).toBeRequired()
+    expect(
       dialog().getByRole("button", { name: "Add a backup" }),
     ).toBeInTheDocument()
     expect(
@@ -172,13 +185,18 @@ describe("Creating a routing policy", () => {
     ).toBeInTheDocument()
   })
 
-  it("creates a one-target policy from three fields", async () => {
+  it("creates a fallback from a name, a main model and a backup", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
     await startCreate(user)
     await nameAndServe(user, "cheap")
+    // A fallback with nothing to fall back to is not one.
+    expect(
+      dialog().getByRole("button", { name: "Create policy" }),
+    ).toBeDisabled()
+    await typeModel(user, /^backup 1$/i, "anthropic:claude-haiku-4-5")
     await submitDialog(user)
 
     const writes = policyWrites(calls)
@@ -186,22 +204,6 @@ describe("Creating a routing policy", () => {
     expect(writes[0].name).toBe("cheap")
     // The fallthrough is explicit and last, which is what the schema requires.
     expect(writes[0].spec).toEqual({
-      select: [{ default: "openai:gpt-5-nano" }],
-    })
-  })
-
-  it("saves the backups as the failure chain", async () => {
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await startCreate(user)
-    await nameAndServe(user, "chained")
-    await user.click(dialog().getByRole("button", { name: "Add a backup" }))
-    await typeModel(user, /^backup 1$/i, "anthropic:claude-haiku-4-5")
-    await submitDialog(user)
-
-    expect(lastSpec(calls)).toEqual({
       select: [{ default: "openai:gpt-5-nano" }],
       on_failure: ["anthropic:claude-haiku-4-5"],
     })
@@ -213,7 +215,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await submitDialog(user)
 
     const writes = policyWrites(calls)
@@ -228,7 +230,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await pickUsers(user, ["bob", "carol"])
     await submitDialog(user)
 
@@ -246,7 +248,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await pickUsers(user, ["bob"])
 
     expect(
@@ -260,7 +262,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await user.click(dialog().getByRole("button", { name: /^Applies to/ }))
     await user.click(dialog().getByRole("button", { name: "Specific users" }))
 
@@ -280,7 +282,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await pickUsers(user, ["bob", "carol", "alice"])
     await submitDialog(user)
 
@@ -309,7 +311,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await pickUsers(user, ["bob", "carol"])
     await submitDialog(user)
     await screen.findByRole("alert")
@@ -332,7 +334,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await pickUsers(user, ["bob", "carol"])
     await submitDialog(user)
     expect(await screen.findByRole("alert")).toBeInTheDocument()
@@ -356,7 +358,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "openai:gpt-4o")
+    await fillFallback(user, "openai:gpt-4o")
 
     expect(screen.getByText(/cannot contain/)).toBeInTheDocument()
     expect(
@@ -533,7 +535,7 @@ describe("Creating a routing policy", () => {
     renderPage(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await submitDialog(user)
 
     expect(await dialog().findByText(/already names an alias/)).toBeVisible()
@@ -621,7 +623,7 @@ describe("Creating from the empty state", () => {
         name: "Create fallback",
       }),
     )
-    await nameAndServe(user, "cheap")
+    await fillFallback(user, "cheap")
     await submitDialog(user)
 
     const trigger = await createTrigger()
@@ -653,7 +655,7 @@ describe("Creating in a workspace", () => {
     renderInWorkspace(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "scoped", "openai:gpt-5-mini")
+    await fillFallback(user, "scoped", "openai:gpt-5-mini")
     await submitDialog(user)
 
     expect(policyWrites(calls)[0]).toMatchObject({
@@ -671,7 +673,7 @@ describe("Creating in a workspace", () => {
     renderInWorkspace(<RoutingPage />)
 
     await startCreate(user)
-    await nameAndServe(user, "tenant-fast", "openai:gpt-5-mini")
+    await fillFallback(user, "tenant-fast", "openai:gpt-5-mini")
     await submitDialog(user)
 
     const written = calls.find(

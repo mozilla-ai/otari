@@ -56,6 +56,7 @@ export function OfferingPicker({
   value,
   onChange,
   description,
+  errorMessage = "",
   isRequired,
   autoFocus,
   actions,
@@ -68,6 +69,8 @@ export function OfferingPicker({
   value: string
   onChange: (selector: string) => void
   description?: ReactNode
+  /** Why the value cannot be saved, shown under the field; "" when it can. */
+  errorMessage?: string
   isRequired?: boolean
   autoFocus?: boolean
   actions?: ReactNode
@@ -144,6 +147,8 @@ export function OfferingPicker({
           placeholder="Search models"
           autoFocus={autoFocus}
           isRequired={isRequired}
+          isInvalid={errorMessage !== ""}
+          errorMessage={errorMessage}
           allowsCustomValue
           // Not "focus": an open list aria-hides the rest of the dialog.
           menuTrigger="input"

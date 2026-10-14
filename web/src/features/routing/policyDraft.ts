@@ -160,7 +160,8 @@ export function seedDraft(intent: Intent, target = ""): PolicyDraft {
   }
   switch (intent) {
     case "fallback":
-      return base
+      // A fallback is its backups, so the form opens on the first one.
+      return { ...base, backups: [""] }
     case "tierdown":
       return { ...base, tierDowns: [{ threshold: 80, target: "" }] }
     default:
@@ -279,6 +280,31 @@ export function isDraftReady(draft: PolicyDraft): boolean {
     ) &&
     draft.guardrails.every((guardrail) => guardrail.profile.trim() !== "") &&
     plannedModels(draft) <= MAX_CANDIDATES
+  )
+}
+
+/**
+ * What is wrong with each backup, or "" for one that is fine: a backup that
+ * repeats the main model or an earlier backup is never tried, since the plan
+ * holds each model once.
+ */
+export function backupProblems(backups: string[], main: string): string[] {
+  const named = backups.map((entry) => entry.trim())
+  return named.map((entry, index) => {
+    if (entry === "") return ""
+    if (entry === main.trim())
+      return "Same as the main model. Pick another one."
+    const first = named.indexOf(entry)
+    return first < index ? `Same as backup ${first + 1}. Pick another one.` : ""
+  })
+}
+
+/** Whether a new fallback has its backups: at least one, each named and distinct. */
+export function isFallbackReady(draft: PolicyDraft): boolean {
+  return (
+    draft.backups.length > 0 &&
+    draft.backups.every((entry) => entry.trim() !== "") &&
+    backupProblems(draft.backups, draft.target).every((entry) => entry === "")
   )
 }
 

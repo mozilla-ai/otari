@@ -182,6 +182,7 @@ describe("CreatePolicyDialog", () => {
     expect(screen.getByRole("combobox", { name: /^main model$/i })).toHaveValue(
       "Claude Sonnet 5.5",
     )
+    await typeInto(user, /^backup 1$/i, "openai:gpt-5")
 
     await user.click(dialog().getByRole("button", { name: "Create policy" }))
     await waitFor(() => expect(writes).toHaveLength(1))
@@ -197,7 +198,6 @@ describe("CreatePolicyDialog", () => {
 
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
     await typeInto(user, /^main model$/i, "anthropic:claude-sonnet-5-5")
-    await user.click(dialog().getByRole("button", { name: "Add a backup" }))
     await typeInto(user, /^backup 1$/i, "openai:gpt-5")
     await user.click(dialog().getByRole("button", { name: "Add a backup" }))
     await typeInto(user, /^backup 2$/i, "anthropic:claude-haiku-4-5")
@@ -226,14 +226,75 @@ describe("CreatePolicyDialog", () => {
 
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
     await typeInto(user, /^main model$/i, "openai:gpt-5")
-    await user.click(dialog().getByRole("button", { name: "Add a backup" }))
     await typeInto(user, /^backup 1$/i, "anthropic:claude-haiku-4-5")
+    await user.click(dialog().getByRole("button", { name: "Add a backup" }))
+    await typeInto(user, /^backup 2$/i, "anthropic:claude-sonnet-5-5")
     await user.click(dialog().getByRole("button", { name: "Remove backup 1" }))
-    expect(dialog().getByText(/No backups yet/)).toBeInTheDocument()
+    // The one left is the last, which a fallback cannot do without.
+    expect(
+      dialog().getByRole("button", { name: "Remove backup 1" }),
+    ).toBeDisabled()
 
     await user.click(dialog().getByRole("button", { name: "Create policy" }))
     await waitFor(() => expect(writes).toHaveLength(1))
-    expect(writes[0].spec.on_failure).toBeUndefined()
+    expect(writes[0].spec.on_failure).toEqual(["anthropic:claude-sonnet-5-5"])
+  })
+
+  it("opens a fallback on one empty, required backup, and will not create it empty", async () => {
+    const { writes } = mockApi()
+    const user = userEvent.setup()
+    await renderDialog("fallback")
+
+    const backup = screen.getByRole("combobox", { name: /^backup 1$/i })
+    expect(backup).toHaveValue("")
+    expect(backup).toBeRequired()
+    expect(dialog().queryByRole("combobox", { name: /^backup 2$/i })).toBeNull()
+    expect(dialog().queryByText(/No backups yet/)).not.toBeInTheDocument()
+    expect(
+      dialog().getByRole("button", { name: "Remove backup 1" }),
+    ).toBeDisabled()
+
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
+    await typeInto(user, /^main model$/i, "openai:gpt-5")
+    const create = dialog().getByRole("button", { name: "Create policy" })
+    expect(create).toBeDisabled()
+
+    await typeInto(user, /^backup 1$/i, "anthropic:claude-haiku-4-5")
+    expect(create).toBeEnabled()
+    await user.click(create)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].spec).toEqual({
+      select: [{ default: "openai:gpt-5" }],
+      on_failure: ["anthropic:claude-haiku-4-5"],
+    })
+  })
+
+  it("refuses a backup that repeats the main model or another backup", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderDialog("fallback")
+
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
+    await typeInto(user, /^main model$/i, "openai:gpt-5")
+    await typeInto(user, /^backup 1$/i, "openai:gpt-5")
+    const create = dialog().getByRole("button", { name: "Create policy" })
+    expect(
+      dialog().getByText("Same as the main model. Pick another one."),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("combobox", { name: /^backup 1$/i }),
+    ).toHaveAttribute("aria-invalid", "true")
+    expect(create).toBeDisabled()
+
+    const first = screen.getByRole("combobox", { name: /^backup 1$/i })
+    await user.clear(first)
+    await typeInto(user, /^backup 1$/i, "anthropic:claude-haiku-4-5")
+    await user.click(dialog().getByRole("button", { name: "Add a backup" }))
+    await typeInto(user, /^backup 2$/i, "anthropic:claude-haiku-4-5")
+    expect(
+      dialog().getByText("Same as backup 1. Pick another one."),
+    ).toBeInTheDocument()
+    expect(create).toBeDisabled()
   })
 
   it("says which failures move on to a backup", async () => {
@@ -259,7 +320,6 @@ describe("CreatePolicyDialog", () => {
 
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
     await typeInto(user, /^main model$/i, "anthropic:claude-sonnet-5-5")
-    await user.click(dialog().getByRole("button", { name: "Add a backup" }))
     await typeInto(user, /^backup 1$/i, "openai:gpt-5")
     await user.click(dialog().getByRole("button", { name: "Add a backup" }))
     await typeInto(user, /^backup 2$/i, "anthropic:claude-haiku-4-5")
@@ -308,6 +368,7 @@ describe("CreatePolicyDialog", () => {
 
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
     await typeInto(user, /^main model$/i, "openai:gpt-5")
+    await typeInto(user, /^backup 1$/i, "anthropic:claude-haiku-4-5")
     await user.click(dialog().getByRole("button", { name: "Create policy" }))
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
     expect(writes).toHaveLength(1)

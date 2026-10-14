@@ -26,11 +26,17 @@ const newRowKey = () => {
 export function BackupList({
   backups,
   onChange,
+  isRequired = false,
+  problems = [],
   isAtCap,
   maxModels,
 }: {
   backups: string[]
   onChange: (next: string[]) => void
+  /** At least one backup: the last row cannot be removed. */
+  isRequired?: boolean
+  /** Per row, why its backup cannot be saved, or "" when it can. */
+  problems?: string[]
   /** Whether the policy already dispatches as many models as it may. */
   isAtCap: boolean
   maxModels: number
@@ -113,6 +119,7 @@ export function BackupList({
                   )
                 }
                 isRequired
+                errorMessage={problems[index] ?? ""}
                 actions={
                   <FieldAction>
                     <div className="flex gap-1">
@@ -140,6 +147,7 @@ export function BackupList({
                         variant="ghost"
                         isIconOnly
                         label={`Remove backup ${index + 1}`}
+                        isDisabled={isRequired && backups.length === 1}
                         onPress={() => remove(index)}
                       >
                         <FiTrash2 aria-hidden />

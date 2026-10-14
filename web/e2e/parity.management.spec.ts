@@ -310,8 +310,8 @@ test.describe("fallback routing", () => {
     await dialog.getByRole("textbox", { name: /^Name/ }).fill(POLICY)
     await fillModelBox(page, /^Main model/, "openai:gpt-4o")
 
-    // Backups are added one row at a time, in the order they are tried.
-    await dialog.getByRole("button", { name: "Add a backup" }).click()
+    // The first backup row is there from the start; more are added one at a
+    // time, in the order they are tried.
     await fillModelBox(page, /^Backup 1/, "anthropic:claude-3-5-haiku-latest")
     await dialog.getByRole("button", { name: "Add a backup" }).click()
     await fillModelBox(page, /^Backup 2/, "groq:llama-3.3-70b-versatile")

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest"
 import type { PolicySpec } from "@/client"
 
 import {
+  backupProblems,
   buildSpec,
   draftFromSpec,
   fallthroughOf,
   isDraftReady,
+  isFallbackReady,
   plannedModels,
   poolProblems,
   seedDraft,
@@ -68,10 +70,18 @@ describe("draftFromSpec and buildSpec", () => {
 })
 
 describe("seedDraft", () => {
-  it("starts a fallback from the deep-linked main model", () => {
+  it("starts a fallback from the deep-linked main model and one empty backup", () => {
     const draft = seedDraft("fallback", "openai:gpt-4o")
     expect(selectionOf(draft)).toBe("single")
     expect(fallthroughOf(draft)).toBe("openai:gpt-4o")
+    expect(draft.backups).toEqual([""])
+    expect(isFallbackReady(draft)).toBe(false)
+  })
+
+  it("starts every other kind with no backup", () => {
+    for (const intent of ["weighted", "knn", "priority", "tierdown"] as const) {
+      expect(seedDraft(intent).backups).toEqual([])
+    }
   })
 
   it("starts a split with that model first and an even share", () => {
@@ -151,5 +161,25 @@ describe("readiness", () => {
         tierDowns: [{ threshold: 100, target: "openai:gpt-5-nano" }],
       }),
     ).toBe(false)
+  })
+})
+
+describe("backupProblems", () => {
+  it("names a backup that repeats the main model or an earlier backup", () => {
+    expect(backupProblems(["a:x", " b:y", "", "b:y", "c:z"], "a:x")).toEqual([
+      "Same as the main model. Pick another one.",
+      "",
+      "",
+      "Same as backup 2. Pick another one.",
+      "",
+    ])
+  })
+
+  it("leaves a fallback with no backup, or a repeated one, unready", () => {
+    const draft = seedDraft("fallback", "a:x")
+    expect(isFallbackReady({ ...draft, backups: [] })).toBe(false)
+    expect(isFallbackReady({ ...draft, backups: ["a:x"] })).toBe(false)
+    expect(isFallbackReady({ ...draft, backups: ["b:y", "b:y"] })).toBe(false)
+    expect(isFallbackReady({ ...draft, backups: ["b:y", "c:z"] })).toBe(true)
   })
 })

@@ -333,6 +333,10 @@ test.describe("dashboard core flows", () => {
     const serves = dialog.getByRole("combobox", { name: "Main model" })
     await serves.fill("openai:gpt-4o")
     await dismissComboBoxInDialog(serves)
+    // A fallback needs a backup before it can be created.
+    const backup = dialog.getByRole("combobox", { name: "Backup 1" })
+    await backup.fill("anthropic:claude-3-5-haiku-latest")
+    await dismissComboBoxInDialog(backup)
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // The policy name is the table's row-header cell (react-aria rowheader).
@@ -353,8 +357,11 @@ test.describe("dashboard core flows", () => {
     await serves.fill("openai:gpt-4o")
     await dismissComboBoxInDialog(serves)
 
-    // Backups are part of the common case, so the section is always there.
-    await dialog.getByRole("button", { name: "Add a backup" }).click()
+    // A fallback opens on its first backup row, which it cannot be created
+    // without.
+    await expect(
+      dialog.getByRole("button", { name: "Create policy" }),
+    ).toBeDisabled()
     const fallback = page.getByRole("combobox", { name: "Backup 1" })
     await fallback.fill("anthropic:claude-3-5-haiku-latest")
     await dismissComboBoxInDialog(fallback)

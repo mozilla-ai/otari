@@ -26,8 +26,9 @@ sent, Otari tries the fallback. The response keeps the policy name; Activity and
 usage record the models that were attempted.
 
 In the dashboard, choose Create policy on Routing, then Fallback: name it, pick
-the main model, and list the backups under "If unavailable, use". The backups
-are `on_failure`, in the order shown. Create policy offers one kind at a time
+the main model, and list at least one backup under "If unavailable, use", each a
+model other than the main one and the other backups. The backups are
+`on_failure`, in the order shown. Create policy offers one kind at a time
 (Fallback, Split traffic, Smart router, Spill over at rate limits, Tier down on
 budget), each with only its own fields. To combine them, open the policy from
 the list once it exists: its page has a section each for the main selection,

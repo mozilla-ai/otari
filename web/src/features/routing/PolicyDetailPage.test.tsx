@@ -110,6 +110,7 @@ describe("PolicyDetailPage", () => {
     ).toHaveValue("80")
     expect(screen.getByRole("textbox", { name: /profile/i })).toHaveValue("pii")
 
+    // Unlike a new fallback, an existing policy may keep no backup at all.
     await user.click(screen.getByRole("button", { name: "Remove backup 1" }))
     await save(user, "Save fallback chain")
 
