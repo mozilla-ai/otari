@@ -492,8 +492,12 @@ passwords are counted per client address, so a held link cannot be used to guess
 the password at speed; a right one is never held back. Anyone can
 sign up with an address they do not hold, and the link then reaches the
 address's real owner, whose click must not activate a password a stranger
-chose. An owner who never signed up uses "Forgot your password?" instead, which
-replaces that password. Where the deployment publishes terms (`terms_url`),
+chose. Signing up again before verifying changes nothing, so the first password
+is the one the link takes. An owner who never signed up, or who forgot that
+password, uses "Forgot your password?" instead, which replaces it. The
+verification and reset pages check their link as they open, without spending
+it, and say at once when it has expired or was already used (or a newer link
+replaced it). Where the deployment publishes terms (`terms_url`),
 signup is refused unless they are accepted, with the form or with a provider (see
 [OAuth sign-in](#oauth-sign-in-google-and-github)). What an unknown address does depends
 on `open_signup`:

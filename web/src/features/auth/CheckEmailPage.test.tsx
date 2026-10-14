@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { CheckEmailPage } from "@/features/auth/CheckEmailPage"
+import { rememberSignInAddress } from "@/features/auth/signInAddress"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { bootstrap } from "@/tests/fixtures"
@@ -19,6 +20,7 @@ function renderPage(hash: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   window.location.hash = ""
+  window.sessionStorage.clear()
 })
 
 afterEach(() => {
@@ -36,6 +38,15 @@ describe("CheckEmailPage", () => {
 
     expect(
       screen.getByText(/If you can sign up with that address/),
+    ).toBeInTheDocument()
+  })
+
+  it("names the address the page before mailed, in the same conditional", () => {
+    rememberSignInAddress("ada@example.com")
+    renderPage("#/check-email?type=signup")
+
+    expect(
+      screen.getByText(/If you can sign up with ada@example.com/),
     ).toBeInTheDocument()
   })
 

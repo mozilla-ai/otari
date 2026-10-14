@@ -1355,7 +1355,10 @@ describe("the tenant Overview's chart and rail", () => {
   })
 
   it("offers a member only the destinations that will serve them", async () => {
-    mockScopedApi({ context: { role: "member" }, period: { cost: 200 } })
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "member" },
+      period: { cost: 200 },
+    })
     renderPage(<OverviewIndex />)
     await screen.findByText("$200.00")
 
@@ -1376,7 +1379,10 @@ describe("the tenant Overview's chart and rail", () => {
   })
 
   it("offers an admin all four", async () => {
-    mockScopedApi({ context: { role: "admin" }, period: { cost: 200 } })
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "admin" },
+      period: { cost: 200 },
+    })
     renderPage(<OverviewIndex />)
     await screen.findByText("$200.00")
 
@@ -1385,6 +1391,28 @@ describe("the tenant Overview's chart and rail", () => {
     const inRail = within(rail as HTMLElement)
     expect(inRail.getByRole("link", { name: "Budgets" })).toBeInTheDocument()
     expect(inRail.getByRole("link", { name: "Members" })).toBeInTheDocument()
+  })
+
+  // A member in no workspace used to read "This workspace" over counts for a
+  // workspace they are not in.
+  it("says so, rather than counting, for a member in no workspace", async () => {
+    mockScopedApi({
+      context: { role: "member", workspace_memberships: [] },
+      period: { cost: 200 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    const rail = (await screen.findByText("No workspace yet")).closest(
+      "section",
+    )
+    expect(rail).not.toBeNull()
+    const inRail = within(rail as HTMLElement)
+    expect(
+      inRail.getByText(/You do not belong to a workspace in this organization/),
+    ).toBeInTheDocument()
+    expect(inRail.queryByText("Active keys")).not.toBeInTheDocument()
+    expect(screen.queryByText("This workspace")).not.toBeInTheDocument()
   })
 })
 

@@ -2,7 +2,7 @@ import { Button } from "@heroui/react"
 import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-import { useResetPassword } from "@/shared/api/auth"
+import { useMailedLinkStatus, useResetPassword } from "@/shared/api/auth"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import {
   MAX_PASSWORD_BYTES,
@@ -13,13 +13,15 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { AuthPasswordField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
+import { CheckingLinkPanel, UnusableLinkPanel } from "./UnusableLinkPanel"
 
 /**
  * `#/reset-password?token=…`: the page the mailed reset link lands on.
  *
- * Nothing fires on arrival: the new password is what completes the reset. No
- * current password is asked for, which is the entire point of a reset; the
- * token in the link is the proof.
+ * Arrival only asks whether the link can still be used, which does not use it,
+ * so a spent or expired link says so before a password is typed. The new
+ * password is what completes the reset. No current password is asked for,
+ * which is the entire point of a reset; the token in the link is the proof.
  *
  * No session is minted on success, and the sign-in screen is where the caller
  * goes next. The gateway revokes every other session this identity holds as
@@ -35,6 +37,7 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 export function ResetPasswordPage({ hash }: { hash: string }) {
   const token = tokenFromHash(hash)
   const reset = useResetPassword()
+  const linkStatus = useMailedLinkStatus("reset", token ?? "")
   const { terms_url } = useDeployment()
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -103,6 +106,21 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
           Your password has been reset.
         </p>
       </PublicAuthLayout>
+    )
+  }
+
+  if (linkStatus.isLoading) {
+    return <CheckingLinkPanel title="Set a new password" />
+  }
+
+  // A check that failed leaves the form up: submitting still gets the
+  // gateway's own answer.
+  if (linkStatus.data === "expired" || linkStatus.data === "invalid") {
+    return (
+      <UnusableLinkPanel
+        status={linkStatus.data}
+        renew={{ to: "#/recover-password", label: "Request a new reset link" }}
+      />
     )
   }
 

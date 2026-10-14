@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   CallerIdentity,
+  MailedLinkStatusResponse,
   OrganizationContext,
   Passkey,
   PasskeysResponse,
@@ -19,6 +20,7 @@ import type {
 } from "@/client"
 import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
 import {
+  MAILED_LINK_STATUS,
   NO_RETRY,
   ORGANIZATION_MEMBERS,
   ORGANIZATIONS,
@@ -292,6 +294,35 @@ export function useRequestPasswordReset() {
         method: "POST",
         body: JSON.stringify({ email }),
       }),
+  })
+}
+
+/**
+ * Whether a mailed reset or verification link can still be used, asked on
+ * arrival so a spent or expired link says so before anyone types a password.
+ *
+ * Checking does not use the link. POST with the token in the body for the
+ * reason `useValidateInvitation` gives. Not retried and not refetched: the
+ * answer only moves when the page itself uses the link, and a gateway that
+ * cannot answer (one older than the route, or a throttle) leaves the page on
+ * its form, which still works.
+ */
+export function useMailedLinkStatus(kind: "reset" | "verify", token: string) {
+  return useQuery({
+    queryKey: [MAILED_LINK_STATUS, kind, token],
+    queryFn: async () => {
+      const result = await apiFetch<MailedLinkStatusResponse>(
+        kind === "reset"
+          ? "/auth/password/reset/validate"
+          : "/auth/verify-email/validate",
+        { method: "POST", body: JSON.stringify({ token }) },
+      )
+      return result.status
+    },
+    enabled: token.length > 0,
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false,
+    ...NO_RETRY,
   })
 }
 

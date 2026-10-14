@@ -139,4 +139,21 @@ describe("the sign-in screen on arrival", () => {
     // Used once: a later visit to the sign-in screen starts empty.
     expect(readSignInAddress()).toBe("")
   })
+
+  it("hands the typed address to the recovery page", async () => {
+    stubPointer(true)
+    const user = userEvent.setup()
+    render(
+      <Mounted>
+        <Login />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Email"), "ada@example.com")
+    await user.click(
+      screen.getByRole("link", { name: "Forgot your password?" }),
+    )
+
+    expect(readSignInAddress()).toBe("ada@example.com")
+  })
 })

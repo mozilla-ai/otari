@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-
 import { SignupPage } from "@/features/auth/SignupPage"
+import { readSignInAddress } from "@/features/auth/signInAddress"
 import { ApiError, apiFetch } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
@@ -64,6 +64,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   resetTelemetrySpy()
   window.location.hash = ""
+  window.sessionStorage.clear()
 })
 
 afterEach(() => {
@@ -102,6 +103,11 @@ describe("SignupPage", () => {
       email: "ada@example.com",
       password: "correct-horse",
     })
+    // The address, never the password, goes on to the check-email page.
+    expect(readSignInAddress()).toBe("ada@example.com")
+    expect(Object.values({ ...window.sessionStorage })).not.toContain(
+      "correct-horse",
+    )
   })
 
   // otari-ai#2100: the same form, reading as registration where the deployment

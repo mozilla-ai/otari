@@ -25,7 +25,7 @@
  * continue, rather than an accept that reads as if it joined them.
  */
 
-import { Button, Link } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
 import type { CallerIdentity } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -46,7 +46,6 @@ import {
   useValidateInvitation,
 } from "@/shared/api/organizations"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
-import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { ClaimForm } from "./ClaimForm"
@@ -111,10 +110,6 @@ export function AcceptInvitationPage() {
   const invitedEmail = preview.data?.email
   const standing = sessionStanding(isAuthenticated, profile, invitedEmail)
   const deployment = useDeployment()
-  // Absent on a hosted deployment, which serves no such page; see
-  // `welcomeGuideHref`. The rule above it goes with it, since a card ending in
-  // a bordered empty row reads as something that failed to load.
-  const welcomeHref = welcomeGuideHref(deployment)
   // A provider-verified address resolves a rostered identity that has no
   // password (`adapters/identity_provider_adapter.py`), so where there is a
   // provider, setting a password here is one way in rather than the only one.
@@ -134,9 +129,7 @@ export function AcceptInvitationPage() {
               )
             }
           />
-          {/* A refusal still owes a door: Back onto a spent token lands here,
-              and a card whose only other link is the welcome guide strands
-              whoever reads it. */}
+          {/* A refusal still owes a door: Back onto a spent token lands here. */}
           <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
         </>
       ) : accept.isSuccess ? (
@@ -281,17 +274,6 @@ export function AcceptInvitationPage() {
             </>
           )}
         </>
-      ) : null}
-
-      {welcomeHref ? (
-        <div className="flex border-t border-border pt-2">
-          <Link
-            href={welcomeHref}
-            className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
-          >
-            Open the welcome guide
-          </Link>
-        </div>
       ) : null}
     </LoginPageShell>
   )

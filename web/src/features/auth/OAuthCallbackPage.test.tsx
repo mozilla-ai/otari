@@ -404,7 +404,51 @@ describe("OAuthCallbackPage", () => {
       "href",
       "#/",
     )
-    // The notice waits for the person instead of moving them on.
+    // The notice waits for the person instead of moving them on, even though
+    // this tab now holds a session.
     expect(window.location.hash).toBe("#/auth/google/callback")
+  })
+
+  // Back from the dashboard used to reopen this page, which replayed the spent
+  // state and said the sign-in "did not start in this tab".
+  it("replaces its own history entry on success, so Back skips it", async () => {
+    window.location.hash =
+      "#/auth/google/callback?code=the-code&state=the-state"
+    const entries = window.history.length
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
+    )
+
+    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+    await screen.findByText("SIGNED IN")
+    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    expect(window.history.length).toBe(entries)
+  })
+
+  it("sends a tab that is already signed in to the dashboard rather than refusing a spent state", async () => {
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    window.location.hash = "#/auth/google/callback?code=the-code&state=spent"
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+
+    // Mounted bare: the harness would hide the page behind the signed-in marker.
+    render(
+      <AppProviders>
+        <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
+          <OAuthCallbackPage
+            provider="google"
+            hash="#/auth/google/callback?code=the-code&state=spent"
+          />
+        </DeploymentProvider>
+      </AppProviders>,
+    )
+
+    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    expect(
+      screen.queryByRole("heading", { name: "That sign-in did not complete" }),
+    ).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(recordEvent).not.toHaveBeenCalled()
   })
 })

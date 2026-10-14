@@ -14,9 +14,9 @@ import { OAuthTermsStep } from "./OAuthTermsStep"
 import { oauthProviderLabel } from "./oauthProviders"
 import { takeOAuthState } from "./oauthRoundTrip"
 import {
-  goToPublicAuthPage,
   PublicAuthLayout,
   PublicAuthLink,
+  replacePublicAuthPage,
 } from "./PublicAuthLayout"
 
 /**
@@ -36,7 +36,8 @@ import {
  *   tab began it; a mismatch means this redirect did not come from a flow this
  *   tab started. The gateway checks the same value against its own record, so a
  *   state that never came from an `/authorize` here is refused there even when
- *   no tab is involved.
+ *   no tab is involved. A tab that already holds a session goes to the
+ *   dashboard instead, since that is Back returning to a finished sign-in.
  * - There is no code. A callback without one has nothing to spend.
  * - Otherwise the code is posted to the gateway, which exchanges it and sets
  *   the session cookie. On success this signs in exactly the way the password
@@ -66,7 +67,7 @@ export function OAuthCallbackPage({
   provider: string
   hash: string
 }) {
-  const { login } = useAuth()
+  const { isAuthenticated, login } = useAuth()
   const { recordEvent } = useTelemetry()
   const { terms_url } = useDeployment()
   const [failure, setFailure] = useState<string>()
@@ -113,8 +114,15 @@ export function OAuthCallbackPage({
       return
     }
     if (!state || state !== remembered.state) {
+      // Back from the dashboard after a sign-in lands here with the state
+      // already taken. Nothing is spent, and the session this tab holds is the
+      // one that callback started, so the dashboard is where it belongs.
+      if (isAuthenticated) {
+        replacePublicAuthPage("#/")
+        return
+      }
       refuse(
-        `That ${label} sign-in did not start in this tab, so it was not completed. Start again from the sign-in screen.`,
+        `That ${label} sign-in did not start in this tab, or it was already used, so it was not completed. Start again from the sign-in screen.`,
         "invalid_state",
       )
       return
@@ -149,9 +157,9 @@ export function OAuthCallbackPage({
           // public auth path *before* the auth gate, so an unchanged hash keeps
           // re-selecting this page, whose effect has already run: the pending
           // panel would sit there with no way out, and a reload would report a
-          // state mismatch because the stored state is spent. So this hands the
-          // tab back the way `AcceptInvitationPage` does when it is finished.
-          goToPublicAuthPage("#/")
+          // state mismatch because the stored state is spent. Replaced rather
+          // than pushed, so Back from the dashboard skips this page.
+          replacePublicAuthPage("#/")
           return
         }
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
@@ -171,7 +179,7 @@ export function OAuthCallbackPage({
         setFailure(errorMessage(caught))
       }
     })()
-  }, [provider, hash, login, recordEvent])
+  }, [provider, hash, isAuthenticated, login, recordEvent])
 
   if (passwordRemoved) {
     return (

@@ -102,6 +102,8 @@ export type ResetPasswordRequest = Defaulted<
   Schemas["ResetPasswordRequest"],
   "terms_accepted"
 >
+export type MailedLinkStatus = Schemas["MailedLinkStatusResponse"]["status"]
+export type MailedLinkStatusResponse = Schemas["MailedLinkStatusResponse"]
 
 // ---------------------------------------------------------------------------
 // Passkeys (otari#652)

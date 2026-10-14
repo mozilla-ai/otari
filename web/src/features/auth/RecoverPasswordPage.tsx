@@ -6,6 +6,7 @@ import { useRequestPasswordReset } from "@/shared/api/auth"
 
 import { AuthEmailField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
+import { readSignInAddress, rememberSignInAddress } from "./signInAddress"
 
 /**
  * `#/recover-password`: ask for a password-reset link.
@@ -17,11 +18,12 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
  * page makes the same call for the same reason.
  *
  * Enumeration-safe like its siblings, so the confirmation is written in the
- * conditional and nothing here reads the response.
+ * conditional and nothing here reads the response. The address arrives from
+ * the sign-in screen and goes back to it (`signInAddress.ts`).
  */
 export function RecoverPasswordPage() {
   const request = useRequestPasswordReset()
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState(readSignInAddress)
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to
@@ -38,7 +40,9 @@ export function RecoverPasswordPage() {
     if (email.trim() === "" || request.isPending) {
       return
     }
-    request.mutate(email.trim())
+    request.mutate(email.trim(), {
+      onSuccess: () => rememberSignInAddress(email.trim()),
+    })
   }
 
   if (request.isSuccess) {

@@ -134,6 +134,11 @@ export const PLAYGROUND = "playground"
 // happen to be acting in, and switching organizations does not change the list.
 export const PASSKEYS = "passkeys"
 
+// Whether a mailed reset or verification link can still be used, read once on
+// arrival. Keyed by the link's kind and token, and never invalidated: using the
+// link moves the page to its success state rather than back to this check.
+export const MAILED_LINK_STATUS = "mailed-link-status"
+
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.

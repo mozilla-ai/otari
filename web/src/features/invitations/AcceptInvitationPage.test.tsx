@@ -611,7 +611,7 @@ describe("AcceptInvitationPage", () => {
     expect(screen.getByText(/missing its invitation token/)).toBeInTheDocument()
     expect(screen.queryByLabelText("Password")).toBeNull()
     // A refusal is not a handoff, but it still owes a way out: Back onto a
-    // spent token lands here, and the welcome guide is not one.
+    // spent token lands here.
     expect(
       screen.getByRole("link", { name: "Back to sign in" }),
     ).toHaveAttribute("href", "#/")
@@ -656,24 +656,11 @@ describe("AcceptInvitationPage", () => {
     expect(screen.queryByLabelText("Password")).toBeNull()
   })
 
-  it("offers the welcome guide where the deployment serves it", async () => {
+  // The welcome guide is how an operator finds the bootstrap key, which an
+  // invitee can do nothing with, so no state of this page links to it.
+  it("offers no welcome guide, which is the operator's page", async () => {
     mockApi({})
     renderPage("#/accept-invitation?token=abc123")
-
-    expect(
-      await screen.findByRole("link", { name: /welcome guide/ }),
-    ).toHaveAttribute("href", "/welcome")
-  })
-
-  // otari.ai serves the bundle from its own edge and `/welcome` from nowhere,
-  // so the footer would be a link out of the app to a 404. See
-  // `welcomeGuideHref`. Invitations are a hosted flow, which is what makes this
-  // the page the broken link was most likely to be clicked from.
-  it("offers no welcome guide on a hosted deployment, which serves none", async () => {
-    mockApi({})
-    renderPage("#/accept-invitation?token=abc123", {
-      deploymentType: "hosted",
-    })
 
     expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /welcome guide/ })).toBeNull()

@@ -48,11 +48,11 @@ export function PublicAuthLayout({
  * rendered by `DeploymentRoot` *ahead* of `RouterProvider` (see `App.tsx`), so
  * there is no router context to link through; and a hash change is not the
  * full page reload that rule exists to prevent, because `App`'s `useHashPath`
- * picks it up and swaps the page in place. The `/welcome` links on `AuthHelp`
- * and `AcceptInvitationPage` are a HeroUI `Link` of their own rather than this,
- * and stay that way: on the deployments that offer it at all, `/welcome` is a
- * path the gateway serves, so it is the one link down here that *is* a page
- * load. Which deployments those are is `welcomeGuideHref`'s answer.
+ * picks it up and swaps the page in place. The `/welcome` link on `AuthHelp`
+ * is a HeroUI `Link` of its own rather than this, and stays that way: on the
+ * deployments that offer it at all, `/welcome` is a path the gateway serves,
+ * so it is the one link down here that *is* a page load. Which deployments
+ * those are is `welcomeGuideHref`'s answer.
  *
  * Sized to the 44px touch target the phone viewport asks for, which `text-sm`
  * alone is about half of, and these stack several deep in a card's footer.
@@ -61,9 +61,12 @@ export function PublicAuthLink({
   to,
   children,
   isInline = false,
+  onPress,
 }: {
   to: string
   children: ReactNode
+  /** Runs before the hash changes, to hand something to the next page. */
+  onPress?: () => void
   /**
    * For a link that shares a row with a label, where a 44px box would make the
    * row 44 tall. The row keeps the line's own 20px and the target is a bleed of
@@ -74,6 +77,7 @@ export function PublicAuthLink({
   return (
     <Link
       href={to}
+      onPress={onPress}
       className={`inline-flex items-center text-sm font-medium text-link hover:text-link-hover ${
         isInline
           ? "relative before:absolute before:inset-x-0 before:-top-4 before:-bottom-2"
@@ -88,4 +92,12 @@ export function PublicAuthLink({
 /** Send this tab to another page in front of the session, from a handler. */
 export function goToPublicAuthPage(to: string): void {
   window.location.hash = to
+}
+
+/**
+ * Leave a page that must not be returned to, replacing its history entry so
+ * Back skips it rather than replaying it.
+ */
+export function replacePublicAuthPage(to: string): void {
+  window.location.replace(to)
 }

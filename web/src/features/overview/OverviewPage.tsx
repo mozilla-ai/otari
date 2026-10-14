@@ -471,6 +471,11 @@ function OrganizationOverview() {
   // collection fetched to produce one number (otari#1425); the gateway scopes
   // and judges them now, and withholds the ceilings a member may not see.
   const summary = useOverviewSummary(scope)
+  // Read off the context once it has answered, so the rail does not flash the
+  // empty state while it loads.
+  const hasNoWorkspace =
+    context.data !== undefined &&
+    (context.data.workspace_memberships ?? []).length === 0
 
   const periodSeries = period.data?.series ?? []
   const ceilingHealth = allocationStrip(summary.data?.ceilings, {
@@ -625,6 +630,7 @@ function OrganizationOverview() {
         activeKeys={summary.data ? activeKeys : null}
         activeMembers={summary.data ? activeMembers : null}
         links={railLinks(managesSpend)}
+        hasNoWorkspace={hasNoWorkspace}
       />
     </div>
   )
@@ -1453,11 +1459,14 @@ function ActivitySplit({
   activeKeys,
   activeMembers,
   links,
+  hasNoWorkspace = false,
 }: {
   recent: ReturnType<typeof useUsageLogs>
   activeKeys: number | null
   activeMembers: number | null
   links: readonly RailDestination[]
+  /** A member in no workspace yet, whose rail has no workspace to count. */
+  hasNoWorkspace?: boolean
 }) {
   return (
     <div className="flex flex-col lg:flex-row lg:items-stretch">
@@ -1473,6 +1482,7 @@ function ActivitySplit({
           activeKeys={activeKeys}
           activeMembers={activeMembers}
           links={links}
+          hasNoWorkspace={hasNoWorkspace}
         />
       </div>
     </div>
@@ -1516,26 +1526,40 @@ function WorkspaceRail({
   activeKeys,
   activeMembers,
   links,
+  hasNoWorkspace,
 }: {
   activeKeys: number | null
   activeMembers: number | null
   links: readonly RailDestination[]
+  hasNoWorkspace: boolean
 }) {
   return (
     <section className="flex flex-col gap-6 pt-6 lg:pl-6">
-      <div>
-        <h2 className="text-title">This workspace</h2>
-        <dl className="mt-3 flex gap-8 lg:flex-col lg:gap-4">
-          <RailStat
-            label="Active keys"
-            value={activeKeys === null ? "—" : formatNumber(activeKeys)}
-          />
-          <RailStat
-            label="Active members"
-            value={activeMembers === null ? "—" : formatNumber(activeMembers)}
-          />
-        </dl>
-      </div>
+      {hasNoWorkspace ? (
+        // Counts here would describe a workspace this caller is not in. Told
+        // the way the Members page tells the same state.
+        <div>
+          <h2 className="text-title">No workspace yet</h2>
+          <p className="mt-3 text-sm text-pretty text-muted">
+            You do not belong to a workspace in this organization yet. An owner
+            or admin can add you to one.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <h2 className="text-title">This workspace</h2>
+          <dl className="mt-3 flex gap-8 lg:flex-col lg:gap-4">
+            <RailStat
+              label="Active keys"
+              value={activeKeys === null ? "—" : formatNumber(activeKeys)}
+            />
+            <RailStat
+              label="Active members"
+              value={activeMembers === null ? "—" : formatNumber(activeMembers)}
+            />
+          </dl>
+        </div>
+      )}
       <div>
         <h2 className="text-overline">Go to</h2>
         <ul className="mt-1 flex flex-col">

@@ -43,7 +43,11 @@ import {
 } from "./oauthProviders"
 import { rememberOAuthState } from "./oauthRoundTrip"
 import { PublicAuthLink } from "./PublicAuthLayout"
-import { forgetSignInAddress, readSignInAddress } from "./signInAddress"
+import {
+  forgetSignInAddress,
+  readSignInAddress,
+  rememberSignInAddress,
+} from "./signInAddress"
 
 /** Whether the primary pointer is a mouse or a trackpad rather than a finger. */
 function hasFinePointer(): boolean {
@@ -317,6 +321,12 @@ export function Login() {
   // proven a password exists.
   const offersResendVerification =
     mail_ready && error instanceof EmailUnverifiedRefusal
+
+  // The recovery and resend pages each ask for the address again, so the one
+  // typed here goes with the visitor.
+  const handOverAddress = () => {
+    if (email.trim() !== "") rememberSignInAddress(email.trim())
+  }
 
   const clearError = () => {
     if (error) {
@@ -780,14 +790,21 @@ export function Login() {
                     />
                     {offersRecovery ? (
                       <div className="col-start-2 row-start-1">
-                        <PublicAuthLink isInline to="#/recover-password">
+                        <PublicAuthLink
+                          isInline
+                          to="#/recover-password"
+                          onPress={handOverAddress}
+                        >
                           Forgot your password?
                         </PublicAuthLink>
                       </div>
                     ) : null}
                   </TextField>
                   {offersResendVerification ? (
-                    <PublicAuthLink to="#/resend-verification">
+                    <PublicAuthLink
+                      to="#/resend-verification"
+                      onPress={handOverAddress}
+                    >
                       Send a new verification link
                     </PublicAuthLink>
                   ) : null}

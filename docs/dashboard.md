@@ -161,7 +161,8 @@ Overview splits the same way. Everyone lands on their own spend, traffic and
 recent requests. An organization owner or admin also gets a budget-health
 figure, read from the spend ceilings holding their organization, while a
 deployment operator gets provider health and the deployment's own budgets
-instead.
+instead. A member who belongs to no workspace yet is told so beside the
+activity table, rather than shown workspace counts.
 
 ## Playground
 
@@ -243,7 +244,11 @@ signed in. After a
 password is set from an invitation link, the sign-in screen opens with the
 invited address filled in. When the link cannot set a password and the address
 has none yet, the page says how to get in instead: a Google or GitHub sign-in,
-or "Forgot your password?", whichever the deployment offers.
+or "Forgot your password?", whichever the deployment offers. The other pages in
+front of sign-in carry the address the same way: from the sign-in screen to
+"Forgot your password?", from signup or a resend to the page saying which
+address was mailed and on to another resend, and back to the sign-in screen
+after a verification or a recovery request. A password never travels with it.
 
 On Members, an invited row offers Reissue and Revoke, and says when its
 invitation has expired. Reissue sends a new accept link (or shows it to share,

@@ -33,6 +33,7 @@ import {
   PublicAuthLayout,
   PublicAuthLink,
 } from "./PublicAuthLayout"
+import { rememberSignInAddress } from "./signInAddress"
 import { TermsAcceptanceField } from "./TermsAcceptanceField"
 
 /**
@@ -153,6 +154,7 @@ export function SignupPage({ hash }: { hash: string }) {
             authentication_method: "password",
             requires_verification: true,
           })
+          rememberSignInAddress(email.trim())
           goToPublicAuthPage("#/check-email?type=signup")
         },
         onError: (error) => {
