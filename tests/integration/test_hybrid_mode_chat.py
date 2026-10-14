@@ -1,7 +1,7 @@
 import json
 from collections.abc import AsyncIterator, Callable, Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import httpx2
@@ -10,8 +10,10 @@ from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
     ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCall,
     Choice,
     CompletionUsage,
+    Function,
     PromptTokensDetails,
 )
 from fastapi.testclient import TestClient
@@ -1838,17 +1840,18 @@ class _CappedSearchBackend:
         return "results"
 
 
-def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
+def test_hybrid_mode_a_reported_search_commits_the_streamed_attempt(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
-    """``max_uses`` bounds the request, not each attempt of it.
+    """A search reported in ``otari_tool_calls`` commits the attempt that ran it.
 
-    A tool-loop stream whose swallowed first round runs a search and whose second
-    round dies is still pre-first-chunk, so the plan falls over. Both runs are
-    billed (``ToolUsageTally`` accumulates across attempts), so a cap the next
-    attempt started over on would bill up to ``max_uses`` per candidate.
+    The first round's tool-call chunks are swallowed, but the search's started and
+    ended entries reach the client while that round runs, so a provider failure in
+    the second round ends the stream with an error event rather than falling over
+    to a model the client was never told about. Messages and Responses commit on
+    their first event the same way.
     """
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
     _CappedSearchBackend.calls = 0
@@ -1934,14 +1937,83 @@ def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
     )
 
     assert response.status_code == 200
-    # The fallover happened, and the served attempt found the cap already spent.
-    assert calls == [
-        "anthropic:claude-haiku-4-5",
-        "anthropic:claude-haiku-4-5",
-        "openai:gpt-4o-mini",
-        "openai:gpt-4o-mini",
-    ]
+    assert calls == ["anthropic:claude-haiku-4-5", "anthropic:claude-haiku-4-5"]
     assert _CappedSearchBackend.calls == 1
+    events = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+    payloads = [json.loads(event) for event in events if event != "[DONE]"]
+    entries = [entry for payload in payloads for entry in payload.get("otari_tool_calls", [])]
+    assert [entry["status"] for entry in entries] == ["in_progress", "completed"]
+    assert entries[0]["id"] == entries[1]["id"]
+    assert payloads[-1]["error"]["code"] == "provider_credential_rejected"
+
+
+def test_hybrid_mode_an_answer_reports_the_search_the_data_plane_ran(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """The tool loop runs on the data plane, so a hybrid answer carries ``otari_tool_calls`` like a standalone one."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="ws-report-req")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search"]})
+        return httpx.Response(204)
+
+    rounds = iter(
+        [
+            ChatCompletionMessage(
+                role="assistant",
+                content=None,
+                tool_calls=cast(
+                    Any,
+                    [
+                        ChatCompletionMessageFunctionToolCall(
+                            id="call_1",
+                            type="function",
+                            function=Function(name="web_search", arguments='{"query": "otari"}'),
+                        )
+                    ],
+                ),
+            ),
+            ChatCompletionMessage(role="assistant", content="answer"),
+        ]
+    )
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        message = next(rounds)
+        return ChatCompletion(
+            id="cmpl-ws-report",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[Choice(finish_reason="tool_calls" if message.tool_calls else "stop", index=0, message=message)],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _CappedSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_web_search"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    [entry] = response.json()["otari_tool_calls"]
+    assert entry["query"] == "otari"
+    assert entry["status"] == "completed"
+    assert entry["sources"] == [{"url": "https://a", "title": "A", "published_date": None}]
 
 
 def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(

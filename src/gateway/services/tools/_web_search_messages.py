@@ -13,28 +13,17 @@ from anthropic.types import (
 )
 
 from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
+from gateway.services.tools._web_display import hits_to_show, search_query
 from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_NATIVE_TYPE_PREFIX,
     WEB_SEARCH_TOOL_NAME,
 )
-from gateway.services.web_retrieval_network import truncate_utf8
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from gateway.services._tool_loop import ToolBackend
-
-# A search result's recency, collapsed to one line and length-capped before it goes
-# on a native block. Same rendering hygiene the text formatter applies: the value is
-# whatever a search-API-fronting adapter forwarded, so one overlong or multiline
-# entry shouldn't be what makes a citations panel unreadable.
-_PAGE_AGE_MAX_CHARS = 128
-
-# Backend-supplied titles are unbounded. Generous for a real page title, and small
-# enough that a full result set of them cannot approach the tool-result byte limit
-# on its own.
-_CITATION_TITLE_MAX_BYTES = 512
 
 
 def _result_block(tool_use_id: str, citations: list[WebSearchResultBlock]) -> WebSearchToolResultBlock:
@@ -60,14 +49,14 @@ def _append_bounded_citation(
 ) -> None:
     """Append one citation, keeping the whole result block inside its byte limit.
 
-    Capping the title is what keeps a normal result set well under the limit, since
-    the backend bounds the hit count and ``page_age`` is already capped. The size
-    check is the backstop for the remaining unbounded field, the URL.
+    The capped title (``hits_to_show``) is what keeps a normal result set well under
+    the limit, since the backend bounds the hit count and ``page_age`` is already
+    capped. The size check is the backstop for the remaining unbounded field, the URL.
     """
     candidate = WebSearchResultBlock(
         type="web_search_result",
         url=url,
-        title=truncate_utf8(title, _CITATION_TITLE_MAX_BYTES, suffix="…").text,
+        title=title,
         page_age=page_age,
         encrypted_content="",
     )
@@ -86,10 +75,6 @@ def _server_tool_use(tool_use_id: str, query: str) -> ServerToolUseBlock:
         input={"query": query},
         type="server_tool_use",
     )
-
-
-def _query_of(call: NativeCall) -> str:
-    return str(call.arguments.get("query") or "")
 
 
 class MessagesWebSearchRendering:
@@ -112,6 +97,10 @@ class MessagesWebSearchRendering:
         type_value = (tool_entry or {}).get("type")
         return isinstance(type_value, str) and type_value.startswith(WEB_SEARCH_NATIVE_TYPE_PREFIX)
 
+    def started(self, call: NativeCall) -> list[Any]:
+        """Nothing: the pair describes a search once it has ended."""
+        return []
+
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The pair for one completed search, empty for a search that failed.
 
@@ -124,26 +113,15 @@ class MessagesWebSearchRendering:
             return []
         tool_use_id = f"{SERVER_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
         citations: list[WebSearchResultBlock] = []
-        for result in take_last_results():
-            url = str(result.get("url") or "").strip()
-            if not url:
-                # Nothing to cite. A hit with no URL is unusable to a citations panel.
-                continue
-            page_age = " ".join(str(result.get("published_date") or "").split())[:_PAGE_AGE_MAX_CHARS]
-            _append_bounded_citation(
-                citations,
-                tool_use_id=tool_use_id,
-                url=url,
-                title=str(result.get("title") or url).strip(),
-                page_age=page_age or None,
-            )
-        return [_server_tool_use(tool_use_id, _query_of(call)), _result_block(tool_use_id, citations)]
+        for url, title, page_age in hits_to_show(take_last_results()):
+            _append_bounded_citation(citations, tool_use_id=tool_use_id, url=url, title=title, page_age=page_age)
+        return [_server_tool_use(tool_use_id, search_query(call.arguments)), _result_block(tool_use_id, citations)]
 
     def refused(self, call: NativeCall) -> list[Any]:
         """The pair for a search the use cap refused, in the vocabulary's own error shape."""
         tool_use_id = f"{SERVER_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
         return [
-            _server_tool_use(tool_use_id, _query_of(call)),
+            _server_tool_use(tool_use_id, search_query(call.arguments)),
             WebSearchToolResultBlock(
                 tool_use_id=tool_use_id,
                 type="web_search_tool_result",

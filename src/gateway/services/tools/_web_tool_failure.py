@@ -3,11 +3,13 @@
 Only fields the logging rule lets an error carry (design section 7): the
 provider, its HTTP status, a tag, and whether a retry may help; never a body,
 a URL or exception text. The direct endpoint's 502 carries them as headers,
-the in-loop backend keeps them for the renderings, and Chat Completions'
-``otari_tool_calls`` entries use the same four names.
+and a failed entry in Chat Completions' ``otari_tool_calls`` carries them as its
+``error`` when the call's backend kept them. Today only a call refused past its
+use cap does; the in-loop web backends do not keep a failure yet.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from typing import Any
 
 import any_search
 from gateway.core.error_codes import (
@@ -16,6 +18,9 @@ from gateway.core.error_codes import (
     ERROR_STATUS_HEADER,
     ERROR_TAG_HEADER,
 )
+
+# The tag of a call refused because the request used up its calls, which reaches no provider.
+CALL_LIMIT_TAG = "call_limit"
 
 # A retry may help a timeout, a rate limit or a fault on the provider's side.
 _RETRYABLE_TAGS = frozenset({"timeout"})
@@ -48,6 +53,10 @@ class WebToolFailure:
     def from_provider_error(cls, error: any_search.ProviderError) -> "WebToolFailure":
         """The failure any-search raised: its provider, status and tag."""
         return cls.of(error.provider, error.status, error.tag)
+
+    def as_dict(self) -> dict[str, Any]:
+        """The four fields as Chat Completions' ``otari_tool_calls`` entries carry them, ``None`` kept."""
+        return asdict(self)
 
     def as_headers(self) -> dict[str, str]:
         """The four fields as the direct endpoint's 502 headers; ``retryable`` is ``true`` or ``false``."""

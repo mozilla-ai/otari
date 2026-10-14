@@ -8,7 +8,8 @@ dialect that can describe it honestly, and none for a dialect that cannot.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -38,14 +39,16 @@ class NativeCall:
 
     ``id`` is the ID the caller's own transcript gave the call. A rendering that needs an
     ID of its own mints one carrying the gateway's prefix instead. ``failed`` is whether the
-    call ran and answered with a tool error. Chat Completions has no renderings and never
-    sets it, so a rendering must not take ``False`` there as proof that a call succeeded.
+    call ran and answered with a tool error. ``token`` is minted once per call: a rendering
+    that announces a call both when it starts and when it ends builds the ID of both from
+    it, so a caller can match the two.
     """
 
     name: str
     id: str
     arguments: Mapping[str, Any]
     failed: bool = False
+    token: str = field(default_factory=lambda: uuid.uuid4().hex, compare=False)
 
 
 class NativeRendering(Protocol):
@@ -53,6 +56,10 @@ class NativeRendering(Protocol):
 
     def declared(self, tool_entry: Mapping[str, Any] | None) -> bool:
         """Whether a caller declaring the tool this way expects this rendering back."""
+        ...
+
+    def started(self, call: NativeCall) -> list[Any]:
+        """Wire items announcing a call the gateway is about to run, empty where the dialect has none."""
         ...
 
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:

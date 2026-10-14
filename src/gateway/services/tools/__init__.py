@@ -19,11 +19,14 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 search endpoint's rules and run its call, and ``SearchQuery`` with the helpers beside it map LiteLLM's
 search fields onto a provider. ``build_web_provider_client`` builds the client the web tools' providers
 are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
+``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's web tool calls, and
+``without_otari_tool_calls`` takes it back off the messages a client sends.
 ``WEB_SEARCH_TOOL_NAME``, ``WEB_FETCH_TOOL_NAME`` and the two tool definitions name the web tools to the model.
 """
 
 from gateway.services.tools._builtin_tool import BuiltinTool
 from gateway.services.tools._candidate_tools import CandidateTools, ProviderToolDeclaration, decide_candidate_tools
+from gateway.services.tools._chat_tool_calls import OTARI_TOOL_CALLS_FIELD, without_otari_tool_calls
 from gateway.services.tools._code_execution_admission import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
     AdmittedCodeExecution,
@@ -142,6 +145,7 @@ __all__ = [
     "CombinedToolBackend",
     "CONTAINER_GONE_DETAIL_TEMPLATE",
     "MAX_USES_EXCEEDED_ERROR",
+    "OTARI_TOOL_CALLS_FIELD",
     "SERVER_TOOL_USE_ID_PREFIX",
     "WEB_SEARCH_CALL_ID_PREFIX",
     "WEB_FETCH_HEADER",
@@ -216,6 +220,7 @@ __all__ = [
     "DirectSearchResult",
     "SearchQuery",
     "WebToolFailure",
+    "without_otari_tool_calls",
     "build_web_provider_client",
     "filter_hits_by_domain",
     "owning_backend",

@@ -157,6 +157,65 @@ runs Otari's. `provider` always forwards the provider's own tool and never uses
 Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
 use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
 
+### Web tool calls on Chat Completions
+
+Chat Completions has no shape for a tool the server runs, so a chat completion
+reports Otari's own web searches and fetches in `otari_tool_calls`, at the top
+level of the response, beside `choices`. Each entry is one call:
+
+| Field | Value |
+|---|---|
+| `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch. |
+| `type` | `web_search` or `web_fetch`. |
+| `status` | `in_progress`, `completed` or `failed`. |
+| `query` | A search's query. |
+| `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
+| `sources` | A completed search's results, each with its `url`, `title` and `published_date` (the provider's own date string, or `null`); empty when it found none. Never page text. |
+| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses` has `"tag": "call_limit"` and a `null` provider. Absent when Otari can say no more than that the call failed. |
+
+A response that is not streamed carries the ended entry of every call, across
+all of the tool loop's rounds:
+
+```json
+{
+  "id": "chatcmpl-…",
+  "object": "chat.completion",
+  "choices": [{"index": 0, "message": {"role": "assistant", "content": "Python 3.14 is…"}, "finish_reason": "stop"}],
+  "otari_tool_calls": [
+    {
+      "id": "otari_ws_5f0c…",
+      "type": "web_search",
+      "status": "completed",
+      "query": "latest python release",
+      "sources": [{"url": "https://www.python.org/downloads/", "title": "Download Python", "published_date": null}]
+    }
+  ]
+}
+```
+
+A stream sends a chunk when each call starts and another when it ends, before
+the answer's text; a call refused past `max_uses` never started, so it is sent
+once, ended. Each chunk carries whole entries at its top level and one choice
+whose `delta` has no content or tool calls, so a client that reads only `choices`
+passes over it. Match entries by `id`: the ended one replaces the started one.
+
+```text
+data: {"id":"chatcmpl-…","choices":[{"delta":{"content":null,…},"finish_reason":null,"index":0}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"in_progress","query":"latest python release"}]}
+
+data: {"id":"chatcmpl-…","choices":[{"delta":{"content":null,…},"finish_reason":null,"index":0}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"completed","query":"latest python release","sources":[…]}]}
+```
+
+The entries are not in the `delta`, where the OpenAI Python SDK's stream helper
+(`client.chat.completions.stream()`) would fail on them. That helper ignores
+them, so read the raw chunks to see them. A stream that has sent an entry has
+sent response bytes, so a provider failure after it ends the stream with an
+error event rather than falling over to another candidate (see [Failure
+behavior](routing.md#failure-behavior)).
+
+A client may keep the entries on the assistant message it sends back: Otari
+removes `otari_tool_calls` from every assistant message before calling the
+provider. Code execution and MCP tool calls are not reported in the field.
+
 ### Provider-specific fields
 
 A field a provider adds to a chat completion's message beyond the OpenAI schema

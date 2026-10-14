@@ -1,4 +1,4 @@
-"""Web fetch's native server-tool rendering on Messages."""
+"""Web fetch's renderings: the server-tool pair on Messages and the ``otari_tool_calls`` entries on Chat Completions."""
 
 from __future__ import annotations
 
@@ -70,9 +70,8 @@ def test_only_the_dated_keyword_asks_for_the_anthropic_pair(tool_entry: dict[str
     assert _rendering().declared(tool_entry) is expected
 
 
-def test_no_other_dialect_announces_a_fetch() -> None:
+def test_responses_does_not_announce_a_fetch() -> None:
     assert native_rendering(WEB_FETCH_TOOL_NAME, Dialect.RESPONSES) is None
-    assert native_rendering(WEB_FETCH_TOOL_NAME, Dialect.CHAT) is None
 
 
 def test_the_pair_carries_the_page_the_backend_kept_without_its_query() -> None:
@@ -112,3 +111,50 @@ def test_a_refused_fetch_reports_max_uses_exceeded() -> None:
 
     assert result.tool_use_id == use.id
     assert result.content.error_code == "max_uses_exceeded"
+
+
+def _chat_rendering() -> Any:
+    rendering = native_rendering(WEB_FETCH_TOOL_NAME, Dialect.CHAT)
+    assert rendering is not None
+    return rendering
+
+
+@pytest.mark.parametrize("tool_entry", [{"type": "otari_web_fetch"}, {"type": "web_fetch_20250910"}, None])
+def test_chat_reports_every_declaration_of_the_fetch(tool_entry: dict[str, Any] | None) -> None:
+    assert _chat_rendering().declared(tool_entry) is True
+
+
+def test_a_chat_fetch_is_announced_with_its_url_and_ended_under_the_same_id() -> None:
+    call = _call()
+
+    [started] = _chat_rendering().started(call)
+    [ended] = _chat_rendering().ran(call, _FetchBackendLike(_page()))
+
+    assert started == {
+        "id": started["id"],
+        "type": "web_fetch",
+        "status": "in_progress",
+        "url": "https://example.com/a",
+    }
+    assert started["id"].startswith("otari_wf_")
+    assert ended == {**started, "status": "completed"}
+
+
+def test_a_chat_fetch_entry_never_carries_the_page() -> None:
+    [ended] = _chat_rendering().ran(_call(), _FetchBackendLike(_page("page text only the model reads")))
+
+    assert "page text" not in str(ended)
+
+
+def test_a_failed_chat_fetch_on_the_old_backend_has_no_error() -> None:
+    [ended] = _chat_rendering().ran(_call(failed=True), _FetchBackendLike())
+
+    assert ended["status"] == "failed"
+    assert "error" not in ended
+
+
+def test_a_refused_chat_fetch_fails_with_the_call_limit_tag() -> None:
+    [ended] = _chat_rendering().refused(_call())
+
+    assert ended["status"] == "failed"
+    assert ended["error"] == {"provider": None, "status": None, "tag": "call_limit", "retryable": False}

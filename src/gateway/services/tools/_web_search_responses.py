@@ -34,6 +34,10 @@ class ResponsesWebSearchRendering:
         del tool_entry
         return True
 
+    def started(self, call: NativeCall) -> list[Any]:
+        """Nothing: the item is announced once the search has ended, with its status."""
+        return []
+
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The item for one search, ``failed`` where its backend errored and ``completed`` otherwise.
 

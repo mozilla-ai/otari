@@ -351,7 +351,9 @@ streaming failure after the stream begins is returned to the client because
 switching models mid-answer would corrupt the response.
 
 A tool loop that has already produced assistant state cannot be replayed on
-another provider. Shared service failures, such as an unavailable mandatory
+another provider. On Chat Completions, a stream that has reported one of Otari's
+web searches or fetches in `otari_tool_calls` has sent response bytes, so it is
+committed from that report on. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
 If every candidate of a plan with more than one candidate fails, Otari returns a gateway error in its own words, never a provider's message. A plan with one candidate answers as naming that model directly would. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.
