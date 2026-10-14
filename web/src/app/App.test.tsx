@@ -266,7 +266,7 @@ describe("App", () => {
     // a model remembered on the catalog wins is decided by `SignedInRoot`.
     function returnFromProvider(returnHash: string) {
       window.sessionStorage.setItem("otari.oauth.state", "the-state")
-      window.sessionStorage.setItem("otari.oauth.return", returnHash)
+      window.sessionStorage.setItem("otari.oauth.return-hash", returnHash)
       vi.mocked(siteFetch).mockResolvedValue({
         build: "test-build",
         version: "1.0.0",

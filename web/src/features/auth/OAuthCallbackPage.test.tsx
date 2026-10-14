@@ -18,7 +18,7 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 })
 
 const STATE_KEY = "otari.oauth.state"
-const RETURN_KEY = "otari.oauth.return"
+const RETURN_KEY = "otari.oauth.return-hash"
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

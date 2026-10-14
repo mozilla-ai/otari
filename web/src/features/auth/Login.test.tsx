@@ -1422,7 +1422,7 @@ describe("Login with a passkey", () => {
       )
 
       await waitFor(() => expect(assign).toHaveBeenCalled())
-      expect(window.sessionStorage.getItem("otari.oauth.return")).toBe(
+      expect(window.sessionStorage.getItem("otari.oauth.return-hash")).toBe(
         "#/organization/billing",
       )
     })
@@ -1502,7 +1502,9 @@ describe("Login with a passkey", () => {
       ).toBeInTheDocument()
       expect(assign).not.toHaveBeenCalled()
       expect(window.sessionStorage.getItem("otari.oauth.state")).toBeNull()
-      expect(window.sessionStorage.getItem("otari.oauth.return")).toBeNull()
+      expect(
+        window.sessionStorage.getItem("otari.oauth.return-hash"),
+      ).toBeNull()
       await waitFor(() =>
         expect(recordEvent).toHaveBeenCalledWith(
           TELEMETRY_EVENTS.LOGIN_FAILED,

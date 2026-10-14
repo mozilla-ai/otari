@@ -23,7 +23,7 @@ const TERMS_KEY = "otari.oauth.terms-accepted"
  * The hash to land on once the sign-in succeeds, so a link into the dashboard
  * that ended on the sign-in screen still opens after the provider's round trip.
  */
-const RETURN_KEY = "otari.oauth.return"
+const RETURN_KEY = "otari.oauth.return-hash"
 
 interface RoundTripOptions {
   termsAccepted?: boolean
@@ -47,34 +47,29 @@ export function rememberOAuthState(
   }
   window.sessionStorage.removeItem(RETURN_KEY)
   try {
-    // A dashboard address the tab was already showing, not a credential; it
-    // reads as sensitive only for having come back out of this storage.
-    // codeql[js/clear-text-storage-of-sensitive-data]
     window.sessionStorage.setItem(RETURN_KEY, returnHash)
   } catch {
     // Storage full: the sign-in still starts, and lands on the home page.
   }
 }
 
-/**
- * Take what was remembered, clearing it so one value answers one callback.
- * The page to return to is checked on the way out: storage is not a source to
- * navigate on unchecked.
- */
-export function takeOAuthState(): {
-  state: string
-  termsAccepted: boolean
-  returnHash: string
-} {
+/** Take what was remembered, clearing it so one value answers one callback. */
+export function takeOAuthState(): { state: string; termsAccepted: boolean } {
   const state = window.sessionStorage.getItem(STATE_KEY) ?? ""
   const termsAccepted = window.sessionStorage.getItem(TERMS_KEY) === "true"
-  const returnHash = resolveSignInReturnHash(
-    window.sessionStorage.getItem(RETURN_KEY) ?? "",
-  )
   window.sessionStorage.removeItem(STATE_KEY)
   window.sessionStorage.removeItem(TERMS_KEY)
+  return { state, termsAccepted }
+}
+
+/**
+ * Take the page to return to, cleared with the state whatever the outcome, and
+ * checked on the way out: storage is not a source to navigate on unchecked.
+ */
+export function takeOAuthReturnHash(): string {
+  const stored = window.sessionStorage.getItem(RETURN_KEY) ?? ""
   window.sessionStorage.removeItem(RETURN_KEY)
-  return { state, termsAccepted, returnHash }
+  return resolveSignInReturnHash(stored)
 }
 
 /**

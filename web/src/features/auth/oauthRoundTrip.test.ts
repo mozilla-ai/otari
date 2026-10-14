@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { rememberOAuthState } from "@/features/auth/oauthRoundTrip"
 
 const STATE_KEY = "otari.oauth.state"
-const RETURN_KEY = "otari.oauth.return"
+const RETURN_KEY = "otari.oauth.return-hash"
 
 describe("rememberOAuthState", () => {
   afterEach(() => {

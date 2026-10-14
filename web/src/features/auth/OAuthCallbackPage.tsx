@@ -12,7 +12,7 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { OAuthTermsStep } from "./OAuthTermsStep"
 import { oauthProviderLabel } from "./oauthProviders"
-import { takeOAuthState } from "./oauthRoundTrip"
+import { takeOAuthReturnHash, takeOAuthState } from "./oauthRoundTrip"
 import {
   PublicAuthLayout,
   PublicAuthLink,
@@ -93,12 +93,12 @@ export function OAuthCallbackPage({
     const label = oauthProviderLabel(provider)
     const params = new URLSearchParams(hash.split("?")[1] ?? "")
     const remembered = takeOAuthState()
+    const returnHash = takeOAuthReturnHash()
     const providerError = params.get("error")
     const state = params.get("state")
     const code = params.get("code")
 
-    const fail = (message: string) =>
-      setFailure({ message, returnHash: remembered.returnHash })
+    const fail = (message: string) => setFailure({ message, returnHash })
     const refuse = (message: string, errorCode: string) => {
       recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: provider,
@@ -165,7 +165,7 @@ export function OAuthCallbackPage({
           // re-selecting this page, whose effect has already run. So this hands
           // the tab on to the page the sign-in started from, replacing this
           // entry so Back from there skips this page.
-          replacePublicAuthPage(remembered.returnHash)
+          replacePublicAuthPage(returnHash)
           return
         }
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
