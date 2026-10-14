@@ -7,6 +7,7 @@ import type { UsageEntry } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageError } from "@/design-system/feedback/PageError"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -359,6 +360,19 @@ export function OverviewIndex() {
 
   if (!isSettled || (hasNoOrganization && invitations.isPending)) {
     return <PageLoading />
+  }
+  if (hasNoOrganization && invitations.isError) {
+    // The overview below cannot serve this identity either, so the one way
+    // forward is offered rather than a page of failed reads.
+    return (
+      <PageError error={invitations.error}>
+        Your invitations could not be loaded.{" "}
+        <Link to="/invitations" className="text-link hover:text-link-hover">
+          Open your invitations
+        </Link>{" "}
+        to try again.
+      </PageError>
+    )
   }
   if (hasNoOrganization && (invitations.data ?? []).length > 0) {
     return <Navigate to="/invitations" replace />

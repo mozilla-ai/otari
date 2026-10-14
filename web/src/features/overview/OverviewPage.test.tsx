@@ -1659,7 +1659,7 @@ describe("OverviewIndex for an identity with no organization", () => {
   })
 
   function mockWithoutOrganization(
-    invitations: ReturnType<typeof pendingOrganizationInvitation>[],
+    invitations: ReturnType<typeof pendingOrganizationInvitation>[] | "fails",
   ) {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
@@ -1667,6 +1667,10 @@ describe("OverviewIndex for an identity with no organization", () => {
         return jsonResponse({ detail: "Organization not found" }, 404)
       }
       if (url.includes(`${API_ROOT}/organizations/me/pending-memberships`)) {
+        if (invitations === "fails") {
+          // A 404 is the one failure the hook does not retry, which keeps this fast.
+          return jsonResponse({ detail: "Not Found" }, 404)
+        }
         return jsonResponse({ data: invitations, count: invitations.length })
       }
       if (url.includes(`${API_ROOT}/usage/summary`)) {
@@ -1717,6 +1721,22 @@ describe("OverviewIndex for an identity with no organization", () => {
     renderHome()
 
     expect(await screen.findByTestId("loc")).toHaveTextContent("/invitations")
+  })
+
+  it("offers the invitations page when they cannot be loaded", async () => {
+    mockWithoutOrganization("fails")
+
+    renderHome()
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Open your invitations" }),
+    ).toHaveAttribute("href", "/invitations")
+    expect(
+      screen.queryByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).not.toBeInTheDocument()
   })
 
   it("stays on the overview when nothing is waiting", async () => {
