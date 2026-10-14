@@ -1916,7 +1916,7 @@ class OrganizationService:
     async def _update_membership(
         self, membership: OrganizationMember, update_data: dict[str, str]
     ) -> OrganizationMember:
-        """Stage a membership change, cancelling any pending invitation once the membership is not ``invited``.
+        """Stage a membership change, canceling any pending invitation once the membership is not ``invited``.
 
         Every status write in this service goes through here. A pending
         invitation on a membership that is active or suspended is a working
