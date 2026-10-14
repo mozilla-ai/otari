@@ -664,28 +664,15 @@ async def reset_password(
     rule again here, because the roster can drop it after the link was mailed.
     """
     users = UserRepository(db)
-    identity = await users.get_by_reset_token_hash(hash_token(token))
-    if identity is None or identity.password_reset_token_expires_at is None or not identity.is_active:
-        raise ResetTokenInvalidError
-    await users.lock(identity.id)
-    identity = await users.get_by_reset_token_hash(hash_token(token))
-    if identity is None or identity.password_reset_token_expires_at is None or not identity.is_active:
-        raise ResetTokenInvalidError
-    if identity.password_reset_token_expires_at < datetime.now(UTC):
-        raise ResetTokenInvalidError
-    if not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup):
-        raise ResetTokenInvalidError
+    identity = await _locked_reset_identity(users, organizations, token=token, open_signup=config.open_signup)
     validate_new_password(new_password)
     needs_terms = identity.terms_accepted_at is None and config.terms_url is not None
     if needs_terms and not terms_accepted:
         raise TermsNotAcceptedError
     if config.open_signup and identity.email_verified_at is None:
         await organizations.provision_tenancy_for_claim(identity, full_name=None)
-        # That block committed, which released the lock, so the token is resolved again under a new one.
-        await users.lock(identity.id)
-        identity = await users.get_by_reset_token_hash(hash_token(token))
-        if identity is None or not identity.is_active:
-            raise ResetTokenInvalidError
+        # That block committed, which released the lock, so the token is resolved and checked again under a new one.
+        identity = await _locked_reset_identity(users, organizations, token=token, open_signup=config.open_signup)
     now = datetime.now(UTC)
     if needs_terms:
         identity.terms_accepted_at = now
@@ -707,6 +694,32 @@ async def reset_password(
     db.add(identity)
     await db.commit()
     return identity if first_claim else None
+
+
+async def _locked_reset_identity(
+    users: UserRepository, organizations: OrganizationService, *, token: str, open_signup: bool
+) -> User:
+    """Lock the identity a reset token names and return it, while the token can still be redeemed.
+
+    Resolved again under the lock, so a concurrent reset that spent the token is
+    seen, and then held to every condition a redemption needs: the identity is
+    active, the token has not expired, and an unverified identity is still
+    claimable. Anything else raises ``ResetTokenInvalidError``.
+    """
+    identity = await users.get_by_reset_token_hash(hash_token(token))
+    if identity is None:
+        raise ResetTokenInvalidError
+    await users.lock(identity.id)
+    identity = await users.get_by_reset_token_hash(hash_token(token))
+    if (
+        identity is None
+        or not identity.is_active
+        or identity.password_reset_token_expires_at is None
+        or identity.password_reset_token_expires_at < datetime.now(UTC)
+        or not await unverified_identity_is_claimable(organizations, identity, open_signup=open_signup)
+    ):
+        raise ResetTokenInvalidError
+    return identity
 
 
 async def operator_has_password(db: AsyncSession) -> bool:

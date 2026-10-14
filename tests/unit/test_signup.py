@@ -11,6 +11,7 @@ observe an emailed link without a real SMTP server.
 import logging
 import re
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,10 +20,12 @@ from httpx2 import Response
 from sqlalchemy import create_engine, text
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.exceptions.identity_exceptions import ResetTokenInvalidError
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
+from gateway.models.tenancy import User
 from gateway.services.password_service import hash_password_async
-from gateway.services.tenancy.organization_service import _default_organization_name
+from gateway.services.tenancy.organization_service import OrganizationService, _default_organization_name
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
     DEFAULT_WORKSPACE_NAME,
@@ -779,6 +782,44 @@ def test_open_signup_gives_an_identity_nobody_still_wants_its_own_organization_t
         assert own != inviting_organization
         assert _organization_ids(tmp_path, email="ada@example.com") == (own, own)
         assert client.get(f"{API_ROOT}/organizations/me").json()["role"] == "owner"
+
+
+def test_a_reset_claim_whose_link_expires_while_its_organization_is_founded_is_refused(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The link is checked in full again once the organization's commit has released the lock."""
+    real = OrganizationService.provision_tenancy_for_claim
+
+    async def provision_then_expire(self: OrganizationService, identity: User, *, full_name: str | None) -> bool:
+        founded = await real(self, identity, full_name=full_name)
+        identity.password_reset_token_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        await self.db.commit()
+        return founded
+
+    monkeypatch.setattr(OrganizationService, "provision_tenancy_for_claim", provision_then_expire)
+    with _client(tmp_path, open_signup=True) as client:
+        invitation = _invite(client, email="ada@example.com")
+        client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{invitation['invitation_id']}",
+            headers={"Otari-Key": MASTER_KEY},
+        )
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.INFO, logger="gateway")
+        try:
+            client.post(f"{API_ROOT}/auth/password/reset", json={"email": "ada@example.com"})
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+        match = _TOKEN_IN_LINK.search(caplog.text)
+        assert match, caplog.text
+
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm", json={"token": match.group(1), "new_password": PASSWORD}
+        )
+
+        assert confirmed.status_code == 400, confirmed.text
+        assert confirmed.json()["detail"] == ResetTokenInvalidError().message
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        assert signed_in.status_code == 401, signed_in.text
 
 
 def test_open_signup_leaves_a_pending_invitee_where_the_invitation_is(
