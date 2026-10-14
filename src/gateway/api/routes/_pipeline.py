@@ -1584,7 +1584,7 @@ async def _require_deployment_funds(
             "BillingPort failed to admit a deployment-paid request: organization=%s request_id=%s: %s",
             organization_id,
             ctx.request_id,
-            _describe_billing_error(exc),
+            _describe_port_error(exc),
         )
         if ctx.db is not None:
             # Whatever the adapter wrote before failing is discarded, and a
@@ -4657,12 +4657,12 @@ async def charge_deployment_paid(
             amount,
             charge.organization_id,
             charge.request_id,
-            _describe_billing_error(exc),
+            _describe_port_error(exc),
         )
 
 
-def _describe_billing_error(exc: Exception) -> str:
-    """Name a billing port failure without the row data a database error's text can carry."""
+def _describe_port_error(exc: Exception) -> str:
+    """Name a port failure without the row data a database error's text can carry."""
     if isinstance(exc, DATABASE_ERRORS):
         return describe_database_error(exc)
     return type(exc).__name__
