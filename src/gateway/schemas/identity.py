@@ -4,6 +4,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from gateway.models.identity import MailedLinkStatus
+
+# A generated token is about 43 characters; this bounds the request body, it is not a format.
+_MAX_SUBMITTED_TOKEN = 512
+
 
 class PasswordLinkPublic(BaseModel):
     """A single-use link that sets an account's password, and whether it was mailed."""
@@ -28,4 +33,21 @@ class PasswordLinkPublic(BaseModel):
     expires_at: datetime = Field(description="When the link stops working.")
 
 
-__all__ = ["PasswordLinkPublic"]
+class MailedLinkRequest(BaseModel):
+    """A token from a verification or password reset link."""
+
+    token: str = Field(max_length=_MAX_SUBMITTED_TOKEN, description="The token from the link.")
+
+
+class MailedLinkStatusResponse(BaseModel):
+    """Whether the link can still be used. Checking it does not use it."""
+
+    status: MailedLinkStatus = Field(
+        description=(
+            "valid, expired, or invalid. invalid covers a link that was never issued, one already used, "
+            "and one whose account was deactivated."
+        )
+    )
+
+
+__all__ = ["MailedLinkRequest", "MailedLinkStatusResponse", "PasswordLinkPublic"]

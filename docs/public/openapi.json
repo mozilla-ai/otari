@@ -8266,6 +8266,46 @@
         "title": "MailSettings",
         "type": "object"
       },
+      "MailedLinkRequest": {
+        "description": "A token from a verification or password reset link.",
+        "properties": {
+          "token": {
+            "description": "The token from the link.",
+            "maxLength": 512,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "MailedLinkRequest",
+        "type": "object"
+      },
+      "MailedLinkStatus": {
+        "description": "Whether a mailed verification or password reset link can still be used.\n\nNOTE: ``INVALID`` covers a link that was never issued and one already used, because a used link's hash is gone.",
+        "enum": [
+          "valid",
+          "expired",
+          "invalid"
+        ],
+        "title": "MailedLinkStatus",
+        "type": "string"
+      },
+      "MailedLinkStatusResponse": {
+        "description": "Whether the link can still be used. Checking it does not use it.",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/MailedLinkStatus",
+            "description": "valid, expired, or invalid. invalid covers a link that was never issued, one already used, and one whose account was deactivated."
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "MailedLinkStatusResponse",
+        "type": "object"
+      },
       "MaintenanceMode": {
         "description": "Whether this deployment is currently refusing new dashboard sign-ins.",
         "properties": {
@@ -24362,6 +24402,56 @@
         ]
       }
     },
+    "/api/v1/auth/password/reset/validate": {
+      "post": {
+        "description": "Say whether a password reset link can still be used, without using it.",
+        "operationId": "auth-validate_reset_link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailedLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailedLinkStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Validate Reset Link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/profile": {
       "get": {
         "description": "Report who the caller is, whether or not they belong to an organization.\n\nThe same shape ``GET /api/v1/organizations/me`` carries as ``caller``, for\nan identity that context cannot describe because it has no active\nmembership.",
@@ -24616,6 +24706,56 @@
           }
         },
         "summary": "Verify Email Route",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-email/validate": {
+      "post": {
+        "description": "Say whether an email verification link can still be used, without using it.\n\nVerifying still needs the password chosen at signup, which this does not check.",
+        "operationId": "auth-validate_verification_link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailedLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailedLinkStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Validate Verification Link",
         "tags": [
           "auth"
         ]

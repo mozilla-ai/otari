@@ -14,7 +14,7 @@ from gateway.exceptions.identity_exceptions import (
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.identity import EmailAssertion, MailedLinkStatus, ProviderIdentity
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
@@ -240,6 +240,18 @@ class IdentityService:
         self._users.stage(account)
         return expires_at
 
+    async def reset_link_status(self, token: str) -> MailedLinkStatus:
+        """Say whether a password reset link can still be used, without using it."""
+        async with self._uow:
+            account = await self._users.get_by_reset_token_hash(hash_token(token))
+        return _link_status(account, None if account is None else account.password_reset_token_expires_at)
+
+    async def verification_link_status(self, token: str) -> MailedLinkStatus:
+        """Say whether an email verification link can still be used, without using it."""
+        async with self._uow:
+            account = await self._users.get_by_verification_token_hash(hash_token(token))
+        return _link_status(account, None if account is None else account.email_verification_token_expires_at)
+
     async def _account_for(self, external: ProviderIdentity, label: str) -> IdentityResolution:
         link = await self._links.get_by_identity(provider=external.provider, subject=external.subject)
         if link is not None:
@@ -305,3 +317,10 @@ class IdentityService:
 
 def _reset_path(token: str) -> str:
     return f"/#/reset-password?token={token}"
+
+
+def _link_status(account: User | None, expires_at: datetime | None) -> MailedLinkStatus:
+    """Judge a mailed link the way redeeming it would, short of the checks that need its password or the roster."""
+    if account is None or not account.is_active or expires_at is None:
+        return MailedLinkStatus.INVALID
+    return MailedLinkStatus.EXPIRED if expires_at < datetime.now(UTC) else MailedLinkStatus.VALID

@@ -33,6 +33,17 @@ class EmailAssertion(StrEnum):
         return cls.VERIFIED if email_verified else cls.UNVERIFIED
 
 
+class MailedLinkStatus(StrEnum):
+    """Whether a mailed verification or password reset link can still be used.
+
+    NOTE: ``INVALID`` covers a link that was never issued and one already used, because a used link's hash is gone.
+    """
+
+    VALID = "valid"
+    EXPIRED = "expired"
+    INVALID = "invalid"
+
+
 @dataclass(frozen=True)
 class ProviderIdentity:
     """What a provider has proven about the person who signed in.
@@ -92,4 +103,4 @@ class OAuthIdentityLink(Base):
     )
 
 
-__all__ = ["EmailAssertion", "OAuthIdentityLink", "ProviderIdentity"]
+__all__ = ["EmailAssertion", "MailedLinkStatus", "OAuthIdentityLink", "ProviderIdentity"]

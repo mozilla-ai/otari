@@ -208,6 +208,8 @@ POST /api/v1/auth/verify-email                      # dashboard-only
 POST /api/v1/auth/resend-verification               # dashboard-only
 POST /api/v1/auth/password/reset                    # dashboard-only
 POST /api/v1/auth/password/reset/confirm            # dashboard-only
+POST /api/v1/auth/password/reset/validate           # dashboard-only
+POST /api/v1/auth/verify-email/validate             # dashboard-only
 # Passkeys (otari#652): both ceremonies need a WebAuthn authenticator, which is
 # a browser API. An SDK cannot produce an attestation or an assertion, so there
 # is nothing here for one to wrap, including the credential list: it exists to

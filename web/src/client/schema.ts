@@ -488,6 +488,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password/reset/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Reset Link
+         * @description Say whether a password reset link can still be used, without using it.
+         */
+        post: operations["auth-validate_reset_link"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/profile": {
         parameters: {
             query?: never;
@@ -648,6 +668,28 @@ export interface paths {
          *     used to guess its password; a verification that succeeds is never counted.
          */
         post: operations["auth-verify_email_route"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verify-email/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Verification Link
+         * @description Say whether an email verification link can still be used, without using it.
+         *
+         *     Verifying still needs the password chosen at signup, which this does not check.
+         */
+        post: operations["auth-validate_verification_link"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10305,6 +10347,33 @@ export interface components {
             transport: string;
         };
         /**
+         * MailedLinkRequest
+         * @description A token from a verification or password reset link.
+         */
+        MailedLinkRequest: {
+            /**
+             * Token
+             * @description The token from the link.
+             */
+            token: string;
+        };
+        /**
+         * MailedLinkStatus
+         * @description Whether a mailed verification or password reset link can still be used.
+         *
+         *     NOTE: ``INVALID`` covers a link that was never issued and one already used, because a used link's hash is gone.
+         * @enum {string}
+         */
+        MailedLinkStatus: "valid" | "expired" | "invalid";
+        /**
+         * MailedLinkStatusResponse
+         * @description Whether the link can still be used. Checking it does not use it.
+         */
+        MailedLinkStatusResponse: {
+            /** @description valid, expired, or invalid. invalid covers a link that was never issued, one already used, and one whose account was deactivated. */
+            status: components["schemas"]["MailedLinkStatus"];
+        };
+        /**
          * MaintenanceMode
          * @description Whether this deployment is currently refusing new dashboard sign-ins.
          */
@@ -17511,6 +17580,39 @@ export interface operations {
             };
         };
     };
+    "auth-validate_reset_link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailedLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailedLinkStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "auth-get_own_profile": {
         parameters: {
             query?: never;
@@ -17701,6 +17803,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VerifyEmailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-validate_verification_link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailedLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailedLinkStatusResponse"];
                 };
             };
             /** @description Validation Error */

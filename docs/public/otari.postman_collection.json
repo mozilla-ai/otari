@@ -795,6 +795,42 @@
           }
         },
         {
+          "name": "Validate Reset Link",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\"\n}"
+            },
+            "description": "Say whether a password reset link can still be used, without using it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "password",
+                "reset",
+                "validate"
+              ],
+              "raw": "{{baseUrl}}/api/v1/auth/password/reset/validate"
+            }
+          }
+        },
+        {
           "name": "Get Own Profile",
           "request": {
             "description": "Report who the caller is, whether or not they belong to an organization.\n\nThe same shape ``GET /api/v1/organizations/me`` carries as ``caller``, for\nan identity that context cannot describe because it has no active\nmembership.",
@@ -1001,6 +1037,41 @@
                 "verify-email"
               ],
               "raw": "{{baseUrl}}/api/v1/auth/verify-email"
+            }
+          }
+        },
+        {
+          "name": "Validate Verification Link",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\"\n}"
+            },
+            "description": "Say whether an email verification link can still be used, without using it.\n\nVerifying still needs the password chosen at signup, which this does not check.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "verify-email",
+                "validate"
+              ],
+              "raw": "{{baseUrl}}/api/v1/auth/verify-email/validate"
             }
           }
         },
