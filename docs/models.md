@@ -23,9 +23,9 @@ A request may also name the model the way the catalog does. `vendor/model` (`dee
 The legacy `provider/model` spelling is still honored where it names an
 offering the deployment serves (`openai/gpt-4o` while an `openai` instance
 serves `gpt-4o`); read as a catalog id otherwise. Where it is also the catalog
-id of a model with other offerings, as it is for every OpenAI model, the named
-offering serves first and the others are its fallback (see
-[Catalog spellings](#catalog-spellings)). Prefer the colon form in standalone
+id of a model the catalog also offers elsewhere (an OpenAI model served by
+Azure OpenAI too, say), the named offering serves first and the others are
+its fallback (see [Catalog spellings](#catalog-spellings)). Prefer the colon form in standalone
 configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
