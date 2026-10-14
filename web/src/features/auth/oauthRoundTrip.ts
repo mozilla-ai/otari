@@ -47,6 +47,9 @@ export function rememberOAuthState(
   }
   window.sessionStorage.removeItem(RETURN_KEY)
   try {
+    // A dashboard address the tab was already showing, not a credential; it
+    // reads as sensitive only for having come back out of this storage.
+    // codeql[js/clear-text-storage-of-sensitive-data]
     window.sessionStorage.setItem(RETURN_KEY, returnHash)
   } catch {
     // Storage full: the sign-in still starts, and lands on the home page.
