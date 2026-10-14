@@ -165,10 +165,11 @@ from 400 raises `ProviderError` with the tag `http_error`.
 
 Every field read from a successful answer is checked: an answer without `response` or its
 `status`, or, when the status is `OK`, without `results` or an item's `url`, `title` or `desc`, or
-with any of these of the wrong type, or with a `pdate` or `timestamp` that is not a Unix time,
-raises `ProviderError` with the tag `unexpected_response`. Mojeek's documentation lists `pdate`
-and `timestamp` on every result, but they come only on request (`timestamp` with `date=1`), so
-they are checked when present. Fields the adapter does not read are ignored.
+with any of these of the wrong type, raises `ProviderError` with the tag `unexpected_response`.
+Mojeek's documentation lists `pdate` and `timestamp` on every result, but they come only on
+request (`timestamp` with `date=1`), so neither is required: the date is read from `pdate` when it
+is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
+behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
 
 ## The fake provider
 

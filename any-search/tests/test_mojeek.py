@@ -224,6 +224,15 @@ async def test_pdate_wins_over_timestamp() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_timestamp_behind_a_usable_pdate_is_not_read() -> None:
+    """Only the fields the adapter reads are checked (decision 64), as an Exa item past the count is not."""
+    body = _answer()
+    body["response"]["results"][0]["timestamp"] = "not a time"
+    result, _ = await _search(httpx.Response(200, json=body))
+    assert result.hits[0].published == datetime.fromtimestamp(1770000000, UTC)
+
+
+@pytest.mark.asyncio
 async def test_a_zero_pdate_falls_back_to_timestamp() -> None:
     body = _answer()
     body["response"]["results"][0]["pdate"] = 0

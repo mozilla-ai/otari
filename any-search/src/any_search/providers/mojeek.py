@@ -24,8 +24,10 @@ side fails the call rather than degrading it: ``response`` and its ``status``
 must be there and, when the status is ``OK``, ``results`` and each item's
 ``url``, ``title`` and ``desc``, which Mojeek documents on every result and
 sends on every one. ``pdate`` and ``timestamp`` are documented on every result
-too, but sent only on request, so they are checked when present: they must be
-Unix times, where 0 means none. Anything else raises ``unexpected_response``.
+too, but sent only on request, so neither is required. The date is read from
+``pdate`` when it is present and not 0, else from ``timestamp``, and the field
+read must be a Unix time, 0 meaning none; a ``timestamp`` behind a usable
+``pdate`` is not read. Anything else raises ``unexpected_response``.
 Fields the adapter does not read are ignored, so a field Mojeek adds breaks
 nothing. Mojeek reports no cost.
 
