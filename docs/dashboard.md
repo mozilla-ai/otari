@@ -183,6 +183,16 @@ lists everything you uploaded in the workspace, to attach again or to delete.
 These controls appear only where the deployment stores files: not when file
 uploads are off, and not on a hosted control plane.
 
+The Tools menu attaches web search, code execution and any number of MCP
+servers to the next message, in any mix: the model is offered all of them in one
+tool loop. A tool the gateway runs shows in the transcript above the reply as a
+collapsed row with its status, opening to the arguments the model sent and what
+the tool returned (a long result is shortened for display). This activity is
+shown in the Playground only (not on a hosted control plane, whose requests run
+on the data plane) and is not saved with a conversation; a request
+made through the API still returns just the final message, as
+[What clients receive](tools.md#what-clients-receive) describes.
+
 Two things are worth knowing about how it is billed and what it stores.
 
 A Playground request carries no API key. It is authorized by the dashboard

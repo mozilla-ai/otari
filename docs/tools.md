@@ -174,7 +174,10 @@ the final answer.
 
 Responses and Messages can expose native server-tool result blocks when their
 wire format expects them. Chat Completions returns only the final assistant
-message. Calls for tools the client must execute are preserved.
+message. Calls for tools the client must execute are preserved. The dashboard
+Playground's own completion route is the one exception: its stream also reports
+each gateway-run call and its result in an `otari_tool_activity` field of the
+delta, so the page can show them.
 
 For gateway-run MCP activity in Messages streams, see
 [Messages streaming activity](mcp.md#messages-streaming-activity).

@@ -514,6 +514,80 @@ describe("sending a question", () => {
     expect(await screen.findByText(/1,200 in · 34 out/)).toBeInTheDocument()
   })
 
+  it("shows the tools the gateway ran, with their arguments and results", async () => {
+    mockApi()
+    const activity = (payload: Record<string, unknown>) =>
+      JSON.stringify({ choices: [{ delta: { otari_tool_activity: payload } }] })
+    mockStream([
+      activity({
+        type: "tool_call",
+        id: "call_1",
+        name: "web_search",
+        arguments: '{"query":"otari"}',
+      }),
+      activity({
+        type: "tool_result",
+        id: "call_1",
+        name: "web_search",
+        content: "three hits",
+        truncated: false,
+        is_error: false,
+      }),
+      delta("Found it."),
+      "[DONE]",
+    ])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+
+    expect(await screen.findByText("Found it.")).toBeInTheDocument()
+    const trigger = screen.getByRole("button", { name: /web_search/ })
+    expect(trigger).toHaveTextContent("Done")
+    await user.click(trigger)
+    expect(await screen.findByText("three hits")).toBeVisible()
+    expect(screen.getByText(/"query": "otari"/)).toBeVisible()
+  })
+
+  it("sends every tool attached to the message", async () => {
+    mockApi({
+      tools: {
+        ...NO_TOOLS,
+        web_search: { configured: true, enabled: true, reason: null },
+        code_execution: { configured: true, enabled: true, reason: null },
+        mcp_servers: [
+          { id: "srv-1", name: "Docs", purpose_hint: null, enabled: true },
+        ],
+      },
+    })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(await screen.findByRole("button", { name: "Add tools" }))
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Web search" }),
+    )
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Code execution" }),
+    )
+    await user.click(await screen.findByRole("checkbox", { name: "Docs" }))
+    await user.keyboard("{Escape}")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+
+    const [, init] = stream.mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      tools: [{ type: "otari_web_search" }, { type: "otari_code_execution" }],
+      mcp_server_ids: ["srv-1"],
+    })
+  })
+
   it("stops on request, keeping what had arrived and reporting no failure", async () => {
     // Somebody pressing Stop already knows why it stopped, so the partial reply
     // stays as it is and nothing is reported as an error.

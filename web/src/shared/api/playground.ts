@@ -337,10 +337,61 @@ export function useReplacePlaygroundFavoriteModels(
 // The streaming completion
 // ---------------------------------------------------------------------------
 
-/** One streamed fragment: visible answer text, reasoning text, or both. */
+/**
+ * A tool the gateway ran for this reply: the model's call, then its result.
+ *
+ * The gateway consumes its own tool calls and a plain Chat Completions stream
+ * hides them. The Playground's route reports them in an `otari_tool_activity`
+ * field of the delta, one record when a call starts and one when it finishes,
+ * joined by `id`.
+ */
+export type ToolActivity =
+  | { type: "tool_call"; id: string; name: string; arguments: string }
+  | {
+      type: "tool_result"
+      id: string
+      name: string
+      content: string
+      isTruncated: boolean
+      isError: boolean
+    }
+
+/** One streamed fragment: answer text, reasoning text, or a tool's activity. */
 export interface StreamDelta {
   content?: string
   reasoning?: string
+  toolActivity?: ToolActivity
+}
+
+/** The activity record as the wire spells it. */
+type WireToolActivity =
+  | { type: "tool_call"; id?: string; name?: string; arguments?: string }
+  | {
+      type: "tool_result"
+      id?: string
+      name?: string
+      content?: string
+      truncated?: boolean
+      is_error?: boolean
+    }
+
+function toolActivityOf(wire: WireToolActivity): ToolActivity | undefined {
+  const id = wire.id ?? ""
+  const name = wire.name ?? ""
+  if (wire.type === "tool_call") {
+    return { type: "tool_call", id, name, arguments: wire.arguments ?? "" }
+  }
+  if (wire.type === "tool_result") {
+    return {
+      type: "tool_result",
+      id,
+      name,
+      content: wire.content ?? "",
+      isTruncated: wire.truncated ?? false,
+      isError: wire.is_error ?? false,
+    }
+  }
+  return undefined
 }
 
 /**
@@ -370,7 +421,13 @@ interface StreamChunk {
   error?: string
   // Some models stream chain-of-thought in a field of its own rather than in
   // inline `<think>` tags; both are surfaced.
-  choices?: { delta?: StreamDelta }[]
+  choices?: {
+    delta?: {
+      content?: string
+      reasoning?: string
+      otari_tool_activity?: WireToolActivity
+    }
+  }[]
   // Present on the final chunk only, because the gateway is asked for it.
   usage?: StreamUsage | null
 }
@@ -474,6 +531,10 @@ export async function streamPlaygroundChat({
         if (delta?.content || delta?.reasoning) {
           onDelta({ content: delta.content, reasoning: delta.reasoning })
         }
+        const toolActivity = delta?.otari_tool_activity
+          ? toolActivityOf(delta.otari_tool_activity)
+          : undefined
+        if (toolActivity) onDelta({ toolActivity })
       }
     }
   } finally {

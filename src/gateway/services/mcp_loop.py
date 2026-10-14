@@ -23,7 +23,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
-from any_llm.types.completion import PromptTokensDetails
+from any_llm.types.completion import ChoiceDelta, ChunkChoice, PromptTokensDetails
 
 from gateway.core.env import otari_env
 from gateway.log_config import logger
@@ -56,6 +56,7 @@ __all__ = [
     "DEFAULT_MAX_TOOL_ITERATIONS",
     "MAX_TOOL_ITERATIONS_CAP",
     "PURPOSE_HINT_HEADER",
+    "TOOL_ACTIVITY_FIELD",
     "MaxToolIterationsExceeded",
     "ToolBackend",
     "inject_purpose_hints",
@@ -268,6 +269,45 @@ def _fold_usage(
         completion.usage.prompt_tokens_details = PromptTokensDetails(cached_tokens=cache_read_total)
 
 
+# The delta field a tool activity chunk carries. The Chat wire has no vocabulary
+# for a gateway-run tool call, so an opted-in stream (the Playground's) reports
+# it in a field of its own, which an OpenAI client ignores as an unknown key.
+TOOL_ACTIVITY_FIELD = "otari_tool_activity"
+
+# A tool result can be a whole fetched page; the transcript shows a preview.
+_ACTIVITY_RESULT_LIMIT = 8_000
+_TOOL_ERROR_PREFIX = "[tool error]"
+
+
+def _activity_chunk(template: ChatCompletionChunk, payload: dict[str, Any]) -> ChatCompletionChunk:
+    """A content-free chunk carrying one tool activity record, shaped like ``template``."""
+    delta = ChoiceDelta.model_validate({TOOL_ACTIVITY_FIELD: payload})
+    choice = ChunkChoice(index=0, delta=delta, finish_reason=None)
+    return template.model_copy(update={"choices": [choice], "usage": None})
+
+
+def _call_activity(call: dict[str, Any]) -> dict[str, Any]:
+    function = call.get("function", {})
+    return {
+        "type": "tool_call",
+        "id": call.get("id") or "",
+        "name": function.get("name", ""),
+        "arguments": function.get("arguments") or "",
+    }
+
+
+def _result_activity(call: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
+    content = str(message.get("content") or "")
+    return {
+        "type": "tool_result",
+        "id": call.get("id") or "",
+        "name": call.get("function", {}).get("name", ""),
+        "content": content[:_ACTIVITY_RESULT_LIMIT],
+        "truncated": len(content) > _ACTIVITY_RESULT_LIMIT,
+        "is_error": content.startswith(_TOOL_ERROR_PREFIX),
+    }
+
+
 class _ChatStreamState:
     """Per-iteration bookkeeping for the chat streaming loop."""
 
@@ -287,6 +327,9 @@ class _ChatStreamState:
         # official OpenAI client raise IndexError.
         self.visible_tool_index: dict[int, int] = {}
         self.next_visible_tool_index = 0
+        # The round's first upstream chunk: activity chunks copy its id, model and
+        # timestamp so they read as part of the same stream.
+        self.template: ChatCompletionChunk | None = None
 
     def deferred_terminal(self) -> list[ChatCompletionChunk]:
         """The round's held-back chunks, in stream order."""
@@ -307,10 +350,12 @@ class _ChatToolLoopStrategy:
 
     transcript_key = "messages"
 
-    def __init__(self, *, budget: ToolUseBudget | None = None) -> None:
-        # Absent unless the caller capped the searches, which keeps the shared
-        # instance in ``_strategy_for`` free of per-request state.
+    def __init__(self, *, budget: ToolUseBudget | None = None, emit_activity: bool = False) -> None:
+        # Both are absent unless the caller capped the searches or asked for
+        # activity, which keeps the shared instance in ``_strategy_for`` free of
+        # per-request state.
         self._budget = budget
+        self._emit_activity = emit_activity
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return list(value or [])
@@ -413,6 +458,8 @@ class _ChatToolLoopStrategy:
         pool: ToolBackend,
         acc: dict[str, int],
     ) -> tuple[StreamAction, ChatCompletionChunk]:
+        if state.template is None:
+            state.template = event
         if not event.choices and event.usage is not None:
             state.usage_chunks.append(event)
             return StreamAction.DEFER, event
@@ -514,9 +561,8 @@ class _ChatToolLoopStrategy:
     ) -> AsyncIterator[ChatCompletionChunk]:
         del acc
         if state.mcp_calls:
-            await _execute_mcp_calls(pool, state.mcp_calls, budget=self._budget)
-        return
-        yield  # pragma: no cover - makes this a no-event async iterator
+            async for activity in self._run_calls(state, pool, state.mcp_calls, []):
+                yield activity
 
     def terminal_events(self, state: _ChatStreamState, acc: dict[str, int]) -> list[ChatCompletionChunk]:
         carrier = state.usage_carrier()
@@ -546,23 +592,41 @@ class _ChatToolLoopStrategy:
         # All-MCP: the terminal chunk was silently dropped so the client
         # doesn't think this iteration's response was the final answer.
         transcript.append({"role": "assistant", "tool_calls": state.mcp_calls})
-        transcript.extend(await _execute_mcp_calls(pool, state.mcp_calls, budget=self._budget))
-        return
-        yield  # pragma: no cover - makes this a no-event async iterator
+        results: list[dict[str, Any]] = []
+        async for activity in self._run_calls(state, pool, state.mcp_calls, results):
+            yield activity
+        transcript.extend(results)
+
+    async def _run_calls(
+        self,
+        state: _ChatStreamState,
+        pool: ToolBackend,
+        calls: list[dict[str, Any]],
+        results: list[dict[str, Any]],
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        """Execute ``calls`` into ``results``, reporting each around its run when opted in."""
+        template = state.template if self._emit_activity else None
+        if template is not None:
+            for call in calls:
+                yield _activity_chunk(template, _call_activity(call))
+        results.extend(await _execute_mcp_calls(pool, calls, budget=self._budget))
+        if template is not None:
+            for call, message in zip(calls, results, strict=True):
+                yield _activity_chunk(template, _result_activity(call, message))
 
 
 _CHAT_STRATEGY = _ChatToolLoopStrategy()
 
 
-def _strategy_for(budget: ToolUseBudget | None) -> _ChatToolLoopStrategy:
-    """The shared strategy, or a per-request one when the caller capped searches.
+def _strategy_for(budget: ToolUseBudget | None, *, emit_activity: bool = False) -> _ChatToolLoopStrategy:
+    """The shared strategy, or a per-request one when the caller capped searches or wants activity.
 
-    Only a capped request has anything per-request to hold, so every other request
+    Only such a request has anything per-request to hold, so every other request
     keeps reusing the single module-level instance.
     """
-    if budget is None:
+    if budget is None and not emit_activity:
         return _CHAT_STRATEGY
-    return _ChatToolLoopStrategy(budget=budget)
+    return _ChatToolLoopStrategy(budget=budget, emit_activity=emit_activity)
 
 
 async def mcp_tool_loop_stream(
@@ -571,6 +635,7 @@ async def mcp_tool_loop_stream(
     pool: ToolBackend,
     max_iterations: int,
     use_budget: ToolUseBudget | None = None,
+    emit_activity: bool = False,
 ) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
@@ -586,13 +651,17 @@ async def mcp_tool_loop_stream(
       * the iteration ended with a non-``tool_calls`` finish_reason (e.g. ``stop``),
       * the model produced foreign tool_calls (caller needs to dispatch them), or
       * the model produced no MCP-owned calls at all (loop exits, terminal goes through).
+
+    ``emit_activity`` reports each gateway-run call and its result as a chunk
+    carrying :data:`TOOL_ACTIVITY_FIELD`, for a client (the Playground) that
+    shows them. Off, those calls stay invisible on the wire.
     """
     # aclosing makes downstream closes (client disconnect) propagate to the
     # engine generator, and through it to the upstream provider stream,
     # instead of waiting for event-loop async-generator finalization.
     async with aclosing(
         run_tool_loop_stream(
-            strategy=_strategy_for(use_budget),
+            strategy=_strategy_for(use_budget, emit_activity=emit_activity),
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,

@@ -43,6 +43,7 @@ export function ChatPanel({
             // Hidden on the reply still streaming: a Copy of a half-answer and
             // a Regenerate of a request in flight are both wrong.
             areActionsVisible={!(isLast && panel.isStreaming)}
+            isStreaming={isLast && panel.isStreaming}
             onRegenerate={
               isLast && turn.role === "assistant" && !panel.isStreaming
                 ? onRegenerate

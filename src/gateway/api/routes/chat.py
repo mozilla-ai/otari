@@ -217,11 +217,13 @@ class _ChatAdapter:
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
-    def __init__(self, endpoint: str = USAGE_ENDPOINT) -> None:
-        # The only thing that varies between instances, and the only reason
-        # there is more than one: the Playground's rows carry their own label.
+    def __init__(self, endpoint: str = USAGE_ENDPOINT, *, emit_tool_activity: bool = False) -> None:
+        # What varies between instances, and the only reason there is more than
+        # one: the Playground's rows carry their own label, and its stream reports
+        # the calls the gateway runs, which the public one keeps hidden.
         # Everything else about the format is identical, which is the point.
         self.endpoint = endpoint
+        self.emit_tool_activity = emit_tool_activity
 
     def error(
         self,
@@ -357,6 +359,8 @@ class _ChatAdapter:
         extra: dict[str, Any] = {}
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if self.emit_tool_activity:
+            extra["emit_activity"] = True
         return mcp_tool_loop_stream(
             completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
@@ -405,7 +409,7 @@ def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 _ADAPTER = _ChatAdapter()
-_PLAYGROUND_ADAPTER = _ChatAdapter(PLAYGROUND_USAGE_ENDPOINT)
+_PLAYGROUND_ADAPTER = _ChatAdapter(PLAYGROUND_USAGE_ENDPOINT, emit_tool_activity=True)
 
 
 def _effective_output_cap(max_tokens: int | None, max_completion_tokens: int | None) -> int | None:

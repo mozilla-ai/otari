@@ -19,9 +19,8 @@ import { Popover } from "@/design-system/overlays/Popover"
  * stops a checkbox from looking attachable and then failing at request time
  * (otari-ai#1419).
  *
- * The three are mutually exclusive: one request carries one tool mode, so the
- * others disable while any is in use, and the menu says why rather than leaving
- * a dead checkbox unexplained.
+ * Any mix can be attached at once: the gateway offers the model all of them in
+ * one tool loop.
  */
 export function ToolsMenu({
   tools,
@@ -52,7 +51,6 @@ export function ToolsMenu({
   const hasGatewayTools =
     (webSearch?.configured ?? false) || (codeExecution?.configured ?? false)
   const hasAnything = hasGatewayTools || mcpServers.length > 0
-  const isMcpInUse = selectedMcpIds.length > 0
 
   return (
     <Popover
@@ -85,9 +83,7 @@ export function ToolsMenu({
                   <ToolRow
                     name="Web search"
                     isSelected={isWebSearchOn}
-                    isDisabled={
-                      !webSearch.enabled || isCodeExecutionOn || isMcpInUse
-                    }
+                    isDisabled={!webSearch.enabled}
                     onChange={onToggleWebSearch}
                     note={
                       webSearch.enabled
@@ -100,9 +96,7 @@ export function ToolsMenu({
                   <ToolRow
                     name="Code execution"
                     isSelected={isCodeExecutionOn}
-                    isDisabled={
-                      !codeExecution.enabled || isWebSearchOn || isMcpInUse
-                    }
+                    isDisabled={!codeExecution.enabled}
                     onChange={onToggleCodeExecution}
                     note={
                       codeExecution.enabled
@@ -126,9 +120,7 @@ export function ToolsMenu({
                     key={server.id}
                     name={server.name}
                     isSelected={selectedMcpIds.includes(server.id)}
-                    isDisabled={
-                      !server.enabled || isWebSearchOn || isCodeExecutionOn
-                    }
+                    isDisabled={!server.enabled}
                     onChange={(isOn) => onToggleMcpServer(server.id, isOn)}
                     note={
                       server.enabled
@@ -138,13 +130,6 @@ export function ToolsMenu({
                   />
                 ))}
               </div>
-            ) : null}
-
-            {isWebSearchOn || isCodeExecutionOn || isMcpInUse ? (
-              <p className="text-caption">
-                Web search, code execution, and MCP cannot be combined in one
-                message.
-              </p>
             ) : null}
           </>
         ) : (

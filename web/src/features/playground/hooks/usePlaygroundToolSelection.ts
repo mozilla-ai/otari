@@ -36,10 +36,8 @@ export interface PlaygroundToolSelection {
 /**
  * What is attached to the next message.
  *
- * The three are mutually exclusive, which is a fact about the gateway rather
- * than a UI preference: one request carries one tool mode, so enabling any of
- * them clears the others instead of letting somebody build a selection the
- * request would refuse.
+ * Any mix is allowed: web search, code execution and any number of MCP servers
+ * ride one request, and the gateway runs them in a single tool loop.
  *
  * The reconciliation effect is the non-obvious half. A tool can stop being
  * attachable while the page is open (an operator disables it for the workspace,
@@ -57,28 +55,17 @@ export function usePlaygroundToolSelection(
 
   const toggleWebSearch = useCallback((isOn: boolean) => {
     setWebSearchOn(isOn)
-    if (isOn) {
-      setCodeExecutionOn(false)
-      setSelectedMcpIds([])
-    }
   }, [])
 
   const toggleCodeExecution = useCallback((isOn: boolean) => {
     setCodeExecutionOn(isOn)
-    if (isOn) {
-      setWebSearchOn(false)
-      setSelectedMcpIds([])
-    }
   }, [])
 
   const toggleMcpServer = useCallback((id: string, isOn: boolean) => {
-    if (!isOn) {
-      setSelectedMcpIds((prev) => prev.filter((existing) => existing !== id))
-      return
-    }
-    setWebSearchOn(false)
-    setCodeExecutionOn(false)
-    setSelectedMcpIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+    setSelectedMcpIds((prev) => {
+      if (!isOn) return prev.filter((existing) => existing !== id)
+      return prev.includes(id) ? prev : [...prev, id]
+    })
   }, [])
 
   useEffect(() => {

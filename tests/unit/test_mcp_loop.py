@@ -816,6 +816,120 @@ async def test_stream_loop_runs_mcp_tool_and_continues(monkeypatch: pytest.Monke
     assert pool.calls == [("fetch_url", {})]
 
 
+def _activity_of(chunks: list[ChatCompletionChunk]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for c in chunks:
+        extra = getattr(c.choices[0].delta, mcp_loop_module.TOOL_ACTIVITY_FIELD, None) if c.choices else None
+        if extra is not None:
+            out.append(extra)
+    return out
+
+
+def _two_round_acompletion(monkeypatch: pytest.MonkeyPatch) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _chunk(tool_calls=[(0, "call_1", "fetch_url", '{"u": 1}')]),
+                _chunk(finish="tool_calls"),
+            ),
+            _async_iter(_chunk(content="all done", finish="stop")),
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_reports_gateway_tool_activity_when_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    _two_round_acompletion(monkeypatch)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    assert _activity_of(chunks) == [
+        {"type": "tool_call", "id": "call_1", "name": "fetch_url", "arguments": '{"u": 1}'},
+        {
+            "type": "tool_result",
+            "id": "call_1",
+            "name": "fetch_url",
+            "content": "ok",
+            "truncated": False,
+            "is_error": False,
+        },
+    ]
+    # Activity chunks carry no text and no finish reason, so the answer is unchanged.
+    assert [c.choices[0].delta.content for c in chunks if c.choices and c.choices[0].delta.content] == ["all done"]
+    assert [c.choices[0].finish_reason for c in chunks if c.choices and c.choices[0].finish_reason] == ["stop"]
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_flags_a_failed_gateway_tool_in_its_activity(monkeypatch: pytest.MonkeyPatch) -> None:
+    _two_round_acompletion(monkeypatch)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "[tool error] boom"})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    assert _activity_of(chunks)[1]["is_error"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_truncates_a_long_tool_result_in_its_activity(monkeypatch: pytest.MonkeyPatch) -> None:
+    _two_round_acompletion(monkeypatch)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "x" * 20_000})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    result = _activity_of(chunks)[1]
+    assert len(result["content"]) == 8_000
+    assert result["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_keeps_gateway_tool_activity_off_the_wire_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _two_round_acompletion(monkeypatch)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+        )
+    ]
+
+    assert _activity_of(chunks) == []
+
+
 def _usage_only_chunk(usage: CompletionUsage) -> ChatCompletionChunk:
     """The ``include_usage`` chunk OpenAI sends after the finish chunk: usage, no choices."""
     return ChatCompletionChunk(id="x", choices=[], created=0, model="fake", object="chat.completion.chunk", usage=usage)
