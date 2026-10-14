@@ -4,8 +4,7 @@ One endpoint, ``PUT /api/v1/auth/password``, and it always acts on the caller's 
 identity. There is deliberately no way here for an admin to set somebody else's
 password: an address on the roster with no password is an identity waiting for
 the signup and reset flows in #650, not one an operator should be able to take
-over. An operator helps somebody else back in with a password link
-(``POST /api/v1/admin/users/{user_id}/password-link``), which that person redeems.
+over.
 
 **Claiming a deployment.** First boot leaves a standalone deployment with an
 operator identity that has no address and no password
