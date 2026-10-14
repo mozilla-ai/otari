@@ -324,10 +324,10 @@ test.describe("dashboard core flows", () => {
     const dialog = page.getByRole("dialog")
     // Role-scoped for the same reason as the user form: policy rows carry a
     // "Copy policy name" control.
-    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("fast")
-    // "Serves" is a model combobox (allows custom values); type the selector, then
-    // put the popover away so it does not aria-hide the submit button.
-    const serves = dialog.getByRole("combobox", { name: /Serves/ })
+    await dialog.getByRole("textbox", { name: /^Name/ }).fill("fast")
+    // "Main model" is a model combobox (allows custom values); type the selector,
+    // then put the popover away so it does not aria-hide the submit button.
+    const serves = dialog.getByRole("combobox", { name: "Main model" })
     await serves.fill("openai:gpt-4o")
     await dismissComboBoxInDialog(serves)
     await dialog.getByRole("button", { name: "Create policy" }).click()
@@ -344,28 +344,28 @@ test.describe("dashboard core flows", () => {
     await page.getByRole("button", { name: "Create policy" }).first().click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
-    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("chained")
-    const serves = dialog.getByRole("combobox", { name: /Serves/ })
+    await dialog.getByRole("textbox", { name: /^Name/ }).fill("chained")
+    const serves = dialog.getByRole("combobox", { name: "Main model" })
     await serves.fill("openai:gpt-4o")
     await dismissComboBoxInDialog(serves)
 
-    // The failure chain is summoned, not presented, so naming one model stays a
-    // short task.
-    await expect(page.getByText("If that fails, try")).toBeHidden()
-    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
-    const fallback = page.getByRole("combobox", { name: /Fallback 1/ })
+    // Backups are part of the common case, so the section is always there.
+    await dialog.getByRole("button", { name: "Add a backup" }).click()
+    const fallback = page.getByRole("combobox", { name: "Backup 1" })
     await fallback.fill("anthropic:claude-3-5-haiku-latest")
     await dismissComboBoxInDialog(fallback)
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
-    // Scoped to the row this test created: "+1 on failure" anywhere on the page
+    // Scoped to the row this test created: a backup chip anywhere on the page
     // would also be satisfied by another policy's chain, so a `chained` saved
-    // without its fallback would still pass.
+    // without its backup would still pass.
     const chained = page
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
     await expect(chained).toBeVisible()
-    await expect(chained).toContainText(/\+1 on failure/)
+    await expect(
+      chained.getByRole("list", { name: "Backups" }).getByRole("listitem"),
+    ).toHaveText(["claude-3-5-haiku-latest · Anthropic"])
   })
 
   test("renames a policy in place", async ({ page }) => {
@@ -389,7 +389,7 @@ test.describe("dashboard core flows", () => {
     await chained.getByRole("button", { name: "Edit" }).click()
     // The edit opens the same dialog, so its fields are scoped the same way.
     const dialog = page.getByRole("dialog")
-    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("renamed")
+    await dialog.getByRole("textbox", { name: /^Name/ }).fill("renamed")
     await dialog.getByRole("button", { name: "Save" }).click()
 
     // A rename moves the row rather than copying it, so the old name has to be
@@ -398,7 +398,9 @@ test.describe("dashboard core flows", () => {
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "renamed" }) })
     await expect(renamed).toBeVisible()
-    await expect(renamed).toContainText(/\+1 on failure/)
+    await expect(
+      renamed.getByRole("list", { name: "Backups" }).getByRole("listitem"),
+    ).toHaveCount(1)
     await expect(page.getByRole("rowheader", { name: "chained" })).toBeHidden()
   })
 

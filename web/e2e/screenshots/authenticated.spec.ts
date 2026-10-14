@@ -461,16 +461,16 @@ test.describe("the routing policy dialog", () => {
     ).toBeVisible()
     await page.getByRole("button", { name: "Create policy" }).first().click()
     const dialog = page.getByRole("dialog")
-    await expect(
-      dialog.getByRole("textbox", { name: /Policy name/ }),
-    ).toBeVisible()
+    await expect(dialog.getByRole("textbox", { name: /^Name/ })).toBeVisible()
     await captureScreenshot(page, "routing-create-dialog")
   })
 
-  // The same dialog once a fallback chain has been summoned, which is the
-  // shortest way to a body taller than the frame: the header and the footer stay
-  // put and the fields scroll between them.
-  test("the create dialog, with a fallback chain", async ({ page }) => {
+  // The same dialog with a backup row and Advanced open, which is the shortest
+  // way to a body taller than the frame: the header and the footer stay put and
+  // the fields scroll between them.
+  test("the create dialog, with a backup and Advanced open", async ({
+    page,
+  }) => {
     await login(page)
     await gotoRoute(page, "/routing")
     await expect(
@@ -478,8 +478,14 @@ test.describe("the routing policy dialog", () => {
     ).toBeVisible()
     await page.getByRole("button", { name: "Create policy" }).first().click()
     const dialog = page.getByRole("dialog")
-    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
-    await expect(dialog.getByText("If that fails, try")).toBeVisible()
+    await dialog.getByRole("button", { name: "Add a backup" }).click()
+    await expect(
+      dialog.getByRole("combobox", { name: "Backup 1" }),
+    ).toBeVisible()
+    await dialog.getByRole("button", { name: /^Advanced/ }).click()
+    await expect(
+      dialog.getByRole("button", { name: /Add guardrails/ }),
+    ).toBeVisible()
     await captureScreenshot(page, "routing-create-dialog-fallback")
   })
 })
