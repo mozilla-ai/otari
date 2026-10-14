@@ -16,13 +16,13 @@ from anthropic.types import (
 )
 
 from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
+from gateway.services.tools._web_display import fetch_display_url
 from gateway.services.tools._web_names import (
     ANTHROPIC_WEB_FETCH_TYPE,
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
 )
 from gateway.services.web_retrieval_network import truncate_utf8
-from gateway.services.web_retrieval_policy import WebURLValidationError, canonicalize_web_url
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -32,14 +32,6 @@ if TYPE_CHECKING:
     from gateway.services._tool_loop import ToolBackend
 
 
-def _display_url(value: Any) -> str:
-    """The URL without its query or fragment, which a fetch result never displays; empty when unparseable."""
-    try:
-        return canonicalize_web_url(str(value or "")).display_url
-    except WebURLValidationError:
-        return ""
-
-
 def _pair(call: NativeCall, content: WebFetchBlock | WebFetchToolResultErrorBlock) -> list[Any]:
     tool_use_id = f"{SERVER_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
     return [
@@ -47,7 +39,7 @@ def _pair(call: NativeCall, content: WebFetchBlock | WebFetchToolResultErrorBloc
             id=tool_use_id,
             # Narrowed for the same reason as the web-search rendering's name.
             name=cast('Literal["web_fetch"]', WEB_FETCH_TOOL_NAME),
-            input={"url": _display_url(call.arguments.get("url"))},
+            input={"url": fetch_display_url(call.arguments.get("url"))},
             type="server_tool_use",
         ),
         WebFetchToolResultBlock(tool_use_id=tool_use_id, type="web_fetch_tool_result", content=content),
@@ -65,6 +57,10 @@ class MessagesWebFetchRendering:
         """Whether the caller asked in Anthropic's dated keyword, which is what asks for the pair."""
         type_value = (tool_entry or {}).get("type")
         return isinstance(type_value, str) and ANTHROPIC_WEB_FETCH_TYPE.fullmatch(type_value) is not None
+
+    def started(self, call: NativeCall) -> list[Any]:
+        """Nothing: the pair describes a fetch once it has ended."""
+        return []
 
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The pair for one fetch, in the vocabulary's error shape where it failed.

@@ -82,7 +82,14 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.providers import acompletion
-from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_FETCH_HEADER, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
+from gateway.services.tools import (
+    CODE_EXECUTION_HEADER,
+    WEB_FETCH_HEADER,
+    WEB_SEARCH_HEADER,
+    Dialect,
+    ToolUseBudget,
+    without_otari_tool_calls,
+)
 from gateway.services.traces import read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
@@ -325,19 +332,17 @@ class _ChatAdapter:
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
     ) -> ChatCompletion:
-        # ``native_tools`` is accepted for interface parity and always empty: this
-        # format has no native vocabulary for a server-side tool call, so a
-        # gateway-run search or execution stays invisible on the wire (see
-        # docs/tools.md).
-        # ``use_budget`` is not: the cap bounds what the caller is billed
-        # for, which every format owes whether or not it can describe the search.
-        # Standalone dispatch has no lock-in callback; only pass the kwarg on
-        # the platform-attempt path so test fakes can mirror each call shape.
+        # ``native_tools`` names the web tools whose calls the answer reports in
+        # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
+        # Standalone dispatch has no lock-in callback; each kwarg is passed only when
+        # set, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if native_tools:
+            extra["native_tools"] = native_tools
         return await mcp_tool_loop(
             completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
@@ -357,6 +362,8 @@ class _ChatAdapter:
         extra: dict[str, Any] = {}
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if native_tools:
+            extra["native_tools"] = native_tools
         return mcp_tool_loop_stream(
             completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
@@ -522,6 +529,11 @@ async def run_chat_completion(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid request: model is required",
         )
+
+    # A client may store the gateway's report of its web tool calls on the assistant
+    # message it sends back. A provider rejects the field, so it goes before
+    # admission sizes the prompt.
+    request.messages = without_otari_tool_calls(request.messages)
 
     # Uploads the normalizer found for the code-execution sandbox, handed to the
     # sandbox session once the billed user and workspace are resolved.

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
 
 from gateway.services.tools import (
+    WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_CALL_ID_PREFIX,
     WEB_SEARCH_TOOL_NAME,
     Dialect,
@@ -108,3 +110,94 @@ def test_the_responses_item_carries_the_query_and_an_id_the_gateway_minted() -> 
 def test_a_refused_search_is_invisible_in_the_responses_vocabulary() -> None:
     """No search ran, so there is nothing to announce."""
     assert _rendering(Dialect.RESPONSES).refused(_call()) == []
+
+
+@pytest.mark.parametrize("tool_entry", [{"type": "otari_web_search"}, {"type": "web_search_20250305"}, None])
+def test_chat_reports_every_declaration_of_the_search(tool_entry: dict[str, Any] | None) -> None:
+    assert _rendering(Dialect.CHAT).declared(tool_entry) is True
+
+
+def test_a_chat_search_is_announced_with_its_query_and_ended_with_its_sources_under_the_same_id() -> None:
+    call = _call()
+    backend = _SearchBackendLike(
+        [
+            {
+                "url": "https://python.org",
+                "title": "Python",
+                "content": "page text only the model reads",
+                "published_date": "2026-10-01",
+            },
+            {"url": "https://docs.python.org", "title": "", "content": "more page text"},
+        ]
+    )
+
+    [started] = _rendering(Dialect.CHAT).started(call)
+    [ended] = _rendering(Dialect.CHAT).ran(call, backend)
+
+    assert started == {
+        "id": started["id"],
+        "type": "web_search",
+        "status": "in_progress",
+        "query": "what is the latest python?",
+    }
+    assert started["id"].startswith(WEB_SEARCH_CALL_ID_PREFIX)
+    assert ended == {
+        **started,
+        "status": "completed",
+        "sources": [
+            {"url": "https://python.org", "title": "Python", "published_date": "2026-10-01"},
+            {"url": "https://docs.python.org", "title": "https://docs.python.org", "published_date": None},
+        ],
+    }
+    assert "page text" not in str(ended)
+
+
+def test_a_chat_search_with_no_hits_is_completed_with_no_sources() -> None:
+    [ended] = _rendering(Dialect.CHAT).ran(_call(), _SearchBackendLike([{"url": "", "title": "no url"}]))
+
+    assert ended["status"] == "completed"
+    assert ended["sources"] == []
+
+
+def test_a_chat_source_bounds_its_title_and_date() -> None:
+    hit = {"url": "https://example.com", "title": "t" * 2000, "published_date": "Mon,\n  " + "1" * 500}
+
+    [ended] = _rendering(Dialect.CHAT).ran(_call(), _SearchBackendLike([hit]))
+
+    [source] = ended["sources"]
+    assert len(source["title"].encode()) <= 512
+    assert source["published_date"].startswith("Mon, 111")
+    assert len(source["published_date"]) == 128
+
+
+def test_a_failed_chat_search_on_the_old_backend_has_no_error() -> None:
+    [ended] = _rendering(Dialect.CHAT).ran(_call(failed=True), _SearchBackendLike([{"url": "https://stale.example"}]))
+
+    assert ended["status"] == "failed"
+    assert "error" not in ended
+    assert "sources" not in ended
+
+
+def test_a_refused_chat_search_fails_with_the_call_limit_tag() -> None:
+    [ended] = _rendering(Dialect.CHAT).refused(_call())
+
+    assert ended["status"] == "failed"
+    assert ended["query"] == "what is the latest python?"
+    assert ended["error"] == {"provider": None, "status": None, "tag": "call_limit", "retryable": False}
+
+
+@pytest.mark.parametrize("dialect", [Dialect.MESSAGES, Dialect.RESPONSES])
+def test_the_other_dialects_announce_nothing_when_a_search_starts(dialect: Dialect) -> None:
+    assert _rendering(dialect).started(_call()) == []
+
+
+def test_chat_sources_stay_within_the_model_facing_results_byte_limit() -> None:
+    """Titles and dates are capped, so the URL is what the limit bounds; a source that would cross it is left out."""
+    long_url = "https://example.com/" + "a" * (WEB_RETRIEVAL_RESULT_MAX_BYTES // 3)
+    hits = [{"url": f"{long_url}{index}", "title": "t"} for index in range(5)] + [{"url": "https://short.example"}]
+
+    [ended] = _rendering(Dialect.CHAT).ran(_call(), _SearchBackendLike(hits))
+
+    assert len(json.dumps(ended["sources"]).encode()) <= WEB_RETRIEVAL_RESULT_MAX_BYTES
+    assert len(ended["sources"]) == 3
+    assert ended["sources"][-1]["url"] == "https://short.example"

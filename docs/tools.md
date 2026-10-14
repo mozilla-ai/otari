@@ -129,8 +129,10 @@ here, so a float that happens to be whole is rejected too.
 
 Past the cap, the model is told the search was refused and can answer without it.
 An Anthropic-native declaration is answered in its own vocabulary, a
-`web_search_tool_result` carrying `error_code: max_uses_exceeded`; every other
-caller gets the same `[tool error]` string a failed tool produces. Even without
+`web_search_tool_result` carrying `error_code: max_uses_exceeded`. Otherwise the
+model gets the same `[tool error]` string a failed tool produces, and a Chat
+Completions client sees the search in `otari_tool_calls` as `failed`, with the
+tag `call_limit`. Even without
 `max_uses`, requests remain bounded by `max_tool_iterations` and the shared
 [10-call Search and Fetch limit](#web-fetch).
 
@@ -173,8 +175,14 @@ Otari consumes its own tool calls, sends results back to the model, and returns
 the final answer.
 
 Responses and Messages can expose native server-tool result blocks when their
-wire format expects them. Chat Completions returns only the final assistant
-message. Calls for tools the client must execute are preserved.
+wire format expects them. Chat Completions has no such blocks, so Otari reports
+its web searches and fetches in a field of its own, `otari_tool_calls`, at the
+top level of the response and of each streamed chunk: a search with its query
+and the sources it found, a fetch with the URL it read, and a failure with what
+may be shown about it. See [Web tool calls on Chat
+Completions](api-reference.md#web-tool-calls-on-chat-completions). Code execution
+and MCP calls are not reported there, so Chat Completions returns only the final
+assistant message for them. Calls for tools the client must execute are preserved.
 
 For gateway-run MCP activity in Messages streams, see
 [Messages streaming activity](mcp.md#messages-streaming-activity).

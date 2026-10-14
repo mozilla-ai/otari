@@ -21,9 +21,10 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from any_llm.types.completion import PromptTokensDetails
+from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, PromptTokensDetails
 
 from gateway.core.env import otari_env
 from gateway.log_config import logger
@@ -38,16 +39,21 @@ from gateway.services._tool_loop import (
 )
 from gateway.services.inference import require_choices
 from gateway.services.providers import acompletion
+from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (
     MAX_TOOL_ITERATIONS_CAP,
     MAX_USES_EXCEEDED_ERROR,
+    OTARI_TOOL_CALLS_FIELD,
+    Dialect,
+    NativeCall,
     ToolUseBudget,
     is_capped_call,
+    native_rendering,
     owning_backend,
 )
 
 if TYPE_CHECKING:
-    from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, CompletionUsage
+    from any_llm.types.completion import ChatCompletion, CompletionUsage
 
 DEFAULT_MAX_TOOL_ITERATIONS = 10
 
@@ -186,13 +192,15 @@ def _execute_split(tool_calls: list[dict[str, Any]], pool: ToolBackend) -> tuple
     return mcp_calls, has_foreign
 
 
-async def _execute_mcp_calls(
+async def _run_owned_calls(
     pool: ToolBackend,
     mcp_calls: list[dict[str, Any]],
+    results: list[dict[str, Any]],
     *,
-    budget: ToolUseBudget | None = None,
-) -> list[dict[str, Any]]:
-    """Run each MCP tool call and return the resulting tool-role messages.
+    budget: ToolUseBudget | None,
+    native_tools: frozenset[str],
+) -> AsyncGenerator[tuple[bool, list[dict[str, Any]]], None]:
+    """Run each gateway-owned call, append its tool-role message to ``results``, and yield its report.
 
     Tool failures (network errors, server errors, schema mismatches, MCP-specific
     or httpx-level transport errors) are converted to a ``[tool error] ...``
@@ -202,25 +210,39 @@ async def _execute_mcp_calls(
     That's the standard idiom for "treat tool failures as recoverable, let
     cancellation propagate".
 
-    A search past ``budget`` is refused the same way, as a tool error rather than a
-    native result block: this format has no vocabulary for a server-side tool call,
-    so the plain string is all a caller can be told.
+    A call past ``budget`` is refused the same way, as a tool error the model reads.
+
+    For a call to one of ``native_tools``, the request's tools announced in
+    ``otari_tool_calls``, this yields ``(False, entries)`` just before the call runs
+    and ``(True, entries)`` right after it returns, so a stream can send each while
+    the call waits or before the next one starts. A refused call yields only its
+    ended entries, since nothing ran.
     """
-    out: list[dict[str, Any]] = []
     for tc in mcp_calls:
         name = tc["function"]["name"]
         try:
             args = json.loads(tc["function"]["arguments"] or "{}")
         except json.JSONDecodeError:
             args = {}
+        rendering = native_rendering(name, Dialect.CHAT) if name in native_tools else None
+        call = NativeCall(name, tc["id"] or "", args if isinstance(args, dict) else {})
         capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted(name):
-            out.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": MAX_USES_EXCEEDED_ERROR})
+            results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": MAX_USES_EXCEEDED_ERROR})
+            if rendering is not None:
+                yield True, rendering.refused(call)
             continue
+        if rendering is not None:
+            yield False, rendering.started(call)
         owner = owning_backend(pool, name)
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
+            # The request's shared search and fetch limit refused the call inside the
+            # backend, after its started entry went out, so the entry ends before the
+            # request fails.
+            if rendering is not None:
+                yield True, rendering.refused(call)
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             detail = tool_failure_detail(owner, name)
@@ -229,19 +251,76 @@ async def _execute_mcp_calls(
         else:
             if capped and budget is not None:
                 budget.record(name, text)
-        out.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
-    return out
+        results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
+        if rendering is not None:
+            yield True, rendering.ran(replace(call, failed=is_tool_error(text)), owner)
 
 
-def _add_usage(acc: dict[str, int], usage: CompletionUsage | None) -> None:
+async def _execute_mcp_calls(
+    pool: ToolBackend,
+    mcp_calls: list[dict[str, Any]],
+    *,
+    budget: ToolUseBudget | None = None,
+    native_tools: frozenset[str] = frozenset(),
+    ended: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Run each gateway-owned call (see :func:`_run_owned_calls`) and return the tool-role messages.
+
+    The ``otari_tool_calls`` entries of each ended call are added to ``ended``, which
+    a response that is not streamed carries; the started ones have no reader there.
+    """
+    results: list[dict[str, Any]] = []
+    async with aclosing(
+        _run_owned_calls(pool, mcp_calls, results, budget=budget, native_tools=native_tools)
+    ) as reports:
+        async for call_ended, entries in reports:
+            if call_ended and ended is not None:
+                ended.extend(entries)
+    return results
+
+
+def _tool_calls_chunk(first: ChatCompletionChunk, entries: list[dict[str, Any]]) -> ChatCompletionChunk:
+    """A chunk carrying ``entries`` beside its ``choices``, with the round's ``id``, ``model`` and ``created``.
+
+    One choice with an empty ``delta`` keeps the chunk ordinary to a client that reads
+    only ``choices``; the entries sit at the top level for the reason
+    ``services/tools/_chat_tool_calls.py`` gives.
+    """
+    chunk = ChatCompletionChunk(
+        id=first.id,
+        object="chat.completion.chunk",
+        created=first.created,
+        model=first.model,
+        choices=[ChunkChoice(index=0, delta=ChoiceDelta(), finish_reason=None)],
+    )
+    setattr(chunk, OTARI_TOOL_CALLS_FIELD, entries)
+    return chunk
+
+
+@dataclass
+class _ChatTotals:
+    """What the chat loop carries across rounds: the usage of the rounds it hid, and the report of its calls.
+
+    ``tool_calls`` holds the ended ``otari_tool_calls`` entries a response that is not
+    streamed carries. A stream sends each entry as its call starts and ends instead,
+    so it stays empty there.
+    """
+
+    prompt: int = 0
+    completion: int = 0
+    cache_read: int = 0
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
     """Add one round's usage to the loop's running totals."""
     if usage is None:
         return
-    acc["prompt"] += usage.prompt_tokens or 0
-    acc["completion"] += usage.completion_tokens or 0
+    acc.prompt += usage.prompt_tokens or 0
+    acc.completion += usage.completion_tokens or 0
     details = usage.prompt_tokens_details
     if details is not None:
-        acc["cache_read"] += details.cached_tokens or 0
+        acc.cache_read += details.cached_tokens or 0
 
 
 def _fold_usage(
@@ -280,6 +359,10 @@ class _ChatStreamState:
         # it, so the rounds the loop hides are billed on the one the client sees.
         self.usage_chunks: list[ChatCompletionChunk] = []
         self.mcp_calls: list[dict[str, Any]] = []
+        # The round's first chunk with choices, whose id, model and created the
+        # gateway's own ``otari_tool_calls`` chunks repeat. A provider's preamble
+        # chunk with no choices may carry neither.
+        self.first: ChatCompletionChunk | None = None
         # Upstream tool_call index -> the index the client sees. Gateway-owned calls
         # are dropped from the stream, so the surviving foreign calls have to be
         # renumbered into a gapless sequence: an SDK accumulator indexes its snapshot
@@ -307,10 +390,12 @@ class _ChatToolLoopStrategy:
 
     transcript_key = "messages"
 
-    def __init__(self, *, budget: ToolUseBudget | None = None) -> None:
+    def __init__(self, *, budget: ToolUseBudget | None = None, native_tools: frozenset[str] = frozenset()) -> None:
         # Absent unless the caller capped the searches, which keeps the shared
         # instance in ``_strategy_for`` free of per-request state.
         self._budget = budget
+        # The gateway-run tools whose calls this request reports in ``otari_tool_calls``.
+        self._native_tools = native_tools
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return list(value or [])
@@ -324,14 +409,18 @@ class _ChatToolLoopStrategy:
         completion: ChatCompletion = await acompletion(**kwargs)  # type: ignore[assignment]
         return completion
 
-    def new_usage_accumulator(self) -> dict[str, int]:
-        return {"prompt": 0, "completion": 0, "cache_read": 0}
+    def new_usage_accumulator(self) -> _ChatTotals:
+        return _ChatTotals()
 
-    def accumulate_usage(self, acc: dict[str, int], result: ChatCompletion) -> None:
+    def accumulate_usage(self, acc: _ChatTotals, result: ChatCompletion) -> None:
         _add_usage(acc, result.usage)
 
-    def fold_usage(self, result: ChatCompletion, acc: dict[str, int]) -> None:
-        _fold_usage(result, acc["prompt"], acc["completion"], acc["cache_read"])
+    def fold_usage(self, result: ChatCompletion, acc: _ChatTotals) -> None:
+        _fold_usage(result, acc.prompt, acc.completion, acc.cache_read)
+        # Every return path folds, so this is where the answer gains the report of
+        # the calls the loop ran and the client never saw.
+        if acc.tool_calls:
+            setattr(result, OTARI_TOOL_CALLS_FIELD, list(acc.tool_calls))
 
     def exit_before_split(self, result: ChatCompletion) -> bool:
         return not result.choices or result.choices[0].finish_reason != "tool_calls"
@@ -356,10 +445,16 @@ class _ChatToolLoopStrategy:
     def exit_after_split(self, result: ChatCompletion) -> bool:
         return False
 
-    async def execute_owned(self, pool: ToolBackend, owned: list[Any], acc: Any = None) -> list[dict[str, Any]]:
-        # ``acc`` is accepted for interface parity and unused: this format has no
-        # native vocabulary for a server-side tool call to report on a mixed batch.
-        return await _execute_mcp_calls(pool, owned, budget=self._budget)
+    async def _run_into(self, pool: ToolBackend, owned: list[Any], acc: _ChatTotals | None) -> list[dict[str, Any]]:
+        """Run ``owned``, adding each ended ``otari_tool_calls`` entry to ``acc`` for the answer to carry."""
+        ended = acc.tool_calls if acc is not None else None
+        return await _execute_mcp_calls(pool, owned, budget=self._budget, native_tools=self._native_tools, ended=ended)
+
+    async def execute_owned(
+        self, pool: ToolBackend, owned: list[Any], acc: _ChatTotals | None = None
+    ) -> list[dict[str, Any]]:
+        # A mixed batch's owned calls ran, so the answer reports them like any other.
+        return await self._run_into(pool, owned, acc)
 
     def filter_owned(self, result: ChatCompletion, owned: list[Any], pool: ToolBackend) -> None:
         # Mixed batch: the MCP-owned subset was executed internally so its
@@ -387,10 +482,10 @@ class _ChatToolLoopStrategy:
         result: ChatCompletion,
         owned: list[Any],
         pool: ToolBackend,
-        acc: Any = None,
+        acc: _ChatTotals | None = None,
     ) -> None:
         transcript.append({"role": "assistant", "tool_calls": owned})
-        transcript.extend(await _execute_mcp_calls(pool, owned, budget=self._budget))
+        transcript.extend(await self._run_into(pool, owned, acc))
 
     # ---- streaming hooks ----
 
@@ -401,7 +496,7 @@ class _ChatToolLoopStrategy:
     def new_stream_state(self) -> _ChatStreamState:
         return _ChatStreamState()
 
-    def new_stream_accumulator(self) -> dict[str, int]:
+    def new_stream_accumulator(self) -> _ChatTotals:
         # Usage of the rounds the loop hid, folded into the final round's report
         # by ``terminal_events``: the client sees one usage chunk for the loop.
         return self.new_usage_accumulator()
@@ -411,8 +506,10 @@ class _ChatToolLoopStrategy:
         state: _ChatStreamState,
         event: ChatCompletionChunk,
         pool: ToolBackend,
-        acc: dict[str, int],
+        acc: _ChatTotals,
     ) -> tuple[StreamAction, ChatCompletionChunk]:
+        if state.first is None and event.choices:
+            state.first = event
         if not event.choices and event.usage is not None:
             state.usage_chunks.append(event)
             return StreamAction.DEFER, event
@@ -510,29 +607,30 @@ class _ChatToolLoopStrategy:
         return has_foreign or not state.mcp_calls
 
     async def finalize_exit(
-        self, state: _ChatStreamState, pool: ToolBackend, acc: dict[str, int]
+        self, state: _ChatStreamState, pool: ToolBackend, acc: _ChatTotals
     ) -> AsyncIterator[ChatCompletionChunk]:
         del acc
-        if state.mcp_calls:
-            await _execute_mcp_calls(pool, state.mcp_calls, budget=self._budget)
-        return
-        yield  # pragma: no cover - makes this a no-event async iterator
+        # A mixed batch's owned calls run here, before the terminal chunk, and are
+        # reported like any other; their results are not needed, since the caller
+        # continues the conversation.
+        async for chunk in self._run_reported(state, pool, []):
+            yield chunk
 
-    def terminal_events(self, state: _ChatStreamState, acc: dict[str, int]) -> list[ChatCompletionChunk]:
+    def terminal_events(self, state: _ChatStreamState, acc: _ChatTotals) -> list[ChatCompletionChunk]:
         carrier = state.usage_carrier()
         if carrier is not None:
-            totals = dict(acc)
+            totals = replace(acc, tool_calls=[])
             _add_usage(totals, carrier.usage)
-            _fold_usage(carrier, totals["prompt"], totals["completion"], totals["cache_read"])
+            _fold_usage(carrier, totals.prompt, totals.completion, totals.cache_read)
         return state.deferred_terminal()
 
-    def accumulate_stream_usage(self, acc: dict[str, int], state: _ChatStreamState) -> None:
+    def accumulate_stream_usage(self, acc: _ChatTotals, state: _ChatStreamState) -> None:
         carrier = state.usage_carrier()
         _add_usage(acc, carrier.usage if carrier is not None else None)
 
-    def synthetic_events(self, state: _ChatStreamState, acc: dict[str, int]) -> list[Any]:
-        # This format has no native vocabulary for a server-side tool call, so the
-        # gateway's calls stay invisible on the wire. Documented in docs/tools.md.
+    def synthetic_events(self, state: _ChatStreamState, acc: _ChatTotals) -> list[Any]:
+        # Each call was reported around its own execution, in ``_run_reported``, so
+        # nothing is left to announce once the round's calls have run.
         return []
 
     async def advance_stream_transcript(
@@ -540,29 +638,40 @@ class _ChatToolLoopStrategy:
         transcript: list[Any],
         state: _ChatStreamState,
         pool: ToolBackend,
-        acc: dict[str, int],
+        acc: _ChatTotals,
     ) -> AsyncIterator[ChatCompletionChunk]:
         del acc
         # All-MCP: the terminal chunk was silently dropped so the client
         # doesn't think this iteration's response was the final answer.
+        results: list[dict[str, Any]] = []
+        async for chunk in self._run_reported(state, pool, results):
+            yield chunk
         transcript.append({"role": "assistant", "tool_calls": state.mcp_calls})
-        transcript.extend(await _execute_mcp_calls(pool, state.mcp_calls, budget=self._budget))
-        return
-        yield  # pragma: no cover - makes this a no-event async iterator
+        transcript.extend(results)
+
+    async def _run_reported(
+        self, state: _ChatStreamState, pool: ToolBackend, results: list[dict[str, Any]]
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        """Run the round's owned calls into ``results``, with an ``otari_tool_calls`` chunk as each starts and ends."""
+        reports = _run_owned_calls(pool, state.mcp_calls, results, budget=self._budget, native_tools=self._native_tools)
+        async with aclosing(reports):
+            async for _ended, entries in reports:
+                if entries and state.first is not None:
+                    yield _tool_calls_chunk(state.first, entries)
 
 
 _CHAT_STRATEGY = _ChatToolLoopStrategy()
 
 
-def _strategy_for(budget: ToolUseBudget | None) -> _ChatToolLoopStrategy:
-    """The shared strategy, or a per-request one when the caller capped searches.
+def _strategy_for(budget: ToolUseBudget | None, native_tools: frozenset[str] = frozenset()) -> _ChatToolLoopStrategy:
+    """The shared strategy, or a per-request one when the caller capped searches or is owed a report.
 
-    Only a capped request has anything per-request to hold, so every other request
+    Only such a request has anything per-request to hold, so every other request
     keeps reusing the single module-level instance.
     """
-    if budget is None:
+    if budget is None and not native_tools:
         return _CHAT_STRATEGY
-    return _ChatToolLoopStrategy(budget=budget)
+    return _ChatToolLoopStrategy(budget=budget, native_tools=native_tools)
 
 
 async def mcp_tool_loop_stream(
@@ -571,16 +680,20 @@ async def mcp_tool_loop_stream(
     pool: ToolBackend,
     max_iterations: int,
     use_budget: ToolUseBudget | None = None,
+    native_tools: frozenset[str] = frozenset(),
 ) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
-    Tool-call deltas from intermediate iterations are streamed straight through to the
-    caller (so clients that want to render "thinking" still get those bytes), but the
+    Tool-call deltas for the gateway's own calls are held back, since the client can
+    never send their results; the caller's own calls are forwarded, renumbered. The
     *terminal* chunk of each intermediate iteration, the one carrying
     ``finish_reason="tool_calls"``, is buffered and dropped if the loop is going to
     iterate again. Forwarding that chunk would tell an OpenAI-compatible client "this
     is the final answer", and most SDKs stop reading at that point; subsequent
     iterations' content would be silently truncated.
+
+    A call to one of ``native_tools`` is reported in an ``otari_tool_calls`` chunk
+    when it starts and another when it ends.
 
     The terminal chunk is forwarded in three cases:
       * the iteration ended with a non-``tool_calls`` finish_reason (e.g. ``stop``),
@@ -592,7 +705,7 @@ async def mcp_tool_loop_stream(
     # instead of waiting for event-loop async-generator finalization.
     async with aclosing(
         run_tool_loop_stream(
-            strategy=_strategy_for(use_budget),
+            strategy=_strategy_for(use_budget, native_tools),
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
@@ -609,8 +722,12 @@ async def mcp_tool_loop(
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
     use_budget: ToolUseBudget | None = None,
+    native_tools: frozenset[str] = frozenset(),
 ) -> ChatCompletion:
     """Non-streaming variant. Accumulates usage across iterations into the returned completion.
+
+    The completion carries the ended ``otari_tool_calls`` entry of each call to one of
+    ``native_tools``, across every round.
 
     ``on_first_response`` follows the provider lock-in contract documented on
     :func:`gateway.services._tool_loop.run_tool_loop`; the hybrid-mode attempt
@@ -620,7 +737,7 @@ async def mcp_tool_loop(
     tools. A later one is returned as the answer, so the rounds before it are billed.
     """
     return await run_tool_loop(
-        strategy=_strategy_for(use_budget),
+        strategy=_strategy_for(use_budget, native_tools),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,

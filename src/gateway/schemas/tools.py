@@ -469,3 +469,40 @@ class SearchResponse(pydantic.BaseModel):
         exclude_if=lambda raw: raw is None,
         description="The provider's whole response, untouched; only when the request set include_raw.",
     )
+
+
+class OtariToolCallSource(pydantic.BaseModel):
+    """One page a gateway-run search returned: where it is, never its text."""
+
+    url: str
+    title: str
+    published_date: str | None = pydantic.Field(default=None, description="The page's date, as the provider gave it.")
+
+
+class OtariToolCallError(pydantic.BaseModel):
+    """What a failed gateway-run call may show: never a body, a URL or exception text."""
+
+    provider: str | None = pydantic.Field(description="The provider that failed; null when none was reached.")
+    status: int | None = pydantic.Field(description="The provider's HTTP error status, when it answered with one.")
+    tag: str = pydantic.Field(description="Why the call failed, such as timeout or call_limit.")
+    retryable: bool = pydantic.Field(description="Whether retrying the same call may help.")
+
+
+class OtariToolCall(pydantic.BaseModel):
+    """One web search or fetch the gateway ran, as a Chat Completions response reports it in ``otari_tool_calls``.
+
+    A stream sends the entry when the call starts and again when it ends, both with
+    the same ``id``. Fields not set are left out of the wire entry.
+    """
+
+    id: str
+    type: Literal["web_search", "web_fetch"]
+    status: Literal["in_progress", "completed", "failed"]
+    query: str | None = pydantic.Field(default=None, description="A search's query.")
+    url: str | None = pydantic.Field(
+        default=None, description="The URL a fetch asked for, without its query string and fragment."
+    )
+    sources: list[OtariToolCallSource] | None = pydantic.Field(
+        default=None, description="A completed search's results; empty when it found none."
+    )
+    error: OtariToolCallError | None = pydantic.Field(default=None, description="Why a failed call failed, when known.")
