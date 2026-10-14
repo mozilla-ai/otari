@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     GrowthSignalPortDep,
     MembershipListenerDep,
+    OrganizationServiceDep,
     UnitOfWorkDep,
     WorkspaceListenerDep,
     get_config,
@@ -114,6 +115,7 @@ async def signup(
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
     uow: UnitOfWorkDep,
+    organizations: OrganizationServiceDep,
     membership_listener: MembershipListenerDep,
     workspace_listener: WorkspaceListenerDep,
 ) -> SignupResponse:
@@ -134,6 +136,7 @@ async def signup(
             email=body.email,
             password=body.password,
             uow=uow,
+            organizations=organizations,
             membership_listener=membership_listener,
             workspace_listener=workspace_listener,
             full_name=body.full_name,

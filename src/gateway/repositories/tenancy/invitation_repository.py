@@ -116,6 +116,29 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
         )
         return [(invitation, membership, organization) for invitation, membership, organization in result.all()], count
 
+    async def lock_live_pending_for_user(self, user_id: uuid.UUID, *, now: datetime) -> bool:
+        """Lock the memberships this identity holds a live invitation to, and return whether there are any.
+
+        The same conditions as ``get_live_pending_for_user_with_context``. Every
+        revocation, decline and removal suspends the membership row, so holding
+        it until the caller's transaction ends makes that write wait, and one
+        that committed first fails the re-checked ``invited`` condition.
+
+        NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
+        """
+        result = await self.db.execute(
+            select(col(OrganizationMember.id))
+            .join(Invitation, col(Invitation.organization_member_id) == col(OrganizationMember.id))
+            .where(
+                col(OrganizationMember.user_id) == user_id,
+                col(OrganizationMember.status) == "invited",
+                col(Invitation.status) == "pending",
+                col(Invitation.expires_at) >= now,
+            )
+            .with_for_update(of=OrganizationMember)
+        )
+        return result.first() is not None
+
     async def create_invitation(
         self,
         *,

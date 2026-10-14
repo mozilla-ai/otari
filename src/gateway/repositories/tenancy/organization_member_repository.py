@@ -129,15 +129,22 @@ class OrganizationMemberRepository(
         result = await self.db.execute(statement.order_by(col(OrganizationMember.created_at)))
         return list(result.scalars().all())
 
-    async def get_first_active_for_user(self, user_id: uuid.UUID) -> OrganizationMember | None:
+    async def get_first_active_for_user(self, user_id: uuid.UUID, *, lock: bool = False) -> OrganizationMember | None:
         """Return a user's oldest active membership, or None.
 
         The id breaks a tie, for the same reason ``get_active_owner`` does it:
         two memberships written in one transaction share a ``created_at``, and
         this decides which organization a stale pointer is repaired onto, so it
         must not be able to answer differently on two reads.
+
+        ``lock`` holds the user's active memberships until the caller's
+        transaction ends, for a write that is allowed only while one exists:
+        a removal suspends the row, so it waits, and one that committed first
+        fails the re-checked ``active`` condition.
+
+        NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
         """
-        result = await self.db.execute(
+        statement = (
             select(OrganizationMember)
             .where(
                 col(OrganizationMember.user_id) == user_id,
@@ -145,6 +152,9 @@ class OrganizationMemberRepository(
             )
             .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
         )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
         return result.scalars().first()
 
     async def get_organization_id(self, organization_member_id: uuid.UUID) -> uuid.UUID | None:

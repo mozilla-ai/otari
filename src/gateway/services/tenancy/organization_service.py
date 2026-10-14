@@ -318,13 +318,14 @@ class OrganizationService:
 
         A revoked, declined or lapsed invitation leaves its identity behind, so
         the identity existing is not the same as anyone still wanting it here.
+
+        Locks the memberships that answer until the caller's transaction ends,
+        so a removal or revocation cannot land between this check and the write
+        it admits. Call it inside that write's Unit of Work block.
         """
-        if await self.members.get_first_active_for_user(user_id) is not None:
+        if await self.members.get_first_active_for_user(user_id, lock=True) is not None:
             return True
-        _, pending = await self.invitations.get_live_pending_for_user_with_context(
-            user_id, now=datetime.now(UTC), limit=1
-        )
-        return pending > 0
+        return await self.invitations.lock_live_pending_for_user(user_id, now=datetime.now(UTC))
 
     async def has_organization(self, organization_id: uuid.UUID) -> bool:
         """Return whether an organization with this ID exists."""

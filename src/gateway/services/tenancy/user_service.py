@@ -268,6 +268,7 @@ async def create_user_for_signup(
     email: str,
     password: str,
     uow: UnitOfWork,
+    organizations: OrganizationService,
     membership_listener: MembershipListener,
     workspace_listener: WorkspaceListener,
     full_name: str | None = None,
@@ -313,18 +314,9 @@ async def create_user_for_signup(
     validate_new_password(password)
 
     address = validated_email(email)
-    organizations = OrganizationService(
-        db,
-        membership_listener=membership_listener,
-        uow=uow,
-        workspace_listener=workspace_listener,
-    )
     identity = await UserRepository(db).get_by_email(address)
     if identity is not None and (
-        identity.hashed_password is not None
-        or identity.email_verified_at is not None
-        or not identity.is_active
-        or (not config.open_signup and not await organizations.has_live_membership(identity.id))
+        identity.hashed_password is not None or identity.email_verified_at is not None or not identity.is_active
     ):
         # Pays the same bcrypt cost the claim path pays hashing a fresh
         # password, so the two cases are closer in wall-clock time than a bare
@@ -345,12 +337,21 @@ async def create_user_for_signup(
                     await verify_absent_password_async(password)
                     return None
                 # The registration, the password and the verification token below are committed together.
-                registration = await organizations.provision_signup_tenancy(email=address, full_name=full_name)
+                registration = await OrganizationService(
+                    db,
+                    membership_listener=membership_listener,
+                    uow=uow,
+                    workspace_listener=workspace_listener,
+                ).provision_signup_tenancy(email=address, full_name=full_name)
                 if not registration.created:
                     # This answers like every other enumeration-safe refusal.
                     await verify_absent_password_async(password)
                     raise _SignupRaceLostError
                 identity = registration.identity
+            elif not config.open_signup and not await organizations.has_live_membership(identity.id):
+                # Checked in the block that writes the claim, so the roster cannot drop the identity in between.
+                await verify_absent_password_async(password)
+                return None
 
             token = generate_token()
             values: dict[str, str | datetime | None] = {

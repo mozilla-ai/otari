@@ -1017,6 +1017,9 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
                     background_tasks=BackgroundTasks(),
                     email="iris@example.com",
                     password=f"signup-password-{index}",
+                    organizations=OrganizationService(
+                        session, membership_listener=None, workspace_listener=NullWorkspaceListener()
+                    ),
                     **membership_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1046,6 +1049,49 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         assert membership.status == "active"
 
 
+async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_admitted(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """A revocation that lands after the check blocks until the checked write commits, rather than slipping between."""
+    _, owner = await _seed_owner(async_db)
+    owner_row = await UserRepository(async_db).get(owner.id)
+    assert owner_row is not None
+    invited = await OrganizationService(
+        async_db, **membership_writes(async_db)
+    ).invite_active_organization_member_for_user(
+        user=owner_row,
+        request=InviteOrganizationMemberRequest(email="juno@example.com"),
+        config=GatewayConfig(),
+    )
+    assert invited.invitation_id is not None
+    membership = await OrganizationMemberRepository(async_db).get(invited.organization_member_id)
+    assert membership is not None
+    invitee_id = membership.user_id
+
+    async def revoke() -> None:
+        async with sessions() as session:
+            user = await UserRepository(session).get(owner.id)
+            assert user is not None
+            assert invited.invitation_id is not None
+            await OrganizationService(
+                session, **membership_writes(session)
+            ).revoke_organization_member_invitation_for_user(user=user, invitation_id=invited.invitation_id)
+
+    async with sessions() as checking:
+        reader = OrganizationService(checking, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        assert await reader.has_live_membership(invitee_id)
+        revocation = asyncio.create_task(revoke())
+        done, _ = await asyncio.wait({revocation}, timeout=_WRITER_WINDOW)
+        assert not done
+        await checking.commit()
+    await revocation
+
+    async with sessions() as after:
+        reader = OrganizationService(after, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        assert not await reader.has_live_membership(invitee_id)
+
+
 async def test_concurrent_open_signups_of_one_address_register_one_identity(
     async_db: AsyncSession,
     sessions: async_sessionmaker[AsyncSession],
@@ -1071,6 +1117,9 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
             background_tasks=BackgroundTasks(),
             email="nova@example.com",
             password="signup-password",
+            organizations=OrganizationService(
+                session, membership_listener=None, workspace_listener=NullWorkspaceListener()
+            ),
             **membership_writes(session),
         )
 
