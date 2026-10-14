@@ -245,9 +245,8 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
         index=True,
     )
     # When this identity last had a dashboard session minted for it. Stamped in
-    # one place, ``dashboard_session_service.create_dashboard_session``, so every
-    # sign-in flow that mints a session records it and none of them has to
-    # remember to; see that function for why a re-mint counts.
+    # one place, ``IdentityService.start_session``, so every flow that mints a
+    # session records it, the re-mint after a master-key rotation included.
     #
     # A column rather than ``max(dashboard_sessions.created_at)``, which would
     # have needed no migration and would have been wrong: session rows are pruned

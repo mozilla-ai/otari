@@ -49,8 +49,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    IdentityServiceDep,
     MembershipListenerDep,
-    OrganizationServiceDep,
     UnitOfWorkDep,
     WorkspaceListenerDep,
     get_config,
@@ -70,7 +70,6 @@ from gateway.services.dashboard_session_service import (
     SESSION_COOKIE_NAME,
     apply_session_cookie,
     clear_session_cookie,
-    create_dashboard_session,
     request_is_https,
     revoke_dashboard_session,
 )
@@ -78,7 +77,6 @@ from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.password_service import MAX_PASSWORD_BYTES
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.membership_listener import MembershipListener
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
@@ -292,7 +290,7 @@ async def create_session(
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
     workspace_listener: WorkspaceListenerDep,
-    organizations: OrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> SessionResponse:
     """Verify a sign-in credential and set the HttpOnly session cookie.
 
@@ -348,24 +346,16 @@ async def create_session(
         assert body.email is not None and body.password is not None  # guaranteed by the model validator
         identity = await _sign_in_with_password(body.email, body.password, request, db)
     try:
-        # Before the session row and inside the same transaction, so a new
-        # membership and the sign-in that earned it land together or not at all.
-        # Not guarded: the only expected failure is two concurrent sign-ins
-        # racing, which the service settles on its own, and a database that
-        # cannot stage this cannot stage the session row either.
-        await OrganizationDomainService(db).auto_join_for_user(identity)
-        active_organization_id = await organizations.active_organization_id_for_sign_in(identity)
-        token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
-        await db.commit()
+        signed_in = await identities.sign_in(identity)
     except DATABASE_ERRORS as exc:
-        await db.rollback()
-        # Generic error to the client; the raw failure is only logged here.
         raise database_error("persist a dashboard session on sign-in", exc) from None
-    apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
+    apply_session_cookie(
+        response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
+    )
     return SessionResponse(
-        expires_at=expires_at,
+        expires_at=signed_in.session_expires_at,
         user_id=identity.id,
-        active_organization_id=active_organization_id,
+        active_organization_id=signed_in.active_organization_id,
     )
 
 

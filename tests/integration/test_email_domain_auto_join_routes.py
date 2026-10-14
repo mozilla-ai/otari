@@ -25,11 +25,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.api.routes import auth_session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DOMAIN_VERIFICATION_TXT_PREFIX, OrganizationMember
-from gateway.services.dashboard_session_service import create_dashboard_session
+from gateway.repositories.identity import DashboardSessionRepository
 from gateway.services.tenancy import organization_domain_service as domain_service
 
 from .webauthn_helpers import SoftwareAuthenticator, challenge_of
@@ -319,13 +318,15 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
     # standing on.
     attempts = {"count": 0}
 
-    async def _fails_once(*args: Any, **kwargs: Any) -> Any:
+    add_session = DashboardSessionRepository.add
+
+    async def _fails_once(self: DashboardSessionRepository, **kwargs: Any) -> None:
         attempts["count"] += 1
         if attempts["count"] == 1:
             raise SQLAlchemyError("the session row could not be written")
-        return await create_dashboard_session(*args, **kwargs)
+        await add_session(self, **kwargs)
 
-    monkeypatch.setattr(auth_session, "create_dashboard_session", _fails_once)
+    monkeypatch.setattr(DashboardSessionRepository, "add", _fails_once)
     refused = client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD})
     assert refused.status_code == 500, refused.text
 

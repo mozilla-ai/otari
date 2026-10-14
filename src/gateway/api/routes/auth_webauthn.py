@@ -35,7 +35,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, OrganizationServiceDep, get_config, get_db, record_auth_failure
+from gateway.api.deps import CurrentIdentity, IdentityServiceDep, get_config, get_db, record_auth_failure
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
@@ -55,12 +55,10 @@ from gateway.models.tenancy import (
 )
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
-    create_dashboard_session,
     request_is_https,
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy import webauthn_service
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
 router = APIRouter(prefix="/auth/webauthn", tags=["auth"])
 
@@ -211,7 +209,7 @@ async def authenticate_passkey(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    organizations: OrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> Any:
     """Verify an assertion and set the HttpOnly session cookie.
 
@@ -245,16 +243,17 @@ async def authenticate_passkey(
     except TenancyError:
         record_auth_failure("invalid_passkey")
         raise
-    # Same transaction as the session row; see the note in ``auth_session``.
-    await OrganizationDomainService(db).auto_join_for_user(identity)
-    active_organization_id = await organizations.active_organization_id_for_sign_in(identity)
-    token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
-    await _commit(db, "persist a dashboard session on a passkey sign-in")
-    apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
+    try:
+        signed_in = await identities.sign_in(identity)
+    except DATABASE_ERRORS as exc:
+        raise database_error("persist a dashboard session on a passkey sign-in", exc) from None
+    apply_session_cookie(
+        response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
+    )
     return PasskeySessionResponse(
-        expires_at=expires_at,
+        expires_at=signed_in.session_expires_at,
         user_id=identity.id,
-        active_organization_id=active_organization_id,
+        active_organization_id=signed_in.active_organization_id,
     )
 
 

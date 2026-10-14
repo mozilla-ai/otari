@@ -1,6 +1,7 @@
+import secrets
 import uuid
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -14,9 +15,11 @@ from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
-from gateway.services.dashboard_session_service import start_dashboard_session
+from gateway.services.dashboard_session_service import hash_session_token
 from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy import OrganizationService
+
+_SESSION_TOKEN_PREFIX = "otari-sess-"
 
 
 class SignInListener(Protocol):
@@ -95,16 +98,37 @@ class IdentityService:
             raise OAuthEmailNotVerifiedError(label)
         async with self._uow:
             resolution = await self._account_for(external, label)
-            account = resolution.identity
+            signed_in = await self.sign_in(resolution.identity)
+        return replace(signed_in, new_account=resolution.new_account)
+
+    async def sign_in(self, account: User) -> SignIn:
+        """Sign in an account that has proven who it is, and start its dashboard session.
+
+        What the sign-in listener stages and the session commit together.
+        """
+        async with self._uow:
             await self._sign_in_listener.account_signed_in(account)
+            return await self.start_session(account)
+
+    async def start_session(self, account: User) -> SignIn:
+        """Start a dashboard session for ``account`` without running the sign-in listener.
+
+        The session counts as the account's latest sign-in, and acts in the organization the account can act in.
+        """
+        async with self._uow:
             active_organization_id = await self._organizations.active_organization_id_for_sign_in(account)
-            token, expires_at = await start_dashboard_session(
-                self._sessions, self._users, self._session_ttl_hours, user_id=account.id
+            now = datetime.now(UTC)
+            await self._sessions.prune_expired(now)
+            await self._users.record_sign_in(account.id, at=now)
+            token = f"{_SESSION_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
+            expires_at = now + timedelta(hours=self._session_ttl_hours)
+            await self._sessions.add(
+                token_hash=hash_session_token(token), user_id=account.id, created_at=now, expires_at=expires_at
             )
         return SignIn(
             account=account,
             active_organization_id=active_organization_id,
-            new_account=resolution.new_account,
+            new_account=False,
             session_token=token,
             session_expires_at=expires_at,
         )

@@ -26,9 +26,8 @@ it is deleted.
 """
 
 import hashlib
-import secrets
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from fastapi import Request, Response
@@ -43,12 +42,9 @@ from gateway.core.database import create_session, describe_database_error
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import DashboardSession, User
-from gateway.repositories.identity import DashboardSessionRepository
-from gateway.repositories.tenancy import UserRepository
 from gateway.services.master_key_service import hash_master_key
 
 SESSION_COOKIE_NAME = "otari_dashboard_session"
-_SESSION_TOKEN_PREFIX = "otari-sess-"
 # Stored in runtime_settings; ignored by runtime_settings_service (not a
 # SETTABLE_KEY). Hash of the master key that existing sessions were minted
 # under, so a key change across a restart revokes them (see
@@ -64,41 +60,6 @@ def hash_session_token(token: str) -> str:
 def _as_utc(value: datetime) -> datetime:
     """Treat a naive stored datetime as the UTC it was written as (SQLite)."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
-async def start_dashboard_session(
-    sessions: DashboardSessionRepository, users: UserRepository, ttl_hours: int, *, user_id: uuid.UUID
-) -> tuple[str, datetime]:
-    """Stage a new session row for ``user_id`` and return ``(token, expires_at)``.
-
-    ``user_id`` names the tenancy identity the session speaks for, and is
-    required rather than defaulted: a session that names nobody cannot resolve a
-    caller, which is the reason the column exists.
-
-    ``user.last_sign_in_at`` is stamped here rather than at each sign-in, so a
-    new sign-in cannot forget to. The re-mint after a master-key rotation is
-    stamped too: the operator proved the new key to get the new session, which
-    is the event the column records.
-
-    Expired rows are pruned opportunistically here, so the table stays small
-    without a background task. The caller owns the transaction and must commit
-    before handing the token to the browser.
-    """
-    now = datetime.now(UTC)
-    await sessions.prune_expired(now)
-    # Only ever forward. Two sign-ins for one identity each compute their own
-    # ``now``, so a plain write would let the one that commits last win rather
-    # than the one that is later.
-    await users.record_sign_in(user_id, at=now)
-    token = f"{_SESSION_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
-    expires_at = now + timedelta(hours=ttl_hours)
-    await sessions.add(token_hash=hash_session_token(token), user_id=user_id, created_at=now, expires_at=expires_at)
-    return token, expires_at
-
-
-async def create_dashboard_session(db: AsyncSession, ttl_hours: int, *, user_id: uuid.UUID) -> tuple[str, datetime]:
-    """Stage a new session row for ``user_id`` on ``db``, as ``start_dashboard_session`` does."""
-    return await start_dashboard_session(DashboardSessionRepository(db), UserRepository(db), ttl_hours, user_id=user_id)
 
 
 async def resolve_dashboard_session(db: AsyncSession, token: str) -> User | None:

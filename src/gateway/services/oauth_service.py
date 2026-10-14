@@ -205,7 +205,6 @@ class _DatabaseStateStore:
         now = datetime.now(UTC)
         # The sweep rides here rather than on a scheduler because this is the
         # only write the table takes, so it is the only place that can grow it.
-        # Same reason ``create_dashboard_session`` prunes on the way in.
         await self._db.execute(delete(OAuthPendingState).where(col(OAuthPendingState.expires_at) <= now))
         self._db.add(
             OAuthPendingState(

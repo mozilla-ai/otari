@@ -38,11 +38,7 @@ from gateway.models.tenancy import (
     User,
 )
 from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
-from gateway.services.dashboard_session_service import (
-    SESSION_COOKIE_NAME,
-    create_dashboard_session,
-    hash_session_token,
-)
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
@@ -561,16 +557,3 @@ async def test_the_service_refuses_the_two_shapes_the_routes_also_refuse(
             user_id=uuid.uuid4(),
             request=DeploymentUserUpdateRequest(is_active=False),
         )
-
-
-@pytest.mark.asyncio
-async def test_a_session_records_the_sign_in_on_the_identity(async_db: AsyncSession) -> None:
-    """The stamp lives in `create_dashboard_session`, so every sign-in flow gets it."""
-    user, _ = await _identity(async_db, full_name="Ada Lovelace")
-    assert user.last_sign_in_at is None
-
-    await create_dashboard_session(async_db, 24, user_id=user.id)
-    await async_db.commit()
-    await async_db.refresh(user)
-
-    assert user.last_sign_in_at is not None

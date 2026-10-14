@@ -1,4 +1,4 @@
-"""OAuth sign-in through the identity service and the core identity provider policy."""
+"""Sign-in through the identity service, and the core identity provider policy."""
 
 import functools
 
@@ -97,6 +97,20 @@ async def test_open_signup_links_the_account_it_registers(async_db: AsyncSession
     assert link is not None
     assert link.user_id == signed_in.account.id
     assert signed_in.session_token
+
+
+async def test_starting_a_session_records_the_sign_in_on_the_account(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    account = await UserRepository(async_db).create_local_identity(
+        email="ada@example.com", full_name="Ada", active_organization_id=organization.id
+    )
+    await async_db.commit()
+    assert account.last_sign_in_at is None
+
+    await _service(async_db, open_signup=False).start_session(account)
+
+    await async_db.refresh(account)
+    assert account.last_sign_in_at is not None
 
 
 class _ReturnsAccount:
