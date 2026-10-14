@@ -1584,8 +1584,7 @@ async def _require_deployment_funds(
             "BillingPort failed to admit a deployment-paid request: organization=%s request_id=%s: %s",
             organization_id,
             ctx.request_id,
-            exc,
-            exc_info=True,
+            _describe_billing_error(exc),
         )
         if ctx.db is not None:
             # Whatever the adapter wrote before failing is discarded, and a
@@ -4651,15 +4650,22 @@ async def charge_deployment_paid(
     try:
         async with db.begin_nested():
             await charge.charge(amount, description=f"{provider}:{model}")
-    except Exception:
+    except Exception as exc:
         logger.error(
             "Charge of %s for a served deployment-paid request failed; it goes uncharged: "
-            "organization=%s request_id=%s",
+            "organization=%s request_id=%s: %s",
             amount,
             charge.organization_id,
             charge.request_id,
-            exc_info=True,
+            _describe_billing_error(exc),
         )
+
+
+def _describe_billing_error(exc: Exception) -> str:
+    """Name a billing port failure without the row data a database error's text can carry."""
+    if isinstance(exc, DATABASE_ERRORS):
+        return describe_database_error(exc)
+    return type(exc).__name__
 
 
 async def release_reservation(ctx: RequestContext) -> None:

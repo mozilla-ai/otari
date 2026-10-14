@@ -115,7 +115,7 @@ stored provider and `config.yml` have all missed. The deployment pays that
 upstream bill, so the request also goes through `BillingPort`. Before the
 provider call, the organization is granted any credit it is owed and refused
 with `402` (`insufficient_funds`) when it has no funds paid in. When the
-request settles, its cost, including the cost a cancelled or failed request
+request settles, its cost, including the cost an abandoned or failed request
 still owes, is charged to the organization. No funds are held while the
 request runs, so concurrent requests can take an organization below zero. A
 request on any other credential never reaches either port, and the core's
