@@ -1,6 +1,7 @@
 """Sign-in through the identity service, and the core identity provider policy."""
 
 import functools
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func, select
@@ -17,7 +18,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.models.base import Base
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
-from gateway.models.tenancy import User
+from gateway.models.tenancy import Organization, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository
 from gateway.repositories.tenancy import OrganizationDomainRepository, OrganizationMemberRepository, UserRepository
@@ -26,7 +27,7 @@ from gateway.services.mail import Mailer
 from gateway.services.tenancy import DomainAutoJoinListener, OrganizationService, forget_unproven_access
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
-from .tenancy_helpers import create_organization, membership_writes
+from .tenancy_helpers import create_member, create_organization, membership_writes
 
 pytestmark = pytest.mark.asyncio
 
@@ -206,3 +207,132 @@ async def test_any_policy_that_reports_a_new_account_is_held_to_the_published_te
 
     await async_db.refresh(signed_in.account)
     assert signed_in.account.terms_accepted_at is not None
+
+
+async def _squatted(db: AsyncSession, email: str) -> User:
+    """An address a stranger signed up with under open signup and never verified."""
+    registration = await OrganizationService(db, **membership_writes(db)).provision_signup_tenancy(
+        email=email, full_name="Mallory Squat"
+    )
+    account = registration.identity
+    account.hashed_password = "squatter-hash"  # pragma: allowlist secret
+    db.add(account)
+    await db.commit()
+    return account
+
+
+def _named(provider: str, email: str, full_name: str | None) -> ProviderIdentity:
+    return ProviderIdentity(
+        provider=provider,
+        subject="provider-subject",
+        email=email,
+        full_name=full_name,
+        email_verified=EmailAssertion.VERIFIED,
+    )
+
+
+async def _organization_name(db: AsyncSession, organization_id: object) -> str:
+    db.expire_all()
+    organization = await db.get(Organization, organization_id)
+    assert organization is not None
+    return organization.name
+
+
+async def test_taking_back_a_squatted_address_drops_the_strangers_name_and_renames_their_organization(
+    async_db: AsyncSession,
+) -> None:
+    squatted = await _squatted(async_db, "ada@example.com")
+    organization_id = squatted.default_organization_id
+    assert await _organization_name(async_db, organization_id) == "Mallory Squat's organization"
+
+    signed_in = await _service(async_db, open_signup=True).sign_in_with_oauth(
+        _named("google", "ada@example.com", "Ada Lovelace")
+    )
+
+    assert signed_in.active_organization_id == organization_id
+    assert signed_in.account.full_name == "Ada Lovelace"
+    assert signed_in.account.hashed_password is None
+    assert await _organization_name(async_db, organization_id) == "Ada Lovelace's organization"
+
+
+async def test_taking_back_a_squatted_address_names_the_organization_from_the_address_without_a_provider_name(
+    async_db: AsyncSession,
+) -> None:
+    squatted = await _squatted(async_db, "ada@example.com")
+
+    signed_in = await _service(async_db, open_signup=True).sign_in_with_oauth(_named("google", "ada@example.com", None))
+
+    assert signed_in.account.full_name is None
+    assert await _organization_name(async_db, squatted.default_organization_id) == "ada's organization"
+
+
+async def test_taking_back_a_squatted_address_keeps_the_name_of_an_organization_someone_else_belongs_to(
+    async_db: AsyncSession,
+) -> None:
+    squatted = await _squatted(async_db, "ada@example.com")
+    organization = await async_db.get(Organization, squatted.default_organization_id)
+    assert organization is not None
+    await create_member(async_db, organization, role="member", full_name="Grace")
+    await async_db.commit()
+
+    signed_in = await _service(async_db, open_signup=True).sign_in_with_oauth(
+        _named("google", "ada@example.com", "Ada Lovelace")
+    )
+
+    assert signed_in.account.full_name == "Ada Lovelace"
+    assert await _organization_name(async_db, organization.id) == "Mallory Squat's organization"
+
+
+async def _former_member(db: AsyncSession, email: str, *, vouched: bool) -> tuple[User, Organization]:
+    """An account an organization added and then removed, whose address was proven, or only vouched for."""
+    organization = await create_organization(db, slug="acme")
+    account = await UserRepository(db).create_local_identity(
+        email=email, full_name="Ada", active_organization_id=organization.id
+    )
+    account.email_verified_at = datetime.now(UTC)
+    account.email_vouched_at = account.email_verified_at if vouched else None
+    account.hashed_password = "member-hash"  # pragma: allowlist secret
+    db.add(account)
+    await OrganizationMemberRepository(db).create_membership(
+        organization_id=organization.id, user_id=account.id, role="member", status="suspended"
+    )
+    await db.commit()
+    return account, organization
+
+
+async def test_proving_a_vouched_address_nobody_still_wants_founds_its_own_organization(
+    async_db: AsyncSession,
+) -> None:
+    """A provider proves an address an organization only vouched for, which is when open signup claims it."""
+    account, former = await _former_member(async_db, "ada@example.com", vouched=True)
+
+    signed_in = await _service(async_db, open_signup=True).sign_in_with_oauth(
+        _named("google", "ada@example.com", "Ada Lovelace")
+    )
+
+    assert signed_in.active_organization_id is not None
+    assert signed_in.active_organization_id != former.id
+    assert signed_in.account.default_organization_id == signed_in.active_organization_id
+    owner = await OrganizationMemberRepository(async_db).get_active_by_organization_and_user(
+        signed_in.active_organization_id, account.id
+    )
+    assert owner is not None
+    assert owner.role == "owner"
+    assert await _organization_name(async_db, signed_in.active_organization_id) == "Ada Lovelace's organization"
+
+
+async def test_a_proven_address_that_lost_its_last_membership_signs_in_to_no_organization(
+    async_db: AsyncSession,
+) -> None:
+    """An address is claimed once, so a later sign-in leaves founding an organization to the person."""
+    _, former = await _former_member(async_db, "ada@example.com", vouched=False)
+    organizations_before = await _count(async_db, Organization)
+
+    signed_in = await _service(async_db, open_signup=True).sign_in_with_oauth(
+        _named("google", "ada@example.com", "Ada Lovelace")
+    )
+
+    assert signed_in.active_organization_id is None
+    assert await _count(async_db, Organization) == organizations_before
+    assert signed_in.account.full_name == "Ada"
+    assert signed_in.account.active_organization_id == former.id

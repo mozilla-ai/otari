@@ -408,9 +408,11 @@ async def create_user_for_signup(
         return None
     try:
         async with uow:
-            if identity is not None and config.open_signup:
+            if identity is not None:
                 # An identity no organization still wants gets what a new address gets, and a lost race rolls it back.
-                await organizations.provision_tenancy_for_claim(identity, full_name=full_name)
+                await organizations.provision_tenancy_for_claim(
+                    identity, open_signup=config.open_signup, full_name=full_name
+                )
             if identity is None:
                 if not config.open_signup:
                     # The same bcrypt cost as the branch above, for the same reason: an
@@ -498,6 +500,12 @@ async def verify_email(
     here (the same identity gets verified twice), but leaves the second racer
     through the lock re-resolving to nothing and correctly raising instead.
     Same pattern as ``organization_service.accept_invitation``.
+
+    Under ``open_signup``, an identity no organization still wants by the time
+    it is verified (its invitation revoked or lapsed since signup) gets an
+    organization and workspace of its own first, as signup would have given it
+    (``OrganizationService.provision_tenancy_for_claim``). ``organizations`` must
+    then be built on a Unit of Work.
     """
     users = UserRepository(db)
     identity = await users.get_by_verification_token_hash(hash_token(token))
@@ -513,6 +521,17 @@ async def verify_email(
         raise VerificationTokenInvalidError
     if identity.hashed_password is None or not await verify_password_async(password, identity.hashed_password):
         raise VerificationPasswordIncorrectError
+    if await organizations.provision_tenancy_for_claim(identity, open_signup=open_signup, full_name=None):
+        # That block committed, which released the lock, so the token is resolved again under a new one.
+        await users.lock(identity.id)
+        identity = await users.get_by_verification_token_hash(hash_token(token))
+        if (
+            identity is None
+            or not identity.is_active
+            or identity.email_verification_token_expires_at is None
+            or identity.email_verification_token_expires_at < datetime.now(UTC)
+        ):
+            raise VerificationTokenInvalidError
 
     identity.email_verified_at = datetime.now(UTC)
     identity.email_verification_token_hash = None
@@ -655,10 +674,13 @@ async def reset_password(
 
     A reset on an unverified identity is a claim, so it is held to
     ``unverified_identity_is_claimable`` when it completes, not only when the
-    link was mailed. Under ``open_signup``, such a claim of an identity no
-    organization still wants gives it an organization and workspace of its own,
-    as signup and a provider sign-in do; that tenancy is committed before the
-    identity is changed. ``organizations`` must then be built on a Unit of Work.
+    link was mailed. Under ``open_signup``, a reset that proves an unverified or
+    vouched address of an identity no organization still wants gives it an
+    organization and workspace of its own, as signup and a provider sign-in do.
+    A reset that takes over an unverified address also drops the name whoever
+    signed up chose, and renames the organization that signup founded. Both are
+    committed before the identity is changed, so ``organizations`` must be built
+    on a Unit of Work. A shared token does neither, since it proves nothing.
 
     Where the deployment publishes terms and the identity has accepted none,
     ``terms_accepted`` is required, because the reset may be what makes the
@@ -696,8 +718,10 @@ async def reset_password(
     needs_terms = identity.terms_accepted_at is None and config.terms_url is not None
     if needs_terms and not terms_accepted:
         raise TermsNotAcceptedError
-    if config.open_signup and identity.email_verified_at is None:
-        await organizations.provision_tenancy_for_claim(identity, full_name=None)
+    # A shared link proves nothing about the address, so it claims nothing either.
+    if not is_shared_token(token) and await organizations.provision_tenancy_for_claim(
+        identity, open_signup=config.open_signup, full_name=None, replaces_unproven=True
+    ):
         # That block committed, which released the lock, so the token is resolved and checked again under a new one.
         identity = await _locked_reset_identity(users, organizations, token=token, open_signup=config.open_signup)
     now = datetime.now(UTC)

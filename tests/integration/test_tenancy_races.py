@@ -12,7 +12,7 @@ import functools
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException, status
@@ -113,12 +113,6 @@ from .tenancy_helpers import (
     create_member,
     membership_writes,
 )
-
-
-def _reader(db: AsyncSession) -> OrganizationService:
-    """The read-only organization service ``get_organization_service`` builds."""
-    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -1240,10 +1234,10 @@ def _claim_together(monkeypatch: pytest.MonkeyPatch) -> None:
     real = OrganizationService.provision_tenancy_for_claim
     all_decided = asyncio.Barrier(_RACERS)
 
-    async def provision_after_all_decide(self: OrganizationService, identity: User, *, full_name: str | None) -> bool:
+    async def provision_after_all_decide(self: OrganizationService, identity: User, **claim: Any) -> bool:
         async with asyncio.timeout(_CHECKPOINT_TIMEOUT):
             await all_decided.wait()
-        return await real(self, identity, full_name=full_name)
+        return await real(self, identity, **claim)
 
     monkeypatch.setattr(OrganizationService, "provision_tenancy_for_claim", provision_after_all_decide)
 
@@ -1444,7 +1438,11 @@ async def test_concurrent_verifications_of_one_token_verify_exactly_once(
 
     async def attempt(session: AsyncSession) -> object:
         return await user_service.verify_email(
-            session, organizations=_reader(session), token=token, password="vera-password", open_signup=True
+            session,
+            organizations=OrganizationService(session, **membership_writes(session)),
+            token=token,
+            password="vera-password",
+            open_signup=True,
         )
 
     outcomes = await _race(sessions, attempt)

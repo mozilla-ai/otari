@@ -13,6 +13,7 @@ import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -819,8 +820,8 @@ def test_a_reset_claim_whose_link_expires_while_its_organization_is_founded_is_r
     """The link is checked in full again once the organization's commit has released the lock."""
     real = OrganizationService.provision_tenancy_for_claim
 
-    async def provision_then_expire(self: OrganizationService, identity: User, *, full_name: str | None) -> bool:
-        founded = await real(self, identity, full_name=full_name)
+    async def provision_then_expire(self: OrganizationService, identity: User, **claim: Any) -> bool:
+        founded = await real(self, identity, **claim)
         identity.password_reset_token_expires_at = datetime.now(UTC) - timedelta(minutes=1)
         await self.db.commit()
         return founded
@@ -904,3 +905,139 @@ def test_signing_in_moves_a_stale_pointer_to_an_organization_the_member_still_be
 def test_a_default_organization_name_is_one_line_however_the_name_was_typed(full_name: str, expected: str) -> None:
     """The name is quoted in invitation emails, where a line break would start a line the deployment did not write."""
     assert _default_organization_name("ada@example.com", full_name) == expected
+
+
+def _reset_token(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> str:
+    """Ask for a reset link and pull its token out of the console log."""
+    caplog.clear()
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        requested = client.post(f"{API_ROOT}/auth/password/reset", json={"email": email})
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    assert requested.status_code == 200, requested.text
+    match = _TOKEN_IN_LINK.search(caplog.text)
+    assert match, caplog.text
+    return match.group(1)
+
+
+def test_open_signup_gives_an_identity_whose_invitation_was_revoked_before_verifying_its_own_organization(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Signup claimed the address while the invitation waited; verifying it is when nobody wants it any more."""
+    with _client(tmp_path, open_signup=True) as client:
+        invitation = _invite(client, email="ada@example.com")
+        inviting_organization, _ = _organization_ids(tmp_path, email="ada@example.com")
+        token = _captured_verification_link(caplog, client, email="ada@example.com")
+        assert _organization_ids(tmp_path, email="ada@example.com")[0] == inviting_organization
+        revoked = client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{invitation['invitation_id']}",
+            headers={"Otari-Key": MASTER_KEY},
+        )
+        assert revoked.status_code == 200, revoked.text
+
+        verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
+        assert verified.status_code == 200, verified.text
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+
+        own = signed_in.json()["active_organization_id"]
+        assert own is not None
+        assert own != inviting_organization
+        assert _organization_ids(tmp_path, email="ada@example.com") == (own, own)
+        assert client.get(f"{API_ROOT}/organizations/me").json()["role"] == "owner"
+
+
+def test_open_signup_gives_a_removed_vouched_member_its_own_organization_when_a_reset_proves_the_address(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A password chosen from an invitation link only vouches for the address; the reset is what claims it."""
+    with _client(tmp_path, open_signup=True) as client:
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.INFO, logger="gateway")
+        try:
+            invitation = _invite(client, email="ada@example.com")
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+        match = _TOKEN_IN_LINK.search(caplog.text)
+        assert match, caplog.text
+        accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": match.group(1), "password": PASSWORD})
+        assert accepted.status_code == 200, accepted.text
+        inviting_organization, _ = _organization_ids(tmp_path, email="ada@example.com")
+        _remove(client, str(invitation["organization_member_id"]))
+
+        token = _reset_token(client, caplog, email="ada@example.com")
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": "another-password"}
+        )
+        assert confirmed.status_code == 204, confirmed.text
+        signed_in = client.post(
+            f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": "another-password"}
+        )
+
+        own = signed_in.json()["active_organization_id"]
+        assert own is not None
+        assert own != inviting_organization
+        assert client.get(f"{API_ROOT}/organizations/me").json()["role"] == "owner"
+
+
+def test_open_signup_leaves_a_proven_member_who_was_removed_without_an_organization(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An address is claimed once; afterwards the person creates an organization from the empty state."""
+    with _client(tmp_path, open_signup=True) as client:
+        membership_id = _signed_in_member(client, caplog, email="eve@example.com")
+        _remove(client, membership_id)
+        client.cookies.clear()
+
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "eve@example.com", "password": PASSWORD})
+
+        assert signed_in.status_code == 200, signed_in.text
+        assert signed_in.json()["active_organization_id"] is None
+
+
+def test_a_reset_that_takes_back_a_squatted_address_drops_the_strangers_name_and_renames_their_organization(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path, open_signup=True) as client:
+        _captured_verification_link(caplog, client, email="ada@example.com", full_name="Mallory Squat")
+        assert _name_and_organization(tmp_path, email="ada@example.com") == (
+            "Mallory Squat",
+            "Mallory Squat's organization",
+        )
+
+        token = _reset_token(client, caplog, email="ada@example.com")
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": "owner-password"}
+        )
+        assert confirmed.status_code == 204, confirmed.text
+
+    assert _name_and_organization(tmp_path, email="ada@example.com") == (None, "ada's organization")
+
+
+def test_the_context_of_a_caller_in_no_organization_says_so_without_naming_one(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        membership_id = _signed_in_member(client, caplog, email="eve@example.com")
+        former, _ = _organization_ids(tmp_path, email="eve@example.com")
+        _remove(client, membership_id)
+
+        context = client.get(f"{API_ROOT}/organizations/me")
+
+        assert context.status_code == 404, context.text
+        assert context.json()["detail"] == "You are not an active member of any organization"
+        assert former not in context.text
+
+
+def test_removal_moves_the_active_organization_to_one_the_member_still_belongs_to(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        membership_id = _signed_in_member(client, caplog, email="ada@example.com")
+        created = client.post(f"{API_ROOT}/organizations", json={"name": "Ada Corp"})
+        assert created.status_code == 201, created.text
+
+        _remove(client, membership_id)
+
+        assert _organization_ids(tmp_path, email="ada@example.com")[0] == created.json()["id"]

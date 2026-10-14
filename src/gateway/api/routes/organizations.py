@@ -148,7 +148,15 @@ async def create_organization(
     )
 
 
-@router.get("/me")
+@router.get(
+    "/me",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": OrganizationRefusal,
+            "description": "The caller is an active member of no organization.",
+        }
+    },
+)
 async def get_active_organization_context(
     service: OrganizationServiceDep,
     current_identity: CurrentIdentity,

@@ -16,6 +16,13 @@ class OrganizationNotFoundError(TenancyNotFoundError):
         super().__init__(f"Organization {organization_id} not found")
 
 
+class NoActiveOrganizationError(TenancyNotFoundError):
+    """The caller is an active member of no organization, so there is no organization for them to act in."""
+
+    def __init__(self) -> None:
+        super().__init__("You are not an active member of any organization")
+
+
 class OrganizationMemberNotFoundError(TenancyNotFoundError):
     def __init__(self, organization_member_id: object):
         super().__init__(f"Organization member {organization_member_id} not found")
@@ -377,6 +384,7 @@ __all__ = [
     "InvitationPasswordNotAcceptedError",
     "LastWorkspaceError",
     "MembershipUpdateError",
+    "NoActiveOrganizationError",
     "NotAnOrganizationMemberError",
     "NotAuthorizedError",
     "OrganizationDomainAlreadyClaimedError",

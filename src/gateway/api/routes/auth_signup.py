@@ -171,7 +171,7 @@ async def verify_email_route(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    organizations: OrganizationServiceDep,
+    organizations: MembershipOrganizationServiceDep,
 ) -> VerifyEmailResponse:
     """Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
 

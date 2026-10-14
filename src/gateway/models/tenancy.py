@@ -227,9 +227,10 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # ``active_organization_id`` and deliberately leaves this where it was,
     # which is the whole point of there being two columns. One write re-homes
     # it: ``OrganizationService.provision_tenancy_for_claim``, when open signup
-    # gives an identity nobody had claimed and no organization still wants its
-    # own organization. That happens at most once, to an identity that never
-    # signed in and so never earned anything anchored here. The hosted edition
+    # gives an identity no organization still wants its own organization as its
+    # address is first proven. That happens at most once, since an address is
+    # proven once, and only to an identity with no live membership, so nothing
+    # it earned is anchored to the organization it leaves. The hosted edition
     # anchors recurring offered credits to it precisely so they cannot be farmed
     # by creating or switching organizations. A column the hosted edition needs
     # has to live here or nowhere, and the overlay contributes adapters and

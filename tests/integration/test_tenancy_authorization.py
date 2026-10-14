@@ -17,6 +17,7 @@ from gateway.core.config import GatewayConfig
 from gateway.exceptions.organizations_exceptions import (
     InvitationAlreadyPendingError,
     MembershipUpdateError,
+    NoActiveOrganizationError,
     NotAuthorizedError,
     OrganizationNameRequiredError,
     OrganizationNotFoundError,
@@ -427,7 +428,7 @@ async def test_an_identity_with_no_live_membership_has_no_context(async_db: Asyn
     assert membership is not None
     await members.update_membership(membership, {"status": "suspended"})
 
-    with pytest.raises(OrganizationNotFoundError):
+    with pytest.raises(NoActiveOrganizationError):
         await OrganizationService(
             async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
         ).get_active_membership_context_for_user(user)

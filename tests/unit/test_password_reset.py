@@ -797,3 +797,50 @@ def test_a_member_cannot_issue_a_password_link(tmp_path: Path, caplog: pytest.Lo
 
     assert response.status_code == 404, response.text
     assert _reset_token_hash(tmp_path, email="ada@example.com") is None
+
+
+def test_an_operator_password_link_claims_no_organization_until_the_mailbox_proves_the_address(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A shared link only vouches for the address, so open signup founds an organization at the later proof."""
+    with _client(tmp_path, open_signup=True) as client:
+        added = client.post(
+            f"{API_ROOT}/organizations/me/members",
+            json={"email": "grace@example.com", "role": "member"},
+            headers={"Otari-Key": MASTER_KEY},
+        )
+        assert added.status_code == 201, added.text
+        removed = client.delete(
+            f"{API_ROOT}/organizations/me/members/{added.json()['organization_member_id']}",
+            headers={"Otari-Key": MASTER_KEY},
+        )
+        assert removed.status_code == 200, removed.text
+        grace = _account_id(client, email="grace@example.com")
+
+    with _client(tmp_path, open_signup=True, mail_transport="none", public_base_url=None) as client:
+        issued = _password_link(client, grace, headers={"Otari-Key": MASTER_KEY})
+        assert issued.status_code == 201, issued.text
+        token = issued.json()["link"].split("token=", 1)[1]
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
+        )
+        assert confirmed.status_code == 204, confirmed.text
+        signed_in = client.post(
+            f"{API_ROOT}/auth/session", json={"email": "grace@example.com", "password": NEW_PASSWORD}
+        )
+        assert signed_in.json()["active_organization_id"] is None
+
+    with _client(tmp_path, open_signup=True) as client:
+        _with_logs(
+            client, caplog, lambda: client.post(f"{API_ROOT}/auth/password/reset", json={"email": "grace@example.com"})
+        )
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm",
+            json={"token": _extract_token(caplog.text), "new_password": "a-proven-password"},
+        )
+        assert confirmed.status_code == 204, confirmed.text
+        signed_in = client.post(
+            f"{API_ROOT}/auth/session", json={"email": "grace@example.com", "password": "a-proven-password"}
+        )
+        assert signed_in.json()["active_organization_id"] is not None
+        assert client.get(f"{API_ROOT}/organizations/me").json()["role"] == "owner"

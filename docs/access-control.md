@@ -475,7 +475,7 @@ Otari links each provider account to one Otari account by the provider's own ID 
 
 The first sign-in with a provider account links it to the account that holds the address the provider verified. Otari links by address only for Google and GitHub, because no tenant can set what they say about an address. If no account holds that address, the result depends on `open_signup`, as it does for [signup](#signup). When `open_signup` is disabled, the sign-in is refused, and so is one on an account an owner or admin added or invited whose address nobody has verified yet, unless it is still an active member or has an invitation it can accept, the same rule [signup](#signup) follows. When it is enabled, Otari creates an account with its own organization and workspace, and sends no verification email, because the provider has already verified the address. The first sign-in is refused if the provider did not verify the address. Any sign-in is refused if the provider says the address is not verified, or if the account is deactivated. A provider that shares no address at all is refused with a message saying so. A provider that fails, cannot be reached, or refuses this deployment's client credentials while finishing the sign-in answers 502, so a provider outage or a misconfigured client is not counted as a client error; only a code the provider calls invalid, expired or spent answers 400.
 
-The first sign-in on an address that is not yet verified, or that an organization only vouched for (see [Invitations](#invitations)), marks it verified. It also removes everything set up on that address before then: its password, any verification or reset link, every session signed in with that password, and every passkey registered from one. The provider confirms who owns the address, not who chose that password. The callback's response says so (`password_removed`), and the dashboard tells the person before they go on, so the password does not just stop working. They can set a new password from their account page once signed in. A password on an address that was already verified is kept, with its sessions and passkeys. A later sign-in through the link does not change the account's password or verification, unless the address has since become only vouched for (an operator's [password link](#deployment-wide-account-administration) that was passed on rather than mailed does that): the sign-in then proves the address the same way, and removes the password, links, sessions and passkeys set up through the vouch.
+The first sign-in on an address that is not yet verified, or that an organization only vouched for (see [Invitations](#invitations)), marks it verified. It also removes everything set up on that address before then: its password, any verification or reset link, every session signed in with that password, and every passkey registered from one. On an unverified address it replaces the display name chosen at signup with the provider's, and renames the organization that signup created after it, unless someone else belongs to that organization. The provider confirms who owns the address, not who chose that password or that name. The callback's response says so (`password_removed`), and the dashboard tells the person before they go on, so the password does not just stop working. They can set a new password from their account page once signed in. A password on an address that was already verified is kept, with its sessions and passkeys. A later sign-in through the link does not change the account's password or verification, unless the address has since become only vouched for (an operator's [password link](#deployment-wide-account-administration) that was passed on rather than mailed does that): the sign-in then proves the address the same way, and removes the password, links, sessions and passkeys set up through the vouch.
 
 Where the deployment publishes terms (`terms_url`), a sign-in that creates an account, or that is the first way in to one an owner or admin added or invited, needs the person's acceptance of them, as the signup form and a first password from an invitation link do. The dashboard asks before it sends the person to the provider and returns the acceptance with the callback (`terms_accepted`). Without it the sign-in is refused with the code `terms_not_accepted`, and nothing it would have set up is kept: no account, organization, workspace, provider link or session. With it, the acceptance is recorded on the account. A sign-in to an account someone already claimed, or through a provider account already linked to one, does not ask, and an account that never accepted the terms is not asked to later.
 
@@ -512,11 +512,17 @@ on `open_signup`:
 - `true`: an unknown address is registered, with an organization and workspace of
   its own. So is an address an organization once added or invited but no longer
   wants (its invitation was revoked, declined or expired, or the member was
-  removed), whether it signs up with the form, with a provider or by choosing a
-  password through "Forgot your password?": it gets its own organization and
-  workspace, and signs in to them. An address with an invitation still waiting
-  is claimed as it is, and finds the invitation under Invitations. Use it where
-  the deployment serves many tenants.
+  removed) when it is claimed, that is, when its owner first proves it: by
+  signing up with the form (or verifying that signup), by a first sign-in with a
+  provider, or by choosing a password through "Forgot your password?" while the
+  address is unverified or only vouched for (see [Invitations](#invitations)).
+  It gets its own organization and workspace, and signs in to them. An address
+  is claimed once: someone who already proved their address and later declines
+  their last invitation or is removed keeps the account but has no
+  organization, and signs in to the empty state [Invitations](#invitations)
+  describes, where they can create one. An address with an invitation still
+  waiting is claimed as it is, and finds the invitation under Invitations. Use
+  it where the deployment serves many tenants.
 
 Signup never sets a password on an address that is already verified. That is the
 state a Google or GitHub sign-in leaves, and the person who signs in that way
@@ -529,9 +535,11 @@ address that has a password, and also of one an owner or admin added or invited
 that nobody has signed in to yet, so that person can choose a first password.
 Completing it verifies the address, since the link reached its mailbox, and where
 the address was unverified or only vouched for it also ends every session and
-removes every passkey set up before then. Where `open_signup` is disabled, every
-address that is not yet verified, with or without a password, follows the signup
-rule above: it gets a link, and the link completes, only while it is an active
+removes every passkey set up before then. Where it was unverified, the display
+name chosen at signup is dropped too, and the organization that signup created is
+renamed after the address, unless someone else belongs to it. Where `open_signup`
+is disabled, every address that is not yet verified, with or without a password,
+follows the signup rule above: it gets a link, and the link completes, only while it is an active
 member or holds an invitation it can still accept, so a revoked invitee gets
 none. Where the deployment publishes terms and the account has accepted none,
 the reset page asks for them. An address that signs in only through a provider
@@ -647,7 +655,11 @@ removed do not count.
 Signing in answers which organization the session acts in. If the person was
 removed from the one they last used, it is the oldest one they still belong to,
 and if they belong to none it is empty; the dashboard then shows their
-invitations.
+invitations, and offers to create an organization where `open_signup` is
+enabled. Being removed, declining or having an invitation revoked moves the
+person's active organization to the oldest one they still belong to. For
+someone who belongs to none, `GET /api/v1/organizations/me` answers 404 saying
+so, without naming an organization.
 
 Invitation tokens are bearer credentials. Whoever holds an unused link can join
 as the invited address, and choose its first password where the link allows one,
