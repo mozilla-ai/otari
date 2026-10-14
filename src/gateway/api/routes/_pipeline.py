@@ -231,12 +231,14 @@ from gateway.services.inference import (
     EMPTY_COMPLETION_DETAIL,
     BlockedCaller,
     Claimed,
+    DeploymentCharge,
     InvalidKey,
     KeyReused,
     Replay,
     StillInFlight,
     UnidentifiedEndUserError,
     UnknownCaller,
+    admit_deployment_paid,
     end_user_identifier,
     is_empty_completion,
     is_provider_billing_error,
@@ -1536,20 +1538,22 @@ async def _require_deployment_funds(
     adapter: FormatAdapter[Any, Any],
     billing: BillingPort,
 ) -> None:
-    """Refuse a deployment-paid request whose organization has no funds, else arm its charge.
+    """Admit a deployment-paid request through ``admit_deployment_paid``, else refuse it over HTTP.
 
-    Grants any credit the organization is owed, then refuses one with nothing
-    paid in. No hold is placed, so concurrent requests can pass on the same
-    funds; the charge at settlement allows the overdraft that leaves, and this
-    gate refuses the next request. The connection the gate checked out is handed
-    back before dispatch, which also commits any credit it granted.
+    The connection the gate checked out is handed back before dispatch, which
+    also commits any credit it granted.
     """
     organization_id = ctx.organization_id
     # The port serves a credential only to a request with an organization.
     assert organization_id is not None
     try:
-        await billing.apply_due_credit(organization_id=organization_id)
-        await billing.require_funds_on_deposit(organization_id=organization_id)
+        charge = await admit_deployment_paid(
+            billing,
+            organization_id=organization_id,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            request_id=ctx.request_id,
+        )
     except InsufficientFundsError as exc:
         logger.info(
             "Deployment-paid request refused for insufficient funds: organization=%s request_id=%s",
@@ -1609,13 +1613,7 @@ async def _require_deployment_funds(
         )
         raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
     await release_session(ctx.db)
-    ctx.deployment_charge = DeploymentCharge(
-        billing=billing,
-        organization_id=organization_id,
-        api_key_id=ctx.api_key_id,
-        actor_user_id=_actor_user_id(ctx.user_id),
-        request_id=ctx.request_id,
-    )
+    ctx.deployment_charge = charge
 
 
 async def _warn_if_hosted_upstream_is_unpriced(
@@ -4626,35 +4624,6 @@ def _handle_counts_toward_budget(reservation: ReservationHandle | None) -> bool:
     return reservation.counts_toward_budget if reservation is not None else True
 
 
-def _actor_user_id(user_id: str | None) -> uuid.UUID | None:
-    """The billed user as the dashboard identity it names, where it names one.
-
-    A key a member minted for themselves carries their identity's uuid as its
-    user id; any other user id is free-form and attributes to no one.
-    """
-    if user_id is None:
-        return None
-    try:
-        return uuid.UUID(user_id)
-    except ValueError:
-        return None
-
-
-@dataclass(frozen=True)
-class DeploymentCharge:
-    """Who a deployment-paid request is charged to, and the port that charges them.
-
-    ``billing`` is resolved on the request's session, the one settlement
-    reconciles the budget reservation on, so the charge lands in that commit.
-    """
-
-    billing: BillingPort
-    organization_id: uuid.UUID
-    api_key_id: str | None
-    actor_user_id: uuid.UUID | None
-    request_id: str | None
-
-
 async def charge_deployment_paid(
     charge: DeploymentCharge | None,
     db: AsyncSession,
@@ -4670,43 +4639,23 @@ async def charge_deployment_paid(
     budget and the organization's funds move together. One charge per settled
     request: a tool loop's rounds settle as one row, and so as one charge.
 
-    ``expects_cost`` says the settlement should have priced something (a
-    success, or a failure the provider reported usage for); a ``None`` cost then
-    means the deployment served the request free, which is logged.
-
     Never raises: the response has already been served. The charge runs in a
     savepoint, so a failed one is discarded whole and the budget settlement that
     follows still lands; the usage row is written either way.
     """
     if charge is None:
         return
-    if cost is None:
-        if expects_cost:
-            logger.warning(
-                "Deployment-paid request settled with no price for %s:%s; organization %s is not charged "
-                "(request_id=%s). Price the models this build serves.",
-                provider,
-                model,
-                charge.organization_id,
-                charge.request_id,
-            )
-        return
-    if cost <= 0:
+    amount = charge.amount_due(cost, model=model, expects_cost=expects_cost)
+    if amount is None:
         return
     try:
         async with db.begin_nested():
-            await charge.billing.charge(
-                organization_id=charge.organization_id,
-                amount=cost,
-                description=f"{provider}:{model}",
-                actor_user_id=charge.actor_user_id,
-                api_key_id=charge.api_key_id,
-            )
+            await charge.charge(amount, description=f"{provider}:{model}")
     except Exception:
         logger.error(
             "Charge of %s for a served deployment-paid request failed; it goes uncharged: "
             "organization=%s request_id=%s",
-            cost,
+            amount,
             charge.organization_id,
             charge.request_id,
             exc_info=True,

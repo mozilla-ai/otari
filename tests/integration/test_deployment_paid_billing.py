@@ -364,7 +364,7 @@ def test_an_unpriced_deployment_paid_completion_is_not_charged_and_says_so(
     assert len(probe.GATES) == 2
     assert probe.LEDGER == []
     warnings = [r.getMessage() for r in gateway_logs.records if r.levelno == logging.WARNING]
-    assert any("openai:gpt-4o-unpriced" in message and "not charged" in message for message in warnings), warnings
+    assert any("gpt-4o-unpriced" in message and "not charged" in message for message in warnings), warnings
 
 
 def test_a_failed_charge_still_serves_and_settles_the_budget(

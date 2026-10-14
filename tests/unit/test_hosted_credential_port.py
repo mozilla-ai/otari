@@ -43,6 +43,7 @@ from gateway.ports.model_provider_port import (
     HostedModels,
     ModelProviderPort,
 )
+from gateway.services.inference import DeploymentCharge
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -775,8 +776,8 @@ def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCapture
         gateway_logger.removeHandler(caplog.handler)
 
 
-def _charge(billing: RecordingBilling) -> pipeline.DeploymentCharge:
-    return pipeline.DeploymentCharge(
+def _charge(billing: RecordingBilling) -> DeploymentCharge:
+    return DeploymentCharge(
         billing=cast(BillingPort, billing),
         organization_id=ORGANIZATION_ID,
         api_key_id="key-1",
@@ -818,7 +819,9 @@ async def test_an_unpriced_settlement_is_not_charged_and_says_so(gateway_logs: p
 
     assert billing.calls == []
     warnings = [r.getMessage() for r in gateway_logs.records if r.levelno == logging.WARNING]
-    assert any("openai:gpt-4o" in message and "not charged" in message for message in warnings), warnings
+    assert any("gpt-4o" in message and "not charged" in message for message in warnings), warnings
+    # The provider is left out of the log line; the request id finds the usage row that names it.
+    assert all("openai" not in message for message in warnings), warnings
 
 
 @pytest.mark.asyncio

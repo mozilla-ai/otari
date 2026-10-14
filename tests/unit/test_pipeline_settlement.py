@@ -83,6 +83,7 @@ from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
+from gateway.services.inference import DeploymentCharge
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools._mcp_admission import (
@@ -561,7 +562,7 @@ def _build(
     started_at: float | None = None,
     tool_tally: ToolUsageTally | None = None,
     request_id: str | None = None,
-    deployment_charge: pipeline.DeploymentCharge | None = None,
+    deployment_charge: DeploymentCharge | None = None,
     db: Any = None,
 ) -> Any:
     return build_streaming_response(
@@ -2746,7 +2747,7 @@ async def _run_standalone(
     db: Any = None,
     display_model: str | None = None,
     workspace_id: uuid.UUID | None = None,
-    deployment_charge: pipeline.DeploymentCharge | None = None,
+    deployment_charge: DeploymentCharge | None = None,
 ) -> tuple[Any, Response]:
     """Drive the standalone non-streaming path with a faked provider call."""
 
@@ -3135,8 +3136,8 @@ class _SavepointDb:
         yield
 
 
-def _deployment_charge(recorder: _ChargeRecorder) -> pipeline.DeploymentCharge:
-    return pipeline.DeploymentCharge(
+def _deployment_charge(recorder: _ChargeRecorder) -> DeploymentCharge:
+    return DeploymentCharge(
         billing=cast(Any, recorder),
         organization_id=_ORGANIZATION_ID,
         api_key_id="key-1",

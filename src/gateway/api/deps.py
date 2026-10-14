@@ -1138,6 +1138,17 @@ def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort
     return container.resolve(BillingPort, db)
 
 
+# ``get_db`` rather than ``PortSessionDep``, for a route whose own session is
+# ``get_db`` (the Playground): a deployment-paid charge is written on the port's
+# session and lands only in the commit that settles the request on that one.
+def get_request_session_billing_port(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> BillingPort:
+    """Resolve the billing adapter on the request's ``get_db`` session."""
+    return container.resolve(BillingPort, db)
+
+
 def get_entitlement_port(db: PortSessionDep, container: ContainerDep) -> EntitlementPort:
     """Resolve the entitlement adapter this build bound at startup."""
     return container.resolve(EntitlementPort, db)
@@ -1341,6 +1352,7 @@ OrganizationGuardrailDefinitionServiceDep = Annotated[
 
 ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
+RequestSessionBillingPortDep = Annotated[BillingPort, Depends(get_request_session_billing_port)]
 CodeExecutionPolicyPortDep = Annotated[CodeExecutionPolicyPort, Depends(get_code_execution_policy_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
@@ -1643,6 +1655,7 @@ async def get_feedback_service(
 __all__ = [
     "AgentModelRecommenderPortDep",
     "BillingPortDep",
+    "RequestSessionBillingPortDep",
     "CodeExecutionPolicyPortDep",
     "ContainerDep",
     "CallerOrganization",

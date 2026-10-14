@@ -133,10 +133,10 @@ Price lookup order belongs to `services/pricing_service.py`. Do not duplicate
 it in a route or tool backend.
 
 A completion served on a `ModelProviderPort` credential is deployment-paid
-(`ResolvedProvider.deployment_paid`). `_require_deployment_funds` in
-`_pipeline.py` gates it on `BillingPort` before dispatch, and
-`charge_deployment_paid` charges its settled cost on `ctx.db` just before the
-reservation settles, so the charge lands in that commit.
+(`ResolvedProvider.deployment_paid`). The funding rule is the inference
+domain's (`services/inference/_deployment_funding.py`): `_pipeline.py` admits
+the request through it before dispatch, and charges its settled cost on
+`ctx.db` just before the reservation settles, so the charge lands in that commit.
 
 ## Budget enforcement
 

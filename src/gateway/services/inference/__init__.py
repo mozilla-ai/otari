@@ -10,6 +10,7 @@ from gateway.services.inference._decisions import (
     request_decision,
     resolve_decision_provider,
 )
+from gateway.services.inference._deployment_funding import DeploymentCharge, admit_deployment_paid
 from gateway.services.inference._idempotency import (
     Admission,
     BlockedCaller,
@@ -79,6 +80,7 @@ from gateway.services.inference._upstream_user import (
 )
 
 __all__ = [
+    "admit_deployment_paid",
     "EMBEDDINGS_BILLING",
     "IMAGES_BILLING",
     "MODERATION_BILLING",
@@ -93,6 +95,7 @@ __all__ = [
     "Claimed",
     "DecisionProvider",
     "DecisionProviderError",
+    "DeploymentCharge",
     "IdempotentRequest",
     "InferenceService",
     "InvalidKey",
