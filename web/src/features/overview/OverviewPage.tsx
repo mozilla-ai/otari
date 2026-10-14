@@ -471,11 +471,9 @@ function OrganizationOverview() {
   // collection fetched to produce one number (otari#1425); the gateway scopes
   // and judges them now, and withholds the ceilings a member may not see.
   const summary = useOverviewSummary(scope)
-  // Read off the context once it has answered, so the rail does not flash the
-  // empty state while it loads.
-  const hasNoWorkspace =
-    context.data !== undefined &&
-    (context.data.workspace_memberships ?? []).length === 0
+  // Only an answered, explicitly empty list says so. A context still loading,
+  // or one without the field, establishes nothing about workspaces.
+  const hasNoWorkspace = context.data?.workspace_memberships?.length === 0
 
   const periodSeries = period.data?.series ?? []
   const ceilingHealth = allocationStrip(summary.data?.ceilings, {

@@ -1414,6 +1414,19 @@ describe("the tenant Overview's chart and rail", () => {
     expect(inRail.queryByText("Active keys")).not.toBeInTheDocument()
     expect(screen.queryByText("This workspace")).not.toBeInTheDocument()
   })
+
+  it("keeps the counts when the context does not say which workspaces the member is in", async () => {
+    // Undefined is dropped when the mock serializes the body, so the field is absent.
+    mockScopedApi({
+      context: { role: "member", workspace_memberships: undefined },
+      period: { cost: 200 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    expect(await screen.findByText("This workspace")).toBeInTheDocument()
+    expect(screen.queryByText("No workspace yet")).not.toBeInTheDocument()
+  })
 })
 
 // One question, one source. The page picks its variant and the usage hooks pick
