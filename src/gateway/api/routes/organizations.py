@@ -66,6 +66,7 @@ from gateway.models.tenancy import (
     PendingOrganizationInvitationsPublic,
     SwitchActiveOrganizationRequest,
 )
+from gateway.schemas.organizations import OrganizationRefusal
 from gateway.services.tenancy import OrganizationDomainService, OrganizationService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
@@ -114,7 +115,8 @@ OrganizationDomainServiceDep = Annotated[OrganizationDomainService, Depends(get_
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_403_FORBIDDEN: {
-            "description": "Signup is closed and the caller is not an active member of any organization."
+            "model": OrganizationRefusal,
+            "description": "Signup is closed and the caller is not an active member of any organization.",
         }
     },
 )

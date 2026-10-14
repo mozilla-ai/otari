@@ -12135,6 +12135,21 @@
         "title": "OrganizationPublic",
         "type": "object"
       },
+      "OrganizationRefusal": {
+        "description": "The body of a request the organizations domain refuses.",
+        "properties": {
+          "detail": {
+            "description": "Why the request was refused.",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "OrganizationRefusal",
+        "type": "object"
+      },
       "OrganizationScopedBudgetCreate": {
         "description": "Attach one of the organization's budgets to a scope inside it.",
         "properties": {
@@ -28298,6 +28313,13 @@
             "description": "Successful Response"
           },
           "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
             "description": "Signup is closed and the caller is not an active member of any organization."
           },
           "422": {

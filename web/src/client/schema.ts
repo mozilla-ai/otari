@@ -12087,6 +12087,17 @@ export interface components {
             updated_at?: string | null;
         };
         /**
+         * OrganizationRefusal
+         * @description The body of a request the organizations domain refuses.
+         */
+        OrganizationRefusal: {
+            /**
+             * Detail
+             * @description Why the request was refused.
+             */
+            detail: string;
+        };
+        /**
          * OrganizationScopedBudgetCreate
          * @description Attach one of the organization's budgets to a scope inside it.
          */
@@ -19629,7 +19640,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
             };
             /** @description Validation Error */
             422: {
