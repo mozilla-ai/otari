@@ -1,17 +1,19 @@
 import { Button } from "@heroui/react"
+import { Link } from "@tanstack/react-router"
 import { useCallback, useMemo, useRef, useState } from "react"
 import { FiEdit2, FiList, FiTrash2 } from "react-icons/fi"
 
-import type { AliasResponse, PolicySpec, RoutingPolicyResponse } from "@/client"
+import type { AliasResponse, PolicySpec } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Dot } from "@/design-system/indicators/Dot"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { DocsLink } from "@/design-system/navigation/DocsLink"
 import { canManage } from "@/features/organization/roles"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
 import {
@@ -26,16 +28,17 @@ import {
   useDeleteRoutingPolicy,
   useRoutingPolicies,
 } from "@/shared/api/routing"
+import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
+import { BackupsCell, MainModelCell } from "./PolicyCells"
 import { PolicyForm } from "./PolicyForm"
 import {
-  computeShares,
   findCandidates,
   findFallthroughTarget,
   findRouterBackend,
-  findWeights,
   KNN_BACKEND,
   normalizeBackend,
   PRIORITY_BACKEND,
@@ -123,66 +126,6 @@ function isEditableInForm(spec: PolicySpec): boolean {
   })
 }
 
-/** What to call the backend that decides, for a chip or a one-line summary.
- *
- *  Named per backend rather than "Dynamic", because the backend's name is what tells
- *  the reader what to do next (teach it, or move the shares). A backend this build
- *  does not know gets the neutral word: it is routed, and claiming it learns would be
- *  a guess about a backend added after this line was written.
- */
-function routerLabelOf(spec: PolicySpec): string {
-  const backend = findRouterBackend(spec)
-  if (backend === WEIGHTED_BACKEND) return "Weighted"
-  if (backend === KNN_BACKEND) return "Learned"
-  if (backend === PRIORITY_BACKEND) return "Priority"
-  return "Routed"
-}
-
-/** One line summarising what a policy serves, for the table. */
-function servesSummary(policy: RoutingPolicyResponse): string {
-  const chain = policy.spec.on_failure ?? []
-  const pool = findCandidates(policy.spec)
-  if (pool.length > 0 && findRouterBackend(policy.spec) === WEIGHTED_BACKEND) {
-    // The split shape, not the model names: two provider:model strings do not fit a
-    // table cell, and the shares are what distinguishes one weighted policy from
-    // another. The pool is spelled out in the editor and in explain.
-    const declared = findWeights(policy.spec)
-    const target = findFallthroughTarget(policy.spec)
-    const full = pool.includes(target) ? pool : [...pool, target]
-    const split = computeShares(full.map((selector) => declared[selector] ?? 0))
-      .map((share) => `${Math.round(share)}%`)
-      .join(" / ")
-    return `Weighted · ${split} across ${full.length} models`
-  }
-  if (pool.length > 0) {
-    return `${routerLabelOf(policy.spec)} · ${pool.length} candidates, ${findFallthroughTarget(policy.spec)} by default`
-  }
-  if (policy.is_dynamic) {
-    const total = 1 + chain.length
-    return `Chosen per request · ${total} candidate${total === 1 ? "" : "s"}`
-  }
-  const target = findFallthroughTarget(policy.spec)
-  return chain.length > 0 ? `${target}  +${chain.length} on failure` : target
-}
-
-// ---------------------------------------------------------------------------
-// Editor
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
-/** The affirmative kind mark: an accent dot and the word, in mono. */
-function KindMark({ label }: { label: string }) {
-  return (
-    <span className="flex items-center gap-2 text-mono-caption text-foreground">
-      <Dot className="bg-accent" />
-      {label.toUpperCase()}
-    </span>
-  )
-}
-
 export function RoutingPage() {
   // Scoped to the selected workspace, like keys and usage (otari-ai#2087).
   // Resolution is workspace-keyed (`services/policy_store`), so a stored policy
@@ -195,7 +138,7 @@ export function RoutingPage() {
   // Which of the two surfaces answers depends on who is signed in
   // (otari-ai#1942, otari-ai#1969), and `useRoutingScope` makes that choice once
   // for both lists: an operator reads the deployment-wide pair, anyone else the
-  // tenant-scoped `/organizations/me/*` one. Both wait for the context to settle
+  // tenant-scoped `/organizations/me/` pair. Both wait for the context to settle
   // rather than taking "not yet an operator" as "member".
   const organization = useOrganizationContext()
   const { isOperator, isSettled: isContextSettled } = useDeploymentOperator()
@@ -204,6 +147,11 @@ export function RoutingPage() {
   // who belongs to no workspace: they have nothing of their own to see and
   // nowhere to write, and are shown the config entries on a read-only page.
   const { selected: selectedWorkspace } = useSelectedWorkspace()
+  // Only a gateway that serves requests itself compiles a policy. A hybrid one
+  // takes its attempt plan from its control plane, and a hosted control plane
+  // serves no requests, so a policy stored there is not consulted.
+  const { deployment_type } = useDeployment()
+  const isStandalone = deployment_type === "standalone"
   const workspaceId = selectedWorkspace?.workspace_id
   const policies = useRoutingPolicies(workspaceId)
   const aliases = useAliases(workspaceId)
@@ -294,40 +242,14 @@ export function RoutingPage() {
         ),
       },
       {
-        id: "serves",
-        header: "Serves",
-        cell: (policy) => (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-foreground">
-              {servesSummary(policy)}
-            </span>
-            {/* The kind of routing, as an affirmative mark: a fallback chain or
-                a learned router is a decision somebody made about this policy,
-                where a plain single-target policy is just the default shape. */}
-            {findCandidates(policy.spec).length > 0 ? (
-              <KindMark label={routerLabelOf(policy.spec)} />
-            ) : policy.is_dynamic ? (
-              <KindMark label="Dynamic" />
-            ) : null}
-          </div>
-        ),
+        id: "main",
+        header: "Main model",
+        cell: (row) => <MainModelCell row={row} />,
       },
       {
-        id: "guards",
-        header: "Guards",
-        cell: (policy) => {
-          const guardrails = policy.spec.guardrails ?? []
-          // An em dash: no guardrails is an absence, not a zero.
-          if (guardrails.length === 0)
-            return <span className="text-muted">—</span>
-          return (
-            <span className="text-body">
-              {guardrails
-                .map((guardrail) => `${guardrail.profile} (${guardrail.mode})`)
-                .join(", ")}
-            </span>
-          )
-        },
+        id: "backups",
+        header: "Backups",
+        cell: (row) => <BackupsCell row={row} />,
       },
       {
         id: "scope",
@@ -338,25 +260,6 @@ export function RoutingPage() {
           ) : (
             <CopyableValue value={policy.user_id ?? ""} label="user id" />
           ),
-      },
-      {
-        id: "source",
-        header: "Source",
-        cell: (row) => (
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-2 text-mono-caption text-muted">
-              <Dot
-                className={
-                  row.source === "config" ? "bg-text-subtle" : "bg-accent"
-                }
-              />
-              {row.source.toUpperCase()}
-            </span>
-            {row.kind === "alias" ? (
-              <span className="text-mono-overline text-subtle">alias</span>
-            ) : null}
-          </div>
-        ),
       },
     ]
     // No actions column for a caller who cannot act: every affordance in it is
@@ -478,12 +381,12 @@ export function RoutingPage() {
             admin sees what their own workspace writes reach, and a member is
             told who manages these rather than offered a control they would
             be refused. */}
-        Named models your callers send as the{" "}
-        <code className="font-mono text-caption">model</code> value. A policy
-        decides which real model serves each request, what is tried if that
-        fails, and which guardrails always run.{" "}
+        Model names your callers send as{" "}
+        <code className="font-mono text-caption">model</code>. Each policy picks
+        the model that serves a request and the backups tried, in order, when it
+        fails.{" "}
         {isOperator
-          ? "It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
+          ? null
           : canEdit
             ? "What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
             : "These are the ones in force in your workspaces; your organization's admins manage them."}
@@ -493,6 +396,14 @@ export function RoutingPage() {
           confirm dialog, which is where the operator is looking. */}
       <ErrorBanner error={policies.error ?? aliases.error} />
 
+      {isStandalone ? null : (
+        <InfoBanner>
+          Policies are a standalone feature: they apply only on a gateway that
+          serves requests itself. A hybrid gateway receives its attempt plan
+          from the connected control plane.
+        </InfoBanner>
+      )}
+
       {/* Mounted while closed so the frame plays its exit with the content
           intact, and keyed on the open counter so the draft is fresh on the way
           in rather than cleared on the way out. See feedback.md. */}
@@ -501,7 +412,7 @@ export function RoutingPage() {
         existing={null}
         initialTarget={initialTarget}
         isOpen={isAdding}
-        // The empty state's "Create your first policy" is gone by the time
+        // The empty state's "Create fallback" is gone by the time
         // this closes, since creating one is what makes the page non-empty, so
         // the frame's own restore has nothing to land on. The heading's action
         // survives.
@@ -527,28 +438,27 @@ export function RoutingPage() {
         canEdit ? (
           <EmptyState
             title="No routing policies yet"
-            actionLabel="Create your first policy"
+            description="A policy gives callers one model name with backups behind it, so a provider outage does not become a failed request."
+            actionLabel="Create fallback"
             onAction={openCreate}
           >
-            <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
-              <li>
-                Create a policy and point it at the model that should normally
-                serve.
-              </li>
-              <li>
-                Add a fallback chain so a provider outage does not become a
-                failed request.
-              </li>
-              <li>
-                Or split the traffic across two providers by weight, and move
-                the shares as you learn.
-              </li>
-              <li>
-                Or let a router choose per request between a cheap and a strong
-                model, then teach it with a few scored examples.
-              </li>
-              <li>Have your callers send the policy name as their `model`.</li>
-            </ol>
+            {/* Catalog-ID fallback is compiled by a standalone gateway only. */}
+            {isStandalone ? (
+              <p className="max-w-prose text-caption">
+                Tip: the same model on several providers already falls back
+                automatically when callers send its catalog ID.{" "}
+                <Link to="/models" className="text-link hover:underline">
+                  Browse models
+                </Link>{" "}
+                or{" "}
+                <DocsLink
+                  href={docsSourceHref("models.md", "catalog-spellings")}
+                >
+                  read how
+                </DocsLink>
+                .
+              </p>
+            ) : null}
           </EmptyState>
         ) : (
           <EmptyState title="No routing policies yet">

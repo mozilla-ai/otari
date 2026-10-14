@@ -396,9 +396,9 @@ afterEach(() => {
  * Scoped rather than resolved by name, because "Create policy" is on screen
  * twice once the dialog is open: this one and the submit.
  *
- * It was three until the empty state's action took its own words
- * ("Create your first policy", matching keys and budgets), and that third copy
- * is why these calls were passing by accident: they ran while the list was
+ * It was three until the empty state's action took its own words ("Create
+ * fallback"), and that third copy is why these calls were passing by
+ * accident: they ran while the list was
  * still loading, so the empty state had not rendered and the name was
  * momentarily unique. Awaiting the empty state before any one of them turned it
  * red with "Found multiple elements". The label fix removes that copy and the
@@ -508,16 +508,32 @@ function policyWrites(
 }
 
 describe("RoutingPage", () => {
-  it("lists policies with what they serve and where they come from", async () => {
+  it("lists each policy's main model, its backups and who it applies to", async () => {
     mockApi()
     renderPage(<RoutingPage />)
 
     const fastRow = (await screen.findByText("fast")).closest("tr")!
-    // The chain is summarised rather than hidden: an operator scanning the table
-    // needs to see that a fallback exists without opening the policy.
-    expect(within(fastRow).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
-    expect(within(fastRow).getByText(/\+1 on failure/)).toBeInTheDocument()
-    expect(within(fastRow).getByText("STORED")).toBeInTheDocument()
+    // By model and provider rather than as a selector, read off the selector
+    // itself so the table makes no catalog read per row.
+    expect(within(fastRow).getByText("gpt-5-mini")).toBeInTheDocument()
+    expect(within(fastRow).getByText("OpenAI")).toBeInTheDocument()
+    // The backups are spelled out in order, so a fallback is visible without
+    // opening the policy.
+    const backups = within(fastRow).getByRole("list", { name: "Backups" })
+    expect(within(backups).getAllByRole("listitem")).toHaveLength(1)
+    expect(backups).toHaveTextContent("claude-haiku-4-5 · Anthropic")
+    expect(within(fastRow).getByText("Every caller")).toBeInTheDocument()
+  })
+
+  it("says a policy has no backups rather than leaving the cell empty", async () => {
+    mockApi([policy("solo", { select: [{ default: "openai:gpt-5" }] })])
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("solo")).closest("tr")!
+    expect(within(row).getByText("None")).toBeInTheDocument()
+    expect(
+      within(row).queryByRole("list", { name: "Backups" }),
+    ).not.toBeInTheDocument()
   })
 
   it("marks a policy that decides per request, since it has no single target", async () => {
@@ -526,7 +542,11 @@ describe("RoutingPage", () => {
 
     const autoRow = (await screen.findByText("auto")).closest("tr")!
     expect(within(autoRow).getByText("DYNAMIC")).toBeInTheDocument()
-    expect(within(autoRow).getByText(/Chosen per request/)).toBeInTheDocument()
+    // The default target, and the condition that moves traffic off it.
+    expect(within(autoRow).getByText("gpt-5-mini")).toBeInTheDocument()
+    expect(
+      within(autoRow).getByText(/From 80% of budget: gpt-5-nano · OpenAI/),
+    ).toBeInTheDocument()
   })
 
   it("does not offer to edit or delete a policy that lives in config.yml", async () => {
@@ -572,7 +592,7 @@ describe("RoutingPage", () => {
       })
     ).closest("div")!.parentElement!
     await user.click(
-      within(empty).getByRole("button", { name: "Create your first policy" }),
+      within(empty).getByRole("button", { name: "Create fallback" }),
     )
     const dialog = await screen.findByRole("dialog")
     expect(dialog).toHaveAccessibleName("New policy")
@@ -1167,7 +1187,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
-    expect(within(row).getByText("openai:gpt-4o-mini")).toBeInTheDocument()
+    expect(within(row).getByText("gpt-4o-mini")).toBeInTheDocument()
     expect(within(row).getByText("alias")).toBeInTheDocument()
     expect(
       within(row).getByRole("button", { name: "Delete" }),
@@ -1227,7 +1247,7 @@ describe("RoutingPage", () => {
       await screen.findByRole("heading", { name: "No routing policies yet" })
     ).closest("div")!.parentElement!
     await user.click(
-      within(empty).getByRole("button", { name: "Create your first policy" }),
+      within(empty).getByRole("button", { name: "Create fallback" }),
     )
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
     await user.type(
@@ -1436,7 +1456,9 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("smart")).closest("tr")!
     expect(
-      within(row).getByText(/Learned . 2 candidates, openai:gpt-5 by default/),
+      within(row).getByText(
+        /Learned . 2 candidates, gpt-5 · OpenAI by default/,
+      ),
     ).toBeInTheDocument()
   })
 
@@ -2158,7 +2180,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    expect(within(row).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
+    expect(within(row).getByText("gpt-5-mini")).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
