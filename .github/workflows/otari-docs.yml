@@ -7,8 +7,10 @@ name: Otari Docs
 # commit, made through the Git Data API so no checkout of the branch is needed.
 #
 # A release publishes the docs at its tag, so the site describes what shipped.
-# A pre-release does not publish. To publish a release again, dispatch this
-# workflow with its tag.
+# A pre-release does not publish. The site shows the highest release version
+# only, so a release with a lower version, such as a patch to an older minor
+# version, fails to publish. To publish the highest version again, dispatch
+# this workflow.
 
 on:
   release:
@@ -24,10 +26,6 @@ on:
       - '.gitbook-branch-readme.md'
       - '.github/workflows/otari-docs.yml'
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to publish (e.g. v0.16.0)"
-        required: true
 
 concurrency:
   group: otari-docs-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
@@ -71,13 +69,27 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Validate tag
+      # NOTE: GitHub's latest flag can name a lower version, so the highest version comes from the tags.
+      - name: Resolve the release tag
         id: tag
         env:
-          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+          if [ -n "$RELEASE_TAG" ] && [[ ! $RELEASE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$RELEASE_TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          HIGHEST=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1000 \
+            --json tagName --jq '[.[].tagName, env.RELEASE_TAG | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))]
+              | sort_by(ltrimstr("v") | split(".") | map(tonumber)) | last // empty')
+          if [ -z "$HIGHEST" ]; then
+            echo "::error::No published release has a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          TAG="${RELEASE_TAG:-$HIGHEST}"
+          if [ "$TAG" != "$HIGHEST" ]; then
+            echo "::error::$TAG is lower than the highest release version ($HIGHEST), so its docs do not publish. This is expected for a patch to an older version."
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"

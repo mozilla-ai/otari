@@ -61,8 +61,11 @@ Four workflows react to the published Release:
   the tap, so `brew install mozilla-ai/tap/otari` follows every release.
 - **`otari-docs.yml`** builds the GitBook site from `docs/` at the release tag
   (`scripts/prepare_gitbook_site.py`) and commits it to the `gitbook-docs`
-  branch, which GitBook syncs from. A pre-release does not publish. Dispatch the
-  workflow with a tag to publish that release's docs again.
+  branch, which GitBook syncs from. A pre-release does not publish. The site
+  shows the highest release version only, so a release with a lower version,
+  such as a patch to an older minor version, fails to publish. That failure is
+  expected and needs no action. Dispatch the workflow to publish the highest
+  version's docs again.
   The site includes the OpenAPI spec at `api/openapi.json` and a generated
   page per API tag. Those pages render from the spec registered in the
   GitBook organization as `otari-openapi-spec`, by the URL
