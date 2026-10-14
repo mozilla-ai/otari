@@ -14,8 +14,8 @@ import {
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
-// The page's empty state and the deployment note. The table and the form are
-// covered in RoutingPage.test.tsx and PolicyForm.test.tsx.
+// The page's empty state and the deployment note. The table and the create
+// dialog are covered in RoutingPage.test.tsx and RoutingPage.create.test.tsx.
 
 function mockEmptyApi() {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -51,7 +51,7 @@ afterEach(() => {
 })
 
 describe("RoutingPage empty state", () => {
-  it("offers one action, and says a catalog ID already falls back", async () => {
+  it("leads with a fallback, and says a catalog ID already falls back", async () => {
     mockEmptyApi()
     const user = userEvent.setup()
     renderPage()
@@ -63,7 +63,11 @@ describe("RoutingPage empty state", () => {
     expect(empty).toHaveTextContent(
       "A policy gives callers one model name with backups behind it",
     )
-    expect(within(empty).getAllByRole("button")).toHaveLength(1)
+    expect(
+      within(empty)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Create fallback", "Other policy types"])
     expect(
       within(empty).getByRole("link", { name: "Browse models" }),
     ).toHaveAttribute("href", "/models")
@@ -77,7 +81,9 @@ describe("RoutingPage empty state", () => {
     await user.click(
       within(empty).getByRole("button", { name: "Create fallback" }),
     )
-    expect(await screen.findByRole("dialog")).toHaveAccessibleName("New policy")
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName(
+      "New fallback",
+    )
   })
 
   it("leaves the catalog tip off a deployment that compiles no plan itself", async () => {

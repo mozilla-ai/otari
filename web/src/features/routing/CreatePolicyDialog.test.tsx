@@ -4,8 +4,8 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { CatalogModelSummary, PolicySpec } from "@/client"
-import { PolicyForm } from "@/features/routing/PolicyForm"
-import type { RoutingRow } from "@/features/routing/policyModel"
+import { CreatePolicyDialog } from "@/features/routing/CreatePolicyDialog"
+import type { Intent } from "@/features/routing/policyDraft"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -94,20 +94,7 @@ function mockApi() {
   return { writes }
 }
 
-function row(name: string, spec: PolicySpec): RoutingRow {
-  return {
-    kind: "policy",
-    name,
-    spec,
-    source: "stored",
-    user_id: null,
-    is_dynamic: false,
-    created_at: null,
-    updated_at: null,
-  }
-}
-
-async function renderForm(existing: RoutingRow | null = null) {
+async function renderDialog(startAt?: Intent) {
   const onClose = vi.fn()
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -115,8 +102,9 @@ async function renderForm(existing: RoutingRow | null = null) {
   await renderWithRouter(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
-        <PolicyForm
-          existing={existing}
+        <CreatePolicyDialog
+          isOpen
+          startAt={startAt}
           isDeploymentWide
           workspaceId={null}
           onClose={onClose}
@@ -151,11 +139,11 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe("PolicyForm", () => {
+describe("CreatePolicyDialog", () => {
   it("shows the model string callers will send, and refuses one with a space", async () => {
     mockApi()
     const user = userEvent.setup()
-    await renderForm()
+    await renderDialog("fallback")
 
     const name = screen.getByRole("textbox", { name: /^name$/i })
     await user.type(name, "fast")
@@ -175,7 +163,7 @@ describe("PolicyForm", () => {
   it("lists models rather than selectors, and saves the provider chosen", async () => {
     const { writes } = mockApi()
     const user = userEvent.setup()
-    await renderForm()
+    await renderDialog("fallback")
 
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "smart")
     await user.type(
@@ -205,7 +193,7 @@ describe("PolicyForm", () => {
   it("saves the backups as the failure chain, in the order they are arranged", async () => {
     const { writes } = mockApi()
     const user = userEvent.setup()
-    await renderForm()
+    await renderDialog("fallback")
 
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
     await typeInto(user, /^main model$/i, "anthropic:claude-sonnet-5-5")
@@ -234,7 +222,7 @@ describe("PolicyForm", () => {
   it("drops a removed backup from the chain", async () => {
     const { writes } = mockApi()
     const user = userEvent.setup()
-    await renderForm()
+    await renderDialog("fallback")
 
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
     await typeInto(user, /^main model$/i, "openai:gpt-5")
@@ -251,7 +239,7 @@ describe("PolicyForm", () => {
   it("previews where a request goes in one sentence", async () => {
     mockApi()
     const user = userEvent.setup()
-    await renderForm()
+    await renderDialog("fallback")
 
     const preview = screen.getByRole("region", { name: "Preview" })
     expect(preview).toHaveTextContent(
@@ -273,78 +261,44 @@ describe("PolicyForm", () => {
     )
   })
 
-  it("keeps who it applies to collapsed on every caller, and Advanced collapsed", async () => {
+  it("previews a split in one sentence too", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderDialog("weighted")
+
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "even")
+    expect(screen.getByRole("region", { name: "Preview" })).toHaveTextContent(
+      "Requests to even are split across 2 models by weight.",
+    )
+  })
+
+  it("opens on the choice when no kind is given, and continues to it", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderDialog()
+
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("New policy")
+    await user.click(
+      dialog().getByRole("radio", { name: "Tier down on budget" }),
+    )
+    await user.click(dialog().getByRole("button", { name: "Continue" }))
+    expect(screen.getByRole("dialog")).toHaveAccessibleName(
+      "New budget tier-down",
+    )
+    expect(
+      screen.getByRole("textbox", { name: /budget used at least/i }),
+    ).toHaveValue("80")
+  })
+
+  it("closes once the policy is created", async () => {
     const { writes } = mockApi()
     const user = userEvent.setup()
-    await renderForm()
-
-    const scope = dialog().getByRole("button", { name: /^Applies to/ })
-    expect(scope).toHaveAttribute("aria-expanded", "false")
-    expect(scope).toHaveTextContent("Every caller")
-    expect(dialog().getByRole("button", { name: /^Advanced/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    )
+    const { onClose } = await renderDialog("fallback")
 
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "fast")
     await typeInto(user, /^main model$/i, "openai:gpt-5")
     await user.click(dialog().getByRole("button", { name: "Create policy" }))
-    await waitFor(() => expect(writes).toHaveLength(1))
-    expect(writes[0].user_id ?? null).toBeNull()
-  })
-
-  it("opens an edit with Advanced expanded when the policy uses it", async () => {
-    mockApi()
-    await renderForm(
-      row("balanced", {
-        select: [
-          {
-            router: "weighted",
-            candidates: ["openai:gpt-5", "anthropic:claude-sonnet-5-5"],
-            weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-5-5": 30 },
-          },
-          { default: "openai:gpt-5" },
-        ],
-        guardrails: [
-          { profile: "pii", mode: "block", on_unavailable: "block" },
-        ],
-      }),
-    )
-
-    const advanced = dialog().getByRole("button", { name: /^Advanced/ })
-    expect(advanced).toHaveAttribute("aria-expanded", "true")
-    expect(advanced).toHaveTextContent("In use: weighted split, guardrails")
-    // Nothing the policy holds is behind a click.
-    expect(dialog().getAllByRole("textbox", { name: /share/i })).toHaveLength(2)
-    expect(dialog().getByRole("textbox", { name: /profile/i })).toHaveValue(
-      "pii",
-    )
-  })
-
-  it("opens an edit of a plain fallback with Advanced collapsed and its target named", async () => {
-    mockApi()
-    await renderForm(
-      row("fast", {
-        select: [{ default: "bedrock:anthropic.claude-sonnet-5-5-v1:0" }],
-        on_failure: ["openai:gpt-5"],
-      }),
-    )
-
-    expect(dialog().getByRole("button", { name: /^Advanced/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    )
-    // The stored selector resolves to its model, with its provider beside it.
-    await waitFor(() =>
-      expect(
-        screen.getByRole("combobox", { name: /^main model$/i }),
-      ).toHaveValue("Claude Sonnet 5.5"),
-    )
-    expect(selectTrigger("Provider")).toHaveTextContent("Amazon Bedrock")
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: /^backup 1$/i })).toHaveValue(
-        "GPT-5",
-      ),
-    )
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(writes).toHaveLength(1)
   })
 })

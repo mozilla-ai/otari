@@ -125,15 +125,6 @@ export function policyNameProblem(name: string): string {
   return ""
 }
 
-/** Whether a spec uses anything the form keeps under Advanced. */
-export function usesAdvancedRouting(spec: PolicySpec): boolean {
-  return (
-    findBudgetConditions(spec).length > 0 ||
-    findCandidates(spec).length > 0 ||
-    (spec.guardrails ?? []).length > 0
-  )
-}
-
 /** The account of a save that wrote some of its scopes and not the others.
  *
  *  Both halves by name, because "it failed" over a part-written save leaves the
