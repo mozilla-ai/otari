@@ -87,6 +87,12 @@ describe("PolicyDetailPage", () => {
     expect(
       screen.getByRole("button", { name: "Save fallback chain" }),
     ).toBeDisabled()
+    // The same rule the create form states, in the same words.
+    expect(
+      within(screen.getByRole("region", { name: "Fallback chain" })).getByText(
+        /missing or rejected provider key, or a request it refuses as invalid\. Not once the answer has started streaming/,
+      ),
+    ).toBeInTheDocument()
   })
 
   it("opens a policy combining every section and saves one without touching the rest", async () => {

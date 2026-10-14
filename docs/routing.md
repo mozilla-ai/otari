@@ -38,12 +38,13 @@ its spec in full.
 
 ## Selection and failure are separate
 
-`select` chooses where a request starts. `on_failure` lists what to try after a
-retryable failure.
-A candidate whose provider has no credential configured counts as one, so the
-policy moves on to the next. When no candidate has a credential, the request is
+`select` chooses where a request starts. `on_failure` lists what to try when a
+candidate fails before its answer starts, whatever the provider's error: an
+outage, a rate limit, or a request it refuses as invalid (400) all move on.
+A candidate whose provider has no credential configured fails that way too, so
+the policy moves on to the next. When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
-the configured credential (401, or a 403 that does not reject the request itself) counts as one too; when every candidate
+the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
 request is refused with `424 provider_credential_rejected`.
 A Chat Completions candidate that answers with no choices has failed too, so the

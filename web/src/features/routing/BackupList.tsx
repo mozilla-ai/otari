@@ -7,6 +7,10 @@ import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { OfferingPicker } from "@/features/models/OfferingPicker"
 
+// When `walk_attempts` (`api/routes/_attempts.py`) moves on to the next model.
+const BACKUP_HELP =
+  "Tried in order when the main model fails or is unavailable before it starts answering, including a rate limit, a missing or rejected provider key, or a request it refuses as invalid. Not once the answer has started streaming or a tool call is under way, or when the remaining budget cannot cover a pricier backup."
+
 let nextRowKey = 0
 const newRowKey = () => {
   nextRowKey += 1
@@ -87,10 +91,7 @@ export function BackupList({
 
   return (
     <div className="flex flex-col gap-3">
-      <ControlField
-        label="If unavailable, use"
-        description="Tried in order when the main model fails before it starts answering. Not after a 400, 401 or 403, which every provider would refuse the same way."
-      />
+      <ControlField label="If unavailable, use" description={BACKUP_HELP} />
       {backups.length === 0 ? (
         <p className="text-caption">
           No backups yet. If the main model fails, the request fails.

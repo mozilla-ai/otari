@@ -236,6 +236,17 @@ describe("CreatePolicyDialog", () => {
     expect(writes[0].spec.on_failure).toBeUndefined()
   })
 
+  it("says which failures move on to a backup", async () => {
+    mockApi()
+    await renderDialog("fallback")
+
+    expect(
+      dialog().getByText(
+        "Tried in order when the main model fails or is unavailable before it starts answering, including a rate limit, a missing or rejected provider key, or a request it refuses as invalid. Not once the answer has started streaming or a tool call is under way, or when the remaining budget cannot cover a pricier backup.",
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("previews where a request goes in one sentence", async () => {
     mockApi()
     const user = userEvent.setup()
