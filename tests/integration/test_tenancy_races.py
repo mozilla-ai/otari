@@ -8,6 +8,7 @@ with separate sessions rather than asserting the branch in isolation.
 """
 
 import asyncio
+import functools
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
@@ -100,7 +101,20 @@ from gateway.services.tenancy.workspace_activation_service import (
 )
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
-from .tenancy_helpers import MembershipWrites, budget_service, create_budget, create_member, membership_writes
+from .tenancy_helpers import (
+    MembershipWrites,
+    budget_service,
+    claim_writes,
+    create_budget,
+    create_member,
+    membership_writes,
+)
+
+
+def _reader(db: AsyncSession) -> OrganizationService:
+    """The read-only organization service ``get_organization_service`` builds."""
+    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -1006,7 +1020,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
     async def accept() -> object:
         async with sessions() as session:
             try:
-                return await OrganizationService(session, **membership_writes(session)).accept_invitation(
+                return await claim_writes(session)["organizations"].accept_invitation(
                     token, password="accepted-password"
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1021,10 +1035,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
                     background_tasks=BackgroundTasks(),
                     email="iris@example.com",
                     password=f"signup-password-{index}",
-                    organizations=OrganizationService(
-                        session, membership_listener=None, workspace_listener=NullWorkspaceListener()
-                    ),
-                    **membership_writes(session),
+                    **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1121,10 +1132,7 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
             background_tasks=BackgroundTasks(),
             email="nova@example.com",
             password="signup-password",
-            organizations=OrganizationService(
-                session, membership_listener=None, workspace_listener=NullWorkspaceListener()
-            ),
-            **membership_writes(session),
+            **claim_writes(session),
         )
 
     outcomes = await _race(sessions, signup)
@@ -1156,6 +1164,7 @@ async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity
         resolution = await DeploymentIdentityProviderAdapter(
             UserRepository(session),
             OrganizationService(session, **membership_writes(session)),
+            functools.partial(user_service.forget_unproven_access, session),
             open_signup=True,
         ).resolve(
             provider="google",
@@ -1299,7 +1308,9 @@ async def test_concurrent_verifications_of_one_token_verify_exactly_once(
     await async_db.commit()
 
     async def attempt(session: AsyncSession) -> object:
-        return await user_service.verify_email(session, token=token, password="vera-password", open_signup=True)
+        return await user_service.verify_email(
+            session, organizations=_reader(session), token=token, password="vera-password", open_signup=True
+        )
 
     outcomes = await _race(sessions, attempt)
 
@@ -1347,9 +1358,7 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
                 await user_service.reset_password(
                     session,
                     GatewayConfig(open_signup=True),
-                    organizations=OrganizationService(
-                        session, membership_listener=None, workspace_listener=NullWorkspaceListener()
-                    ),
+                    organizations=_reader(session),
                     token=token,
                     new_password=f"racer-password-{index}",
                 )

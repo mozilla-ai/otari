@@ -119,9 +119,7 @@ describe("ResetPasswordPage", () => {
     ).toBeNull()
   })
 
-  it("requires the terms where the deployment publishes them", async () => {
-    // The same link sets a first password for an account somebody added, so
-    // it can be what makes the account usable at all.
+  it("sends the terms only when ticked, since only a first password needs them", async () => {
     vi.mocked(apiFetch).mockResolvedValue(undefined as never)
     const user = userEvent.setup()
     renderPage("#/reset-password?token=abc123", "https://example.com/terms")
@@ -131,14 +129,46 @@ describe("ResetPasswordPage", () => {
       screen.getByLabelText("Confirm new password"),
       "correct-horse",
     )
-    expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
-
-    await user.click(screen.getByLabelText("I accept the terms of service"))
+    // An ordinary reset of an account that accepted them long ago goes through as it is.
+    expect(screen.getByRole("button", { name: "Set password" })).toBeEnabled()
     await user.click(screen.getByRole("button", { name: "Set password" }))
 
     await screen.findByRole("heading", { name: "Password updated" })
     const [, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
     expect(JSON.parse(String(init?.body))).toEqual({
+      token: "abc123",
+      new_password: "correct-horse",
+    })
+  })
+
+  it("shows the gateway's terms refusal for a first password, and goes through once they are ticked", async () => {
+    vi.mocked(apiFetch)
+      .mockRejectedValueOnce(
+        new ApiError(400, "Accept the terms of service to continue"),
+      )
+      .mockResolvedValueOnce(undefined as never)
+    const user = userEvent.setup()
+    renderPage("#/reset-password?token=abc123", "https://example.com/terms")
+
+    await user.type(screen.getByLabelText("New password"), "correct-horse")
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "correct-horse",
+    )
+    await user.click(screen.getByRole("button", { name: "Set password" }))
+
+    expect(
+      await screen.findByText("Accept the terms of service to continue"),
+    ).toBeInTheDocument()
+    await user.click(screen.getByLabelText("I accept the terms of service"))
+    expect(
+      screen.queryByText("Accept the terms of service to continue"),
+    ).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Set password" }))
+
+    await screen.findByRole("heading", { name: "Password updated" })
+    const [, retry] = vi.mocked(apiFetch).mock.calls[1] ?? []
+    expect(JSON.parse(String(retry?.body))).toEqual({
       token: "abc123",
       new_password: "correct-horse",
       terms_accepted: true,

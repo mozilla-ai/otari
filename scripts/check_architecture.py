@@ -494,7 +494,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/health.py",
     "gateway/api/routes/hooks.py",
     "gateway/api/routes/images.py",
-    "gateway/api/routes/invitations.py",
     "gateway/api/routes/keys.py",
     "gateway/api/routes/maintenance_mode.py",
     "gateway/api/routes/mcp.py",

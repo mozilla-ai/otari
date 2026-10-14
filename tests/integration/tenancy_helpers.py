@@ -5,7 +5,7 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.membership_listener import MembershipListener
-from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 
 
@@ -44,6 +44,20 @@ def membership_writes(db: AsyncSession) -> MembershipWrites:
         "uow": uow,
         "membership_listener": BudgetMembershipListener(BudgetRepositories.on(uow)),
         "workspace_listener": NullWorkspaceListener(),
+    }
+
+
+def claim_writes(db: AsyncSession, *, terms_url: str | None = None) -> dict[str, Any]:
+    """Build the Unit of Work and the organization service a claim writes through.
+
+    The same pairing ``get_claiming_organization_service`` builds for the signup and invitation routes.
+    """
+    writes = membership_writes(db)
+    return {
+        "uow": writes["uow"],
+        "organizations": OrganizationService(
+            db, **writes, invitation_claims=InvitationClaimSettings(terms_url=terms_url)
+        ),
     }
 
 

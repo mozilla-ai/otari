@@ -20,6 +20,7 @@ this container after the core defaults are bound, and may rebind any port and
 contribute routers of its own. Unset, the defaults stand.
 """
 
+import functools
 import importlib
 import inspect
 from collections.abc import Callable, ItemsView
@@ -64,6 +65,7 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.tenancy import UserRepository
+from gateway.services.tenancy import forget_unproven_access
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
@@ -288,6 +290,7 @@ def _identity_provider_adapter_factory(
                 uow=uow,
                 workspace_listener=workspace_listener(uow),
             ),
+            functools.partial(forget_unproven_access, session),
             open_signup=bool(config and config.open_signup),
         )
 

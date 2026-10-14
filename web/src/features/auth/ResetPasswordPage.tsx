@@ -17,10 +17,9 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 /**
  * `#/reset-password?token=…`: the page the mailed reset link lands on.
  *
- * Unlike `#/verify-email`, nothing fires on arrival: the token alone is not
- * the whole act here, and the new password is what completes it. No current
- * password is asked for, which is the entire point of a reset; the token in
- * the link is the proof.
+ * Nothing fires on arrival: the new password is what completes the reset. No
+ * current password is asked for, which is the entire point of a reset; the
+ * token in the link is the proof.
  *
  * No session is minted on success, and the sign-in screen is where the caller
  * goes next. The gateway revokes every other session this identity holds as
@@ -28,9 +27,10 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
  * not outlive it.
  *
  * The same link sets a first password for an account somebody added or
- * invited, so where the deployment publishes terms they are accepted here, as
- * on signup. The gateway records the acceptance only for an account that has
- * none yet.
+ * invited, so where the deployment publishes terms the page offers them, as
+ * on signup. Only an account that has accepted none needs them, and the page
+ * cannot tell which this is, so the box is optional: the gateway refuses a
+ * first claim without it, and that refusal shows beside the box.
  */
 export function ResetPasswordPage({ hash }: { hash: string }) {
   const token = tokenFromHash(hash)
@@ -42,11 +42,7 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
 
   const problem = newPasswordProblem(password, confirmPassword)
   const isComplete = password !== "" && confirmPassword !== ""
-  const canSubmit =
-    token !== null &&
-    isComplete &&
-    problem === null &&
-    (terms_url === null || isTermsAccepted)
+  const canSubmit = token !== null && isComplete && problem === null
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to
@@ -66,7 +62,9 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
     reset.mutate({
       token,
       new_password: password,
-      ...(terms_url !== null ? { terms_accepted: true } : {}),
+      ...(terms_url !== null && isTermsAccepted
+        ? { terms_accepted: true }
+        : {}),
     })
   }
 

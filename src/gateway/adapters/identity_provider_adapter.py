@@ -1,5 +1,7 @@
 """Core adapter for ``IdentityProviderPort``."""
 
+import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from gateway.exceptions.identity_exceptions import (
@@ -10,9 +12,8 @@ from gateway.exceptions.identity_exceptions import (
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.oauth_service import provider_label
+from gateway.services.tenancy import OrganizationService, unverified_identity_is_claimable
 from gateway.services.tenancy.email_address import validated_email
-from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.user_service import forget_unproven_access, unverified_identity_is_claimable
 
 
 class DeploymentIdentityProviderAdapter(IdentityProviderPort):
@@ -22,9 +23,18 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
     which ``OrganizationService.provision_signup_tenancy`` commits in its own Unit of Work block.
     """
 
-    def __init__(self, users: UserRepository, organizations: OrganizationService, *, open_signup: bool) -> None:
+    def __init__(
+        self,
+        users: UserRepository,
+        organizations: OrganizationService,
+        forget_unproven_access: Callable[[uuid.UUID], Awaitable[None]],
+        *,
+        open_signup: bool,
+    ) -> None:
+        """``forget_unproven_access`` stages the end of one identity's sessions and passkeys."""
         self._users = users
         self._organizations = organizations
+        self._forget_unproven_access = forget_unproven_access
         self._open_signup = open_signup
 
     async def resolve(
@@ -50,7 +60,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
           An account that already names a provider keeps it.
         - It marks an unverified address verified, which lets a deployment with no mail admit a member.
           Verifying the address also removes its password, its pending email verification and reset tokens,
-          its sessions and its passkeys (``forget_unproven_access``).
+          its sessions and its passkeys.
           The provider confirms who owns the address, not who set a password on it while it was unverified.
           A password on an address that is already verified is kept.
         - It sets ``full_name`` if the account has none.
@@ -110,7 +120,9 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
             identity.hashed_password = None
             identity.email_verification_token_hash = None
             identity.email_verification_token_expires_at = None
-            await forget_unproven_access(self._users.db, identity)
+            identity.password_reset_token_hash = None
+            identity.password_reset_token_expires_at = None
+            await self._forget_unproven_access(identity.id)
         if not identity.full_name and full_name:
             identity.full_name = full_name
         self._users.stage(identity)

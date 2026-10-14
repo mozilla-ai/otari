@@ -124,6 +124,13 @@ export function AcceptInvitationPage() {
               >
                 Go to sign in
               </Button>
+              {/* Whoever signed up may not be this invitee, who then takes the
+                  address back by choosing a password through the mailbox. */}
+              {accept.data.verification_pending ? (
+                <PublicAuthLink to="#/recover-password">
+                  Didn't sign up? Set a password instead
+                </PublicAuthLink>
+              ) : null}
             </>
           )}
         </>

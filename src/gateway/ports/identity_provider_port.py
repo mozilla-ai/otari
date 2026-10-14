@@ -57,7 +57,11 @@ class IdentityProviderPort(Protocol):
         full_name: str | None,
         email_verified: bool,
     ) -> IdentityResolution:
-        """Return the identity this external OAuth identity signs in as.
+        """Return the identity this external OAuth identity signs in as, as an ``IdentityResolution``.
+
+        ``IdentityResolution.new_account`` says whether this sign-in created the
+        account or is the first way in to one nobody had claimed, which the
+        caller reports as a signup.
 
         ``provider`` names the provider or connection and is an open string
         rather than a closed enum, because a customer's own OIDC connections are

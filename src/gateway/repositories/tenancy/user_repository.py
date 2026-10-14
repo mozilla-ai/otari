@@ -269,6 +269,11 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         )
         return bool(result.rowcount)
 
+    async def reload(self, identity: User) -> User:
+        """Read the identity's columns again, for a caller whose conditional write bypassed the session."""
+        await self.db.refresh(identity)
+        return identity
+
     async def set_active_organization(self, user: User, organization_id: uuid.UUID) -> User:
         """Stage a change of the identity's active organization."""
         user.active_organization_id = organization_id

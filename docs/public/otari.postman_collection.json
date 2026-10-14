@@ -933,7 +933,7 @@
               },
               "raw": "{\n  \"token\": \"string\",\n  \"password\": \"string\"\n}"
             },
-            "description": "Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.\n\nOne refusal for a link that is unknown, expired or spent and for a password\nthat does not match, and a refusal consumes nothing. Not throttled with the\naddress-bearing routes: the token is the proof, and a person who mistyped\ntheir password must still be able to use it.",
+            "description": "Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.\n\nOne refusal for a link that is unknown, expired or spent and for a password\nthat does not match, and a refusal consumes nothing. Refusals are counted\nper client IP and answer 429 once over the limit, so a held link cannot be\nused to guess its password; a verification that succeeds is never counted.",
             "header": [
               {
                 "key": "Content-Type",

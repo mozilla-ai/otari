@@ -23,16 +23,21 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    ClaimingOrganizationServiceDep,
     GrowthSignalPortDep,
-    MembershipListenerDep,
     OrganizationServiceDep,
     UnitOfWorkDep,
-    WorkspaceListenerDep,
     get_config,
     get_db,
 )
-from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
+from gateway.api.routes._public_auth import (
+    count_failed_verification,
+    mail_unavailable,
+    refuse_exhausted_verification_attempts,
+    throttle_public_auth,
+)
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
@@ -127,9 +132,7 @@ async def signup(
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
     uow: UnitOfWorkDep,
-    organizations: OrganizationServiceDep,
-    membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
+    organizations: ClaimingOrganizationServiceDep,
 ) -> SignupResponse:
     """Claim a roster identity, register a new one, or do nothing: the response never says which.
 
@@ -152,8 +155,6 @@ async def signup(
             password=body.password,
             uow=uow,
             organizations=organizations,
-            membership_listener=membership_listener,
-            workspace_listener=workspace_listener,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
         )
@@ -178,17 +179,26 @@ async def signup(
 @router.post("/verify-email")
 async def verify_email_route(
     body: VerifyEmailRequest,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
 ) -> VerifyEmailResponse:
     """Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
 
     One refusal for a link that is unknown, expired or spent and for a password
-    that does not match, and a refusal consumes nothing. Not throttled with the
-    address-bearing routes: the token is the proof, and a person who mistyped
-    their password must still be able to use it.
+    that does not match, and a refusal consumes nothing. Refusals are counted
+    per client IP and answer 429 once over the limit, so a held link cannot be
+    used to guess its password; a verification that succeeds is never counted.
     """
-    identity = await verify_email(db, token=body.token, password=body.password, open_signup=config.open_signup)
+    refuse_exhausted_verification_attempts(request)
+    try:
+        identity = await verify_email(
+            db, organizations=organizations, token=body.token, password=body.password, open_signup=config.open_signup
+        )
+    except VerificationTokenInvalidError:
+        count_failed_verification(request)
+        raise
     assert identity.email is not None  # guaranteed: only a claimed identity has a verification token
     return VerifyEmailResponse(email=identity.email)
 
@@ -200,11 +210,14 @@ async def resend_verification(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
 ) -> ResendVerificationResponse:
     """Mail a fresh verification link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
-        await resend_verification_email(db, config, background_tasks=background_tasks, email=body.email)
+        await resend_verification_email(
+            db, config, organizations=organizations, background_tasks=background_tasks, email=body.email
+        )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     return ResendVerificationResponse(message=_RESEND_MESSAGE)

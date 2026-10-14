@@ -13,12 +13,9 @@ the identity stays password-less until ``POST /api/v1/auth/signup`` or a
 provider sign-in claims it.
 """
 
-from typing import Annotated
+from fastapi import APIRouter, BackgroundTasks, Request
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from gateway.api.deps import GrowthSignalPortDep, MembershipListenerDep, UnitOfWorkDep, get_db
+from gateway.api.deps import ClaimingOrganizationServiceDep, GrowthSignalPortDep, OrganizationServiceDep
 from gateway.api.routes._public_auth import throttle_public_auth
 from gateway.models.tenancy import (
     AcceptInvitationRequest,
@@ -26,47 +23,8 @@ from gateway.models.tenancy import (
     InvitationPreviewPublic,
     ValidateInvitationRequest,
 )
-from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
-
-
-def get_organization_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-) -> OrganizationService:
-    """Build the organization service on the request's session.
-
-    A separate copy of the same tiny factory `organizations.py` declares: the
-    two route modules deliberately don't import from each other (one is
-    public, one is master-key gated), and importing the dependency alone
-    across that boundary is not worth it for one function.
-    """
-    return OrganizationService(
-        db, membership_listener=membership_listener, uow=uow, workspace_listener=NullWorkspaceListener()
-    )
-
-
-OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
-
-
-def _throttle(request: Request) -> None:
-    """Throttle calls to these routes per client IP.
-
-    ``POST /api/v1/auth/session`` is the only other unauthenticated route that
-    takes a credential, and it is IP-limited (``auth_session._check_login_rate_limit``,
-    via ``app.state.login_rate_limiter``); these two were not, and ``accept``
-    writes. The token's entropy (``secrets.token_urlsafe(32)``) already rules
-    out guessing, so this isn't about brute-forcing a token: it's that these
-    are the app's only unauthenticated write surface, reachable at whatever
-    rate a client can manage, each call costing a handful of reads (``accept``
-    several writes). Counted unconditionally on the public auth budget
-    (``throttle_public_auth``), not the failed sign-in one, so mistyped
-    passwords do not lock an invitee out of their link.
-    """
-    throttle_public_auth(request)
 
 
 @router.post("/validate")
@@ -81,7 +39,7 @@ async def validate_invitation(
     the token is a bearer credential, and a URL path is what an access log or
     an intermediate proxy routinely retains.
     """
-    _throttle(request)
+    throttle_public_auth(request)
     return await service.get_invitation_preview(body.token)
 
 
@@ -89,7 +47,7 @@ async def validate_invitation(
 async def accept_invitation(
     request: Request,
     background_tasks: BackgroundTasks,
-    service: OrganizationServiceDep,
+    service: ClaimingOrganizationServiceDep,
     growth: GrowthSignalPortDep,
     body: AcceptInvitationRequest,
 ) -> AcceptInvitationResultPublic:
@@ -98,7 +56,7 @@ async def accept_invitation(
     Setting a first password makes the account usable for the first time, so it
     is reported to ``GrowthSignalPort`` as a signup.
     """
-    _throttle(request)
+    throttle_public_auth(request)
     acceptance = await service.accept_invitation(
         body.token,
         password=body.password,

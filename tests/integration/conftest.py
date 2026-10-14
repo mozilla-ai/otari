@@ -357,6 +357,11 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         if config.dashboard_login_rate_limit_per_minute is not None
         else None
     )
+    app.state.verification_failure_rate_limiter = (
+        RateLimiter(config.dashboard_login_rate_limit_per_minute)
+        if config.dashboard_login_rate_limit_per_minute is not None
+        else None
+    )
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
     app.state.container = build_container(
         config.bootstrap,

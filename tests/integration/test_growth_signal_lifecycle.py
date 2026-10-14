@@ -211,6 +211,7 @@ def test_a_provider_registration_notifies_the_signup_and_a_later_sign_in_does_no
 
     signups = growth.of("signup")
     assert [signup["email"] for signup in signups] == ["new@example.com"], growth.calls
+    assert signups[0]["full_name"] == "Ada Lovelace"
 
 
 def test_a_provider_sign_in_that_claims_an_added_address_notifies_the_signup(
@@ -225,6 +226,7 @@ def test_a_provider_sign_in_that_claims_an_added_address_notifies_the_signup(
     _sign_in_with_google(client, monkeypatch, email="ada@example.com")
 
     assert [signup["email"] for signup in growth.of("signup")] == ["ada@example.com"], growth.calls
+    assert growth.of("signup")[0]["full_name"] == "Ada Lovelace"
 
 
 def test_a_first_password_from_an_invitation_link_notifies_the_signup(
@@ -240,10 +242,14 @@ def test_a_first_password_from_an_invitation_link_notifies_the_signup(
     assert invited.status_code == status.HTTP_201_CREATED, invited.text
     token = invited.json()["accept_link"].split("token=")[1]
 
-    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+    accepted = client.post(
+        f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD, "full_name": "Ida Wells"}
+    )
 
     assert accepted.status_code == status.HTTP_200_OK, accepted.text
     assert [signup["email"] for signup in growth.of("signup")] == ["ida@example.com"], growth.calls
+    # The name the accept wrote, not the empty one the invitee was loaded with.
+    assert growth.of("signup")[0]["full_name"] == "Ida Wells"
 
 
 def _complete_a_reset(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> None:

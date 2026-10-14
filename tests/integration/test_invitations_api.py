@@ -302,6 +302,30 @@ def test_a_shared_link_lets_the_invitee_set_a_password_and_sign_in_without_mail(
     assert row["full_name"] == "Grace Hopper"
 
 
+def test_a_first_password_from_a_link_requires_the_published_terms(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The link is held to the rule signup and a reset claim follow, so it is not a way around the terms."""
+    monkeypatch.setattr(test_config, "terms_url", "https://example.com/terms")
+    token = _token_from(_invite(client, master_key_header, email="tess@example.com")["accept_link"])
+
+    refused = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+    assert refused.status_code == 400, refused.text
+    assert "terms" in refused.json()["detail"]
+    # Nothing was accepted, so the same link still works once the terms are.
+    accepted = client.post(
+        f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD, "terms_accepted": True}
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    invitee = db_session.query(User).filter(col(User.email) == "tess@example.com").one()
+    assert invitee.terms_accepted_at is not None
+
+
 def test_accepting_without_a_password_still_works_and_sets_none(
     client: TestClient,
     master_key_header: dict[str, str],

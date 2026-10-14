@@ -438,7 +438,9 @@ A sign-in that creates an account, or that is the first way in to one an owner o
 
 Signup sets a password for an address and sends a verification link. The link
 verifies the address only together with that password: the verification page
-asks for it, and a wrong one is refused without spending the link. Anyone can
+asks for it, and a wrong one is refused without spending the link. Wrong
+passwords are counted per client address, so a held link cannot be used to guess
+the password at speed; a right one is never held back. Anyone can
 sign up with an address they do not hold, and the link then reaches the
 address's real owner, whose click must not activate a password a stranger
 chose. An owner who never signed up uses "Forgot your password?" instead, which
@@ -508,7 +510,8 @@ its email went out, or its accept link to share when it did not.
 Opening the link lets the invitee accept. If the invited address has never signed
 in, the accept page asks them to choose a first password, and once they accept
 they can sign in straight away. No verification email is needed, so this works on
-a deployment without mail. An address that can already sign in, by password or
+a deployment without mail. Where the deployment publishes terms, choosing that
+password requires accepting them, as signup does. An address that can already sign in, by password or
 through a provider, just accepts; the link cannot set or replace a password on
 it. Neither can it for an address another organization has already added: the
 inviter holds the link too, so that person accepts without a password and then

@@ -595,9 +595,9 @@ export interface paths {
          * @description Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
          *
          *     One refusal for a link that is unknown, expired or spent and for a password
-         *     that does not match, and a refusal consumes nothing. Not throttled with the
-         *     address-bearing routes: the token is the proof, and a person who mistyped
-         *     their password must still be able to use it.
+         *     that does not match, and a refusal consumes nothing. Refusals are counted
+         *     per client IP and answer 429 once over the limit, so a held link cannot be
+         *     used to guess its password; a verification that succeeds is never counted.
          */
         post: operations["auth-verify_email_route"];
         delete?: never;

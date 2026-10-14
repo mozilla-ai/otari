@@ -95,6 +95,19 @@ class SlidingWindowLog:
         reset_after = window.entries[0][0] + window_sec - now if window.entries else window_sec
         return RateLimitWindow(allowed=handle is not None, count=window.total, reset_after=reset_after, handle=handle)
 
+    def peek(self, key: str, window_sec: float) -> RateLimitWindow:
+        """Report what ``key`` has spent in the window without counting anything."""
+        window = self._requests.get(key)
+        if window is None:
+            return RateLimitWindow(allowed=True, count=0, reset_after=window_sec, handle=None)
+        now = time.monotonic()
+        cutoff = now - window_sec
+        while window.entries and window.entries[0][0] <= cutoff:
+            _, expired = window.entries.popleft()
+            window.total -= window.costs.pop(expired)
+        reset_after = window.entries[0][0] + window_sec - now if window.entries else window_sec
+        return RateLimitWindow(allowed=True, count=window.total, reset_after=reset_after, handle=None)
+
     def settle(self, key: str, handle: str, cost: int) -> None:
         """Make an admitted entry count for ``cost`` instead; a no-op once it has left the window."""
         window = self._requests.get(key)
@@ -144,6 +157,18 @@ class RateLimiter:
 
         """
         return _info_or_raise(self._log.hit(user_id, self._rpm, self._window_sec), self._rpm)
+
+    def require_room(self, key: str) -> None:
+        """Raise the 429 ``check`` would raise once ``key`` has spent its allowance, counting nothing.
+
+        For a limit counted only on failure, checked before the work a failure costs.
+        """
+        window = self._log.peek(key, self._window_sec)
+        if window.count >= self._rpm:
+            _info_or_raise(
+                RateLimitWindow(allowed=False, count=window.count, reset_after=window.reset_after, handle=None),
+                self._rpm,
+            )
 
 
 class UserRateLimiter:

@@ -140,6 +140,11 @@ describe("AcceptInvitationPage", () => {
       await screen.findByText("Sign in to get started."),
     ).toBeInTheDocument()
     expect(screen.queryByLabelText("Password")).toBeNull()
+    expect(
+      screen.queryByRole("link", {
+        name: "Didn't sign up? Set a password instead",
+      }),
+    ).toBeNull()
     await user.click(screen.getByRole("button", { name: "Go to sign in" }))
     expect(window.location.hash).toBe("#/")
   })
@@ -158,6 +163,12 @@ describe("AcceptInvitationPage", () => {
       await screen.findByText(/Verify ada@example.com first/),
     ).toBeInTheDocument()
     expect(screen.queryByText("Sign in to get started.")).toBeNull()
+    // The invitee may not be who signed up, and takes the address back here.
+    expect(
+      screen.getByRole("link", {
+        name: "Didn't sign up? Set a password instead",
+      }),
+    ).toHaveAttribute("href", "#/recover-password")
   })
 
   it("sets a password for an address that has never signed in, in the same step", async () => {

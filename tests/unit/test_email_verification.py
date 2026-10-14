@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, text
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
+from gateway.services.tenancy import user_service
 
 MASTER_KEY = "sk-test-master"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
@@ -378,3 +379,42 @@ def test_failed_sign_ins_do_not_lock_anyone_out_of_signing_up_or_verifying(
         assert client.post(f"{API_ROOT}/auth/resend-verification", json={"email": "x@example.com"}).status_code == 200
         verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
         assert verified.status_code == 200, verified.text
+
+
+def test_failed_verifications_are_throttled_before_the_password_is_checked(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A held link cannot be used to guess its password, nor to make the gateway hash at will."""
+    with TestClient(create_app(_config(tmp_path, dashboard_login_rate_limit_per_minute=2))) as client:
+        token = _signed_up(client, caplog, email="ada@example.com")
+        for _ in range(2):
+            wrong = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": "a-wrong-guess"})
+            assert wrong.status_code == 400
+
+        checked: list[str] = []
+
+        async def recording_verify(password: str, hashed: str) -> bool:
+            checked.append(password)
+            return False
+
+        monkeypatch.setattr(user_service, "verify_password_async", recording_verify)
+        throttled = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
+        assert throttled.status_code == 429
+        assert checked == []
+
+
+def test_a_successful_verification_spends_none_of_the_failure_budget(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    def verify(client: TestClient, token: str, password: str) -> int:
+        return client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": password}).status_code
+
+    with TestClient(create_app(_config(tmp_path, dashboard_login_rate_limit_per_minute=2))) as client:
+        first = _signed_up(client, caplog, email="ada@example.com")
+        second = _signed_up(client, caplog, email="grace@example.com")
+
+        assert verify(client, first, "a-typo-1234") == 400
+        assert verify(client, first, PASSWORD) == 200
+        # One failure is left: the success above was not counted against it.
+        assert verify(client, second, "a-typo-1234") == 400
+        assert verify(client, second, "a-typo-1234") == 429

@@ -653,12 +653,13 @@ class GatewayConfig(
         ge=1,
         description=(
             "Maximum calls per client IP per minute to the app's unauthenticated "
-            "surfaces (None disables this limit), counted in two separate budgets of "
+            "surfaces (None disables this limit), counted in three separate budgets of "
             "this size: failed POST /api/v1/auth/session attempts (a correct master "
-            "key is never throttled there), and every call to the signup, resend "
+            "key is never throttled there); every call to the signup, resend "
             "verification, password-reset request, OAuth and public invitation routes, "
-            "counted whether they succeed or fail. The verification and reset-confirm "
-            "links are not counted, since their token is the proof. Separate from "
+            "counted whether they succeed or fail; and failed email verifications, "
+            "whose password check would otherwise be open to guessing. Reset-confirm "
+            "is not counted, since its token is the whole proof. Separate from "
             "rate_limit_rpm, which is keyed to authenticated users and does not cover "
             "any of these pre-auth paths."
         ),
