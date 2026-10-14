@@ -37,6 +37,8 @@ LIVE_OPENAI_KEY = os.environ.get("OTARI_E2E_LIVE_OPENAI_KEY")
 
 @dataclass(frozen=True)
 class Gateway:
+    """A running Otari and the API key the snippets authenticate with."""
+
     base_url: str
     api_key: str
     provider: mock_provider.MockProvider
@@ -51,18 +53,21 @@ class Gateway:
         return env
 
     def tail(self, lines: int = 60) -> str:
+        """Return the end of the gateway log, which is where the reason for a failure is."""
         if not self.log_path.exists():
             return ""
         return "\n".join(self.log_path.read_text(errors="replace").splitlines()[-lines:])
 
 
 def _free_port() -> int:
+    """Return a port that is free on localhost now, for the gateway to bind."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
 def _request(method: str, url: str, payload: dict[str, Any] | None = None) -> Any:
+    """Call the gateway's admin API with the master key and return the decoded JSON."""
     data = json.dumps(payload).encode() if payload is not None else None
     request = urllib.request.Request(url, data=data, method=method)
     request.add_header("Otari-Key", MASTER_KEY)
@@ -83,6 +88,7 @@ def _otari_command() -> list[str]:
 
 @pytest.fixture(scope="session")
 def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Gateway]:
+    """Serve Otari for the session, in front of the mock provider or, in live mode, OpenAI."""
     workdir = tmp_path_factory.mktemp("otari")
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"

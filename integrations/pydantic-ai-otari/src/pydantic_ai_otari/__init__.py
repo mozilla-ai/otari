@@ -98,10 +98,12 @@ class OtariProvider(OpenAIProvider):
 
     @property
     def name(self) -> str:
+        """The provider name Pydantic AI reports on responses and usage."""
         return "otari"
 
     @staticmethod
     def model_profile(model_name: str) -> ModelProfile | None:
+        """Describe the model by the family its name starts with, ``provider:model`` or ``provider/model``."""
         provider, separator, model = model_name.partition(":")
         if not separator:
             provider, separator, model = model_name.partition("/")
@@ -126,4 +128,5 @@ class OtariModel(OpenAIChatModel):
         profile: ModelProfileSpec | None = None,
         settings: ModelSettings | None = None,
     ) -> None:
+        """Create the model, with an ``OtariProvider`` from the environment unless one is passed."""
         super().__init__(model_name, provider=provider or OtariProvider(), profile=profile, settings=settings)

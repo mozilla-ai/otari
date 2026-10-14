@@ -25,6 +25,7 @@ SNIPPET_TIMEOUT_SECONDS = 120
 
 
 def _snippets() -> list[pytest.param]:
+    """Collect every Python block on the pages, one test parameter each."""
     params = []
     for page in PAGES:
         text = (REPO_ROOT / "docs" / page).read_text(encoding="utf-8")
@@ -35,6 +36,7 @@ def _snippets() -> list[pytest.param]:
 
 
 def _admin_get(gateway: Gateway, path: str) -> Any:
+    """GET an admin endpoint with the master key and return the decoded JSON."""
     request = urllib.request.Request(f"{gateway.base_url}{path}", headers={"Otari-Key": MASTER_KEY})
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read())
@@ -42,6 +44,7 @@ def _admin_get(gateway: Gateway, path: str) -> Any:
 
 @pytest.mark.parametrize(("page", "code"), _snippets())
 def test_snippet_runs_through_otari(gateway: Gateway, page: str, code: str) -> None:
+    """A block runs on its own with the two documented variables, prints, and reaches the provider through Otari."""
     before = len(gateway.provider.requests)
     result = subprocess.run(
         [sys.executable, "-c", code],

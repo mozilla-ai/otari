@@ -35,6 +35,7 @@ class ChatOtari(ChatOpenAI):
     @model_validator(mode="before")
     @classmethod
     def _otari_environment(cls, values: Any) -> Any:
+        """Fill ``base_url`` and ``api_key`` from the Otari variables, before ChatOpenAI looks for its own."""
         if not isinstance(values, dict):
             return values
         if not (values.get("base_url") or values.get("openai_api_base")):
@@ -51,12 +52,15 @@ class ChatOtari(ChatOpenAI):
 
     @property
     def _llm_type(self) -> str:
+        """Identify the model as Otari's in callbacks and traces."""
         return "otari-chat"
 
     @property
     def lc_secrets(self) -> dict[str, str]:
+        """Name the variable a serialized model takes its key from."""
         return {"openai_api_key": "OTARI_API_KEY"}
 
     @classmethod
     def get_lc_namespace(cls) -> list[str]:
+        """Return the namespace this class serializes under."""
         return ["langchain_otari", "chat_models"]

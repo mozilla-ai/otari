@@ -36,19 +36,24 @@ USAGE = {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
 
 
 class MockProvider(ThreadingHTTPServer):
+    """The HTTP server, plus every request body it was sent."""
+
     daemon_threads = True
 
     def __init__(self) -> None:
+        """Listen on a free port on localhost."""
         super().__init__(("127.0.0.1", 0), _Handler)
         self.requests: list[dict[str, Any]] = []
         self._lock = threading.Lock()
 
     @property
     def base_url(self) -> str:
+        """The API root a provider instance is configured with."""
         host, port = self.server_address[:2]
         return f"http://{host!s}:{port}/v1"
 
     def record(self, body: dict[str, Any]) -> None:
+        """Keep one request body for a test to inspect."""
         with self._lock:
             self.requests.append(body)
 
@@ -85,6 +90,7 @@ def answer(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _completion(body: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
+    """Wrap a message in a chat completion, shaped as the OpenAI SDK expects."""
     return {
         "id": "chatcmpl-framework-e2e",
         "object": "chat.completion",
@@ -102,6 +108,7 @@ def _completion(body: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]
 
 
 def _chunks(body: dict[str, Any], message: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield the same message as streamed chat completion chunks."""
     base = {
         "id": "chatcmpl-framework-e2e",
         "object": "chat.completion.chunk",
@@ -125,10 +132,13 @@ def _chunks(body: dict[str, Any], message: dict[str, Any]) -> Iterator[dict[str,
 
 
 class _Handler(BaseHTTPRequestHandler):
+    """Answer ``POST .../chat/completions`` with what ``answer`` decides."""
+
     protocol_version = "HTTP/1.1"
     server: MockProvider
 
     def do_POST(self) -> None:  # noqa: N802
+        """Record the request and answer it, streamed when it asked to be."""
         length = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(length) or b"{}")
         if not self.path.endswith("/chat/completions"):
@@ -155,6 +165,7 @@ class _Handler(BaseHTTPRequestHandler):
         """Stay quiet: the gateway's log is the useful one on a failure."""
 
     def _json(self, status: int, payload: dict[str, Any]) -> None:
+        """Send a JSON response with its length, so the connection stays reusable."""
         data = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -165,6 +176,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 @contextmanager
 def running() -> Iterator[MockProvider]:
+    """Run the mock provider on a background thread for the duration of the block."""
     server = MockProvider()
     thread = threading.Thread(target=server.serve_forever, name="mock-provider", daemon=True)
     thread.start()
