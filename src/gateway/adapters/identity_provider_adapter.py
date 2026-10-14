@@ -58,9 +58,8 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
           its sessions and its passkeys, and ``password_removed`` says whether there was a password.
           The provider confirms who owns the address, not who set a password on it while it was unverified.
           A password on an address that is already verified is kept.
-        - It sets ``full_name`` if the account has none. On an unverified address it replaces the name
-          whoever signed up chose, and renames the organization that signup founded while nobody else
-          belongs to it.
+        - It sets ``full_name`` if the account has none, and on an unverified address replaces it,
+          since whoever signed up chose that name rather than the provider's verified owner.
 
         NOTE: Concurrent sign-ins on one account are serialized on PostgreSQL only.
         On SQLite, the later of two concurrent sign-ins can overwrite the provider that the first recorded.
@@ -68,11 +67,8 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         An account nobody has verified yet is signed in only where ``unverified_identity_is_claimable`` allows,
         the rule the signup form and a password reset follow.
 
-        Under ``open_signup``, proving the address of an unverified or vouched account that no organization
-        still wants (its invitation revoked, declined or lapsed, or the member removed) gives it an
-        organization and workspace of its own and points it at them, the way a new account is created
-        (``OrganizationService.provision_tenancy_for_claim``). The account is then read again under a lock
-        before this sign-in changes it.
+        Settling the claimed account's tenancy commits a block, which releases the lock, so the account
+        is read again under a lock before this sign-in changes it.
 
         ``new_account`` is true when this sign-in created the account, or is the first way in to one an
         organization added and nobody had claimed.

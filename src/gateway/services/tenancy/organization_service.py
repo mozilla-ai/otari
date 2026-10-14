@@ -705,27 +705,20 @@ class OrganizationService:
         full_name: str | None,
         replaces_unproven: bool = False,
     ) -> bool:
-        """Settle the tenancy of an identity whose address is being claimed.
+        """Settle the tenancy of an identity whose address is being claimed, before the claim is written.
 
-        Every step that claims an address calls this before it writes the claim: signup on an identity
-        that already exists, the verification that completes it, and a reset or a provider sign-in that
-        proves an unverified or vouched address. An address is proven once, so this acts at most once on
-        an identity; one that loses its last membership after that has no organization until it creates one.
+        It acts only while the address is unproven, so at most once per identity: an address proven
+        earlier that later loses its last membership is left without an organization on purpose, since
+        a decline or a removal must not found a tenant at the next sign-in.
 
-        Under ``open_signup``, an identity no organization still wants (no active membership and no
-        invitation it can still accept) gets what a new address gets: an organization and workspace of
-        its own, which become its active and default organizations.
+        ``replaces_unproven`` marks a proof of the mailbox taking over an unverified signup, whose chosen
+        name came from whoever signed up rather than the owner.
 
-        ``replaces_unproven`` is for a proof of the mailbox that takes over an address somebody signed up
-        with and never verified. The name that signup chose is replaced with ``full_name``, and the
-        organization the signup founded is renamed after it by signup's rule while nobody else belongs to it.
+        The identity is locked and asked again inside the block, so of two claims racing on it only the
+        first founds an organization.
 
-        The identity is locked and asked again inside the block, so of two
-        claims racing on it only the first founds an organization; the second
-        finds the membership the first committed and does nothing.
-
-        Returns False, having opened no block, when there is nothing to settle. Otherwise returns True
-        after a block that commits, and so releases the identity's lock, when the caller holds none.
+        Returns False, having opened no block, when there is nothing to settle. Otherwise True, after a
+        block that commits, and so releases the identity's lock, when the caller holds none.
         """
         replaces_unproven = replaces_unproven and identity.email_verified_at is None
         unproven = identity.email_verified_at is None or identity.email_vouched_at is not None
