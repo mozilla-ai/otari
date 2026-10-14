@@ -21,9 +21,14 @@ from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
-from gateway.services.tenancy import OrganizationService, unverified_identity_is_claimable
-from gateway.services.tenancy.password_reset_email import render_password_reset_email
-from gateway.services.tenancy.tokens import generate_shared_token, generate_token, hash_token
+from gateway.services.tenancy import (
+    OrganizationService,
+    generate_shared_token,
+    generate_token,
+    hash_token,
+    render_password_reset_email,
+    unverified_identity_is_claimable,
+)
 
 _SESSION_TOKEN_PREFIX = "otari-sess-"
 
