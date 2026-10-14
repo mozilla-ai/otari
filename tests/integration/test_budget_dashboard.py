@@ -157,6 +157,8 @@ def test_deleting_a_budget_a_workspace_hands_out_is_refused_by_name(
     on whether the engine is enforcing foreign keys (SQLite only does with
     ``PRAGMA foreign_keys`` on).
     """
+    # Provision the default organization before another one exists, as a fresh deployment does.
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     budget_id = _make_budget(client, master_key_header)
     organization = Organization(name="Acme", slug="acme-delete-guard")
     db_session.add(organization)
@@ -184,6 +186,7 @@ def test_deleting_an_organization_budget_is_refused(
     db_session: Session,
 ) -> None:
     """The operator may edit a tenant's budget but not delete it out from under them."""
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     organization = Organization(name="Acme", slug="acme-owned-budget")
     db_session.add(organization)
     db_session.flush()
@@ -195,7 +198,8 @@ def test_deleting_an_organization_budget_is_refused(
     refused = client.delete(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header)
     assert refused.status_code == 409, refused.text
     assert "organization" in refused.json()["detail"]
-    assert client.get(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header).status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Budget, budget_id) is not None
 
 
 def test_deleting_a_budget_that_has_reset_clears_its_history(

@@ -19,6 +19,7 @@ neither operation can desync a budget, matching the boundary the ingest path est
 """
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Annotated, Any, cast
 
@@ -138,8 +139,10 @@ class UsageSetPriceResult(BaseModel):
     unchanged: int = 0
 
 
-def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]]:
-    """WHERE conditions for a selection, always scoped to imported rows.
+def _selection_conditions(
+    selection: UsageSelection, *, workspace_ids: Collection[uuid.UUID]
+) -> list[ColumnElement[bool]]:
+    """WHERE conditions for a selection, always scoped to imported rows in the caller's workspaces.
 
     Two fixed conditions pin the target set to imported usage regardless of the
     caller's input:
@@ -154,11 +157,14 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
       the spend ledger can never be affected even if the provenance guard ever slips.
 
     Together they mean even an ``ids`` list naming enforced or budget-exempt gateway
-    rows cannot reach them: they simply do not match.
+    rows cannot reach them: they simply do not match. ``workspace_ids`` confines the
+    set to the caller's organization the way ``GET /api/v1/usage/count`` is, so an
+    ``ids`` list naming another organization's rows does not match either.
     """
     conditions: list[ColumnElement[bool]] = [
         UsageLog.source != SERVED_HERE_SLUG,
         UsageLog.counts_toward_budget.is_(False),
+        UsageLog.workspace_id.in_(workspace_ids),
     ]
     if selection.ids:
         conditions.append(UsageLog.id.in_(selection.ids))
@@ -206,14 +212,16 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     return conditions
 
 
-async def delete_usage(db: AsyncSession, request: UsageDeleteRequest) -> UsageDeleteResult:
+async def delete_usage(
+    db: AsyncSession, request: UsageDeleteRequest, *, workspace_ids: Collection[uuid.UUID]
+) -> UsageDeleteResult:
     """Delete the imported usage rows a selection matches.
 
     Only ``counts_toward_budget=False`` rows are ever removed, so the enforcement
     ledger is untouched. Nothing references ``usage_logs``, so a plain bulk delete
     leaves no orphans.
     """
-    conditions = _selection_conditions(request)
+    conditions = _selection_conditions(request, workspace_ids=workspace_ids)
     try:
         result = cast("CursorResult[Any]", await db.execute(delete(UsageLog).where(*conditions)))
         await db.commit()
@@ -268,7 +276,9 @@ def _row_usage(row: UsageLog) -> BillableUsage:
     )
 
 
-async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> UsageSetPriceResult:
+async def set_usage_price(
+    db: AsyncSession, request: UsageSetPriceRequest, *, workspace_ids: Collection[uuid.UUID]
+) -> UsageSetPriceResult:
     """Recompute cost for matched imported rows from manual per-1M rates.
 
     Builds a transient ``ModelPricing`` from the supplied rates and reprices each
@@ -295,7 +305,7 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
         cache_write_1h_price_per_million=None,
         pricing_tiers=[],
     )
-    conditions = _selection_conditions(request)
+    conditions = _selection_conditions(request, workspace_ids=workspace_ids)
     result = UsageSetPriceResult()
 
     try:

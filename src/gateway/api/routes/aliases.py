@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
+from gateway.api.deps import CallerWorkspaces, get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -159,22 +159,23 @@ async def _require_user(db: AsyncSession, user_id: str) -> None:
 async def list_aliases(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_ids: CallerWorkspaces,
     workspace_id: Annotated[
         uuid.UUID | None,
         Query(
             description=(
                 "Only stored entries in this workspace. Config-file entries are always included, "
-                "being deployment-wide. Omit to list the stored entries of every workspace."
+                "being deployment-wide. Omit to list the stored entries of every workspace in your organization."
             )
         ),
     ] = None,
 ) -> list[AliasResponse]:
-    """List every alias in force, from config.yml and from storage.
+    """List every alias in force in your organization, from config.yml and from storage.
 
     Every scope at once, workspace-wide and user-scoped alike: this is the
     master-key management view, not what any one caller resolves.
     """
-    statement = select(ModelAlias)
+    statement = select(ModelAlias).where(ModelAlias.workspace_id.in_(workspace_ids))
     if workspace_id is not None:
         # Stored rows only. A config.yml entry has no workspace: it is
         # deployment-wide and in force in every one of them, so filtering

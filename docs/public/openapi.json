@@ -23859,11 +23859,11 @@
     },
     "/api/v1/aliases": {
       "get": {
-        "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
+        "description": "List every alias in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
         "operationId": "aliases-list_aliases",
         "parameters": [
           {
-            "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
+            "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace in your organization.",
             "in": "query",
             "name": "workspace_id",
             "required": false,
@@ -23877,7 +23877,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
+              "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace in your organization.",
               "title": "Workspace Id"
             }
           }
@@ -25381,7 +25381,7 @@
     },
     "/api/v1/budgets": {
       "get": {
-        "description": "List all budgets with pagination.",
+        "description": "List the deployment's budgets and the caller's organization's, with pagination.",
         "operationId": "budgets-list_budgets",
         "parameters": [
           {
@@ -34249,7 +34249,7 @@
     },
     "/api/v1/organizations/me/usage/count": {
       "get": {
-        "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
+        "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the operator's ``GET /api/v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
         "operationId": "organization-usage-count_organization_usage",
         "parameters": [
           {
@@ -38503,11 +38503,11 @@
     },
     "/api/v1/routing/policies": {
       "get": {
-        "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
+        "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
         "operationId": "routing-list_policies",
         "parameters": [
           {
-            "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
+            "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace in your organization.",
             "in": "query",
             "name": "workspace_id",
             "required": false,
@@ -38521,7 +38521,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
+              "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace in your organization.",
               "title": "Workspace Id"
             }
           }
@@ -38919,7 +38919,7 @@
     },
     "/api/v1/scoped-budgets": {
       "get": {
-        "description": "List scoped budgets, optionally filtered to one scope.",
+        "description": "List the scoped budgets in the caller's organization, optionally filtered to one scope.",
         "operationId": "scoped-budgets-list_scoped_budgets",
         "parameters": [
           {

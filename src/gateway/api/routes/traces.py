@@ -1,9 +1,9 @@
 """Agent traces as a core feature: the session list, one session with its turns, the per-hour counts, and retention.
 
 Two routers serve the same four reads over different scopes. ``/traces`` is
-deployment-wide and operator-only, like ``/usage``. ``/organizations/me/traces``
-reads the caller's own organization, by the rule the organization's usage reads
-use. The scope is derived from the caller, never
+operator-only, like ``/usage``, and reads every workspace of the operator's active
+organization. ``/organizations/me/traces`` reads the caller's own organization, by
+the rule the organization's usage reads use. The scope is derived from the caller, never
 taken from the request; a filter narrows inside it and cannot widen it.
 """
 

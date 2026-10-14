@@ -1478,11 +1478,6 @@ def get_trace_service(uow: UnitOfWorkDep) -> TraceService:
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
 
 
-def get_deployment_trace_scope() -> TraceScope:
-    """Every workspace: the scope of the deployment-operator trace routes, which their router gates."""
-    return TraceScope.deployment()
-
-
 async def get_organization_trace_scope(
     identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> TraceScope:
@@ -1631,6 +1626,26 @@ async def _caller_organization_id(
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
 
 
+async def _caller_workspace_ids(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+) -> frozenset[uuid.UUID]:
+    """Every workspace in the organization this request acts in.
+
+    What a deployment-wide read of workspace-owned rows is confined to, so an
+    operator sees their active organization's rows rather than every tenant's.
+    """
+    return frozenset(await WorkspaceRepository(db).get_ids_by_organization(organization_id))
+
+
+CallerWorkspaces = Annotated[frozenset[uuid.UUID], Depends(_caller_workspace_ids)]
+
+
+def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
+    """The scope of the deployment-operator trace routes: every workspace in the caller's organization."""
+    return TraceScope.workspaces(workspace_ids)
+
+
 async def get_feedback_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     _authenticated: Annotated[str | None, Depends(verify_master_key)],
@@ -1646,6 +1661,7 @@ __all__ = [
     "CodeExecutionPolicyPortDep",
     "ContainerDep",
     "CallerOrganization",
+    "CallerWorkspaces",
     "CurrentIdentity",
     "EntitlementPortDep",
     "FileServiceDep",

@@ -70,7 +70,7 @@ def test_list_and_count_filters_leave_an_offset_bound_alone() -> None:
 def test_bulk_selection_pins_the_same_bound_as_the_count() -> None:
     """The delete re-derives its target set server-side, so it has to agree."""
     selection = UsageSelection(by_filter=True, start_date=_NAIVE_START, end_date=_NAIVE_END)
-    assert _bound_values(_selection_conditions(selection)) == [
+    assert _bound_values(_selection_conditions(selection, workspace_ids=())) == [
         _NAIVE_START.replace(tzinfo=UTC),
         _NAIVE_END.replace(tzinfo=UTC),
     ]

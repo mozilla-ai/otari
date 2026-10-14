@@ -62,13 +62,12 @@ class OverviewRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def count_active_keys(self, *, workspace_id: uuid.UUID | None, organization_id: uuid.UUID | None) -> int:
+    async def count_active_keys(self, *, workspace_id: uuid.UUID | None, organization_id: uuid.UUID) -> int:
         """Active keys, narrowed the way the keys page narrows its own list.
 
-        A workspace is the tighter scope and wins when both are given, which is
-        what keeps this equal to the count the API keys page would show: the
-        rail it feeds links there, so the two cannot disagree. With neither, the
-        count is deployment-wide, which only an operator is allowed to ask for.
+        A workspace is the tighter scope and wins when given, which is what keeps
+        this equal to the count the API keys page would show: the rail it feeds
+        links there, so the two cannot disagree.
 
         There is no organization column on a key, so the organization scope is
         the workspaces that belong to it. That is the same route the key list
@@ -78,10 +77,9 @@ class OverviewRepository:
         stmt = select(func.count()).select_from(APIKey).where(APIKey.is_active.is_(True))
         if workspace_id is not None:
             return int(await self.db.scalar(stmt.where(APIKey.workspace_id == workspace_id)) or 0)
-        if organization_id is not None:
-            stmt = stmt.join(Workspace, APIKey.workspace_id == col(Workspace.id)).where(
-                col(Workspace.organization_id) == organization_id
-            )
+        stmt = stmt.join(Workspace, APIKey.workspace_id == col(Workspace.id)).where(
+            col(Workspace.organization_id) == organization_id
+        )
         return int(await self.db.scalar(stmt) or 0)
 
     async def count_active_workspace_members(self, workspace_id: uuid.UUID) -> int:

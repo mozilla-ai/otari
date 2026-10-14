@@ -1,7 +1,7 @@
 """Bulk usage log endpoint.
 
-Provides a single query interface over all usage logs with optional
-time range and user filters, ordered newest-first. Intended for
+Provides a single query interface over the usage logs of the caller's
+organization with optional time range and user filters, ordered newest-first. Intended for
 external systems that need to sync usage data (billing, analytics).
 """
 
@@ -16,7 +16,13 @@ from pydantic import BaseModel
 from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
+from gateway.api.deps import (
+    CallerWorkspaces,
+    get_config,
+    get_db,
+    require_deployment_operator,
+    verify_api_key_or_master_key,
+)
 from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.api.routes._request_tags import MAX_TAG_KEY_LENGTH
@@ -55,8 +61,8 @@ from gateway.services.usage_admin_service import (
 )
 
 # Two routers under one prefix, because the two planes that meet here
-# authenticate differently. Reading or amending every tenant's usage rows is
-# deployment-wide, so that gate is declared on the router and a route added later
+# authenticate differently. Reading or amending usage rows across an
+# organization is an operator's job, so that gate is declared on the router and a route added later
 # inherits it; ``POST /external-events`` files rows on behalf of the API key that
 # holds them, and ``GET /requests/{request_id}`` reads a key's own request back,
 # so both sit on a router of their own rather than a route-level override, and
@@ -423,11 +429,12 @@ def _usage_filters(
     ``count_usage`` also narrows ``counts_toward_budget=false`` to imported rows,
     because that call sizes a mutation rather than a page (see its docstring).
 
-    ``scope`` is the one condition that is not a filter. The deployment-wide
-    routes here pass ``None`` and read every row; the organization-scoped routes
-    in ``organization_usage.py`` pass the predicate their caller's membership
-    resolved to, so it is ANDed in alongside whatever the client asked for and a
-    client-supplied ``workspace_id`` can only ever narrow it further.
+    ``scope`` is the one condition that is not a filter. The operator routes here
+    pass the workspaces of the caller's active organization; the
+    organization-scoped routes in ``organization_usage.py`` pass the predicate
+    their caller's membership resolved to. Either way it is ANDed in alongside
+    whatever the client asked for, so a client-supplied ``workspace_id`` can only
+    ever narrow it further.
 
     Deliberately **without a default**, unlike every filter beside it. It is a
     parameter so that a route building these conditions cannot forget the half
@@ -515,6 +522,7 @@ def _tag_conditions(tag: list[str]) -> list[ColumnElement[bool]]:
 @operator_router.get("")
 async def list_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_ids: CallerWorkspaces,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -568,7 +576,7 @@ async def list_usage(
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
-        scope=None,
+        scope=UsageLog.workspace_id.in_(workspace_ids),
     )
     # Outer-joined rather than looked up per row, and rather than left to the
     # client: naming a page of rows must not cost a round trip each, nor oblige a
@@ -694,6 +702,7 @@ async def get_request_settlement(
 @operator_router.get("/count")
 async def count_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_ids: CallerWorkspaces,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -747,7 +756,7 @@ async def count_usage(
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
-        scope=None,
+        scope=UsageLog.workspace_id.in_(workspace_ids),
     )
     if counts_toward_budget is False:
         # counts_toward_budget alone does not say "imported": gateway traffic on an
@@ -803,6 +812,7 @@ async def list_in_flight(raw_request: Request) -> InFlightResponse:
 async def delete_usage_rows(
     request: UsageDeleteRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_ids: CallerWorkspaces,
 ) -> UsageDeleteResult:
     """Delete imported usage rows by explicit ids or by filter (standalone).
 
@@ -813,13 +823,14 @@ async def delete_usage_rows(
     the spend ledger (``users.spend``) are untouched, so a delete can never desync a
     budget. Master-key only.
     """
-    return await delete_usage(db, request)
+    return await delete_usage(db, request, workspace_ids=workspace_ids)
 
 
 @operator_router.post("/set-price")
 async def set_usage_price_rows(
     request: UsageSetPriceRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_ids: CallerWorkspaces,
 ) -> UsageSetPriceResult:
     """Set the cost of imported usage rows from manual per-1M rates (standalone).
 
@@ -830,7 +841,7 @@ async def set_usage_price_rows(
     configured pricing). Only imported rows (``counts_toward_budget = false``) are
     touched, so ``users.spend`` is never affected. Master-key only.
     """
-    return await set_usage_price(db, request)
+    return await set_usage_price(db, request, workspace_ids=workspace_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1615,6 +1626,7 @@ async def _summary_response(
 @operator_router.get("/summary")
 async def usage_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_ids: CallerWorkspaces,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -1674,7 +1686,7 @@ async def usage_summary(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
-        scope=None,
+        scope=UsageLog.workspace_id.in_(workspace_ids),
     )
     return await _summary_response(
         db,
@@ -1781,6 +1793,7 @@ async def _grouped_series_response(
 @operator_router.get("/series")
 async def usage_series(
     db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_ids: CallerWorkspaces,
     group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
@@ -1832,7 +1845,7 @@ async def usage_series(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
-        scope=None,
+        scope=UsageLog.workspace_id.in_(workspace_ids),
     )
     return await _grouped_series_response(
         db,

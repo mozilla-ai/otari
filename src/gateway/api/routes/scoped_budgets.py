@@ -10,11 +10,12 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, String, cast, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
-from gateway.api.deps import OrganizationServiceDep, get_db, require_deployment_operator
+from gateway.api.deps import CallerOrganization, OrganizationServiceDep, get_db, require_deployment_operator
 from gateway.api.routes._helpers import database_error
 from gateway.core.database import DATABASE_ERRORS
 from gateway.models.api_keys import APIKey
@@ -43,8 +44,37 @@ router = APIRouter(
 )
 
 
-async def _get_or_404(db: AsyncSession, budget_id: str) -> ScopedBudget:
-    budget = (await db.execute(select(ScopedBudget).where(ScopedBudget.id == budget_id))).scalar_one_or_none()
+def _in_organization(organization_id: uuid.UUID) -> ColumnElement[bool]:
+    """A ceiling whose scope sits in this organization, matched per scope kind so an id never matches across kinds.
+
+    Another organization's ceiling is out of reach, and its id answers 404 like an unknown one.
+    """
+    workspaces = select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
+    return or_(
+        (ScopedBudget.scope_type == SCOPE_ORGANIZATION) & (ScopedBudget.scope_id == str(organization_id)),
+        (ScopedBudget.scope_type == SCOPE_WORKSPACE)
+        & ScopedBudget.scope_id.in_(
+            select(cast(col(Workspace.id), String)).where(col(Workspace.organization_id) == organization_id)
+        ),
+        (ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER)
+        & ScopedBudget.scope_id.in_(
+            select(cast(col(WorkspaceMember.id), String)).where(col(WorkspaceMember.workspace_id).in_(workspaces))
+        ),
+        (ScopedBudget.scope_type == SCOPE_ORG_MEMBER)
+        & ScopedBudget.scope_id.in_(
+            select(cast(col(OrganizationMember.id), String)).where(
+                col(OrganizationMember.organization_id) == organization_id
+            )
+        ),
+        (ScopedBudget.scope_type == SCOPE_API_TOKEN)
+        & ScopedBudget.scope_id.in_(select(APIKey.id).where(APIKey.workspace_id.in_(workspaces))),
+    )
+
+
+async def _get_or_404(db: AsyncSession, budget_id: str, organization_id: uuid.UUID) -> ScopedBudget:
+    budget = (
+        await db.execute(select(ScopedBudget).where(ScopedBudget.id == budget_id, _in_organization(organization_id)))
+    ).scalar_one_or_none()
     if budget is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -166,13 +196,14 @@ async def create_scoped_budget(
 @router.get("")
 async def list_scoped_budgets(
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
     scope_type: Annotated[ScopeType | None, Query()] = None,
     scope_id: Annotated[str | None, Query(max_length=255)] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[ScopedBudgetResponse]:
-    """List scoped budgets, optionally filtered to one scope."""
-    stmt = select(ScopedBudget)
+    """List the scoped budgets in the caller's organization, optionally filtered to one scope."""
+    stmt = select(ScopedBudget).where(_in_organization(organization_id))
     if scope_type is not None:
         stmt = stmt.where(ScopedBudget.scope_type == scope_type)
     if scope_id is not None:
@@ -193,9 +224,10 @@ async def list_scoped_budgets(
 async def get_scoped_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
 ) -> ScopedBudgetResponse:
     """Get one scoped budget."""
-    ceiling = await _get_or_404(db, budget_id)
+    ceiling = await _get_or_404(db, budget_id, organization_id)
     limit = await db.get(Budget, ceiling.budget_id)
     if limit is None:  # pragma: no cover - RESTRICT keeps the budget alive
         raise HTTPException(
@@ -210,6 +242,7 @@ async def update_scoped_budget(
     budget_id: str,
     request: UpdateScopedBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
 ) -> ScopedBudgetResponse:
     """Relabel a ceiling, or point it at a different budget.
 
@@ -221,7 +254,7 @@ async def update_scoped_budget(
     budget, so changing what a ceiling allows is either editing that budget,
     which moves every ceiling naming it, or naming a different one.
     """
-    budget = await _get_or_404(db, budget_id)
+    budget = await _get_or_404(db, budget_id, organization_id)
     limit = await db.get(Budget, budget.budget_id)
     if limit is None:  # pragma: no cover - RESTRICT keeps the budget alive
         raise HTTPException(
@@ -261,13 +294,14 @@ async def update_scoped_budget(
 async def delete_scoped_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
 ) -> None:
     """Delete a scoped budget.
 
     A request holding a reservation against it settles into nothing afterwards,
     which is the right outcome: the ceiling no longer exists to be credited.
     """
-    budget = await _get_or_404(db, budget_id)
+    budget = await _get_or_404(db, budget_id, organization_id)
     await db.delete(budget)
     try:
         await db.commit()
