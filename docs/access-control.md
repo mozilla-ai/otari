@@ -585,8 +585,9 @@ expired, and offers Reissue and Revoke either way.
 The API can also add a member directly (`POST /api/v1/organizations/me/members`),
 active at once with no invitation to accept and no email. A new address added
 that way gets in by signing up, by "Forgot your password?" or through a provider,
-so on a deployment with no mail and no provider it has no way in: invite it
-instead, since an invitation link can set its first password.
+so on a deployment with no mail and no provider it waits for an operator's
+password link. Invite it instead, since the invitation link itself can set its
+first password.
 
 To invite several people at once, paste their addresses into the invite dialog,
 separated by commas or new lines (up to 100). Everyone gets the same role and

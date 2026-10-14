@@ -2677,9 +2677,9 @@ export interface paths {
          *     no invitation to accept and no email sent, so the person has to be told
          *     some other way. An address that belongs to no identity yet creates one,
          *     which gets in by signing up, by "Forgot your password?" or by a Google or
-         *     GitHub sign-in; on a deployment with no mail and no provider it has no way
-         *     in, so invite it instead (``POST /me/member-invitations``), whose link can
-         *     set its first password.
+         *     GitHub sign-in; on a deployment with no mail and no provider it waits for
+         *     an operator's password link, so invite it instead
+         *     (``POST /me/member-invitations``), whose link can set its first password.
          */
         post: operations["organizations-create_active_organization_member"];
         delete?: never;
