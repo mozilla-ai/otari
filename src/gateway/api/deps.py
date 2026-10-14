@@ -878,14 +878,6 @@ def get_unit_of_work_if_needed(
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
-def get_inference_service(
-    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> InferenceService:
-    """Build the inference service on the request's Unit of Work, so its writes commit or roll back with the request."""
-    return build_inference_service(uow, config)
-
-
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
     """Return the listener that keeps members' budget ceilings in step with their memberships.
 
@@ -1403,8 +1395,6 @@ async def get_organization_trace_scope(
     return TraceScope.workspaces(frozenset(scope.workspace_ids))
 
 
-DeploymentTraceScopeDep = Annotated[TraceScope, Depends(get_deployment_trace_scope)]
-OrganizationTraceScopeDep = Annotated[TraceScope, Depends(get_organization_trace_scope)]
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
 WebProviderClientDep = Annotated[httpx.AsyncClient, Depends(get_web_provider_client)]
 
