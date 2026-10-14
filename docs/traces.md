@@ -20,6 +20,7 @@ Otari never guesses that two requests belong together from their content.
 | The `session_label` request field | `"session_label": "chat-42"` | `client` |
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | The agent harness's own session id | Claude Code's `x-claude-code-session-id`, sent on every request | `harness` |
+| An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
 
 A request that names no session is a trace of its own. To group a custom

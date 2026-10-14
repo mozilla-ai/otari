@@ -89,6 +89,16 @@ def test_spans_naming_one_conversation_share_a_trace_across_otel_traces() -> Non
     assert sorted(len(write.spans) for write in writes) == [1, 2]
 
 
+def test_a_claude_sessions_threads_share_one_trace() -> None:
+    session = {"anthropic.session.id": "sesn_1"}
+    writes = _project(
+        _span("a", trace_id="1" * 32, attrs={**session, "gen_ai.conversation.id": "sthr_main"}),
+        _span("b", trace_id="2" * 32, attrs={**session, "gen_ai.conversation.id": "sthr_sub"}),
+    )
+
+    assert [len(write.spans) for write in writes] == [2]
+
+
 def test_text_in_a_span_name_or_attribute_never_reaches_the_document() -> None:
     [write] = _project(
         _span(

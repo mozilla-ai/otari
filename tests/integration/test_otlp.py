@@ -704,3 +704,148 @@ def test_otlp_agent_spans_from_a_budgeted_key_are_not_traced(
 
     assert resp.status_code == 200
     assert writer.writes == []
+
+
+# --- Claude Platform -------------------------------------------------------------
+# Span names, attributes and token semantics follow the Claude API's OpenTelemetry span
+# reference: ``gen_ai.usage.input_tokens`` counts cache reads and writes, and a
+# request's usage repeats on its request, model request and compaction spans.
+
+_CLAUDE_TRACE = "a" * 32
+_CLAUDE_USAGE = {
+    "gen_ai.provider.name": "anthropic",
+    "gen_ai.usage.input_tokens": 1000,
+    "gen_ai.usage.output_tokens": 50,
+    "gen_ai.usage.cache_read.input_tokens": 200,
+    "gen_ai.usage.cache_write.input_tokens": 100,
+}
+
+
+def _claude_span(name: str, span_id: str, attrs: dict[str, Any], *, kind: int = 1, parent: str = "") -> dict[str, Any]:
+    return {
+        "traceId": _CLAUDE_TRACE,
+        "spanId": span_id,
+        "parentSpanId": parent,
+        "name": name,
+        "kind": kind,
+        "startTimeUnixNano": "1784000000000000000",
+        "endTimeUnixNano": "1784000001500000000",
+        "attributes": [_attr(k, v) for k, v in attrs.items()],
+    }
+
+
+def _claude_export(*spans: dict[str, Any], scope: str = "com.anthropic.claude-platform") -> dict[str, Any]:
+    return {
+        "resourceSpans": [
+            {
+                "resource": {"attributes": [_attr("service.name", "claude-platform")]},
+                "scopeSpans": [{"scope": {"name": scope}, "spans": list(spans)}],
+            }
+        ]
+    }
+
+
+def _messages_create(
+    span_id: str = "1" * 16, *, kind: int = 2, compaction: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    attrs = {
+        **_CLAUDE_USAGE,
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": "claude-opus-latest",
+        "gen_ai.response.model": "claude-opus-4-8",
+        "gen_ai.response.id": "msg_claude_1",
+        "anthropic.usage.cache_creation.ephemeral_5m_input_tokens": 60,
+        "anthropic.usage.cache_creation.ephemeral_1h_input_tokens": 40,
+        **(compaction or {}),
+    }
+    return _claude_span("anthropic.messages.create", span_id, attrs, kind=kind)
+
+
+def _claude_rows(db_session: Session) -> dict[str, UsageLog]:
+    rows = db_session.query(UsageLog).filter(UsageLog.source == "claude_platform").all()
+    return {str(row.source_event_id): row for row in rows}
+
+
+def test_otlp_claude_platform_request_is_booked_once(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The request span is booked at the served model; its model request and compaction spans are not."""
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    export = _claude_export(
+        _messages_create(
+            compaction={"anthropic.usage.compaction.input_tokens": 300, "anthropic.usage.compaction.output_tokens": 20}
+        ),
+        _claude_span(
+            "anthropic.model_request",
+            "2" * 16,
+            {**_CLAUDE_USAGE, "gen_ai.request.model": "claude-opus-4-8"},
+            parent="1" * 16,
+        ),
+        _claude_span(
+            "anthropic.compaction",
+            "3" * 16,
+            {"gen_ai.provider.name": "anthropic", "gen_ai.usage.input_tokens": 300, "gen_ai.usage.output_tokens": 20},
+            parent="1" * 16,
+        ),
+    )
+
+    resp = client.post("/otlp/v1/traces", json=export, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    rows = _claude_rows(db_session)
+    assert set(rows) == {"msg_claude_1", "msg_claude_1:compaction"}
+    request = rows["msg_claude_1"]
+    assert (request.provider, request.model) == ("anthropic", "claude-opus-4-8")
+    assert (request.prompt_tokens, request.cache_read_tokens, request.cache_write_tokens) == (1000, 200, 100)
+    # Input counts the cache, so 700 fresh tokens; the 1h share of the write bills at its own rate.
+    expected = _usd(700, "15") + _usd(200, "1.5") + _usd(60, "18.75") + _usd(40, "30") + _usd(50, "75")
+    assert request.cost == expected
+    assert rows["msg_claude_1:compaction"].cost == _usd(300, "15") + _usd(20, "75")
+
+
+def test_otlp_claude_sdk_and_api_spans_of_one_request_are_one_row(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    sdk = _claude_export(_messages_create("4" * 16, kind=3), scope="com.anthropic.sdk.python")
+
+    client.post("/otlp/v1/traces", json=sdk, headers=headers)
+    client.post("/otlp/v1/traces", json=_claude_export(_messages_create()), headers=headers)
+
+    assert list(_claude_rows(db_session)) == ["msg_claude_1"]
+
+
+def test_otlp_claude_managed_agents_session_is_booked_per_model_request(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    session = {"anthropic.session.id": "sesn_1", "gen_ai.conversation.id": "sthr_1"}
+    export = _claude_export(
+        _claude_span(
+            "anthropic.session.turn",
+            "5" * 16,
+            {**session, "gen_ai.operation.name": "invoke_agent", "gen_ai.request.model": "claude-opus-4-8"},
+            kind=1,
+        ),
+        _claude_span(
+            "anthropic.model_request",
+            "6" * 16,
+            {**_CLAUDE_USAGE, **session, "gen_ai.operation.name": "chat", "gen_ai.request.model": "claude-opus-4-8"},
+            parent="5" * 16,
+        ),
+        _claude_span(
+            "anthropic.session.outcome_evaluation",
+            "7" * 16,
+            {**session, "gen_ai.usage.input_tokens": 10, "gen_ai.usage.output_tokens": 5},
+            parent="5" * 16,
+        ),
+    )
+
+    resp = client.post("/otlp/v1/traces", json=export, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    [row] = _claude_rows(db_session).values()
+    assert row.source_event_id == f"{_CLAUDE_TRACE}:{'6' * 16}"
+    assert row.source_label == "sesn_1"
+    assert row.prompt_tokens == 1000 and row.model == "claude-opus-4-8"

@@ -2,8 +2,8 @@
 
 Every span is kept, not only the ones that carry token usage: an agent's own
 spans (``invoke_agent``, ``execute_tool``) are what the gateway cannot see for
-itself. A span's session is the conversation it names
-(``gen_ai.conversation.id``), or its OTel trace when it names none.
+itself. A span's session is the Claude session or the conversation it names
+(``anthropic.session.id``, ``gen_ai.conversation.id``), or its OTel trace when it names none.
 
 Nothing is passed through verbatim. Each name and value is projected the way the
 gateway's own spans are, so text an agent put in a span name or attribute never
@@ -117,7 +117,10 @@ def _kind(operation: str | None) -> str:
 
 
 def _session(span: OtlpSpan) -> SessionRef:
-    key = _str(span.attributes, "gen_ai.conversation.id", "otari.session_label") or span.trace_id
+    # A Claude Managed Agents session names each thread a conversation of its own.
+    key = (
+        _str(span.attributes, "anthropic.session.id", "gen_ai.conversation.id", "otari.session_label") or span.trace_id
+    )
     return SessionRef(source="otlp", key=key)
 
 

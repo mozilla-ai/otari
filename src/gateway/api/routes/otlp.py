@@ -119,6 +119,14 @@ _CODEX_USAGE_EVENTS = ("codex.api_request", "codex.sse_event")
 # tokens are a subset of ``input_tokens`` and must be de-included before pricing.
 _ADDITIVE_CACHE_PROVIDERS = {"anthropic"}
 
+# Spans from the Claude Platform (a Console telemetry destination) and the Claude SDKs.
+# Their usage repeats on several levels of one request's span tree, so they get their
+# own mapping rather than the generic one, which would book every level.
+_CLAUDE_SCOPE_PREFIX = "com.anthropic."
+_CLAUDE_SOURCE = "claude_platform"
+# The SDKs name the cloud a Claude client reaches in their own words.
+_CLAUDE_PROVIDERS = {"aws.bedrock": "bedrock", "gcp.vertex_ai": "vertexaianthropic"}
+
 # ``Status.code`` of a span that ended in error (``STATUS_CODE_ERROR`` in the OTLP schema).
 _STATUS_CODE_ERROR = 2
 
@@ -395,6 +403,122 @@ def _build_event(
     return source, event
 
 
+def _claude_event(
+    attrs: dict[str, Any],
+    *,
+    event_id: str,
+    model: Any,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read: int = 0,
+    cache_write: int = 0,
+    cache_write_1h: int = 0,
+    reasoning: int = 0,
+    timestamp: datetime | None,
+    duration_ms: float | None,
+    failed: bool,
+) -> ExternalUsageEvent | None:
+    provider = str(attrs.get("gen_ai.provider.name") or "anthropic")
+    session = attrs.get("anthropic.session.id") or attrs.get("gen_ai.conversation.id")
+    if not (model and timestamp and (input_tokens or output_tokens)):
+        return None
+    try:
+        return ExternalUsageEvent(
+            source_event_id=event_id,
+            timestamp=timestamp,
+            provider=_CLAUDE_PROVIDERS.get(provider, provider),
+            model=str(model),
+            status="error" if failed else "success",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            cache_write_1h_tokens=cache_write_1h,
+            reasoning_tokens=reasoning,
+            # ``gen_ai.usage.input_tokens`` counts the cache reads and writes here,
+            # unlike Claude Code's additive counts.
+            cache_tokens_in_prompt=True,
+            duration_ms=int(duration_ms) if duration_ms is not None else None,
+            session_label=str(session) if session else None,
+        )
+    except Exception:  # noqa: BLE001 - a value that fails the event schema is skipped, not fatal
+        return None
+
+
+def _claude_events(
+    span: Any,
+    attrs: dict[str, Any],
+    *,
+    default_timestamp: datetime | None,
+    duration_ms: float | None,
+) -> list[ExternalUsageEvent]:
+    """Map one Claude Platform or Claude SDK span onto the usage it alone accounts for.
+
+    A request's usage repeats on its ``anthropic.messages.create`` span, the
+    ``anthropic.model_request`` spans under it and its ``anthropic.compaction``
+    spans, so each token is booked from one level only: the request span on the
+    Messages API, which also carries its compactions' tokens, and the model
+    request spans in a Managed Agents session, which has no request span with
+    usage. The SDK's client span and the API's server span for one request share
+    a response id, so whichever arrives second is a duplicate. Outcome evaluation
+    spans carry tokens but no model to price them by, and are not booked.
+    """
+    failed = span.status.code == _STATUS_CODE_ERROR
+    timestamp = _resolve_timestamp(attrs, default_timestamp)
+    events: list[ExternalUsageEvent | None] = []
+    if span.name == "anthropic.messages.create":
+        response_id = attrs.get("gen_ai.response.id")
+        if not response_id:
+            return []
+        model = attrs.get("gen_ai.response.model") or attrs.get("gen_ai.request.model")
+        events.append(
+            _claude_event(
+                attrs,
+                event_id=str(response_id),
+                input_tokens=_int(attrs.get("gen_ai.usage.input_tokens")),
+                output_tokens=_int(attrs.get("gen_ai.usage.output_tokens")),
+                cache_read=_int(attrs.get("gen_ai.usage.cache_read.input_tokens")),
+                cache_write=_int(attrs.get("gen_ai.usage.cache_write.input_tokens")),
+                cache_write_1h=_int(attrs.get("anthropic.usage.cache_creation.ephemeral_1h_input_tokens")),
+                reasoning=_int(attrs.get("gen_ai.usage.reasoning.output_tokens")),
+                model=model,
+                timestamp=timestamp,
+                duration_ms=duration_ms,
+                failed=failed,
+            )
+        )
+        # Compaction tokens are outside the request's ``gen_ai.usage.*`` counts and
+        # carry no cache breakdown, so their cached share bills at the input rate.
+        events.append(
+            _claude_event(
+                attrs,
+                event_id=f"{response_id}:compaction",
+                input_tokens=_int(attrs.get("anthropic.usage.compaction.input_tokens")),
+                output_tokens=_int(attrs.get("anthropic.usage.compaction.output_tokens")),
+                model=model,
+                timestamp=timestamp,
+                duration_ms=None,
+                failed=failed,
+            )
+        )
+    elif span.name == "anthropic.model_request" and attrs.get("anthropic.session.id"):
+        events.append(
+            _claude_event(
+                attrs,
+                event_id=f"{span.trace_id.hex()}:{span.span_id.hex()}",
+                model=attrs.get("gen_ai.response.model") or attrs.get("gen_ai.request.model"),
+                input_tokens=_int(attrs.get("gen_ai.usage.input_tokens")),
+                output_tokens=_int(attrs.get("gen_ai.usage.output_tokens")),
+                cache_read=_int(attrs.get("gen_ai.usage.cache_read.input_tokens")),
+                cache_write=_int(attrs.get("gen_ai.usage.cache_write.input_tokens")),
+                timestamp=timestamp,
+                duration_ms=duration_ms,
+                failed=failed,
+            )
+        )
+    return [event for event in events if event is not None]
+
+
 def _otlp_span(span: Any) -> OtlpSpan:
     """Read the fields a trace keeps out of one received span."""
     return OtlpSpan(
@@ -522,11 +646,21 @@ async def receive_traces(
     received: list[Any] = []
     for resource_spans in parsed.resource_spans:
         for scope_spans in resource_spans.scope_spans:
+            claude = scope_spans.scope.name.startswith(_CLAUDE_SCOPE_PREFIX)
             for span in scope_spans.spans:
                 received.append(span)
                 duration = None
                 if span.start_time_unix_nano and span.end_time_unix_nano:
                     duration = (span.end_time_unix_nano - span.start_time_unix_nano) / 1_000_000
+                if claude:
+                    events = _claude_events(
+                        span,
+                        _attributes(span.attributes),
+                        default_timestamp=_nanos_to_dt(span.start_time_unix_nano),
+                        duration_ms=duration,
+                    )
+                    pairs.extend((_CLAUDE_SOURCE, event) for event in events)
+                    continue
                 mapped = _build_event(
                     _attributes(span.attributes),
                     fallback_event_id=span.span_id.hex() or None,
