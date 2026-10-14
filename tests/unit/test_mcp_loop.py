@@ -557,6 +557,45 @@ async def test_loop_refuses_an_empty_first_completion_before_locking_in(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_loop_returns_an_empty_completion_after_a_tool_round(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Past lock-in an empty answer is returned, carrying the usage of the rounds before it."""
+    empty = ChatCompletion(
+        id="cmpl-empty",
+        choices=[],
+        created=0,
+        model="fake",
+        object="chat.completion",
+        usage=CompletionUsage(prompt_tokens=7, completion_tokens=0, total_tokens=7),
+    )
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")], prompt=10, completion_tokens=2),
+            empty,
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakePool(tool_names=["fetch_url"])
+    locked_in: list[bool] = []
+
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=5,
+        on_first_response=lambda: locked_in.append(True),
+    )
+
+    assert out.choices == []
+    assert pool.calls == [("fetch_url", {})]
+    assert locked_in == [True]
+    assert out.usage is not None
+    assert (out.usage.prompt_tokens, out.usage.completion_tokens, out.usage.total_tokens) == (17, 2, 19)
+
+
+@pytest.mark.asyncio
 async def test_loop_preserves_cached_tokens_when_final_iteration_lacks_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
