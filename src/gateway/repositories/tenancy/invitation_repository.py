@@ -117,7 +117,7 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
         return [(invitation, membership, organization) for invitation, membership, organization in result.all()], count
 
     async def lock_live_pending_for_user(self, user_id: uuid.UUID, *, now: datetime) -> bool:
-        """Lock the memberships this identity holds a live invitation to, and return whether there are any.
+        """Lock one membership this identity holds a live invitation to, and return whether there is one.
 
         The same conditions as ``get_live_pending_for_user_with_context``. Every
         revocation, decline and removal suspends the membership row, so holding
@@ -135,6 +135,7 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
                 col(Invitation.status) == "pending",
                 col(Invitation.expires_at) >= now,
             )
+            .limit(1)
             .with_for_update(of=OrganizationMember)
         )
         return result.first() is not None

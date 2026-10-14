@@ -137,7 +137,7 @@ class OrganizationMemberRepository(
         this decides which organization a stale pointer is repaired onto, so it
         must not be able to answer differently on two reads.
 
-        ``lock`` holds the user's active memberships until the caller's
+        ``lock`` holds that membership until the caller's
         transaction ends, for a write that is allowed only while one exists:
         a removal suspends the row, so it waits, and one that committed first
         fails the re-checked ``active`` condition.
@@ -151,6 +151,7 @@ class OrganizationMemberRepository(
                 col(OrganizationMember.status) == "active",
             )
             .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
+            .limit(1)
         )
         if lock:
             statement = statement.with_for_update()
