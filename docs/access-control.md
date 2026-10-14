@@ -535,7 +535,7 @@ either lifts both restrictions.
 
 A link stops working as soon as its membership stops waiting on it: when the
 person is added directly, removed, or accepts or declines from their inbox, any
-invitation still pending for them is cancelled. Revoking an invitation suspends
+invitation still pending for them is closed. Revoking an invitation suspends
 the membership only while it is still waiting; a person who became a member
 another way keeps their access. An expired link says it expired every time it is
 opened, and every refusal says to ask the inviter for a new link. An address

@@ -2003,7 +2003,7 @@ class OrganizationService:
         Suspension rather than deletion, as on the platform: the row is what
         every historical attribution resolves through, so it outlives the access
         it granted. If the membership was `invited`, its pending invitation is
-        cancelled in the same transaction (see ``_update_membership``): the
+        closed in the same transaction (see ``_update_membership``): the
         dashboard routes an invited row to Revoke instead, which does the same
         thing, but this stays correct for a caller that removes one directly.
         """
