@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import ColumnElement, String, cast, or_, select
+from sqlalchemy import ColumnElement, Select, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -44,26 +44,29 @@ router = APIRouter(
 )
 
 
-def _in_organization(organization_id: uuid.UUID) -> ColumnElement[bool]:
+async def _in_organization(db: AsyncSession, organization_id: uuid.UUID) -> ColumnElement[bool]:
     """A ceiling whose scope sits in this organization, matched per scope kind so an id never matches across kinds.
 
-    Another organization's ceiling is out of reach, and its id answers 404 like an unknown one.
+    Another organization's ceiling is out of reach, and its id answers 404 like an unknown one. The ids are
+    read and rendered with ``str`` here rather than cast in SQL, because a stored ``scope_id`` is the hyphenated
+    form and SQLite keeps a UUID column as bare hex.
     """
     workspaces = select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
+
+    async def ids(statement: Select[tuple[uuid.UUID]]) -> list[str]:
+        return [str(value) for value in (await db.execute(statement)).scalars()]
+
     return or_(
         (ScopedBudget.scope_type == SCOPE_ORGANIZATION) & (ScopedBudget.scope_id == str(organization_id)),
-        (ScopedBudget.scope_type == SCOPE_WORKSPACE)
-        & ScopedBudget.scope_id.in_(
-            select(cast(col(Workspace.id), String)).where(col(Workspace.organization_id) == organization_id)
-        ),
+        (ScopedBudget.scope_type == SCOPE_WORKSPACE) & ScopedBudget.scope_id.in_(await ids(workspaces)),
         (ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER)
         & ScopedBudget.scope_id.in_(
-            select(cast(col(WorkspaceMember.id), String)).where(col(WorkspaceMember.workspace_id).in_(workspaces))
+            await ids(select(col(WorkspaceMember.id)).where(col(WorkspaceMember.workspace_id).in_(workspaces)))
         ),
         (ScopedBudget.scope_type == SCOPE_ORG_MEMBER)
         & ScopedBudget.scope_id.in_(
-            select(cast(col(OrganizationMember.id), String)).where(
-                col(OrganizationMember.organization_id) == organization_id
+            await ids(
+                select(col(OrganizationMember.id)).where(col(OrganizationMember.organization_id) == organization_id)
             )
         ),
         (ScopedBudget.scope_type == SCOPE_API_TOKEN)
@@ -73,7 +76,9 @@ def _in_organization(organization_id: uuid.UUID) -> ColumnElement[bool]:
 
 async def _get_or_404(db: AsyncSession, budget_id: str, organization_id: uuid.UUID) -> ScopedBudget:
     budget = (
-        await db.execute(select(ScopedBudget).where(ScopedBudget.id == budget_id, _in_organization(organization_id)))
+        await db.execute(
+            select(ScopedBudget).where(ScopedBudget.id == budget_id, await _in_organization(db, organization_id))
+        )
     ).scalar_one_or_none()
     if budget is None:
         raise HTTPException(
@@ -203,7 +208,7 @@ async def list_scoped_budgets(
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[ScopedBudgetResponse]:
     """List the scoped budgets in the caller's organization, optionally filtered to one scope."""
-    stmt = select(ScopedBudget).where(_in_organization(organization_id))
+    stmt = select(ScopedBudget).where(await _in_organization(db, organization_id))
     if scope_type is not None:
         stmt = stmt.where(ScopedBudget.scope_type == scope_type)
     if scope_id is not None:
