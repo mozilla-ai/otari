@@ -33,6 +33,22 @@ describe("EmptyState", () => {
     expect(onAction).toHaveBeenCalledOnce()
   })
 
+  it("offers a secondary action beside the primary", async () => {
+    const user = userEvent.setup()
+    const onSecondaryAction = vi.fn()
+    render(
+      <EmptyState
+        title="No routing policies yet"
+        actionLabel="Create fallback"
+        onAction={() => {}}
+        secondaryActionLabel="Other policy types"
+        onSecondaryAction={onSecondaryAction}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: "Other policy types" }))
+    expect(onSecondaryAction).toHaveBeenCalledOnce()
+  })
+
   it("omits the action entirely for a purely informational empty state", () => {
     render(
       <EmptyState

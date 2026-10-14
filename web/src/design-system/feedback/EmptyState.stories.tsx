@@ -23,6 +23,16 @@ export const WithAction: Story = {
   args: { actionLabel: "Create key", onAction: () => {} },
 }
 
+/** A quieter alternative beside the primary, for a page with more than one way in. */
+export const WithSecondaryAction: Story = {
+  args: {
+    actionLabel: "Create fallback",
+    onAction: () => {},
+    secondaryActionLabel: "Other policy types",
+    onSecondaryAction: () => {},
+  },
+}
+
 /**
  * The action can be disabled while a precondition is unmet, so the panel still
  * says what to do rather than hiding the button.
