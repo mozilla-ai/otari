@@ -322,6 +322,9 @@ test.describe("dashboard core flows", () => {
     await page.getByRole("button", { name: "Create policy" }).first().click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
+    // The dialog asks what the policy is for first; a fallback is the default.
+    await expect(dialog.getByRole("radio", { name: "Fallback" })).toBeChecked()
+    await dialog.getByRole("button", { name: "Continue" }).click()
     // Role-scoped for the same reason as the user form: policy rows carry a
     // "Copy policy name" control.
     await dialog.getByRole("textbox", { name: /^Name/ }).fill("fast")
@@ -344,6 +347,7 @@ test.describe("dashboard core flows", () => {
     await page.getByRole("button", { name: "Create policy" }).first().click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
+    await dialog.getByRole("button", { name: "Continue" }).click()
     await dialog.getByRole("textbox", { name: /^Name/ }).fill("chained")
     const serves = dialog.getByRole("combobox", { name: "Main model" })
     await serves.fill("openai:gpt-4o")
@@ -387,10 +391,13 @@ test.describe("dashboard core flows", () => {
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
     await chained.getByRole("button", { name: "Edit" }).click()
-    // The edit opens the same dialog, so its fields are scoped the same way.
-    const dialog = page.getByRole("dialog")
-    await dialog.getByRole("textbox", { name: /^Name/ }).fill("renamed")
-    await dialog.getByRole("button", { name: "Save" }).click()
+    // Edit opens the policy's own page, where the name is a section of its own.
+    await expect(pageHeading(page, "chained")).toBeVisible()
+    await page.getByRole("textbox", { name: /^Name/ }).fill("renamed")
+    await page.getByRole("button", { name: "Rename" }).click()
+    // The page follows the policy to its new address.
+    await expect(pageHeading(page, "renamed")).toBeVisible()
+    await page.getByRole("link", { name: "← Routing" }).click()
 
     // A rename moves the row rather than copying it, so the old name has to be
     // gone: two rows would mean callers could still reach the policy either way.

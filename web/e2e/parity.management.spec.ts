@@ -305,6 +305,8 @@ test.describe("fallback routing", () => {
     await page.getByRole("button", { name: "Create policy" }).first().click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
+    await expect(dialog.getByRole("radio", { name: "Fallback" })).toBeChecked()
+    await dialog.getByRole("button", { name: "Continue" }).click()
     await dialog.getByRole("textbox", { name: /^Name/ }).fill(POLICY)
     await fillModelBox(page, /^Main model/, "openai:gpt-4o")
 
@@ -327,8 +329,10 @@ test.describe("fallback routing", () => {
     ])
 
     // Shrinking has to be possible too: a chain that could only grow would strand
-    // an operator who added a candidate by mistake.
+    // an operator who added a candidate by mistake. Edit opens the policy's own
+    // page, where the chain is a section with its own Save.
     await policy.getByRole("button", { name: "Edit" }).click()
+    await expect(pageHeading(page, POLICY)).toBeVisible()
     const fallbackTwo = page.getByRole("combobox", { name: /^Backup 2/ })
     await expect(fallbackTwo).toBeVisible()
     // Each backup's Remove names its row, so the press cannot land on another.
@@ -336,7 +340,9 @@ test.describe("fallback routing", () => {
     await expect(page.getByRole("combobox", { name: /^Backup 2/ })).toHaveCount(
       0,
     )
-    await page.getByRole("button", { name: "Save" }).click()
+    await page.getByRole("button", { name: "Save fallback chain" }).click()
+    await expect(page.getByText("Unsaved changes")).toHaveCount(0)
+    await page.getByRole("link", { name: "← Routing" }).click()
     await expect(
       row(page, "Routing policies", POLICY)
         .getByRole("list", { name: "Backups" })
