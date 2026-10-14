@@ -1328,6 +1328,9 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
         full_name="Rex", active_organization_id=organization.id, email="rex@example.com"
     )
     identity_id = identity.id
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=organization.id, user_id=identity_id, role="member"
+    )
     token = generate_token()
     identity.password_reset_token_hash = hash_token(token)
     identity.password_reset_token_expires_at = datetime.now(UTC) + timedelta(hours=1)
@@ -1336,7 +1339,15 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
     async def run_one(index: int) -> object:
         async with sessions() as session:
             try:
-                await user_service.reset_password(session, token=token, new_password=f"racer-password-{index}")
+                await user_service.reset_password(
+                    session,
+                    GatewayConfig(),
+                    organizations=OrganizationService(
+                        session, membership_listener=None, workspace_listener=NullWorkspaceListener()
+                    ),
+                    token=token,
+                    new_password=f"racer-password-{index}",
+                )
                 return index
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc

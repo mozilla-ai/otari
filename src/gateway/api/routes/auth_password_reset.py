@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db
+from gateway.api.deps import OrganizationServiceDep, get_config, get_db
 from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
 from gateway.core.config import GatewayConfig
 from gateway.services.mail import MailNotConfiguredError
@@ -55,11 +55,14 @@ async def request_reset(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
 ) -> RequestPasswordResetResponse:
     """Mail a password-reset link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
-        await request_password_reset(db, config, background_tasks=background_tasks, email=body.email)
+        await request_password_reset(
+            db, config, organizations=organizations, background_tasks=background_tasks, email=body.email
+        )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     return RequestPasswordResetResponse(message=_RESET_REQUEST_MESSAGE)
@@ -70,10 +73,12 @@ async def confirm_reset(
     body: ResetPasswordRequest,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
 ) -> None:
     """Complete a password reset. Single-use: the token stops working after this."""
     throttle_public_auth(request)
-    await reset_password(db, token=body.token, new_password=body.new_password)
+    await reset_password(db, config, organizations=organizations, token=body.token, new_password=body.new_password)
 
 
 __all__ = ["router"]

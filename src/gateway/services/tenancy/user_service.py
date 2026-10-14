@@ -85,7 +85,7 @@ from gateway.services.tenancy.password_reset_email import render_password_reset_
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 from gateway.services.tenancy.tokens import generate_token, hash_token
 from gateway.services.tenancy.verification_email import render_verification_email
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 # The unique index alembic creates on ``user.email`` (c4b6d8e0f2a3).
 _EMAIL_UNIQUE_INDEX = "ix_user_email"
@@ -480,7 +480,12 @@ async def resend_verification_email(
 
 
 async def request_password_reset(
-    db: AsyncSession, config: GatewayConfig, *, background_tasks: BackgroundTasks, email: str
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    organizations: OrganizationService,
+    background_tasks: BackgroundTasks,
+    email: str,
 ) -> None:
     """Mail a password-reset link, or do nothing: the caller cannot tell which.
 
@@ -511,9 +516,7 @@ async def request_password_reset(
         or (
             not config.open_signup
             and identity.email_verified_at is None
-            and not await OrganizationService(
-                db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-            ).has_live_membership(identity.id)
+            and not await organizations.has_live_membership(identity.id)
         )
     ):
         await verify_absent_password_async(_TIMING_EQUALIZER)
@@ -535,7 +538,14 @@ async def request_password_reset(
     )
 
 
-async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> None:
+async def reset_password(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    organizations: OrganizationService,
+    token: str,
+    new_password: str,
+) -> None:
     """Complete a password reset. Single-use, the same way ``verify_email`` is.
 
     No current password to prove, unlike ``update_password``: that is the
@@ -552,6 +562,9 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
     and each receiving success, with the last write winning. The second racer
     through the lock re-resolves to nothing and raises instead. Same pattern
     as ``organization_service.accept_invitation`` and ``verify_email`` above.
+
+    Where ``open_signup`` is off, an unverified identity is held to signup's
+    rule again here, because the roster can drop it after the link was mailed.
     """
     users = UserRepository(db)
     identity = await users.get_by_reset_token_hash(hash_token(token))
@@ -562,6 +575,12 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
     if identity is None or identity.password_reset_token_expires_at is None or not identity.is_active:
         raise ResetTokenInvalidError
     if identity.password_reset_token_expires_at < datetime.now(UTC):
+        raise ResetTokenInvalidError
+    if (
+        not config.open_signup
+        and identity.email_verified_at is None
+        and not await organizations.has_live_membership(identity.id)
+    ):
         raise ResetTokenInvalidError
     validate_new_password(new_password)
 

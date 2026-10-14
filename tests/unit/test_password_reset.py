@@ -382,7 +382,7 @@ def _invite(client: TestClient, *, email: str) -> str:
 def test_reset_claims_an_identity_an_admin_added_and_nobody_signed_in_to(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Forgot password is what someone added by an admin tries first, and it used to mail nothing."""
+    """Forgot password is what someone added by an admin tries first, so it mails a link that claims the account."""
     with _client(tmp_path) as client:
         added = client.post(
             f"{API_ROOT}/organizations/me/members",
@@ -458,6 +458,28 @@ def test_reset_sends_nothing_for_a_revoked_invitee_where_signup_is_closed(
         assert status_code == 200
         assert "mail:console" not in log_text
     assert _reset_token_hash(tmp_path, email="eve@example.com") is None
+
+
+def test_reset_link_stops_working_once_the_invitation_is_revoked_where_signup_is_closed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A link mailed while the invitation was live does not claim the identity after the roster drops it."""
+    with _client(tmp_path) as client:
+        invitation_id = _invite(client, email="eve@example.com")
+        _, log_text = _request_reset(client, caplog, email="eve@example.com")
+        revoked = client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{invitation_id}", headers={"Otari-Key": MASTER_KEY}
+        )
+        assert revoked.status_code == 200, revoked.text
+
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm",
+            json={"token": _extract_token(log_text), "new_password": NEW_PASSWORD},
+        )
+        assert confirmed.status_code == 400, confirmed.text
+
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "eve@example.com", "password": NEW_PASSWORD})
+        assert signed_in.status_code != 200
 
 
 def test_reset_claims_a_revoked_invitee_where_signup_is_open(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
