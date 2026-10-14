@@ -414,7 +414,7 @@ are managed there.
 
 ## Limits and safety
 
-- `mcp_servers` and `mcp_server_ids` cannot be combined with `otari_code_execution` or `otari_web_search` in the same request yet
+- `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request, as [Combining tools](tools.md#combining-tools) describes. A server tool named like a built-in the request declares (`web_search`, `web_fetch` or `code_execution`) is refused with a `400`
 - `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` too, but a fixed one that repeats neither name, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check

@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.24.0/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.24.0/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.25.0/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.25.0/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 The default server address is `http://localhost:8000`. The API is mounted at
@@ -116,9 +116,9 @@ no way to send them back.
 Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
 header, streaming or not. In hybrid mode it is the platform's id for the
 request; a standalone gateway mints its own. A standalone gateway also names the
-provider instance that served the request, whether a fallback did, and how long
-it took, in `Otari-Provider`, `Otari-Attempt-Count`, `Otari-Fallback` and
-`Otari-Response-Duration-Ms`; see
+provider instance and model that served the request, whether a fallback did, and
+how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
+`Otari-Fallback` and `Otari-Response-Duration-Ms`; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
@@ -143,6 +143,19 @@ costs less than half a micro-dollar, such as a few tokens of a cheap embedding
 model, is recorded, debited and reported as `"0.000000"`. The usage row and
 the inline field always agree, and `pricing_source` still says the request was
 priced.
+
+### Who runs a built-in tool
+
+A request that declares code execution, web search or Anthropic's web fetch in a
+provider's own words (`code_execution_<date>`, `code_interpreter`,
+`web_search_<date>`, `web_fetch_<date>`) can say who runs it with the
+`Otari-Code-Execution`, `Otari-Web-Search` and `Otari-Web-Fetch` headers. Each
+takes `auto`, `otari` or `provider`, and each attempt of a fallback chain is
+decided on its own. `auto` keeps the provider's own tool on an attempt whose
+model runs it natively and runs Otari's on one that does not. `otari` always
+runs Otari's. `provider` always forwards the provider's own tool and never uses
+Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
+use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
 
 ### Provider-specific fields
 
@@ -277,7 +290,7 @@ fails the next retry runs in its place.
 - A key belongs to the API key that sent it (or, for the master key, to the
   billed user), so two callers never see each other's responses.
 - A retry has to be the same request: the same body, and the same
-  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Router`,
+  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`,
   `Otari-Router-Task`, `Otari-Conversation-Id` and `anthropic-beta` headers,
   since those change what the request does. The same key with a different body
   or different values for those headers is refused with 422, so send a new key
@@ -344,9 +357,100 @@ search tool directly. This is separate from `otari_web_search`, which lets a
 model request searches during a completion. Both are described in
 [Built-in tools](tools.md).
 
+The request and the response follow LiteLLM's `/v1/search`, so a client written
+for it works against Otari with its base URL changed. `include_raw` and
+`provider_options` are Otari's own.
+
+**Which tool.** The path names the tool. On `POST /api/v1/search`, the body's
+`search_tool_name` does, else the deployment's `web_search_default_tool`, else
+the only configured tool. A call that names no tool runs on the workspace's
+[organization search key](tools.md#organization-search-keys) when it has a usable
+one; a named call runs on that tool with its own key. Either way the tool decides
+the key allow-list entry (`<provider>:<tool>`), the `rate_limits` rules, the
+timeout and the usage row's model and provider.
+
+**Request.**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `query` | string, required | What to search for. |
+| `search_tool_name` | string | The tool, when the path does not name one. |
+| `max_results` | integer, at least 1 | How many results. 10 when unset. No upper bound of Otari's own: lowered to the workspace's ceiling when its web-access policy sets one, and to the provider's own maximum (100 for Exa). |
+| `search_domain_filter` | up to 20 domains | Only results from these domains and their subdomains; a leading `-` excludes a domain instead. Exa filters natively; for other providers the results are filtered after the search. |
+| `country` | two-letter ISO code | Localizes results where the provider can (Exa's `userLocation`); ignored where it cannot. |
+| `max_tokens_per_page` | integer, at least 1 | The page budget, at four characters a token: it cuts every result's `snippet`, and bounds the page text Exa returns, at most 10,000 characters. Unset, a budget of 1,024 tokens cuts every provider's snippet but Exa's, whose page text that budget already bounds. |
+| `include_raw` | boolean | Also return `raw`, the provider's whole response. Default `false`. |
+| `provider_options` | object | Native options of the provider serving the call, under its own names, as `GET /api/v1/search-tools/providers` lists them. They win over the tool's own options; the fields above win over them. An option the provider does not take, or takes only from the deployment, is a 400 naming it. A call that names no tool may be served by an organization key on another provider, so name the tool when the options are meant for one provider. |
+| `user` | string | Who the search is billed to; see below. |
+
+Until any-search has their adapters, `include_raw` and `provider_options` are a
+400 on a `searxng` tool and on a call a Tavily or Brave organization key serves;
+`false` and `{}` pass.
+
+**Response.**
+
+```json
+{
+  "object": "search",
+  "search_tool": "exa-search",
+  "results": [
+    {
+      "title": "Python 3.14.0 (final) is here!",
+      "url": "https://blog.python.org/2025/10/python-3140-final-is-here.html",
+      "snippet": "Python 3.14.0 is the newest major release ...",
+      "date": "2025-10-01T00:00:00.000Z",
+      "last_updated": null
+    }
+  ]
+}
+```
+
+`title` and `snippet` are always strings, empty when the provider gave none.
+`snippet` is the page text when the provider returned it, else its excerpt. `date`
+is the page's date as the provider gave it, else `null`, and `last_updated` is
+`null`. `raw` appears only when the request set `include_raw`.
+
 A service key's `user` field names one of its end users here as it does on chat
 completions: the search is billed to that end user, under the key's end-user
 budget, and counted by `rate_limits`.
+
+**Errors.** Where a refusal carries a stable code, it is in the
+`Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
+
+| Situation | Status | `Otari-Error-Code` |
+|---|---|---|
+| No credentials, or a key that is not valid | 401 | |
+| No tool is configured, the tool named is not, or several are and the call names none with no default | 400 | |
+| The tool cannot run as configured, such as a `searxng` tool with no address | 400 | |
+| A `provider_options` key the provider does not take from a request | 400 | |
+| `include_raw` or `provider_options` on a call that does not run on any-search yet | 400 | |
+| The master key without a `user` | 400 | |
+| The body fails schema validation, such as an `include_raw` that is not a boolean | 422 | `invalid_request` |
+| The workspace turned web search off | 403 | |
+| The key's allow-list does not name `<provider>:<tool>` | 403 | |
+| A `user` naming another user, where the key rejects a mismatch | 403 | |
+| A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
+| A budget refuses the search | 403 | `budget_exceeded` |
+| A rate limit is full | 429 | `rate_limited` |
+| The workspace's organization search key cannot be used as it is | 502 | |
+| The provider failed the search, or could not be reached | 502 | |
+| The workspace's stored web-access policy cannot be read | 503 | |
+
+Every provider failure is a 502 whose `detail` names no upstream detail, whatever
+the provider answered, unlike the completion routes, which classify a provider's
+failure. The 502 carries what is safe to show of the failure as headers instead,
+never a body, a URL or the query:
+
+| Header | Value |
+|---|---|
+| `Otari-Error-Provider` | The provider that failed, such as `exa`. |
+| `Otari-Error-Status` | The provider's own HTTP error status; absent when it gave none, as for a timeout, an error inside a successful answer, or an answer that could not be read. |
+| `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
+| `Otari-Error-Retryable` | `true` for a timeout, a 429 or a 5xx from the provider, when a retry may help; otherwise `false`. |
+
+On a search the workspace's organization key serves, they name the key's
+provider. A 502 for a failure that is not the provider's, such as an organization
+key this gateway cannot call, carries none of them.
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
@@ -444,6 +548,14 @@ either. A provider timeout answers 504, and any other provider failure 502
 `The provider closed the connection before answering`, or
 `The gateway could not connect to the provider`. A failure Otari cannot place
 keeps the fixed `LLM provider error`.
+A non-streamed Chat Completions response with no choices is a provider failure
+too, not an answer: it is refused with a 502,
+`The provider returned a completion with no choices` and the code
+`provider_error`, recorded on the usage row as an error, and a routing policy
+moves on to its next candidate. Inside a gateway tool loop this applies to the
+model's first response; a later one is returned as the answer, since the rounds
+before it were already billed. Messages and Responses are not checked: an empty
+`content` or `output` can be a legitimate answer there.
 When the request named a model alias,
 a provider message that names the alias's target names the alias instead.
 
@@ -476,30 +588,33 @@ reworded.
 
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
-| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token` |
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one |
 | `user_blocked` | 403 | The billed user is blocked | |
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
-| `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too | |
+| `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
-| `pricing_required` | 402 | `require_pricing` is on and the model has no price. An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
+| `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price. An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | The gateway holds no credential for the model's provider, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the credential in `config.yml`, through the dashboard, or in the environment variable the detail names | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
+| `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
 | `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
-| `provider_error` | 200, in a stream's error event only | The provider failed after the stream started, for a reason no other code names | |
+| `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
 | `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason`, or the connection carrying it was cut. The output received so far is truncated | |
 
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
-cost of $Y`); see [Budgets](access-control.md#budgets).
+cost of $Y`); see [Budgets](access-control.md#budgets). Its `Retry-After` is
+when the budget resets, which may be days away for a monthly budget; see
+[Refusals and `Retry-After`](access-control.md#refusals-and-retry-after).
 
 A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request

@@ -56,7 +56,7 @@ path); it is never sent to a standalone or third-party search backend.
 
 ## Grants
 
-> **Status.** Specified, not built. Otari sends and reads none of the fields in this section or in the two sections after it. Each capability adopts them when it ships, starting with files ([#1750](https://github.com/mozilla-ai/otari/issues/1750)). The rules behind them are in [ARCHITECTURE.md](https://github.com/mozilla-ai/otari/blob/v0.24.0/ARCHITECTURE.md#how-a-data-plane-reaches-what-it-does-not-own).
+> **Status.** Specified, not built. Otari sends and reads none of the fields in this section or in the two sections after it. Each capability adopts them when it ships, starting with files ([#1750](https://github.com/mozilla-ai/otari/issues/1750)). The rules behind them are in [ARCHITECTURE.md](https://github.com/mozilla-ai/otari/blob/v0.25.0/ARCHITECTURE.md#how-a-data-plane-reaches-what-it-does-not-own).
 
 The control plane never carries customer traffic. For each resource a request needs, it answers with one of three kinds of authority, and the data plane then goes to the resource directly.
 
@@ -145,7 +145,7 @@ Each front door has its own `aud` and its own `authorization_details` type, and 
 
 ## Try-Confirm/Cancel
 
-Where a capability leaves durable state, such as a stored file or a recorded trace, the exchange is Try-Confirm/Cancel (TCC), as [ARCHITECTURE.md](https://github.com/mozilla-ai/otari/blob/v0.24.0/ARCHITECTURE.md#durable-state-try-confirmcancel) describes. Each capability keeps its own endpoints (for files, prepare, finalize and abandon), and there is no generic TCC endpoint. The rules below apply to every one of them.
+Where a capability leaves durable state, such as a stored file or a recorded trace, the exchange is Try-Confirm/Cancel (TCC), as [ARCHITECTURE.md](https://github.com/mozilla-ai/otari/blob/v0.25.0/ARCHITECTURE.md#durable-state-try-confirmcancel) describes. Each capability keeps its own endpoints (for files, prepare, finalize and abandon), and there is no generic TCC endpoint. The rules below apply to every one of them.
 
 ### Idempotency
 
@@ -900,6 +900,7 @@ waiting forever for usage reports that will never arrive.
 | `conn_err` | `httpx.NetworkError`, or the OpenAI/Anthropic SDKs' own `APIConnectionError` |
 | `http_<code>` | Provider returned an HTTP status code (e.g. `http_429`, `http_401`) |
 | `http_<code>_billing` | Provider returned a 400 or 422 whose message identifies account billing exhaustion (e.g. Anthropic's "credit balance is too low"), or any 402 Payment Required, including one whose SDK discarded the response message. Reported as `http_400_billing` etc., keeping an empty provider wallet separable from a malformed request. Like every provider error before lock-in, it advances to the next attempt. |
+| `empty_completion` | The provider answered a non-streamed chat completion with no choices. It advances to the next candidate. |
 | `unknown` | Any other exception class. It still advances to the next candidate. |
 
 Treat `error_class` as an open set of strings, not a closed enum: new tags are

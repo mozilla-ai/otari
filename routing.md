@@ -35,6 +35,8 @@ refused with `424 provider_not_configured`. A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) counts as one too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
 request is refused with `424 provider_credential_rejected`.
+A Chat Completions candidate that answers with no choices has failed too, so the
+policy moves on to the next.
 
 ```yaml
 routing:
@@ -310,6 +312,7 @@ without reading the usage log:
 | Header | Value |
 | --- | --- |
 | `Otari-Provider` | The provider instance that served the request, by its configured name (`openai`, `azure-eu`). Never its base URL or credentials. |
+| `Otari-Model` | The model the serving provider was sent, as that provider names it (`gpt-5-mini`, `claude-haiku-4-5`), without the instance prefix. A routing policy, an alias, or a catalog ID keeps its own name in the body's `model`, so this is where a caller sees which model answered. A request naming a model reports that model. Left out when the name is not printable ASCII. |
 | `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
 | `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
 | `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening or its first chunk, since the headers go out then. |

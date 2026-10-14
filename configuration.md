@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.24.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.25.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -470,14 +470,15 @@ signed-in member's.
 | OpenAI, Azure OpenAI | `user` on chat completions, `safety_identifier` on Responses |
 | Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
 | Anthropic, including Azure and Vertex AI | `metadata.user_id` |
-| Bedrock | `requestMetadata.otari_user` |
+| Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model |
 | Any other provider with a native Messages API, on Messages | `metadata.user_id` |
 
-Bedrock's abuse detection reads no end-user identifier, but `requestMetadata`
-lands in the account's invocation logs, which is where the prompt ids in an AWS
-abuse report are traced back to a user. Every other provider gets nothing: some
-have no such field (Gemini, Vertex AI, Mistral), some run your own models, and
-for the rest an unknown field can fail the call. A Responses or Messages request
+Bedrock's abuse detection reads no end-user identifier, but `requestMetadata`,
+like the request body that carries `metadata.user_id`, lands in the account's
+invocation logs, which is where the prompt ids in an AWS abuse report are traced
+back to a user. Every other provider gets nothing: some have no such field
+(Gemini, Vertex AI, Mistral), some run your own models, and for the rest an
+unknown field can fail the call. A Responses or Messages request
 served as a chat completion gets that provider's chat field.
 
 Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
@@ -520,7 +521,9 @@ rejected instead of bypassing the budget. The 402 says what to do: with
 misspelled name, so it points at `GET /api/v1/models` and at adding a price;
 with it off, it offers both adding a price and turning the fallback on. A model
 whose provider has no credential at all is refused as `provider_not_configured`
-instead, since pricing it would not make it servable.
+instead, since pricing it would not make it servable, and a selector nothing
+resolves (no configured provider, alias, policy or catalog id) as `invalid_model`,
+since there is no model to price.
 
 With `require_pricing: false`, such a request is served, its model tokens carry
 no cost, and its response carries no inline `cost_usd`. The usage row records no
@@ -653,7 +656,10 @@ A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
 `providers:`. That rate is what a search reserves against the caller's budget
 before it runs; without one no dollars are held, though the search still holds
 one request against a request-count budget. A successful search settles at the
-provider's reported charge when it reports one, and at the rate otherwise.
+provider's reported charge when it reports one, and at the rate otherwise. A
+search a workspace's organization search key served is priced under
+`otari:web_search` instead, since the deployment cannot price the organization's
+own provider account.
 
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
@@ -706,8 +712,8 @@ request's price.
 ## Search tools
 
 `search_tools` names the deployment's search instances. Direct `POST /api/v1/search`
-calls use them by name, and the in-loop `otari_web_search` tool uses the default
-one (below). `fetch_tools` names fetch instances, for the `otari_web_fetch` tool
+calls use them by name, or the default one (below) when they name none, and the
+in-loop `otari_web_search` tool uses the default one. `fetch_tools` names fetch instances, for the `otari_web_fetch` tool
 and for enriching search results. Both can also be stored at runtime through
 `/api/v1/search-tools`, a fetch instance with `kind: fetch` and listed with
 `?kind=fetch`, and search instances from Tools too. A stored instance wins over
@@ -796,11 +802,12 @@ file or environment, then to the built-in default.
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
-In this release these settings are read and checked, and no request uses them yet.
-They take effect in later releases: `web_fetch_default_tool` when web fetch moves
-onto the fetch instances, `web_search_default_tool` for unnamed direct calls when
-the direct endpoint does, and the in-loop parts of the other two, with a search
-instance's `fetch_tool`, when in-loop search does.
+In this release `web_search_default_tool` picks the tool for a direct
+`POST /api/v1/search` that names none, and no other request uses these settings
+yet. The rest take effect in later releases: `web_fetch_default_tool` when web
+fetch moves onto the fetch instances, and the in-loop parts of
+`web_search_default_tool` and `web_search_max_calls`, with a search instance's
+`fetch_tool`, when in-loop search does.
 
 After that, the old in-loop backend still serves some requests until it is
 removed. In that period `web_fetch_default_tool` governs every fetch tool call,
@@ -869,7 +876,9 @@ laptop.
 Mail is optional. An invitation that is not emailed returns its accept link, and an invitee new
 to the deployment chooses a password on the page it opens, so members can join
 a deployment with no transport configured. Without mail, signup, email verification, and password
-reset are unavailable.
+reset are unavailable. A member who forgot their password gets back in through a password link an
+operator creates from the dashboard's Accounts page and shares with them, or by signing in with a
+provider where one is configured.
 
 SMTP needs the deployment's public URL, a host, and a sender:
 
@@ -883,6 +892,19 @@ mail_from_email: "otari@example.com"
 smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
+
+Invitation email is limited per organization and per recipient address over 24
+hours, so an organization anyone can create cannot use the deployment's sender to
+mail strangers at will. An invitation over a limit is still created and its link
+returned to share by hand. Both limits are counted in `rate_limit_store`, and
+`null` turns one off:
+
+```yaml
+invitation_mail_limit_per_organization: 250   # default
+invitation_mail_limit_per_address: 5          # default, from every organization together
+```
+
+See [Invitations](access-control.md#invitations).
 
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
@@ -917,9 +939,29 @@ and guardrail configuration. Common startup settings are:
 - `web_search_allow_private_hosts`
 - `provider_allow_private_hosts`
 - `provider_endpoints_enabled` (see [Provider endpoints](provider-endpoints.md))
+- `web_search_workspace_default` and `code_execution_workspace_default`
+  (below)
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
 [Guardrails](guardrails.md) for behavior and security boundaries.
+
+### What a workspace with no tool policy gets
+
+A deployment that serves several tenants from one search key or one sandbox can
+make web access and code execution something each workspace turns on, rather than
+something each workspace may turn off:
+
+```yaml
+web_search_workspace_default: false      # OTARI_WEB_SEARCH_WORKSPACE_DEFAULT
+code_execution_workspace_default: false  # OTARI_CODE_EXECUTION_WORKSPACE_DEFAULT
+```
+
+Each decides only for a workspace with no stored policy: `false` refuses the
+tool there as a stored disabled policy would, and a workspace owner or admin
+turns it on from the Tools pages or the workspace policy API. A stored policy
+always wins. Unset, the tools are on, except on a hosted deployment, where they
+are off. See [Built-in tools](tools.md#per-workspace-web-access-policy) for what
+each policy covers.
 
 ## Documentation links
 
@@ -1016,7 +1058,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.24.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.25.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

@@ -33,6 +33,7 @@
   * [Chat](api-endpoints/chat.md)
   * [Decisions](api-endpoints/decisions.md)
   * [Embeddings](api-endpoints/embeddings.md)
+  * [End users](api-endpoints/end-users.md)
   * [Feedback](api-endpoints/feedback.md)
   * [Files](api-endpoints/files.md)
   * [Health](api-endpoints/health.md)

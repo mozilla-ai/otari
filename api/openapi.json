@@ -49,6 +49,12 @@
       "AcceptInvitationResultPublic": {
         "description": "What accepting produces: enough for the accept page to say where the visitor landed.\n\nNo session and no token. When the request carried a password, the identity\ncan sign in straight away; otherwise it stays password-less until claimed by\nsignup or a provider sign-in.",
         "properties": {
+          "can_sign_in": {
+            "default": true,
+            "description": "Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.",
+            "title": "Can Sign In",
+            "type": "boolean"
+          },
           "organization_name": {
             "title": "Organization Name",
             "type": "string"
@@ -62,6 +68,24 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "verification_pending": {
+            "default": false,
+            "description": "Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.",
+            "title": "Verification Pending",
+            "type": "boolean"
+          },
+          "ways_in": {
+            "description": "When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
+            "items": {
+              "enum": [
+                "provider",
+                "password_reset"
+              ],
+              "type": "string"
+            },
+            "title": "Ways In",
+            "type": "array"
           }
         },
         "required": [
@@ -296,7 +320,7 @@
         "type": "object"
       },
       "ActiveOrganizationMemberCreateResultPublic": {
-        "description": "The outcome of adding a member.\n\nThe platform answers ``invited`` on both its branches, because being added\nthere always needs acceptance: a known address gets an ``invited``\nmembership, an unknown one an emailed invitation. This edition has neither\nan invitation to send nor a way to accept one, so it answers on the other\narm of the same union, ``active``, and the invitation fields stay null until\nthat flow rehomes.",
+        "description": "The outcome of adding a member directly.\n\nThe platform answers ``invited`` on both its branches, because being added\nthere always needs acceptance. A direct add here needs none, so it answers\non the other arm of the same union, ``active``, and the invitation fields\nstay null; inviting answers ``InviteOrganizationMemberResultPublic``.",
         "properties": {
           "attribution_user_id": {
             "anyOf": [
@@ -418,7 +442,7 @@
         "type": "object"
       },
       "ActiveOrganizationMemberPublic": {
-        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, with two consequences of the OSS line:\n``email`` is nullable here (a local operator identity has no sign-in\naddress), and ``invitation_id`` is always null until the invitation flow\nrehomes, which is what fills it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
+        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, except that ``email`` is nullable here (a\nlocal operator identity has no sign-in address).\n\n``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's\ncurrent invitation, which may have expired, so the roster can offer to\nrevoke or reissue it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
         "properties": {
           "attribution": {
             "anyOf": [
@@ -467,6 +491,19 @@
               }
             ],
             "title": "Full Name"
+          },
+          "invitation_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the invitation in invitation_id expires, or expired. Null when there is none.",
+            "title": "Invitation Expires At"
           },
           "invitation_id": {
             "anyOf": [
@@ -6414,6 +6451,37 @@
         "title": "EmbeddingUsage",
         "type": "object"
       },
+      "EndUserBudgetPublic": {
+        "description": "A budget a service key may put its end users on, and how many of them are on it.",
+        "properties": {
+          "blocked_end_user_count": {
+            "title": "Blocked End User Count",
+            "type": "integer"
+          },
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
+          },
+          "end_user_count": {
+            "description": "End users of the key's user on this budget, blocked ones included",
+            "title": "End User Count",
+            "type": "integer"
+          },
+          "is_default": {
+            "description": "Whether a new end user starts here when its request names no budget",
+            "title": "Is Default",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "budget_id",
+          "is_default",
+          "end_user_count",
+          "blocked_end_user_count"
+        ],
+        "title": "EndUserBudgetPublic",
+        "type": "object"
+      },
       "EndUserPublic": {
         "description": "An end user of a service key, addressed by the id the service named it by.",
         "properties": {
@@ -7632,6 +7700,11 @@
       "InvitationPreviewPublic": {
         "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nand the role on offer. The token is the caller's only credential here, not\na session, so this carries nothing that identifies who sent it or any\nother member.",
         "properties": {
+          "can_sign_in": {
+            "description": "Whether the invited address can already sign in, with a password or through a provider.",
+            "title": "Can Sign In",
+            "type": "boolean"
+          },
           "email": {
             "title": "Email",
             "type": "string"
@@ -7642,7 +7715,7 @@
             "type": "string"
           },
           "needs_password": {
-            "description": "Whether the invited address has never signed in here, so accepting should also set its password. False when the address already has a way in, and then accept refuses one.",
+            "description": "Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.",
             "title": "Needs Password",
             "type": "boolean"
           },
@@ -7653,6 +7726,18 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "ways_in": {
+            "description": "When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.",
+            "items": {
+              "enum": [
+                "provider",
+                "password_reset"
+              ],
+              "type": "string"
+            },
+            "title": "Ways In",
+            "type": "array"
           }
         },
         "required": [
@@ -7660,7 +7745,9 @@
           "organization_name",
           "role",
           "expires_at",
-          "needs_password"
+          "needs_password",
+          "can_sign_in",
+          "ways_in"
         ],
         "title": "InvitationPreviewPublic",
         "type": "object"
@@ -7741,8 +7828,14 @@
             "title": "Invitation Id",
             "type": "string"
           },
+          "mail_limited": {
+            "default": false,
+            "description": "Whether the email was held back because the organization or the address reached its invitation mail limit for the day. Share the link yourself, or reissue the invitation later to email a new one.",
+            "title": "Mail Limited",
+            "type": "boolean"
+          },
           "mail_sent": {
-            "description": "Whether the invitation email was actually dispatched. False when mail is not configured, or the send itself failed.",
+            "description": "Whether the invitation email was actually dispatched. False when mail is not configured, the send itself failed, or mail_limited.",
             "title": "Mail Sent",
             "type": "boolean"
           },
@@ -8171,6 +8264,46 @@
           "missing"
         ],
         "title": "MailSettings",
+        "type": "object"
+      },
+      "MailedLinkRequest": {
+        "description": "A token from a verification or password reset link.",
+        "properties": {
+          "token": {
+            "description": "The token from the link.",
+            "maxLength": 512,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "MailedLinkRequest",
+        "type": "object"
+      },
+      "MailedLinkStatus": {
+        "description": "Whether a mailed verification or password reset link can still be used.\n\nNOTE: ``INVALID`` covers a link that was never issued and one already used, because a used link's hash is gone.",
+        "enum": [
+          "valid",
+          "expired",
+          "invalid"
+        ],
+        "title": "MailedLinkStatus",
+        "type": "string"
+      },
+      "MailedLinkStatusResponse": {
+        "description": "Whether the link can still be used. Checking it does not use it.",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/MailedLinkStatus",
+            "description": "valid, expired, or invalid. invalid covers a link that was never issued, one already used, and one whose account was deactivated."
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "MailedLinkStatusResponse",
         "type": "object"
       },
       "MaintenanceMode": {
@@ -9527,6 +9660,12 @@
             "maxLength": 512,
             "title": "State",
             "type": "string"
+          },
+          "terms_accepted": {
+            "default": false,
+            "description": "Whether the person accepted this deployment's terms before going to the provider. Required where the bootstrap reports a terms_url and the sign-in creates the account, or is the first way in to one nobody has claimed yet; ignored otherwise.",
+            "title": "Terms Accepted",
+            "type": "boolean"
           }
         },
         "required": [
@@ -9540,16 +9679,29 @@
         "description": "A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).\n\nThe same three fields ``POST /api/v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
         "properties": {
           "active_organization_id": {
-            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
-            "format": "uuid",
-            "title": "Active Organization Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none, as an invitee who has not accepted yet is not.",
+            "title": "Active Organization Id"
           },
           "expires_at": {
             "description": "When the session cookie stops being accepted.",
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
+          },
+          "password_removed": {
+            "default": false,
+            "description": "Whether this sign-in removed a password the account held: the first provider sign-in on an address nobody had proven removes the password set before then. The person can set a new one from Account settings.",
+            "title": "Password Removed",
+            "type": "boolean"
           },
           "user_id": {
             "description": "The identity this session speaks for.",
@@ -12104,6 +12256,21 @@
         "title": "OrganizationPublic",
         "type": "object"
       },
+      "OrganizationRefusal": {
+        "description": "The body of a request the organizations domain refuses.",
+        "properties": {
+          "detail": {
+            "description": "Why the request was refused.",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "OrganizationRefusal",
+        "type": "object"
+      },
       "OrganizationScopedBudgetCreate": {
         "description": "Attach one of the organization's budgets to a scope inside it.",
         "properties": {
@@ -12464,10 +12631,17 @@
         "description": "A dashboard session minted by a passkey (the token travels only in the cookie).\n\nThe same three fields ``POST /api/v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
         "properties": {
           "active_organization_id": {
-            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
-            "format": "uuid",
-            "title": "Active Organization Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none, as an invitee who has not accepted yet is not.",
+            "title": "Active Organization Id"
           },
           "expires_at": {
             "description": "When the session cookie stops being accepted.",
@@ -12488,6 +12662,40 @@
           "active_organization_id"
         ],
         "title": "PasskeySessionResponse",
+        "type": "object"
+      },
+      "PasswordLinkPublic": {
+        "description": "A single-use link that sets an account's password, and whether it was mailed.",
+        "properties": {
+          "expires_at": {
+            "description": "When the link stops working.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it records the address as vouched for rather than proven, since the mailbox never saw the link.",
+            "title": "Link"
+          },
+          "mail_sent": {
+            "description": "Whether the link was mailed to the account's address. False when this deployment cannot mail links, or the send failed.",
+            "title": "Mail Sent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mail_sent",
+          "expires_at"
+        ],
+        "title": "PasswordLinkPublic",
         "type": "object"
       },
       "PasswordResponse": {
@@ -14841,7 +15049,7 @@
       "RequestPasswordResetResponse": {
         "properties": {
           "message": {
-            "description": "The same message whether or not the address has a password to reset.",
+            "description": "The same message whether or not a link was sent.",
             "title": "Message",
             "type": "string"
           }
@@ -15212,6 +15420,12 @@
             "minLength": 8,
             "title": "New Password",
             "type": "string"
+          },
+          "terms_accepted": {
+            "default": false,
+            "description": "Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url and the account has not accepted them yet.",
+            "title": "Terms Accepted",
+            "type": "boolean"
           },
           "token": {
             "description": "The token from the reset link.",
@@ -16373,7 +16587,7 @@
         "type": "object"
       },
       "SearchRequest": {
-        "description": "A search request, following LiteLLM's ``/v1/search`` body.",
+        "description": "A direct search request: LiteLLM's ``/v1/search`` body, plus ``include_raw`` and ``provider_options``.",
         "example": {
           "max_results": 5,
           "query": "otari llm gateway"
@@ -16393,10 +16607,15 @@
             "description": "Two-letter ISO country code to localize results to",
             "title": "Country"
           },
+          "include_raw": {
+            "default": false,
+            "description": "Also return the provider's whole response, as raw.",
+            "title": "Include Raw",
+            "type": "boolean"
+          },
           "max_results": {
             "anyOf": [
               {
-                "maximum": 20.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -16404,7 +16623,7 @@
                 "type": "null"
               }
             ],
-            "description": "Maximum number of results to return",
+            "description": "Maximum number of results to return; 10 when unset. Lowered to the workspace's ceiling when it sets one, and to the provider's own maximum.",
             "title": "Max Results"
           },
           "max_tokens_per_page": {
@@ -16419,6 +16638,19 @@
             ],
             "description": "Approximate cap on the page content returned per result",
             "title": "Max Tokens Per Page"
+          },
+          "provider_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Native options for the provider that serves the call, under the provider's own names, as GET /api/v1/search-tools/providers lists them. An option the provider does not take from a request is refused with a 400. On a call that names no tool they go to whichever provider serves it, so name the tool when they are meant for one provider.",
+            "title": "Provider Options"
           },
           "query": {
             "description": "The search query",
@@ -16451,7 +16683,7 @@
                 "type": "null"
               }
             ],
-            "description": "Configured search tool to run against. Optional when exactly one tool is configured, and ignored on POST /api/v1/search/{search_tool_name}.",
+            "description": "Configured search tool to run against. Optional when the deployment names a default (web_search_default_tool) or has exactly one tool, and ignored on POST /api/v1/search/{search_tool_name}.",
             "title": "Search Tool Name"
           },
           "user": {
@@ -16474,13 +16706,26 @@
         "type": "object"
       },
       "SearchResponse": {
-        "description": "A completed search.",
+        "description": "A completed direct search.",
         "properties": {
           "object": {
             "const": "search",
             "default": "search",
             "title": "Object",
             "type": "string"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's whole response, untouched; only when the request set include_raw.",
+            "title": "Raw"
           },
           "results": {
             "items": {
@@ -16503,7 +16748,7 @@
         "type": "object"
       },
       "SearchResultItem": {
-        "description": "One search result.",
+        "description": "One search result, shaped as LiteLLM's ``SearchResult``.",
         "properties": {
           "date": {
             "anyOf": [
@@ -16514,9 +16759,10 @@
                 "type": "null"
               }
             ],
+            "description": "The page's date, as the provider gave it.",
             "title": "Date"
           },
-          "snippet": {
+          "last_updated": {
             "anyOf": [
               {
                 "type": "string"
@@ -16525,18 +16771,18 @@
                 "type": "null"
               }
             ],
-            "title": "Snippet"
+            "description": "Always null: no provider reports it.",
+            "title": "Last Updated"
+          },
+          "snippet": {
+            "description": "The page text the provider returned, else its excerpt, cut to the page budget.",
+            "title": "Snippet",
+            "type": "string"
           },
           "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
+            "description": "The page's title; empty when the provider gave none.",
+            "title": "Title",
+            "type": "string"
           },
           "url": {
             "title": "Url",
@@ -16544,7 +16790,9 @@
           }
         },
         "required": [
-          "url"
+          "title",
+          "url",
+          "snippet"
         ],
         "title": "SearchResultItem",
         "type": "object"
@@ -16699,7 +16947,7 @@
                 "type": "null"
               }
             ],
-            "description": "When not ok, the error's tag: timeout, network, http_error, invalid_response, or the provider's own.",
+            "description": "When not ok, the error's tag: timeout, network, http_error, invalid_response, unexpected_response (an answer whose shape the provider changed), or the provider's own.",
             "title": "Error"
           },
           "hits": {
@@ -16829,10 +17077,17 @@
         "description": "A freshly minted dashboard session (the token travels only in the cookie).",
         "properties": {
           "active_organization_id": {
-            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
-            "format": "uuid",
-            "title": "Active Organization Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none, as an invitee who has not accepted yet is not.",
+            "title": "Active Organization Id"
           },
           "expires_at": {
             "description": "When the session cookie stops being accepted.",
@@ -16885,7 +17140,7 @@
                 "type": "null"
               }
             ],
-            "description": "The address to sign in with. Required when the identity has none, which is the state first boot leaves the operator in, including when the master key is what authenticates the call. Resubmitting the address the identity already holds is accepted and ignored; only a *different* address is refused, because changing one is not supported yet.",
+            "description": "The address to sign in with. Required when the identity has none, which is the state first boot leaves the operator in, including when the master key is what authenticates the call. Resubmitting the address the identity already holds is accepted and ignored; only a *different* address is refused, because changing one is not supported yet. It is always the caller's own address, the operator's when the master key authenticates the call, and never names another account.",
             "title": "Email"
           },
           "new_password": {
@@ -17040,7 +17295,7 @@
           },
           "terms_accepted": {
             "default": false,
-            "description": "Whether the caller accepted this deployment's terms.",
+            "description": "Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url.",
             "title": "Terms Accepted",
             "type": "boolean"
           }
@@ -21142,6 +21397,12 @@
       },
       "VerifyEmailRequest": {
         "properties": {
+          "password": {
+            "description": "The password chosen at signup. The link verifies the address only together with it, so a link that reaches someone who did not sign up verifies nothing.",
+            "maxLength": 1024,
+            "title": "Password",
+            "type": "string"
+          },
           "token": {
             "description": "The token from the verification link.",
             "maxLength": 512,
@@ -21150,7 +21411,8 @@
           }
         },
         "required": [
-          "token"
+          "token",
+          "password"
         ],
         "title": "VerifyEmailRequest",
         "type": "object"
@@ -21450,6 +21712,10 @@
             ],
             "title": "Created At"
           },
+          "default_enabled": {
+            "title": "Default Enabled",
+            "type": "boolean"
+          },
           "default_purpose_hint": {
             "anyOf": [
               {
@@ -21547,6 +21813,7 @@
           "workspace_id",
           "configured",
           "sandbox_configured",
+          "default_enabled",
           "allowed_images",
           "available_tools",
           "enabled",
@@ -22457,6 +22724,10 @@
             ],
             "title": "Created At"
           },
+          "default_enabled": {
+            "title": "Default Enabled",
+            "type": "boolean"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -22520,6 +22791,7 @@
           "workspace_id",
           "configured",
           "web_search_configured",
+          "default_enabled",
           "enabled",
           "max_results",
           "purpose_hint",
@@ -22574,14 +22846,14 @@
             "anyOf": [
               {
                 "exclusiveMinimum": 0.0,
-                "maximum": 20.0,
+                "maximum": 2147483647.0,
                 "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Search only: ceiling on results one search returns; only ever lowers the effective limit, so at most 20",
+            "description": "Search only: ceiling on results one search returns, through otari_web_search and POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the provider's own maximum is the only limit.",
             "title": "Max Results"
           },
           "provider_options": {
@@ -22845,7 +23117,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
     "title": "otari",
-    "version": "0.24.0"
+    "version": "0.25.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -23005,6 +23277,58 @@
           }
         ],
         "summary": "Update Deployment User",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/password-link": {
+      "post": {
+        "description": "Give an account a single-use link that sets its password, for someone who cannot sign in.\n\nWhere this deployment can mail links, the link goes to the account's address and is not returned, the\nsame as \"Forgot your password?\". Where it cannot, or the send fails, the response carries the link for\nyou to pass on, which is how a member who forgot their password gets back in on a deployment without\nmail. A password chosen through a link that was not mailed records the address as vouched for rather\nthan proven. A new link replaces any earlier reset link for the account.\n\nRefused with 409 for a deactivated account, one with no address, one that has no password and signs in\nwith a provider or a passkey (its owner adds a password once signed in), and, where open_signup is\ndisabled, an unverified address no organization still has as a member or invitee.",
+        "operationId": "admin-issue_password_link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordLinkPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Issue Password Link",
         "tags": [
           "admin"
         ]
@@ -23907,7 +24231,7 @@
     },
     "/api/v1/auth/oauth/{provider}/callback": {
       "post": {
-        "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the provider's account resolves to,\nexactly as a password sign-in binds one to the identity that authenticated,\nso every request it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and rendered by the tenancy error handler. Like\nthe passkey route there is no separate post-failure throttle: this route is\nthrottled unconditionally on the way in, because there is no legitimate\ncaller here whose correct credential must never be blocked. An authorization\ncode is single-use and minted by a redirect, not something a person retries\nby hand.\n\n**Maintenance mode freezes this the way it freezes the other two sign-ins.**\nThe freeze is on starting a session, not on a credential, so an OAuth sign-in\nhas to answer to it or the switch is bypassable by anybody holding a Google\naccount. Refused before the exchange, so a frozen deployment makes no\noutbound call, spends nobody's authorization code, and counts no auth\nfailure: nobody failed to authenticate, the gateway declined to try.",
+        "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the provider's account resolves to,\nexactly as a password sign-in binds one to the identity that authenticated,\nso every request it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and rendered by the tenancy error handler. Like\nthe passkey route there is no separate post-failure throttle: this route is\nthrottled unconditionally on the way in, because there is no legitimate\ncaller here whose correct credential must never be blocked. An authorization\ncode is single-use and minted by a redirect, not something a person retries\nby hand.\n\n**Maintenance mode freezes this the way it freezes the other two sign-ins.**\nThe freeze is on starting a session, not on a credential, so an OAuth sign-in\nhas to answer to it or the switch is bypassable by anybody holding a Google\naccount. Refused before the exchange, so a frozen deployment makes no\noutbound call, spends nobody's authorization code, and counts no auth\nfailure: nobody failed to authenticate, the gateway declined to try.\n\nA sign-in that created the account, or is the first way in to one, is\nreported to ``GrowthSignalPort`` as a signup once it has committed. Where\nthe deployment publishes terms, that sign-in is refused with\n``terms_not_accepted`` unless the body carries ``terms_accepted``, and\nnothing it would have created is kept.",
         "operationId": "auth-callback",
         "parameters": [
           {
@@ -23963,7 +24287,7 @@
     },
     "/api/v1/auth/password": {
       "put": {
-        "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. The operator setting a password\nfor the first time retires master-key sign-in on this deployment.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
+        "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. The operator setting a password\nfor the first time retires master-key sign-in on this deployment.\n\nWith the master key the caller is the deployment's operator, so an ``email``\nsent then is the operator's own sign-in address: on an unclaimed deployment it\nclaims the deployment with that address. This never sets another account's\npassword; an address another account holds is refused with 409. To help a\nmember who forgot their password, send them a link with\n``POST /api/v1/admin/users/{user_id}/password-link``.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
         "operationId": "auth-set_dashboard_password",
         "requestBody": {
           "content": {
@@ -24055,7 +24379,7 @@
     },
     "/api/v1/auth/password/reset/confirm": {
       "post": {
-        "description": "Complete a password reset. Single-use: the token stops working after this.",
+        "description": "Complete a password reset, or choose a first password. Single-use: the token stops working after this.\n\nNot throttled with the address-bearing routes, for the reason the\nverification route gives: the token is the proof.",
         "operationId": "auth-confirm_reset",
         "requestBody": {
           "content": {
@@ -24088,7 +24412,85 @@
         ]
       }
     },
+    "/api/v1/auth/password/reset/validate": {
+      "post": {
+        "description": "Say whether a password reset link can still be used, without using it.",
+        "operationId": "auth-validate_reset_link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailedLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailedLinkStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Validate Reset Link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/profile": {
+      "get": {
+        "description": "Report who the caller is, whether or not they belong to an organization.\n\nThe same shape ``GET /api/v1/organizations/me`` carries as ``caller``, for\nan identity that context cannot describe because it has no active\nmembership.",
+        "operationId": "auth-get_own_profile",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerIdentityPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Own Profile",
+        "tags": [
+          "auth"
+        ]
+      },
       "patch": {
         "description": "Change the name the caller is known by on this deployment.\n\nAlways the caller's own identity. The same shape\n``GET /api/v1/organizations/me`` carries as ``caller`` comes back, so a\nclient can seat the answer where it read the old value rather than refetch\nthe whole membership context.",
         "operationId": "auth-update_own_profile",
@@ -24237,7 +24639,7 @@
     },
     "/api/v1/auth/signup": {
       "post": {
-        "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.",
+        "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.\n\nRefused with a 400 where the deployment publishes terms and ``terms_accepted``\nis not set, whatever the address.",
         "operationId": "auth-signup",
         "requestBody": {
           "content": {
@@ -24279,7 +24681,7 @@
     },
     "/api/v1/auth/verify-email": {
       "post": {
-        "description": "Confirm an address from its verification link, lifting the sign-in gate.",
+        "description": "Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.\n\nOne refusal for a link that is unknown, expired or spent and for a password\nthat does not match, and a refusal consumes nothing. Refusals are counted\nper client IP and answer 429 once over the limit, so a held link cannot be\nused to guess its password; a verification that succeeds is never counted.",
         "operationId": "auth-verify_email_route",
         "requestBody": {
           "content": {
@@ -24314,6 +24716,56 @@
           }
         },
         "summary": "Verify Email Route",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-email/validate": {
+      "post": {
+        "description": "Say whether an email verification link can still be used, without using it.\n\nVerifying still needs the password chosen at signup, which this does not check.",
+        "operationId": "auth-validate_verification_link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailedLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailedLinkStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Validate Verification Link",
         "tags": [
           "auth"
         ]
@@ -25899,6 +26351,495 @@
         ]
       }
     },
+    "/api/v1/end-user-budgets": {
+      "get": {
+        "description": "List the budgets the calling service key may put its end users on, with how many end users each holds.\n\nRequires a service key. The counts cover the end users of the key's user, blocked ones included and deleted\nones not.",
+        "operationId": "end-users-list_end_user_budgets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserBudgetPublic"
+                  },
+                  "title": "Response End-Users-List End User Budgets",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List End User Budgets",
+        "tags": [
+          "end-users"
+        ]
+      }
+    },
+    "/api/v1/end-users": {
+      "get": {
+        "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed. ``external_id`` reads one end user by any id, one containing '/'\nincluded, as a list of zero or one.",
+        "operationId": "end-users-list_end_users",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only end users on this budget.",
+            "in": "query",
+            "name": "budget_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users on this budget.",
+              "title": "Budget Id"
+            }
+          },
+          {
+            "description": "Only end users that are, or are not, blocked.",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users that are, or are not, blocked.",
+              "title": "Blocked"
+            }
+          },
+          {
+            "description": "Only the end user the service names with this `user` value: zero or one.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user the service names with this `user` value: zero or one.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserPublic"
+                  },
+                  "title": "Response End-Users-List End Users",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List End Users",
+        "tags": [
+          "end-users"
+        ]
+      },
+      "patch": {
+        "description": "Block, unblock or move the end user named by ``external_id``.\n\nThe same as ``PATCH /end-users/{external_id}``, for any id, one containing '/' included.",
+        "operationId": "end-users-update_end_user_by_query",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+            "in": "query",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update End User By Query",
+        "tags": [
+          "end-users"
+        ]
+      },
+      "put": {
+        "description": "Put the end user named by ``external_id`` on a budget from the key's list, creating it if needed.\n\nThe same as ``PUT /end-users/{external_id}``, for any id, one containing '/' included.",
+        "operationId": "end-users-put_end_user_by_query",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+            "in": "query",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "The end user was created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put End User By Query",
+        "tags": [
+          "end-users"
+        ]
+      }
+    },
+    "/api/v1/end-users/{external_id}": {
+      "get": {
+        "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404. An id with a '.' or '..'\nsegment is refused with 400; ``GET /end-users?external_id=`` reads any end user.",
+        "operationId": "end-users-get_end_user",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get End User",
+        "tags": [
+          "end-users"
+        ]
+      },
+      "patch": {
+        "description": "Block, unblock or move an end user of the calling service key.\n\nRequires a service key. A move restarts the end user's period on the new budget but keeps what it has spent and\nused so far. The budget must be on the key's ``end_user_budget_ids``, or the move is refused with 403 and\n``end_user_budget_not_allowed``. An id with a '.' or '..' segment is refused with 400;\n``PATCH /end-users?external_id=`` takes any id.",
+        "operationId": "end-users-update_end_user",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update End User",
+        "tags": [
+          "end-users"
+        ]
+      },
+      "put": {
+        "description": "Put an end user of the calling service key on a budget from the key's list, creating it if needed.\n\nRequires a service key. Answers 201 when the end user was created. An end user already on the budget keeps its\ncurrent period, so repeating the call changes nothing. A budget that is not on the key's ``end_user_budget_ids``\nis refused with 403 and ``end_user_budget_not_allowed``. An id with a '.' or '..' segment is refused with 400;\n``PUT /end-users?external_id=`` takes any id.",
+        "operationId": "end-users-put_end_user",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "The end user was created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put End User",
+        "tags": [
+          "end-users"
+        ]
+      }
+    },
     "/api/v1/feedback": {
       "post": {
         "description": "Send feedback privately to the Otari team.",
@@ -26595,7 +27536,7 @@
     },
     "/api/v1/invitations/accept": {
       "post": {
-        "description": "Accept a pending invitation, resolving it to an active membership and optionally setting a first password.",
+        "description": "Accept a pending invitation, resolving it to an active membership and optionally setting a first password.\n\nSetting a first password makes the account usable for the first time, so it\nis reported to ``GrowthSignalPort`` as a signup.",
         "operationId": "invitations-accept_invitation",
         "requestBody": {
           "content": {
@@ -26965,9 +27906,305 @@
         ]
       }
     },
+    "/api/v1/keys/{key_id}/end-users": {
+      "get": {
+        "description": "List the end users of a service key, oldest first.\n\nEnd users belong to the key's user, so every service key of one user lists the same end users. A deleted end\nuser is not listed. ``external_id`` reads one end user by any id, one containing '/' included, as a list of zero\nor one.",
+        "operationId": "keys-list_end_users",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only end users on this budget.",
+            "in": "query",
+            "name": "budget_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users on this budget.",
+              "title": "Budget Id"
+            }
+          },
+          {
+            "description": "Only end users that are, or are not, blocked.",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users that are, or are not, blocked.",
+              "title": "Blocked"
+            }
+          },
+          {
+            "description": "Only the end user the service names with this `user` value: zero or one.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user the service names with this `user` value: zero or one.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserPublic"
+                  },
+                  "title": "Response Keys-List End Users",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List End Users",
+        "tags": [
+          "keys"
+        ]
+      },
+      "patch": {
+        "description": "Block, unblock or move the end user of a service key named by ``external_id``.\n\nThe same as ``PATCH /keys/{key_id}/end-users/{external_id}``, for any id, one containing '/' included.",
+        "operationId": "keys-update_end_user_by_query",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+            "in": "query",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update End User By Query",
+        "tags": [
+          "keys"
+        ]
+      },
+      "put": {
+        "description": "Put the end user named by ``external_id`` on a budget from the key's list, creating it if it does not exist yet.\n\nThe same as ``PUT /keys/{key_id}/end-users/{external_id}``, for any id, one containing '/' included.",
+        "operationId": "keys-put_end_user_by_query",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+            "in": "query",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field, any id, '/' included",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "The end user was created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put End User By Query",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
     "/api/v1/keys/{key_id}/end-users/{external_id}": {
       "get": {
-        "description": "Get an end user of a service key by the id the service names it by.\n\nEnd users belong to the key's user, so every service key of one user reaches the same end users.",
+        "description": "Get an end user of a service key by the id the service names it by.\n\nEnd users belong to the key's user, so every service key of one user reaches the same end users. An id with a\n'.' or '..' segment is refused with 400; ``GET /keys/{key_id}/end-users?external_id=`` reads any end user.",
         "operationId": "keys-get_end_user",
         "parameters": [
           {
@@ -27027,7 +28264,7 @@
         ]
       },
       "patch": {
-        "description": "Block, unblock or move an end user of a service key.\n\nA move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users\nAPI does. The budget must be on the key's ``end_user_budget_ids``.",
+        "description": "Block, unblock or move an end user of a service key.\n\nA move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users\nAPI does. The budget must be on the key's ``end_user_budget_ids``. An id with a '.' or '..' segment is refused\nwith 400; ``PATCH /keys/{key_id}/end-users?external_id=`` takes any id.",
         "operationId": "keys-update_end_user",
         "parameters": [
           {
@@ -27097,7 +28334,7 @@
         ]
       },
       "put": {
-        "description": "Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.\n\nAnswers 201 when the end user was created, so one can be placed on a budget before its first request. An end\nuser already on the budget keeps its current period, so repeating the call changes nothing. A budget that is\nnot on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``.",
+        "description": "Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.\n\nAnswers 201 when the end user was created, so one can be placed on a budget before its first request. An end\nuser already on the budget keeps its current period, so repeating the call changes nothing. A budget that is\nnot on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``. An id with a\n'.' or '..' segment is refused with 400; ``PUT /keys/{key_id}/end-users?external_id=`` takes any id.",
         "operationId": "keys-put_end_user",
         "parameters": [
           {
@@ -27907,7 +29144,7 @@
     },
     "/api/v1/organizations": {
       "post": {
-        "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.",
+        "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.\n\nWhere signup is closed, the caller must already be an active member of an\norganization; a caller with none is refused with a 403.",
         "operationId": "organizations-create_organization",
         "requestBody": {
           "content": {
@@ -27929,6 +29166,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "Signup is closed and the caller is not an active member of any organization."
           },
           "422": {
             "content": {
@@ -27969,6 +29216,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "The caller is an active member of no organization."
           }
         },
         "security": [
@@ -29566,7 +30823,7 @@
     },
     "/api/v1/organizations/me/member-invitations": {
       "post": {
-        "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). The response\nalways carries the accept link, whether or not it was actually emailed\n(``mail_sent``), so an operator can share it themselves when mail is not\nconfigured or the send fails.",
+        "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). When the\nemail did not go out (``mail_sent`` is false: mail is not configured, the\nsend failed, or the invitation mail limit was reached), the response\ncarries the accept link so the caller can share it themselves. An address\nwhose invitation is still pending is refused; reissue that invitation to\nsend a new link.",
         "operationId": "organizations-invite_active_organization_member",
         "requestBody": {
           "content": {
@@ -29616,7 +30873,7 @@
     },
     "/api/v1/organizations/me/member-invitations/bulk": {
       "post": {
-        "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent`` and\naccept link.",
+        "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent``, and\nits accept link when that is false.",
         "operationId": "organizations-bulk_invite_active_organization_members",
         "requestBody": {
           "content": {
@@ -29666,7 +30923,7 @@
     },
     "/api/v1/organizations/me/member-invitations/{invitation_id}": {
       "delete": {
-        "description": "Revoke an unaccepted invitation. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
+        "description": "Revoke an unaccepted invitation, pending or expired. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
         "operationId": "organizations-revoke_active_organization_member_invitation",
         "parameters": [
           {
@@ -29711,6 +30968,58 @@
           }
         ],
         "summary": "Revoke Active Organization Member Invitation",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/member-invitations/{invitation_id}/reissue": {
+      "post": {
+        "description": "Give a pending or expired invitation a new accept link. Organization owners and admins only.\n\nThe old link stops working. The new one is emailed as an invitation is, and\nreturned in ``accept_link`` when it was not, so a lost link can be\nrecovered whether or not the deployment sends mail.",
+        "operationId": "organizations-reissue_active_organization_member_invitation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invitation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteOrganizationMemberResultPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reissue Active Organization Member Invitation",
         "tags": [
           "organizations"
         ]
@@ -29804,7 +31113,7 @@
         ]
       },
       "post": {
-        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately and\nthe response says so: this edition has no invitation to send and no way to\naccept one, so it answers on the ``active`` arm of the result rather than\nthe ``invited`` one the platform uses. An address that belongs to no\nidentity yet creates one, which carries the address as the handle a future\nsign-in flow will claim it by, and can do nothing until then.",
+        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately, with\nno invitation to accept and no email sent, so the person has to be told\nsome other way. An address that belongs to no identity yet creates one,\nwhich gets in by signing up, by \"Forgot your password?\" or by a Google or\nGitHub sign-in; on a deployment with no mail and no provider it waits for\nan operator's password link, so invite it instead\n(``POST /me/member-invitations``), whose link can set its first password.",
         "operationId": "organizations-create_active_organization_member",
         "requestBody": {
           "content": {
@@ -37919,7 +39228,7 @@
     },
     "/api/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when the\ndeployment's ``web_search_default_tool`` names one, or when exactly one\ntool is configured. Such a call runs on the workspace's organization search\nkey when it has one.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
         "operationId": "search-create_search",
         "requestBody": {
           "content": {

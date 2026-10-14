@@ -197,8 +197,9 @@ aliases:
 ```
 
 Callers send the alias in `model`. Completion responses keep the alias while
-pricing, budgets, and usage use the resolved target. Configure the target's
-price, not a price under the alias.
+pricing, budgets, and usage use the resolved target, which a standalone gateway
+names in the `Otari-Provider` and `Otari-Model` response headers. Configure the
+target's price, not a price under the alias.
 
 An alias also withholds its target from `GET /api/v1/models` in that workspace,
 where the alias is listed in its place. This does not apply to routing-policy
