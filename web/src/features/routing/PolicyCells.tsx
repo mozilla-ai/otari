@@ -32,7 +32,7 @@ export function routerLabelOf(spec: PolicySpec): string {
 }
 
 /** A selector in a table cell: its model, then its provider. */
-function selectorText(selector: string): string {
+export function selectorText(selector: string): string {
   const { model, provider } = describeOffering(selector)
   return provider ? `${model} · ${provider}` : model
 }
@@ -75,8 +75,8 @@ function SelectorName({ selector }: { selector: string }) {
 }
 
 /**
- * What serves a normal request through this row, and the advanced rules
- * around it, each on a caption line of its own.
+ * What serves a normal request through this row, with its tier-downs and
+ * guardrails each on a caption line of its own.
  */
 export function MainModelCell({ row }: { row: RoutingRow }) {
   const pool = findCandidates(row.spec)

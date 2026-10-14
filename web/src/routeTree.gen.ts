@@ -38,6 +38,8 @@ import { Route as OrganizationMembersRouteImport } from './routes/organization.m
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
 import { Route as OrganizationProviderKeysRouteImport } from './routes/organization.provider-keys'
 import { Route as OrganizationUsageRouteImport } from './routes/organization.usage'
+import { Route as RoutingIndexRouteImport } from './routes/routing.index'
+import { Route as RoutingNameRouteImport } from './routes/routing.$name'
 import { Route as ToolsIndexRouteImport } from './routes/tools.index'
 import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-execution'
 import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
@@ -190,6 +192,16 @@ const OrganizationUsageRoute = OrganizationUsageRouteImport.update({
   path: '/usage',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const RoutingIndexRoute = RoutingIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => RoutingRoute,
+} as any)
+const RoutingNameRoute = RoutingNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => RoutingRoute,
+} as any)
 const ToolsIndexRoute = ToolsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -231,7 +243,7 @@ export interface FileRoutesByFullPath {
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
-  '/routing': typeof RoutingRoute
+  '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
@@ -244,12 +256,14 @@ export interface FileRoutesByFullPath {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
+  '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -265,7 +279,6 @@ export interface FileRoutesByTo {
   '/members': typeof MembersRoute
   '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
-  '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
@@ -277,12 +290,14 @@ export interface FileRoutesByTo {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
+  '/routing': typeof RoutingIndexRoute
   '/tools': typeof ToolsIndexRoute
 }
 export interface FileRoutesById {
@@ -301,7 +316,7 @@ export interface FileRoutesById {
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
-  '/routing': typeof RoutingRoute
+  '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
@@ -314,12 +329,14 @@ export interface FileRoutesById {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
+  '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
 }
 export interface FileRouteTypes {
@@ -352,12 +369,14 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/models/'
     | '/organization/'
+    | '/routing/'
     | '/tools/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -373,7 +392,6 @@ export interface FileRouteTypes {
     | '/members'
     | '/playground'
     | '/providers'
-    | '/routing'
     | '/settings'
     | '/usage'
     | '/workspaces'
@@ -385,12 +403,14 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/models'
     | '/organization'
+    | '/routing'
     | '/tools'
   id:
     | '__root__'
@@ -421,12 +441,14 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/models/'
     | '/organization/'
+    | '/routing/'
     | '/tools/'
   fileRoutesById: FileRoutesById
 }
@@ -445,7 +467,7 @@ export interface RootRouteChildren {
   OrganizationRoute: typeof OrganizationRouteWithChildren
   PlaygroundRoute: typeof PlaygroundRoute
   ProvidersRoute: typeof ProvidersRoute
-  RoutingRoute: typeof RoutingRoute
+  RoutingRoute: typeof RoutingRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
   UsageRoute: typeof UsageRoute
@@ -658,6 +680,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationUsageRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/routing/': {
+      id: '/routing/'
+      path: '/'
+      fullPath: '/routing/'
+      preLoaderRoute: typeof RoutingIndexRouteImport
+      parentRoute: typeof RoutingRoute
+    }
+    '/routing/$name': {
+      id: '/routing/$name'
+      path: '/$name'
+      fullPath: '/routing/$name'
+      preLoaderRoute: typeof RoutingNameRouteImport
+      parentRoute: typeof RoutingRoute
+    }
     '/tools/': {
       id: '/tools/'
       path: '/'
@@ -733,6 +769,19 @@ const OrganizationRouteWithChildren = OrganizationRoute._addFileChildren(
   OrganizationRouteChildren,
 )
 
+interface RoutingRouteChildren {
+  RoutingNameRoute: typeof RoutingNameRoute
+  RoutingIndexRoute: typeof RoutingIndexRoute
+}
+
+const RoutingRouteChildren: RoutingRouteChildren = {
+  RoutingNameRoute: RoutingNameRoute,
+  RoutingIndexRoute: RoutingIndexRoute,
+}
+
+const RoutingRouteWithChildren =
+  RoutingRoute._addFileChildren(RoutingRouteChildren)
+
 interface ToolsRouteChildren {
   ToolsCodeExecutionRoute: typeof ToolsCodeExecutionRoute
   ToolsGuardrailsRoute: typeof ToolsGuardrailsRoute
@@ -766,7 +815,7 @@ const rootRouteChildren: RootRouteChildren = {
   OrganizationRoute: OrganizationRouteWithChildren,
   PlaygroundRoute: PlaygroundRoute,
   ProvidersRoute: ProvidersRoute,
-  RoutingRoute: RoutingRoute,
+  RoutingRoute: RoutingRouteWithChildren,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,
   UsageRoute: UsageRoute,

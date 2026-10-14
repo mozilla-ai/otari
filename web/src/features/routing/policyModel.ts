@@ -7,7 +7,7 @@
  * exists to keep pointing one way.
  */
 
-import type { PolicySpec, RoutingPolicyResponse } from "@/client"
+import type { AliasResponse, PolicySpec, RoutingPolicyResponse } from "@/client"
 
 /** A row on this page: either a routing policy or a stored/config alias.
  *
@@ -154,4 +154,76 @@ export function describePartialScopeSave(
     .map((entry) => `${labelFor(entry.userId)} (${entry.reason})`)
     .join(", ")
   return `${created}Not created for ${missing}. Submitting again retries only the ones still missing.`
+}
+
+/** Present an alias as the one-target policy it is. */
+export function aliasAsRow(alias: AliasResponse): RoutingRow {
+  return {
+    kind: "alias",
+    name: alias.name,
+    spec: { select: [{ default: alias.target }] },
+    source: alias.source,
+    user_id: alias.user_id,
+    // Carried, not dropped: an edit or a delete goes back to the workspace the
+    // row lives in, not the selected one.
+    workspace_id: alias.workspace_id,
+    is_dynamic: false,
+    created_at: alias.created_at,
+    updated_at: alias.updated_at,
+  }
+}
+
+/**
+ * A row's identity. Scope is half of it: the same name can exist globally and
+ * per user, and keying on the name alone would collapse those rows into one.
+ */
+export const rowKeyOf = (row: RoutingRow): string =>
+  JSON.stringify([row.kind, row.user_id, row.name])
+
+/** Whether the dashboard can edit a spec without losing part of it.
+ *
+ *  An edit rebuilds the spec from its sections, so anything they do not model
+ *  (a `user_id`/`key_id` condition, a comparator other than `gte`, an unknown
+ *  router) would be dropped on save. Those are shown read-only: refusing to
+ *  edit is recoverable, a silent lossy save is not.
+ */
+export function isEditableInForm(spec: PolicySpec): boolean {
+  // Sections re-emit `select` as tier-downs, then the router, then the
+  // default. Selection is order-sensitive server-side, so a router ahead of a
+  // condition would come back meaning something else.
+  const routerIndex = spec.select.findIndex(
+    (entry) => entry.router !== undefined,
+  )
+  const lastConditionIndex = spec.select.reduce(
+    (last, entry, index) => (entry.when !== undefined ? index : last),
+    -1,
+  )
+  if (
+    routerIndex !== -1 &&
+    lastConditionIndex !== -1 &&
+    routerIndex < lastConditionIndex
+  )
+    return false
+  return spec.select.every((entry) => {
+    if (entry.default !== undefined) return entry.when === undefined
+    if (entry.router !== undefined) {
+      if ((entry.candidates?.length ?? 0) === 0) return false
+      const backend = normalizeBackend(entry.router)
+      if (backend === KNN_BACKEND || backend === PRIORITY_BACKEND) return true
+      // A weighted entry without weights cannot be saved back (the API
+      // refuses it), so the form would have to invent a split.
+      return (
+        backend === WEIGHTED_BACKEND &&
+        Object.keys(entry.weights ?? {}).length > 0
+      )
+    }
+    const when = entry.when
+    if (when === undefined || entry.target === undefined) return false
+    const keys = Object.keys(when)
+    return (
+      keys.length === 1 &&
+      keys[0] === "budget_used_pct" &&
+      when.budget_used_pct?.gte !== undefined
+    )
+  })
 }

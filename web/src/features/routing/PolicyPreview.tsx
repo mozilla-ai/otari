@@ -16,8 +16,8 @@ function Offering({ selector }: { selector: string }) {
 /**
  * Where a policy sends a request, as one plain sentence under the form.
  *
- * Built from the draft rather than from a saved spec, so it changes as the
- * operator types and says what Save would do.
+ * Built from the draft in a form, so it changes as the operator types and says
+ * what Save would do, and from the stored spec on the policy page.
  */
 export function PolicyPreview({
   name,
@@ -25,6 +25,7 @@ export function PolicyPreview({
   backups,
   pool,
   tierDowns,
+  label = "Preview",
 }: {
   name: string
   target: string
@@ -32,6 +33,8 @@ export function PolicyPreview({
   /** The routed pool, when a router decides instead of one target. */
   pool?: { backend: string; size: number }
   tierDowns: { threshold: number; target: string }[]
+  /** The heading; the policy page says what is in force rather than a preview. */
+  label?: string
 }) {
   const headingId = useId()
   const trimmedName = name.trim()
@@ -99,7 +102,7 @@ export function PolicyPreview({
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-1">
       <span id={headingId} className="text-caption text-subtle">
-        Preview
+        {label}
       </span>
       {sentence}
     </section>
