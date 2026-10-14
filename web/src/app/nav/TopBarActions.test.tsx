@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
@@ -43,6 +43,21 @@ describe("TopBarActions", () => {
       screen.queryByRole("link", { name: "Playground" }),
     ).not.toBeInTheDocument()
     expect(await cluster()).toHaveTextContent("Documentation")
+  })
+
+  it("omits Playground for a caller with no organization", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    await renderActions()
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("link", { name: "Playground" }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(await cluster()).toHaveTextContent("Documentation")
+    vi.restoreAllMocks()
   })
 
   it("contributes nothing where the balance goes", async () => {

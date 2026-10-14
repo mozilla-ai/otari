@@ -61,8 +61,14 @@ const BASE_NAV_SECTIONS = [
     id: "index",
     items: [
       // Ungated on every axis: the index is the deployment's own front page and
-      // reads whatever it is allowed to.
-      { to: "/", label: "Overview", icon: FiHome },
+      // reads whatever it is allowed to. The one row a caller with no
+      // organization keeps, since it is where they are told how to get in.
+      {
+        to: "/",
+        label: "Overview",
+        icon: FiHome,
+        reachableWithoutOrganization: true,
+      },
     ],
   },
   {
@@ -662,6 +668,21 @@ export function navLabelForPath(pathname: string): string | undefined {
     (one) => one.to === pathname,
   )
   return child?.label ?? navItemForPath(pathname)?.label
+}
+
+/** Names for the chrome destinations, which no registry entry declares. */
+const CHROME_PAGE_LABELS: Readonly<Record<string, string | undefined>> = {
+  "/docs": "Documentation",
+  "/account": "Account",
+  "/invitations": "Invitations",
+}
+
+/**
+ * What to call the page at this pathname, rail or chrome, for the tab title
+ * and the breadcrumb alike, so the two cannot name one page differently.
+ */
+export function pageLabelForPath(pathname: string): string | undefined {
+  return navLabelForPath(pathname) ?? CHROME_PAGE_LABELS[pathname]
 }
 
 /**

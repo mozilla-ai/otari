@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useLocation } from "@tanstack/react-router"
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
@@ -14,6 +15,7 @@ import { BudgetsPage } from "@/features/budgets/BudgetsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 function testUser(user_id: string): User {
   return {
@@ -1033,4 +1035,40 @@ describe("BudgetsPage", () => {
       screen.queryByRole("grid", { name: "Organization budgets" }),
     ).toBeNull()
   })
+
+  it("sends a caller with no organization to the index, not the operator page", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith(`${API_ROOT}/organizations/me`)
+        ? jsonResponse({ detail: "Organization not found" }, 404)
+        : jsonResponse([]),
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <DeploymentProvider value={bootstrap()}>
+        <QueryClientProvider client={client}>
+          <BudgetsPage />
+        </QueryClientProvider>
+      </DeploymentProvider>,
+      {
+        wrapper: withRouter({
+          url: "/budgets",
+          routes: [{ path: "/", element: <LocationProbe /> }],
+        }),
+      },
+    )
+
+    expect(await screen.findByTestId("loc")).toHaveTextContent(/^\/$/)
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some(([input]) => String(input).includes("/budgets")),
+    ).toBe(false)
+  })
 })
+
+/** Reports where a navigation landed. */
+function LocationProbe() {
+  return <div data-testid="loc">{useLocation().pathname}</div>
+}

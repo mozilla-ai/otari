@@ -5,7 +5,7 @@ import type { RefObject } from "react"
 // seam's alias key, and the module says what a relative import would cost.
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
-import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
+import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // Desktop destinations; the account menu keeps them reachable on mobile.
@@ -24,7 +24,7 @@ export function TopBarActions({
   feedbackTriggerRef?: RefObject<HTMLButtonElement | null>
 }) {
   const { docs_url, feedback_enabled } = useDeployment()
-  const hostsSurface = useSurfaceVisibility()
+  const isNavVisible = useNavVisibility()
 
   return (
     // Hidden below the md breakpoint, where the mobile header has room for the
@@ -32,7 +32,7 @@ export function TopBarActions({
     // cluster and so inherits that, which is what otari.ai's own navbar does
     // with the balance.
     <div className="hidden shrink-0 items-center gap-5 md:flex">
-      {hostsSurface(PLAYGROUND_NAV_ITEM) && (
+      {isNavVisible(PLAYGROUND_NAV_ITEM) && (
         <Link to={PLAYGROUND_NAV_ITEM.to} className={ACTION}>
           {PLAYGROUND_NAV_ITEM.label}
         </Link>

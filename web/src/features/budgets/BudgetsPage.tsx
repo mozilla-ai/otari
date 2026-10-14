@@ -3,6 +3,7 @@
 // took chips off everything it rebuilt, so this is an inconsistency rather than
 // a decision: see the note in the PR body.
 import { Button, Chip, Spinner } from "@heroui/react"
+import { Navigate } from "@tanstack/react-router"
 import {
   type ReactNode,
   type RefObject,
@@ -1187,6 +1188,11 @@ export function BudgetsPage() {
 
   if (!isSettled) {
     return <PageLoading label="Loading spend and budgets…" />
+  }
+  // No organization means no budgets of its own and none to operate; the
+  // index is where such a caller is told how to get in.
+  if (answer === "no-organization") {
+    return <Navigate to="/" replace />
   }
   // An errored context lands on the operator page, as every operator gate does
   // (`useDeploymentOperator`): its reads say in their own words when they are

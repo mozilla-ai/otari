@@ -91,6 +91,18 @@ interface NavItemBase {
    * own refusal.
    */
   operatorOnly?: "unlisted" | "refused"
+  /**
+   * That this destination is of use to a signed-in caller who belongs to no
+   * organization: someone who declined their only invitation, or signed in
+   * before accepting one.
+   *
+   * Opt-in, because such a caller has no tenant and no workspace, so nearly
+   * every page would open on a refusal. A missing one hides the row from them,
+   * which is also what an overlay's row gets unless it says otherwise. Answered
+   * by the same context read as `operatorOnly`, whose 404 is what says there is
+   * no organization.
+   */
+  reachableWithoutOrganization?: boolean
 }
 
 /** One sidebar link with its deployment and entitlement gating. */

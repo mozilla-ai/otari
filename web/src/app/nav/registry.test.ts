@@ -16,6 +16,7 @@ import {
   navContextForPath,
   navItemForPath,
   ORG_NAV_SECTIONS,
+  pageLabelForPath,
   visibleNavSections,
 } from "./registry"
 import type {
@@ -762,5 +763,28 @@ describe("composeNavItems", () => {
       "Billing",
       "Invoices",
     ])
+  })
+})
+
+describe("pageLabelForPath", () => {
+  it("names a rail page and a chrome page from one place", () => {
+    expect(pageLabelForPath("/usage")).toBe("Usage")
+    expect(pageLabelForPath("/invitations")).toBe("Invitations")
+    expect(pageLabelForPath("/account")).toBe("Account")
+    expect(pageLabelForPath("/nowhere")).toBeUndefined()
+  })
+})
+
+describe("reachableWithoutOrganization", () => {
+  it("is declared by Overview alone in the base registry", () => {
+    const optedIn = [
+      ...NAV_SECTIONS,
+      ...ORG_NAV_SECTIONS,
+      ...DEPLOYMENT_NAV_SECTIONS,
+    ]
+      .flatMap((section) => section.items)
+      .filter((item) => item.reachableWithoutOrganization)
+      .map((item) => item.to)
+    expect(optedIn).toEqual(["/"])
   })
 })

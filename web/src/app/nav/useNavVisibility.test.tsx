@@ -103,6 +103,32 @@ afterEach(() => {
 })
 
 describe("useNavVisibility", () => {
+  it("shows a caller with no organization only the rows that opt in", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    const rendered = visibility(["usage"])
+    await settled(rendered)
+
+    const { isVisible } = rendered.result.current
+    expect(isVisible(item({ reachableWithoutOrganization: true }))).toBe(true)
+    // Another axis still applies to a row that opts in.
+    expect(
+      isVisible(item({ reachableWithoutOrganization: true, surface: "keys" })),
+    ).toBe(false)
+    // An ungated row, as an overlay contributes, declares nothing and is hidden.
+    expect(isVisible(item({ to: "/billing" as never }))).toBe(false)
+    expect(isVisible(item({ surface: "usage" }))).toBe(false)
+  })
+
+  it("ignores the opt-in for a caller who has an organization", async () => {
+    mockCaller(false)
+    const rendered = visibility([])
+    await settled(rendered)
+
+    expect(rendered.result.current.isVisible(item({}))).toBe(true)
+  })
+
   it("shows an entry that declares no gate at all", () => {
     mockCaller(false)
     expect(predicate([])(item({}))).toBe(true)

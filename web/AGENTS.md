@@ -83,9 +83,13 @@ through the explicit overlay seams.
 - `surface`, the deployment topology
 - `capability`, the installed or entitled feature
 - `operatorOnly`, deployment-wide authority
+- `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
+  caller with no organization can use (Overview today); every other row,
+  overlay rows included, is hidden from that caller
 
-These gates combine with AND. Organization and workspace authorization still
-comes from server responses.
+These gates combine with AND, and the top bar and the account menu gate their
+Playground link through the same predicate. Organization and workspace
+authorization still comes from server responses.
 
 The workspace and organization rails have separate registries. A sidebar item
 points to a real page, never a redirect. `/playground`, `/docs`, and `/account` are chrome

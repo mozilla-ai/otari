@@ -1,5 +1,5 @@
 /**
- * Composes the three gates a registry entry can declare.
+ * Composes the gates a registry entry can declare.
  *
  * The predicate form, because a section's heading has to disappear along with
  * its last visible item, and a wrapper component (`EntitlementGate`) cannot tell
@@ -12,6 +12,8 @@
  * stay two mechanisms rather than one. The third, `operatorOnly`, is not about
  * the deployment at all but about who is signed in, and it is answered by the
  * server reporting the caller's own standing rather than by a rule of its own.
+ * `reachableWithoutOrganization` rides on the same read: its 404 says the
+ * caller belongs to no organization, and then only the rows that opt in show.
  */
 
 import { useMemo } from "react"
@@ -71,11 +73,9 @@ export function useNavVisibility(): (item: NavItem) => boolean {
         : isOperator
     }
 
-    // A caller with no organization has no workspace and no tenant for any
-    // row but the index to read, so each of the others would open on a
-    // refusal.
     if (answer === "no-organization") {
-      return (item: NavItem) => item.to === "/" && isRouteVisible(item)
+      return (item: NavItem) =>
+        item.reachableWithoutOrganization === true && isRouteVisible(item)
     }
     return (item: NavItem) => isRouteVisible(item) && allowedByCaller(item)
   }, [isRouteVisible, answer, isOperator])
