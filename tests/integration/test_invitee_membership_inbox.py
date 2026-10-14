@@ -44,7 +44,7 @@ from gateway.repositories.tenancy import (
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
-from .tenancy_helpers import membership_writes
+from .tenancy_helpers import NO_TERMS, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -247,7 +247,7 @@ async def test_declining_cancels_the_invitation_and_kills_the_emailed_link(
     # decline. Refused as already-used rather than not-found: the row is still
     # there and still theirs, it is its `cancelled` status that ends it.
     with pytest.raises(InvitationAlreadyUsedError):
-        await service.accept_invitation(token)
+        await service.accept_invitation(token, claims=NO_TERMS)
     assert inviting.id not in {
         row.organization.id for row in (await service.list_organization_memberships_for_user(user=invitee)).data
     }
@@ -543,7 +543,7 @@ async def test_declining_cancels_every_live_link_to_the_membership(
         assert cancelled.status == "cancelled"
 
     with pytest.raises(InvitationAlreadyUsedError):
-        await service.accept_invitation(second_token)
+        await service.accept_invitation(second_token, claims=NO_TERMS)
 
     membership = await OrganizationMemberRepository(async_db).get(issued.organization_member_id)
     assert membership is not None

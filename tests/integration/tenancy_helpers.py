@@ -47,18 +47,14 @@ def membership_writes(db: AsyncSession) -> MembershipWrites:
     }
 
 
-def claim_writes(db: AsyncSession, *, terms_url: str | None = None) -> dict[str, Any]:
-    """Build the Unit of Work and the organization service a claim writes through.
+# A deployment that publishes no terms, for an accept that does not exercise them.
+NO_TERMS = InvitationClaimSettings(terms_url=None)
 
-    The same pairing ``get_claiming_organization_service`` builds for the signup and invitation routes.
-    """
+
+def claim_writes(db: AsyncSession) -> dict[str, Any]:
+    """Build the Unit of Work and the organization service a claim writes through, as the claim routes do."""
     writes = membership_writes(db)
-    return {
-        "uow": writes["uow"],
-        "organizations": OrganizationService(
-            db, **writes, invitation_claims=InvitationClaimSettings(terms_url=terms_url)
-        ),
-    }
+    return {"uow": writes["uow"], "organizations": OrganizationService(db, **writes)}
 
 
 def budget_service(db: AsyncSession) -> BudgetService:

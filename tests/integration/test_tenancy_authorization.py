@@ -47,7 +47,7 @@ from gateway.services.tenancy.authorization import resolve_visible_workspace_sco
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
-from .tenancy_helpers import membership_writes
+from .tenancy_helpers import NO_TERMS, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -542,7 +542,7 @@ async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a
         config=_TEST_CONFIG,
     )
     assert invitation.accept_link is not None
-    await service.accept_invitation(invitation.accept_link.split("token=")[1])
+    await service.accept_invitation(invitation.accept_link.split("token=")[1], claims=NO_TERMS)
 
     memberships = await service.list_organization_memberships_for_user(user=invitee)
     assert memberships.count == 2

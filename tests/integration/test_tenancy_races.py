@@ -102,6 +102,7 @@ from gateway.services.tenancy.workspace_activation_service import (
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import (
+    NO_TERMS,
     MembershipWrites,
     budget_service,
     claim_writes,
@@ -966,7 +967,9 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
     token = invited.accept_link.split("token=")[1]
 
     async def attempt(session: AsyncSession) -> object:
-        return await OrganizationService(session, **membership_writes(session)).accept_invitation(token)
+        return await OrganizationService(session, **membership_writes(session)).accept_invitation(
+            token, claims=NO_TERMS
+        )
 
     outcomes = await _race(sessions, attempt)
 
@@ -1021,7 +1024,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         async with sessions() as session:
             try:
                 return await claim_writes(session)["organizations"].accept_invitation(
-                    token, password="accepted-password"
+                    token, claims=NO_TERMS, password="accepted-password"
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1242,7 +1245,9 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
     assert invited.invitation_id is not None
 
     async def accept(session: AsyncSession) -> object:
-        return await OrganizationService(session, **membership_writes(session)).accept_invitation(token)
+        return await OrganizationService(session, **membership_writes(session)).accept_invitation(
+            token, claims=NO_TERMS
+        )
 
     async def revoke(session: AsyncSession) -> object:
         user = await UserRepository(session).get(owner.id)

@@ -15,8 +15,9 @@ provider sign-in claims it.
 
 from fastapi import APIRouter, BackgroundTasks, Request
 
-from gateway.api.deps import ClaimingOrganizationServiceDep, GrowthSignalPortDep, OrganizationServiceDep
+from gateway.api.deps import GrowthSignalPortDep, InvitationClaimSettingsDep, OrganizationServiceDep
 from gateway.api.routes._public_auth import throttle_public_auth
+from gateway.api.routes.organizations import OrganizationServiceDep as MembershipOrganizationServiceDep
 from gateway.models.tenancy import (
     AcceptInvitationRequest,
     AcceptInvitationResultPublic,
@@ -47,7 +48,8 @@ async def validate_invitation(
 async def accept_invitation(
     request: Request,
     background_tasks: BackgroundTasks,
-    service: ClaimingOrganizationServiceDep,
+    service: MembershipOrganizationServiceDep,
+    claims: InvitationClaimSettingsDep,
     growth: GrowthSignalPortDep,
     body: AcceptInvitationRequest,
 ) -> AcceptInvitationResultPublic:
@@ -59,6 +61,7 @@ async def accept_invitation(
     throttle_public_auth(request)
     acceptance = await service.accept_invitation(
         body.token,
+        claims=claims,
         password=body.password,
         full_name=body.full_name,
         terms_accepted=body.terms_accepted,

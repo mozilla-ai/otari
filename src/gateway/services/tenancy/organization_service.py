@@ -268,17 +268,14 @@ class OrganizationService:
         membership_listener: MembershipListener | None,
         uow: UnitOfWork | None = None,
         workspace_listener: WorkspaceListener,
-        invitation_claims: InvitationClaimSettings | None = None,
     ):
         """Build the service on a session.
 
         A service that changes workspace membership needs a listener and a Unit of Work over the same session,
         because the listener writes through that Unit of Work's open block. A read-only service needs neither.
         ``workspace_listener`` sets up each workspace this service creates, inside the same transaction.
-        ``invitation_claims`` is required only to accept an invitation with a first password.
         """
         self.db = db
-        self._invitation_claims = invitation_claims
         self._workspace_listener = workspace_listener
         self._membership_listener = membership_listener
         self._uow = uow
@@ -996,12 +993,6 @@ class OrganizationService:
             raise RuntimeError(msg)
         return self._membership_listener
 
-    def _require_invitation_claims(self) -> InvitationClaimSettings:
-        if self._invitation_claims is None:
-            msg = "This organization service cannot accept an invitation with a password"
-            raise RuntimeError(msg)
-        return self._invitation_claims
-
     def _require_unit_of_work(self) -> UnitOfWork:
         if self._uow is None:
             msg = "This organization service cannot change workspace membership"
@@ -1427,6 +1418,7 @@ class OrganizationService:
         self,
         token: str,
         *,
+        claims: InvitationClaimSettings,
         password: str | None = None,
         full_name: str | None = None,
         terms_accepted: bool = False,
@@ -1445,8 +1437,9 @@ class OrganizationService:
         only where ``_invitation_may_set_password`` allows, so a link can claim
         an unclaimed seat and never take over an account. The verification it
         stamps is recorded as vouched (``email_vouched_at``), which domain
-        auto-join does not trust. Where the deployment publishes terms, a first
-        password needs ``terms_accepted``, as signup and a reset claim do.
+        auto-join does not trust. Where the deployment publishes terms
+        (``claims``), a first password needs ``terms_accepted``, as signup and
+        a reset claim do.
 
         ``verification_pending`` on the result says the invitee chose a password
         through signup and has not verified it yet, so the page can tell them to
@@ -1456,7 +1449,7 @@ class OrganizationService:
         if password is not None:
             # Before the lookup, so a policy refusal says nothing about the token.
             validate_new_password(password)
-            if self._require_invitation_claims().terms_url is not None and not terms_accepted:
+            if claims.terms_url is not None and not terms_accepted:
                 raise TermsNotAcceptedError
         _, _, organization = await self._resolve_pending_invitation(token)
         # Locked, then re-resolved, before any write: two concurrent accepts of

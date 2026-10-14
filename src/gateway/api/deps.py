@@ -1198,28 +1198,12 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
 
 
-def get_claiming_organization_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> OrganizationService:
-    """Build the organization service the public claim routes write through: signup and an invitation link.
-
-    A claim can create a membership and a workspace, so it needs the request's Unit of Work and its listeners,
-    and an invitation link that sets a first password asks for the terms this deployment publishes.
-    """
-    return OrganizationService(
-        db,
-        membership_listener=membership_listener,
-        uow=uow,
-        workspace_listener=workspace_listener,
-        invitation_claims=InvitationClaimSettings(terms_url=config.terms_url),
-    )
+def get_invitation_claim_settings(config: Annotated[GatewayConfig, Depends(get_config)]) -> InvitationClaimSettings:
+    """Return what this deployment asks of an invitee who chooses a first password from an invitation link."""
+    return InvitationClaimSettings(terms_url=config.terms_url)
 
 
-ClaimingOrganizationServiceDep = Annotated[OrganizationService, Depends(get_claiming_organization_service)]
+InvitationClaimSettingsDep = Annotated[InvitationClaimSettings, Depends(get_invitation_claim_settings)]
 
 
 def get_budget_service(
