@@ -430,6 +430,7 @@ async def test_anyone_may_create_an_organization_and_owns_the_one_they_create(
     created = await service.create_organization_for_user(
         user=viewer,
         request=OrganizationCreateRequest(name="Theirs"),
+        config=GatewayConfig(),
     )
 
     memberships, count = await service.members.get_by_user_with_organizations(viewer.id, status="active")

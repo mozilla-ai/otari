@@ -141,7 +141,7 @@ async def create_organization(
     return await service.create_organization_for_user(
         user=current_identity,
         request=body,
-        require_existing_membership=not config.open_signup,
+        config=config,
     )
 
 

@@ -506,7 +506,7 @@ class OrganizationService:
         *,
         user: User,
         request: OrganizationCreateRequest,
-        require_existing_membership: bool = False,
+        config: GatewayConfig,
     ) -> OrganizationPublic:
         """Create an organization owned by the caller, with a workspace to work in.
 
@@ -528,20 +528,16 @@ class OrganizationService:
         looking at.
 
         No role check, because there is no organization to check a role in yet:
-        this is not an action inside a tenant. ``require_existing_membership`` is
-        for a deployment that keeps signup closed: there, an identity whose every
-        membership has ended (revoked, removed) would otherwise make itself a
-        tenant by creating one, so the caller must already be an active member
-        somewhere. That membership is locked until the creation commits, so a
+        this is not an action inside a tenant. Where ``open_signup`` is off,
+        though, an identity whose every membership has ended (revoked, removed)
+        would otherwise make itself a tenant by creating one, so the caller must
+        already be an active member somewhere. That membership is locked until the creation commits, so a
         removal cannot land between the check and the new owner row.
         """
         name = _validated_organization_name(request.name)
         try:
             async with self._require_unit_of_work():
-                if (
-                    require_existing_membership
-                    and await self.members.get_first_active_for_user(user.id, lock=True) is None
-                ):
+                if not config.open_signup and await self.members.get_first_active_for_user(user.id, lock=True) is None:
                     raise NotAuthorizedError("Only a member of an organization can create another one")
                 organization = await self.organizations.create_organization(
                     name=name,
