@@ -28,6 +28,7 @@ from gateway.exceptions.identity_exceptions import TermsNotAcceptedError
 from gateway.exceptions.organizations_exceptions import (
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
+    InvitationClosedError,
     InvitationExpiredError,
     InvitationNotFoundError,
     InvitationPasswordNotAcceptedError,
@@ -63,6 +64,7 @@ from gateway.models.tenancy import (
     CallerWorkspaceMembershipPublic,
     Invitation,
     InvitationPreviewPublic,
+    InvitationWayIn,
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
     MemberAttributionPublic,
@@ -97,6 +99,7 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
+from gateway.services.organizations import InvitationMailLimit
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -155,6 +158,16 @@ def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
     if not ways:
         return "ask whoever administers this gateway how to sign in"
     return ", or ".join(ways)
+
+
+def _ways_in(settings: "InvitationClaimSettings") -> list[InvitationWayIn]:
+    """The ways in ``_way_in_without_the_link`` describes, for the accept page to offer."""
+    ways: list[InvitationWayIn] = []
+    if settings.sign_in_providers:
+        ways.append("provider")
+    if settings.can_send_links:
+        ways.append("password_reset")
+    return ways
 
 
 def _hash_invitation_token(token: str) -> str:
@@ -859,12 +872,11 @@ class OrganizationService:
         # the picker the dashboard builds its key-owner list from, so every row
         # needs to say whether it can own a key.
         live = await live_attribution_user_ids(self.db, [str(member_user.id) for _, member_user in rows])
-        # Likewise for which invited rows have a pending invitation to revoke:
-        # one query for the page's invited memberships rather than one per row.
-        pending = await self.invitations.get_pending_by_organization_members(
+        # Likewise for each invited row's invitation to revoke or reissue, expired
+        # or not: one query for the page's invited memberships rather than one per row.
+        invitation_by_member = await self.invitations.get_current_by_organization_members(
             membership.id for membership, _ in rows if membership.status == "invited"
         )
-        invitation_by_member = {invitation.organization_member_id: invitation.id for invitation in pending}
         # Where each member is and what they may spend there, for the page and
         # not per workspace: the roster used to fan a read out per workspace and
         # join the results in the browser (otari#1381).
@@ -905,7 +917,7 @@ class OrganizationService:
                     membership,
                     member_user,
                     live=live,
-                    invitation_id=invitation_by_member.get(membership.id),
+                    invitation=invitation_by_member.get(membership.id),
                     placements=placements.get(member_user.id, []),
                     ceilings=ceilings,
                     spend=spend.get(str(member_user.id)),
@@ -1144,6 +1156,7 @@ class OrganizationService:
         user: User,
         request: InviteOrganizationMemberRequest,
         config: GatewayConfig,
+        mail_limit: InvitationMailLimit,
     ) -> InviteOrganizationMemberResultPublic:
         """Invite an address to the caller's organization by email.
 
@@ -1156,8 +1169,7 @@ class OrganizationService:
 
         Refuses an address that already holds an active membership, or one
         with a still-unexpired invitation pending: resending on purpose is
-        revoke (which cancels the pending invitation and suspends the
-        membership) followed by a fresh invite. An address whose invitation
+        ``reissue_organization_member_invitation_for_user``. An address whose invitation
         has expired unaccepted is not refused, though: this supersedes it
         directly through the same "revive a suspended membership" branch
         below that re-adding a removed address already goes through, since
@@ -1208,6 +1220,7 @@ class OrganizationService:
             membership=membership,
             token=token,
             config=config,
+            mail_limit=mail_limit,
         )
 
     async def invite_active_organization_members_for_user(
@@ -1216,6 +1229,7 @@ class OrganizationService:
         user: User,
         request: BulkInviteOrganizationMembersRequest,
         config: GatewayConfig,
+        mail_limit: InvitationMailLimit,
     ) -> BulkInviteOrganizationMembersResultPublic:
         """Invite several addresses to the caller's organization at once.
 
@@ -1286,6 +1300,7 @@ class OrganizationService:
                     membership=membership,
                     token=token,
                     config=config,
+                    mail_limit=mail_limit,
                 )
 
         invited = await asyncio.gather(*(mail(*one) for one in staged))
@@ -1389,16 +1404,20 @@ class OrganizationService:
         membership: OrganizationMember,
         token: str,
         config: GatewayConfig,
+        mail_limit: InvitationMailLimit,
     ) -> InviteOrganizationMemberResultPublic:
         """Email a committed invitation's accept link, where links can be mailed, and report whether it went.
 
         The link is returned to the inviter only when the email did not go out.
         A delivered link then reaches the invitee's mailbox alone, rather than
-        also sitting with an admin who could open it as them.
+        also sitting with an admin who could open it as them. An email over
+        ``mail_limit`` is held back the same way: the link costs the deployment
+        nothing, and its sender's standing is what the limit protects.
         """
         email = invitation.email
         accept_link = mailer.link(_invitation_accept_path(token))
         mail_sent = False
+        mail_limited = False
         # can_send_links, not is_configured: an accept link that is relative
         # (no public_base_url) means nothing in an inbox, so a deployment that
         # cannot build an absolute one falls back to the operator sharing it
@@ -1406,11 +1425,14 @@ class OrganizationService:
         # branch of the no-mail design; a surface with no such fallback calls
         # mailer.require_ready() instead.
         if mailer.can_send_links:
+            mail_limited = not await mail_limit.admit(organization.id, email)
+        if mailer.can_send_links and not mail_limited:
             delivery = await mailer.send(
                 to=email,
                 message=render_invitation_email(
                     organization_name=organization.name,
-                    inviter_name=user.full_name or "An organization admin",
+                    inviter_name=user.full_name,
+                    inviter_email=user.email,
                     role=membership.role,
                     accept_link=accept_link,
                     expiry_hours=config.invitation_expiry_hours,
@@ -1424,19 +1446,24 @@ class OrganizationService:
             email=email,
             role=membership.role,
             mail_sent=mail_sent,
+            mail_limited=mail_limited,
             accept_link=None if mail_sent else accept_link,
             expires_at=invitation.expires_at,
             created_at=invitation.created_at,
         )
 
-    async def _resolve_pending_invitation(self, token: str) -> tuple[Invitation, OrganizationMember, Organization]:
-        """Look up a still-acceptable invitation by token, or raise why not.
+    async def _resolve_pending_invitation(
+        self, token: str
+    ) -> tuple[Invitation, OrganizationMember, Organization, User]:
+        """Look up a still-acceptable invitation by token, with its invitee, or raise why not.
 
         Shared by the preview and accept paths so the two answer identically:
         an unknown or foreign token collapses into one ``InvitationNotFoundError``
         (see that error's docstring for why), and an invitation past its status
         or its expiry raises the specific reason once here rather than being
-        checked twice by two callers.
+        checked twice by two callers. An invitee a deployment operator
+        deactivated is refused as a link that is no longer valid, without the
+        reason, as inviting that address is.
         """
         invitation = await self.invitations.get_by_token_hash(_hash_invitation_token(token))
         if invitation is None:
@@ -1460,7 +1487,10 @@ class OrganizationService:
         # and accepting it would undo whatever moved the membership on.
         if membership.status != "invited":
             raise InvitationAlreadyUsedError
-        return invitation, membership, organization
+        invitee = await self.users.get(membership.user_id)
+        if invitee is None or not invitee.is_active:
+            raise InvitationAlreadyUsedError
+        return invitation, membership, organization, invitee
 
     async def _invitation_may_set_password(self, invitee: User | None, organization_id: uuid.UUID) -> bool:
         """Whether accepting an invitation from ``organization_id`` may choose ``invitee``'s first password.
@@ -1489,22 +1519,26 @@ class OrganizationService:
         pending = await self.invitations.get_pending_by_organization_members(invited)
         return not any(invitation.expires_at >= now for invitation in pending)
 
-    async def get_invitation_preview(self, token: str) -> InvitationPreviewPublic:
+    async def get_invitation_preview(self, token: str, *, claims: InvitationClaimSettings) -> InvitationPreviewPublic:
         """Look up a pending invitation by token, for the accept page. No auth: the token is the proof.
 
         ``needs_password`` tells the token's holder whether accepting may set
-        the address's first password. That is only ever said to someone holding
-        this invitation, which already names the address, so it widens nothing
-        signup's enumeration-safety protects.
+        the address's first password, and ``can_sign_in`` and ``ways_in`` how
+        the address gets in when it may not. That is only ever said to someone
+        holding this invitation, which already names the address, so it widens
+        nothing signup's enumeration-safety protects.
         """
-        invitation, membership, organization = await self._resolve_pending_invitation(token)
-        invitee = await self.users.get(membership.user_id)
+        invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
+        needs_password = await self._invitation_may_set_password(invitee, organization.id)
+        can_sign_in = not _has_never_signed_in(invitee)
         return InvitationPreviewPublic(
             email=invitation.email,
             organization_name=organization.name,
             role=membership.role,
             expires_at=invitation.expires_at,
-            needs_password=await self._invitation_may_set_password(invitee, organization.id),
+            needs_password=needs_password,
+            can_sign_in=can_sign_in,
+            ways_in=[] if needs_password or can_sign_in else _ways_in(claims),
         )
 
     async def accept_invitation(
@@ -1544,7 +1578,7 @@ class OrganizationService:
             validate_new_password(password)
             if claims.terms_url is not None and not terms_accepted:
                 raise TermsNotAcceptedError
-        _, _, organization = await self._resolve_pending_invitation(token)
+        _, _, organization, _ = await self._resolve_pending_invitation(token)
         # Locked, then re-resolved, before any write: two concurrent accepts of
         # the same token could otherwise both pass the pending check above
         # (nothing has committed yet to see), both flip the membership, and
@@ -1556,10 +1590,9 @@ class OrganizationService:
         # second caller through the lock re-resolves and finds the invitation
         # no longer pending, so it raises InvitationAlreadyUsedError instead.
         await self.organizations.lock(organization.id)
-        invitation, membership, organization = await self._resolve_pending_invitation(token)
-        invitee = await self.users.get(membership.user_id)
+        invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
         if password is not None:
-            if invitee is None or not await self._invitation_may_set_password(invitee, organization.id):
+            if not await self._invitation_may_set_password(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
@@ -1584,16 +1617,20 @@ class OrganizationService:
                 await self.db.rollback()
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
         result = await self._resolve_invitation_to_active_membership(invitation, membership, organization)
-        verification_pending = (
-            invitee is not None and invitee.hashed_password is not None and invitee.email_verified_at is None
-        )
+        verification_pending = invitee.hashed_password is not None and invitee.email_verified_at is None
+        can_sign_in = password is not None or not _has_never_signed_in(invitee)
         claimed_identity = None
-        if password is not None and invitee is not None:
+        if password is not None:
             # The claim was a conditional UPDATE the session did not see, so the name it wrote is read back.
             claimed_identity = await self.users.reload(invitee)
         return InvitationAcceptance(
             result=result.model_copy(
-                update={"password_set": password is not None, "verification_pending": verification_pending}
+                update={
+                    "password_set": password is not None,
+                    "verification_pending": verification_pending,
+                    "can_sign_in": can_sign_in,
+                    "ways_in": [] if can_sign_in else _ways_in(claims),
+                }
             ),
             claimed=claimed_identity,
         )
@@ -1893,13 +1930,7 @@ class OrganizationService:
         # _validate_membership_update, is a no-op within one transaction.
         await self.organizations.lock(organization.id)
 
-        invitation = await self.invitations.get(invitation_id)
-        if invitation is None or invitation.organization_id != organization.id:
-            raise InvitationNotFoundError(invitation_id)
-        if invitation.status != "pending":
-            raise InvitationAlreadyUsedError
-
-        membership = await self.members.get_by_id_and_organization(invitation.organization_member_id, organization.id)
+        invitation, membership = await self._open_invitation(invitation_id, organization)
         # Only a membership still waiting on this invitation is suspended with it.
         # One that became active another way keeps its access; the stale link goes.
         if membership is not None and membership.status == "invited":
@@ -1912,6 +1943,93 @@ class OrganizationService:
             await self._update_membership(membership, {"status": "suspended"})
         await self.invitations.update_status(invitation, {"status": "cancelled"})
         await self.db.commit()
+
+    async def _open_invitation(
+        self, invitation_id: uuid.UUID, organization: Organization
+    ) -> tuple[Invitation, OrganizationMember | None]:
+        """The organization's invitation an owner or admin may still revoke or reissue, with its membership.
+
+        That is a pending one, or an expired one its membership is still
+        waiting on: the roster lists that row as invited, so it is the
+        invitation to act on. One that was accepted, revoked or declined, or
+        an expired one a newer invitation replaced, is refused in the
+        inviter's words.
+        """
+        invitation = await self.invitations.get(invitation_id)
+        if invitation is None or invitation.organization_id != organization.id:
+            raise InvitationNotFoundError(invitation_id)
+        if invitation.status not in ("pending", "expired"):
+            raise InvitationClosedError(invitation.status)
+        membership = await self.members.get_by_id_and_organization(invitation.organization_member_id, organization.id)
+        if invitation.status == "expired":
+            current = (
+                (await self.invitations.get_current_by_organization_members([membership.id])).get(membership.id)
+                if membership is not None and membership.status == "invited"
+                else None
+            )
+            if current is None or current.id != invitation.id:
+                raise InvitationClosedError(invitation.status)
+        return invitation, membership
+
+    async def reissue_organization_member_invitation_for_user(
+        self,
+        *,
+        user: User,
+        invitation_id: uuid.UUID,
+        config: GatewayConfig,
+        mail_limit: InvitationMailLimit,
+    ) -> InviteOrganizationMemberResultPublic:
+        """Give a pending or expired invitation a new link, and email it where mail can be sent. Owners and admins only.
+
+        The old link stops working, and the new one gets a full
+        ``invitation_expiry_hours``. The invitation keeps its id, role and
+        workspace assignments; whoever reissues it becomes its inviter. This is
+        how a lost link is recovered, including on a deployment with no mail,
+        where the new link is returned to share.
+        """
+        organization = await self.get_active_organization_for_user(user)
+        actor_membership = await self.require_active_organization_management_access(
+            user=user,
+            organization=organization,
+        )
+        token = secrets.token_urlsafe(32)
+        async with self._require_unit_of_work():
+            # The lock accept_invitation and revoke take, so a reissue lands
+            # wholly before or after either.
+            await self.organizations.lock(organization.id)
+            invitation, membership = await self._open_invitation(invitation_id, organization)
+            if membership is None or membership.status != "invited":
+                raise InvitationClosedError("cancelled")
+            # The role guard revoke applies: an admin may not act on an owner's invitation.
+            await self._validate_membership_update(
+                actor_membership=actor_membership,
+                target_membership=membership,
+                update_data={},
+                organization_id=organization.id,
+            )
+            invitee = await self.users.get(membership.user_id)
+            if invitee is None or not invitee.is_active:
+                raise OrganizationMemberDeactivatedError(invitation.email)
+            invitation = await self.invitations.update_status(
+                invitation,
+                {
+                    "status": "pending",
+                    "token_hash": _hash_invitation_token(token),
+                    "expires_at": datetime.now(UTC) + timedelta(hours=config.invitation_expiry_hours),
+                    "invited_by_user_id": user.id,
+                },
+            )
+
+        return await self._mail_invitation(
+            mailer=Mailer(config),
+            user=user,
+            organization=organization,
+            invitation=invitation,
+            membership=membership,
+            token=token,
+            config=config,
+            mail_limit=mail_limit,
+        )
 
     async def _update_membership(
         self, membership: OrganizationMember, update_data: dict[str, str]
@@ -1986,11 +2104,10 @@ class OrganizationService:
         await self.db.commit()
 
         live = await live_attribution_user_ids(self.db, [str(target_user.id)])
-        invitation_id = None
+        invitation = None
         if updated.status == "invited":
-            pending = await self.invitations.get_pending_by_organization_members([updated.id])
-            invitation_id = pending[0].id if pending else None
-        return self._to_member_public(updated, target_user, live=live, invitation_id=invitation_id)
+            invitation = (await self.invitations.get_current_by_organization_members([updated.id])).get(updated.id)
+        return self._to_member_public(updated, target_user, live=live, invitation=invitation)
 
     async def remove_active_organization_member_for_user(
         self,
@@ -2077,7 +2194,7 @@ class OrganizationService:
         user: User,
         *,
         live: set[str],
-        invitation_id: uuid.UUID | None = None,
+        invitation: Invitation | None = None,
         placements: list[tuple[WorkspaceMember, Workspace]] | None = None,
         ceilings: dict[str, MemberCeilingPublic] | None = None,
         spend: MemberAttributionPublic | None = None,
@@ -2088,7 +2205,8 @@ class OrganizationService:
             organization_member_id=membership.id,
             user_id=user.id,
             attribution_user_id=attribution_user_id if attribution_user_id in live else None,
-            invitation_id=invitation_id,
+            invitation_id=invitation.id if invitation is not None else None,
+            invitation_expires_at=invitation.expires_at if invitation is not None else None,
             email=user.email,
             full_name=user.full_name,
             role=membership.role,

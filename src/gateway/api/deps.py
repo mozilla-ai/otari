@@ -33,6 +33,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
+from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
@@ -70,6 +71,7 @@ from gateway.services.mail import Mailer
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
+from gateway.services.organizations import InvitationMailLimit
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import ForwardedToolOffer, LocalToolOffer, PlaygroundToolOffer
 from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
@@ -1240,6 +1242,20 @@ def get_invitation_claim_settings(config: Annotated[GatewayConfig, Depends(get_c
 
 
 InvitationClaimSettingsDep = Annotated[InvitationClaimSettings, Depends(get_invitation_claim_settings)]
+
+
+def get_invitation_mail_limit(
+    config: Annotated[GatewayConfig, Depends(get_config)], container: ContainerDep
+) -> InvitationMailLimit:
+    """Return the invitation mail limits, counted in the rate-limit store this build bound."""
+    return InvitationMailLimit(
+        container.resolve(RateLimitStorePort, None),
+        per_organization=config.invitation_mail_limit_per_organization,
+        per_address=config.invitation_mail_limit_per_address,
+    )
+
+
+InvitationMailLimitDep = Annotated[InvitationMailLimit, Depends(get_invitation_mail_limit)]
 
 
 def get_budget_service(

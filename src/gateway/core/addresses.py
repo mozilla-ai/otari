@@ -25,6 +25,10 @@ def normalized_address(value: str) -> str | None:
     local, at, domain = candidate.partition("@")
     if not local or not at or "@" in domain or "." not in domain[1:-1]:
         return None
+    # An empty label ("example.com.", "a..b") is refused: a mail server will not
+    # take one, and the send would fail where nobody sees it.
+    if "" in domain.split("."):
+        return None
     return None if _WHITESPACE.search(candidate) else candidate
 
 

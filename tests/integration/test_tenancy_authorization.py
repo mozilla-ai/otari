@@ -47,7 +47,7 @@ from gateway.services.tenancy.authorization import resolve_visible_workspace_sco
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
-from .tenancy_helpers import NO_TERMS, membership_writes
+from .tenancy_helpers import NO_MAIL_LIMIT, NO_TERMS, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -564,6 +564,7 @@ async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a
         user=admin,
         request=InviteOrganizationMemberRequest(email="invitee@example.com"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
     assert invitation.accept_link is not None
     await service.accept_invitation(invitation.accept_link.split("token=")[1], claims=NO_TERMS)
@@ -883,6 +884,7 @@ async def test_a_plain_member_cannot_invite(async_db: AsyncSession) -> None:
             user=member,
             request=InviteOrganizationMemberRequest(email="ada@example.com"),
             config=_TEST_CONFIG,
+            mail_limit=NO_MAIL_LIMIT,
         )
 
 
@@ -896,6 +898,7 @@ async def test_an_admin_can_invite(async_db: AsyncSession) -> None:
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com", role="member"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
     assert result.status == "invited"
@@ -913,6 +916,7 @@ async def test_an_admin_cannot_invite_an_owner(async_db: AsyncSession) -> None:
             user=admin,
             request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
             config=_TEST_CONFIG,
+            mail_limit=NO_MAIL_LIMIT,
         )
 
 
@@ -925,6 +929,7 @@ async def test_a_viewer_cannot_revoke_an_invitation(async_db: AsyncSession) -> N
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
     with pytest.raises(NotAuthorizedError):
@@ -944,6 +949,7 @@ async def test_an_admin_cannot_revoke_a_pending_owner_invitation(async_db: Async
         user=owner,
         request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
     with pytest.raises(MembershipUpdateError, match="owners"):
@@ -961,6 +967,7 @@ async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db:
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
     with pytest.raises(InvitationAlreadyPendingError):
@@ -968,4 +975,5 @@ async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db:
             user=admin,
             request=InviteOrganizationMemberRequest(email="ada@example.com"),
             config=_TEST_CONFIG,
+            mail_limit=NO_MAIL_LIMIT,
         )

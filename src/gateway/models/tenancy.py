@@ -663,10 +663,12 @@ class ActiveOrganizationMemberPublic(SQLModel):
     """A member row joined to the identity behind it, as the roster shows it.
 
     Field-for-field the platform's shape, so the ported roster page is not
-    rewritten around a new contract, with two consequences of the OSS line:
-    ``email`` is nullable here (a local operator identity has no sign-in
-    address), and ``invitation_id`` is always null until the invitation flow
-    rehomes, which is what fills it.
+    rewritten around a new contract, except that ``email`` is nullable here (a
+    local operator identity has no sign-in address).
+
+    ``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's
+    current invitation, which may have expired, so the roster can offer to
+    revoke or reissue it.
 
     ``attribution_user_id`` is the addition the platform has no counterpart for.
     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
@@ -683,6 +685,10 @@ class ActiveOrganizationMemberPublic(SQLModel):
     user_id: uuid.UUID | None = None
     attribution_user_id: str | None = None
     invitation_id: uuid.UUID | None = None
+    invitation_expires_at: datetime | None = Field(
+        default=None,
+        description="When the invitation in invitation_id expires, or expired. Null when there is none.",
+    )
     email: str | None = None
     full_name: str | None = None
     role: str
@@ -723,14 +729,12 @@ class ActiveOrganizationMemberCreateRequest(SQLModel):
 
 
 class ActiveOrganizationMemberCreateResultPublic(SQLModel):
-    """The outcome of adding a member.
+    """The outcome of adding a member directly.
 
     The platform answers ``invited`` on both its branches, because being added
-    there always needs acceptance: a known address gets an ``invited``
-    membership, an unknown one an emailed invitation. This edition has neither
-    an invitation to send nor a way to accept one, so it answers on the other
-    arm of the same union, ``active``, and the invitation fields stay null until
-    that flow rehomes.
+    there always needs acceptance. A direct add here needs none, so it answers
+    on the other arm of the same union, ``active``, and the invitation fields
+    stay null; inviting answers ``InviteOrganizationMemberResultPublic``.
     """
 
     status: Literal["active", "invited"]
@@ -1054,6 +1058,10 @@ class InvitationUpdate(SQLModel):
     status: str | None = Field(default=None, max_length=32)
 
 
+# The ways an invitee whose link will not set a password can get in instead.
+InvitationWayIn = Literal["provider", "password_reset"]
+
+
 class InvitationPreviewPublic(SQLModel):
     """What an unauthenticated visitor sees before committing to accept.
 
@@ -1069,8 +1077,21 @@ class InvitationPreviewPublic(SQLModel):
     expires_at: datetime
     needs_password: bool = Field(
         description=(
-            "Whether the invited address has never signed in here, so accepting should also set its "
-            "password. False when the address already has a way in, and then accept refuses one."
+            "Whether accepting should also set the invited address's first password. False when the address "
+            "already has a way in, and also when another organization has it as a member or invitee, since this "
+            "link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a "
+            "password whenever this is false."
+        )
+    )
+    can_sign_in: bool = Field(
+        description="Whether the invited address can already sign in, with a password or through a provider."
+    )
+    ways_in: list[InvitationWayIn] = Field(
+        description=(
+            "When the address cannot sign in yet and this link will not set its password, what this deployment "
+            "offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and "
+            "'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when "
+            "the deployment offers neither, in which case whoever administers it has to help."
         )
     )
 
@@ -1103,8 +1124,15 @@ class InviteOrganizationMemberResultPublic(SQLModel):
     mail_sent: bool = Field(
         description=(
             "Whether the invitation email was actually dispatched. False when mail is not "
-            "configured, or the send itself failed."
+            "configured, the send itself failed, or mail_limited."
         )
+    )
+    mail_limited: bool = Field(
+        default=False,
+        description=(
+            "Whether the email was held back because the organization or the address reached its invitation "
+            "mail limit for the day. Share the link yourself, or reissue the invitation later to email a new one."
+        ),
     )
     accept_link: str | None = Field(
         default=None,
@@ -1194,6 +1222,17 @@ class AcceptInvitationResultPublic(SQLModel):
             "Whether the invited address chose a password through signup and has not verified it yet, "
             "so it has to open its verification link before it can sign in."
         ),
+    )
+    can_sign_in: bool = Field(
+        default=True,
+        description=(
+            "Whether the invited address can sign in now, with a password (this accept's included) or through "
+            "a provider. False when it accepted without one and has never signed in."
+        ),
+    )
+    ways_in: list[InvitationWayIn] = Field(
+        default_factory=list,
+        description="When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
     )
 
 

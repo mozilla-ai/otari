@@ -557,9 +557,36 @@ whatever edge controls the deployment has.
 
 An owner or admin can invite a person to an organization and selected workspaces.
 If mail is configured, Otari emails the accept link. When the email does not go
-out (no mail configured, or the send failed), the dashboard shows the link instead,
-so it can be shared by hand. A link that was emailed is never shown to the
-inviter, so only the invitee's mailbox holds it.
+out (no mail configured, the send failed, or a mail limit below was reached), the
+dashboard shows the link instead, so it can be shared by hand. A link that was
+emailed is never shown to the inviter, so only the invitee's mailbox holds it. The
+email names the inviter by their address as well as the name they chose, and an
+address the mail server would refuse, such as one ending in a dot, is refused
+when it is invited.
+
+Invitation email is limited, because it carries text an organization chose (its
+name, the inviter's name) from the deployment's own sender, and on a deployment
+where anyone can create an organization that would otherwise make it an open
+relay. In any 24 hours an organization sends at most
+`invitation_mail_limit_per_organization` invitation emails (250 by default), and
+an address receives at most `invitation_mail_limit_per_address` (5 by default)
+from every organization together, so revoking and inviting again cannot flood it.
+An invitation over a limit is still created, and its link is returned to share by
+hand, as when mail is off: the link costs the deployment nothing, and refusing
+would stop a legitimate admin partway through a bulk invite. The counts are kept
+in `rate_limit_store`, so with Redis they hold across replicas.
+
+A link that was lost can be reissued. Reissuing gives a pending or expired
+invitation a new link, emailed or returned as above, and the old link stops
+working. Inviting an address whose invitation is still pending is refused and says
+to reissue it instead. On Members, an invited row says when its invitation has
+expired, and offers Reissue and Revoke either way.
+
+The API can also add a member directly (`POST /api/v1/organizations/me/members`),
+active at once with no invitation to accept and no email. A new address added
+that way gets in by signing up, by "Forgot your password?" or through a provider,
+so on a deployment with no mail and no provider it has no way in: invite it
+instead, since an invitation link can set its first password.
 
 To invite several people at once, paste their addresses into the invite dialog,
 separated by commas or new lines (up to 100). Everyone gets the same role and
@@ -601,14 +628,19 @@ the membership only while it is still waiting; a person who became a member
 another way keeps their access. An expired link says it expired every time it is
 opened, and every refusal says to ask the inviter for a new link. An address
 whose account a deployment operator deactivated cannot be invited or added until
-it is reactivated; the refusal does not give the reason, since the admin asking
-may be another tenant's. An organization name cannot carry line breaks or other
-control characters, since it is quoted in invitation emails.
+it is reactivated, and an invitation already pending for it stops working until
+then too; neither refusal gives the reason, since the admin asking may be
+another tenant's. For the same reason, refusing an address another organization
+vouched for says what would lift the refusal and nothing about that
+organization. An organization name cannot carry line breaks or other control
+characters, since it is quoted in invitation emails.
 
 When a link may not set a password (the address belongs to someone another
-organization still has as a member or invitee), the refusal names the way in this
-deployment offers: a provider sign-in where one is configured, or "Forgot your
-password?" where mail is. Memberships that were revoked, declined, expired or
+organization still has as a member or invitee), the accept page says so before
+the invitee accepts, and names the way in this deployment offers once they have:
+a provider sign-in where one is configured, or "Forgot your password?" where mail
+is, or else asking whoever administers the gateway. A password sent anyway is
+refused with the same advice. Memberships that were revoked, declined, expired or
 removed do not count.
 
 Signing in answers which organization the session acts in. If the person was

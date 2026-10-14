@@ -23,6 +23,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
+from gateway.services.organizations import InvitationMailLimit
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
@@ -49,6 +50,9 @@ def membership_writes(db: AsyncSession) -> MembershipWrites:
 
 # A deployment that publishes no terms, for an accept that does not exercise them.
 NO_TERMS = InvitationClaimSettings(terms_url=None)
+
+# No invitation mail limit, for a test that is not about it.
+NO_MAIL_LIMIT = InvitationMailLimit(None, per_organization=None, per_address=None)
 
 
 def claim_writes(db: AsyncSession) -> dict[str, Any]:

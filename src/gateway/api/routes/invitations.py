@@ -33,6 +33,7 @@ router = APIRouter(prefix="/invitations", tags=["invitations"])
 async def validate_invitation(
     request: Request,
     service: OrganizationServiceDep,
+    claims: InvitationClaimSettingsDep,
     body: ValidateInvitationRequest,
 ) -> InvitationPreviewPublic:
     """Look up a pending invitation by its token, for the accept page to render before committing.
@@ -42,7 +43,7 @@ async def validate_invitation(
     an intermediate proxy routinely retains.
     """
     throttle_public_auth(request)
-    return await service.get_invitation_preview(body.token)
+    return await service.get_invitation_preview(body.token, claims=claims)
 
 
 @router.post("/accept")

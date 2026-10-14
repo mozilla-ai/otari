@@ -23,10 +23,18 @@ def _article_for(role: str) -> str:
     return "an" if role[:1].lower() in "aeiou" else "a"
 
 
+def _inviter(name: str | None, email: str | None) -> str:
+    """Who sent the invitation: the address this deployment knows them by, beside the name they chose."""
+    if name and email:
+        return f"{name} ({email})"
+    return name or email or "An organization admin"
+
+
 def render_invitation_email(
     *,
     organization_name: str,
-    inviter_name: str,
+    inviter_name: str | None,
+    inviter_email: str | None,
     role: str,
     accept_link: str,
     expiry_hours: int,
@@ -37,7 +45,7 @@ def render_invitation_email(
         subject="You're invited to join {{ORGANIZATION_NAME}} on Otari",
         values={
             "ORGANIZATION_NAME": organization_name,
-            "INVITER_NAME": inviter_name,
+            "INVITER": _inviter(inviter_name, inviter_email),
             "ROLE": role,
             "ROLE_ARTICLE": _article_for(role),
             "ACCEPT_LINK": accept_link,

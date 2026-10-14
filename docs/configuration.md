@@ -893,6 +893,19 @@ smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
 
+Invitation email is limited per organization and per recipient address over 24
+hours, so an organization anyone can create cannot use the deployment's sender to
+mail strangers at will. An invitation over a limit is still created and its link
+returned to share by hand. Both limits are counted in `rate_limit_store`, and
+`null` turns one off:
+
+```yaml
+invitation_mail_limit_per_organization: 250   # default
+invitation_mail_limit_per_address: 5          # default, from every organization together
+```
+
+See [Invitations](access-control.md#invitations).
+
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or

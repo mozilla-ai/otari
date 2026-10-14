@@ -22,6 +22,7 @@ from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.inference import InferenceSettings
+from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.tools import ToolSettings
 from gateway.core.settings.traces import TraceSettings
@@ -492,6 +493,7 @@ class GatewayConfig(
     ApiKeySettings,
     PricingSettings,
     FeedbackSettings,
+    OrganizationSettings,
     ToolSettings,
     TraceSettings,
     BaseSettings,

@@ -52,6 +52,32 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
         )
         return list(result.scalars().all())
 
+    async def get_current_by_organization_members(
+        self,
+        organization_member_ids: Iterable[uuid.UUID],
+    ) -> dict[uuid.UUID, Invitation]:
+        """Return each membership's newest invitation that is pending or expired, keyed by membership.
+
+        The roster's view of an ``invited`` row: an invitation that expired is
+        still the one to revoke or reissue, so it is not filtered out the way
+        ``get_pending_by_organization_members`` filters it.
+        """
+        ids = list(organization_member_ids)
+        if not ids:
+            return {}
+        result = await self.db.execute(
+            select(Invitation)
+            .where(
+                col(Invitation.organization_member_id).in_(ids),
+                col(Invitation.status).in_(("pending", "expired")),
+            )
+            .order_by(col(Invitation.created_at).desc(), col(Invitation.id).desc())
+        )
+        current: dict[uuid.UUID, Invitation] = {}
+        for invitation in result.scalars().all():
+            current.setdefault(invitation.organization_member_id, invitation)
+        return current
+
     async def get_live_pending_for_user_with_context(
         self,
         user_id: uuid.UUID,

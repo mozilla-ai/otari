@@ -90,12 +90,15 @@ class OrganizationMemberAddressUnprovenError(TenancyConflictError):
     A password chosen through an invitation link is the inviting organization's
     word for the address, and that organization's admins held the link. Letting a
     second organization take it as a member would hand them its access.
+
+    The message says what would lift the refusal and nothing about the other
+    organization, which is another tenant's business.
     """
 
     def __init__(self, identifier: object):
         super().__init__(
-            f"{identifier} was claimed through another organization's invitation and has not proven the address; "
-            "it can be added once it signs in with a provider or resets its password by email"
+            f"{identifier} cannot be added to or invited into this organization until whoever holds it proves "
+            "the address, by signing in with a provider or by resetting its password by email"
         )
 
 
@@ -175,14 +178,13 @@ class InvitationAlreadyPendingError(TenancyConflictError):
 
     Distinct from ``OrganizationMemberAlreadyExistsError``: that message says
     "already an active member", which is false for an address that is only
-    ``invited``. Resending is revoke (which cancels the pending invitation and
-    suspends the membership) followed by a fresh invite; once the existing
-    invitation's own expiry has passed, a fresh invite supersedes it directly
-    instead of raising this.
+    ``invited``. Resending is reissuing that invitation, which the message
+    says; once the existing invitation's own expiry has passed, a fresh invite
+    supersedes it directly instead of raising this.
     """
 
     def __init__(self, identifier: object):
-        super().__init__(f"{identifier} already has a pending invitation")
+        super().__init__(f"{identifier} already has a pending invitation. Reissue it to send a new link.")
 
 
 class WorkspaceNameRequiredError(TenancyValidationError):
@@ -308,6 +310,21 @@ class InvitationAlreadyUsedError(TenancyValidationError):
         )
 
 
+class InvitationClosedError(TenancyValidationError):
+    """An owner or admin acting on an invitation that was accepted, revoked, declined or replaced.
+
+    The inviter's counterpart to ``InvitationAlreadyUsedError``, whose message
+    speaks to the invitee.
+    """
+
+    def __init__(self, status: str) -> None:
+        what = {
+            "accepted": "was already accepted",
+            "cancelled": "was already revoked or declined",
+        }.get(status, "has been replaced by a newer one")
+        super().__init__(f"This invitation {what}, so it cannot be revoked or reissued.")
+
+
 class InvitationPasswordNotAcceptedError(TenancyValidationError):
     """A password sent with an accept for an address the link may not claim.
 
@@ -354,6 +371,7 @@ __all__ = [
     "InvalidRoleError",
     "InvitationAlreadyPendingError",
     "InvitationAlreadyUsedError",
+    "InvitationClosedError",
     "InvitationExpiredError",
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",

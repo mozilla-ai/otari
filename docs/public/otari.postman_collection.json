@@ -3769,7 +3769,7 @@
               },
               "raw": "{\n  \"email\": \"string\"\n}"
             },
-            "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). The response\nalways carries the accept link, whether or not it was actually emailed\n(``mail_sent``), so an operator can share it themselves when mail is not\nconfigured or the send fails.",
+            "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). When the\nemail did not go out (``mail_sent`` is false: mail is not configured, the\nsend failed, or the invitation mail limit was reached), the response\ncarries the accept link so the caller can share it themselves. An address\nwhose invitation is still pending is refused; reissue that invitation to\nsend a new link.",
             "header": [
               {
                 "key": "Content-Type",
@@ -3804,7 +3804,7 @@
               },
               "raw": "{\n  \"emails\": [\n    \"string\"\n  ]\n}"
             },
-            "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent`` and\naccept link.",
+            "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent``, and\nits accept link when that is false.",
             "header": [
               {
                 "key": "Content-Type",
@@ -3831,7 +3831,7 @@
         {
           "name": "Revoke Active Organization Member Invitation",
           "request": {
-            "description": "Revoke an unaccepted invitation. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
+            "description": "Revoke an unaccepted invitation, pending or expired. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -3847,6 +3847,36 @@
                 ":invitation_id"
               ],
               "raw": "{{baseUrl}}/api/v1/organizations/me/member-invitations/:invitation_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "invitation_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reissue Active Organization Member Invitation",
+          "request": {
+            "description": "Give a pending or expired invitation a new accept link. Organization owners and admins only.\n\nThe old link stops working. The new one is emailed as an invitation is, and\nreturned in ``accept_link`` when it was not, so a lost link can be\nrecovered whether or not the deployment sends mail.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "member-invitations",
+                ":invitation_id",
+                "reissue"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/member-invitations/:invitation_id/reissue",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3910,7 +3940,7 @@
               },
               "raw": "{\n  \"email\": \"string\"\n}"
             },
-            "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately and\nthe response says so: this edition has no invitation to send and no way to\naccept one, so it answers on the ``active`` arm of the result rather than\nthe ``invited`` one the platform uses. An address that belongs to no\nidentity yet creates one, which carries the address as the handle a future\nsign-in flow will claim it by, and can do nothing until then.",
+            "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately, with\nno invitation to accept and no email sent, so the person has to be told\nsome other way. An address that belongs to no identity yet creates one,\nwhich gets in by signing up, by \"Forgot your password?\" or by a Google or\nGitHub sign-in; on a deployment with no mail and no provider it has no way\nin, so invite it instead (``POST /me/member-invitations``), whose link can\nset its first password.",
             "header": [
               {
                 "key": "Content-Type",

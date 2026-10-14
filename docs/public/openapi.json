@@ -49,6 +49,12 @@
       "AcceptInvitationResultPublic": {
         "description": "What accepting produces: enough for the accept page to say where the visitor landed.\n\nNo session and no token. When the request carried a password, the identity\ncan sign in straight away; otherwise it stays password-less until claimed by\nsignup or a provider sign-in.",
         "properties": {
+          "can_sign_in": {
+            "default": true,
+            "description": "Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.",
+            "title": "Can Sign In",
+            "type": "boolean"
+          },
           "organization_name": {
             "title": "Organization Name",
             "type": "string"
@@ -68,6 +74,18 @@
             "description": "Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.",
             "title": "Verification Pending",
             "type": "boolean"
+          },
+          "ways_in": {
+            "description": "When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
+            "items": {
+              "enum": [
+                "provider",
+                "password_reset"
+              ],
+              "type": "string"
+            },
+            "title": "Ways In",
+            "type": "array"
           }
         },
         "required": [
@@ -302,7 +320,7 @@
         "type": "object"
       },
       "ActiveOrganizationMemberCreateResultPublic": {
-        "description": "The outcome of adding a member.\n\nThe platform answers ``invited`` on both its branches, because being added\nthere always needs acceptance: a known address gets an ``invited``\nmembership, an unknown one an emailed invitation. This edition has neither\nan invitation to send nor a way to accept one, so it answers on the other\narm of the same union, ``active``, and the invitation fields stay null until\nthat flow rehomes.",
+        "description": "The outcome of adding a member directly.\n\nThe platform answers ``invited`` on both its branches, because being added\nthere always needs acceptance. A direct add here needs none, so it answers\non the other arm of the same union, ``active``, and the invitation fields\nstay null; inviting answers ``InviteOrganizationMemberResultPublic``.",
         "properties": {
           "attribution_user_id": {
             "anyOf": [
@@ -424,7 +442,7 @@
         "type": "object"
       },
       "ActiveOrganizationMemberPublic": {
-        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, with two consequences of the OSS line:\n``email`` is nullable here (a local operator identity has no sign-in\naddress), and ``invitation_id`` is always null until the invitation flow\nrehomes, which is what fills it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
+        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, except that ``email`` is nullable here (a\nlocal operator identity has no sign-in address).\n\n``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's\ncurrent invitation, which may have expired, so the roster can offer to\nrevoke or reissue it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
         "properties": {
           "attribution": {
             "anyOf": [
@@ -473,6 +491,19 @@
               }
             ],
             "title": "Full Name"
+          },
+          "invitation_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the invitation in invitation_id expires, or expired. Null when there is none.",
+            "title": "Invitation Expires At"
           },
           "invitation_id": {
             "anyOf": [
@@ -7669,6 +7700,11 @@
       "InvitationPreviewPublic": {
         "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nand the role on offer. The token is the caller's only credential here, not\na session, so this carries nothing that identifies who sent it or any\nother member.",
         "properties": {
+          "can_sign_in": {
+            "description": "Whether the invited address can already sign in, with a password or through a provider.",
+            "title": "Can Sign In",
+            "type": "boolean"
+          },
           "email": {
             "title": "Email",
             "type": "string"
@@ -7679,7 +7715,7 @@
             "type": "string"
           },
           "needs_password": {
-            "description": "Whether the invited address has never signed in here, so accepting should also set its password. False when the address already has a way in, and then accept refuses one.",
+            "description": "Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.",
             "title": "Needs Password",
             "type": "boolean"
           },
@@ -7690,6 +7726,18 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "ways_in": {
+            "description": "When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.",
+            "items": {
+              "enum": [
+                "provider",
+                "password_reset"
+              ],
+              "type": "string"
+            },
+            "title": "Ways In",
+            "type": "array"
           }
         },
         "required": [
@@ -7697,7 +7745,9 @@
           "organization_name",
           "role",
           "expires_at",
-          "needs_password"
+          "needs_password",
+          "can_sign_in",
+          "ways_in"
         ],
         "title": "InvitationPreviewPublic",
         "type": "object"
@@ -7778,8 +7828,14 @@
             "title": "Invitation Id",
             "type": "string"
           },
+          "mail_limited": {
+            "default": false,
+            "description": "Whether the email was held back because the organization or the address reached its invitation mail limit for the day. Share the link yourself, or reissue the invitation later to email a new one.",
+            "title": "Mail Limited",
+            "type": "boolean"
+          },
           "mail_sent": {
-            "description": "Whether the invitation email was actually dispatched. False when mail is not configured, or the send itself failed.",
+            "description": "Whether the invitation email was actually dispatched. False when mail is not configured, the send itself failed, or mail_limited.",
             "title": "Mail Sent",
             "type": "boolean"
           },
@@ -30607,7 +30663,7 @@
     },
     "/api/v1/organizations/me/member-invitations": {
       "post": {
-        "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). The response\nalways carries the accept link, whether or not it was actually emailed\n(``mail_sent``), so an operator can share it themselves when mail is not\nconfigured or the send fails.",
+        "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). When the\nemail did not go out (``mail_sent`` is false: mail is not configured, the\nsend failed, or the invitation mail limit was reached), the response\ncarries the accept link so the caller can share it themselves. An address\nwhose invitation is still pending is refused; reissue that invitation to\nsend a new link.",
         "operationId": "organizations-invite_active_organization_member",
         "requestBody": {
           "content": {
@@ -30657,7 +30713,7 @@
     },
     "/api/v1/organizations/me/member-invitations/bulk": {
       "post": {
-        "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent`` and\naccept link.",
+        "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent``, and\nits accept link when that is false.",
         "operationId": "organizations-bulk_invite_active_organization_members",
         "requestBody": {
           "content": {
@@ -30707,7 +30763,7 @@
     },
     "/api/v1/organizations/me/member-invitations/{invitation_id}": {
       "delete": {
-        "description": "Revoke an unaccepted invitation. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
+        "description": "Revoke an unaccepted invitation, pending or expired. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
         "operationId": "organizations-revoke_active_organization_member_invitation",
         "parameters": [
           {
@@ -30752,6 +30808,58 @@
           }
         ],
         "summary": "Revoke Active Organization Member Invitation",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/member-invitations/{invitation_id}/reissue": {
+      "post": {
+        "description": "Give a pending or expired invitation a new accept link. Organization owners and admins only.\n\nThe old link stops working. The new one is emailed as an invitation is, and\nreturned in ``accept_link`` when it was not, so a lost link can be\nrecovered whether or not the deployment sends mail.",
+        "operationId": "organizations-reissue_active_organization_member_invitation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invitation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteOrganizationMemberResultPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reissue Active Organization Member Invitation",
         "tags": [
           "organizations"
         ]
@@ -30845,7 +30953,7 @@
         ]
       },
       "post": {
-        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately and\nthe response says so: this edition has no invitation to send and no way to\naccept one, so it answers on the ``active`` arm of the result rather than\nthe ``invited`` one the platform uses. An address that belongs to no\nidentity yet creates one, which carries the address as the handle a future\nsign-in flow will claim it by, and can do nothing until then.",
+        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately, with\nno invitation to accept and no email sent, so the person has to be told\nsome other way. An address that belongs to no identity yet creates one,\nwhich gets in by signing up, by \"Forgot your password?\" or by a Google or\nGitHub sign-in; on a deployment with no mail and no provider it has no way\nin, so invite it instead (``POST /me/member-invitations``), whose link can\nset its first password.",
         "operationId": "organizations-create_active_organization_member",
         "requestBody": {
           "content": {

@@ -15,6 +15,7 @@ def _render(**overrides: object) -> tuple[str, str, str]:
         **{  # type: ignore[arg-type]
             "organization_name": "Acme",
             "inviter_name": "Ada",
+            "inviter_email": "ada@example.com",
             "role": "member",
             "accept_link": ACCEPT_LINK,
             "expiry_hours": 168,
@@ -101,3 +102,23 @@ def test_render_invitation_email_strips_newlines_from_the_subject_line() -> None
 
     assert "\r" not in subject
     assert "\n" not in subject
+
+
+def test_render_invitation_email_names_the_inviter_by_address_as_well_as_name() -> None:
+    """The name is whatever the inviter typed; the address is the one this deployment knows them by."""
+    _, html, text = _render(inviter_name="IT Helpdesk", inviter_email="mallory@example.com")
+    for rendered in (html, text):
+        assert "IT Helpdesk (mallory@example.com) has invited you" in rendered
+
+    _, _, nameless = _render(inviter_name=None, inviter_email="mallory@example.com")
+    assert "mallory@example.com has invited you" in nameless
+
+    _, _, anonymous = _render(inviter_name=None, inviter_email=None)
+    assert "An organization admin has invited you" in anonymous
+
+
+def test_render_invitation_email_offers_the_role_rather_than_membership() -> None:
+    _, html, _ = _render(role="admin")
+
+    assert "to join as an admin." in html
+    assert "become a member" not in html

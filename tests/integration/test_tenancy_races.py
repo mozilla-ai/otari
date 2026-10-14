@@ -38,6 +38,7 @@ from gateway.exceptions.organizations_exceptions import (
     ForeignTenancyError,
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
+    InvitationClosedError,
     InvitationPasswordNotAcceptedError,
     LastWorkspaceError,
     MembershipUpdateError,
@@ -103,6 +104,7 @@ from gateway.services.tenancy.workspace_activation_service import (
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import (
+    NO_MAIL_LIMIT,
     NO_TERMS,
     MembershipWrites,
     budget_service,
@@ -909,6 +911,7 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
             user=user,
             request=InviteOrganizationMemberRequest(email="grace@example.com"),
             config=config,
+            mail_limit=NO_MAIL_LIMIT,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -949,6 +952,7 @@ async def test_organizations_inviting_one_new_address_at_once_all_succeed(
                     user=owner,
                     request=InviteOrganizationMemberRequest(email="nova@example.com"),
                     config=GatewayConfig(),
+                    mail_limit=NO_MAIL_LIMIT,
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -991,6 +995,7 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
             workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="viewer")],
         ),
         config=config,
+        mail_limit=NO_MAIL_LIMIT,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1045,6 +1050,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         request=InviteOrganizationMemberRequest(email="iris@example.com"),
         # No mail for the invite itself, so the link comes back to share.
         config=GatewayConfig(),
+        mail_limit=NO_MAIL_LIMIT,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1110,6 +1116,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="juno@example.com"),
         config=GatewayConfig(),
+        mail_limit=NO_MAIL_LIMIT,
     )
     assert invited.invitation_id is not None
     membership = await OrganizationMemberRepository(async_db).get(invited.organization_member_id)
@@ -1358,6 +1365,7 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="ivy@example.com"),
         config=GatewayConfig(),
+        mail_limit=NO_MAIL_LIMIT,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1389,8 +1397,11 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
 
     # Exactly one side has to lose, and lose with the mapped error: accept and
     # revoke are different operations, but they are still racing the same
-    # pending-to-something-else transition, so only one may win it.
-    losses = [outcome for outcome in outcomes if isinstance(outcome, InvitationAlreadyUsedError)]
+    # pending-to-something-else transition, so only one may win it. Each loses
+    # in its own caller's words.
+    losses = [
+        outcome for outcome in outcomes if isinstance(outcome, InvitationAlreadyUsedError | InvitationClosedError)
+    ]
     assert len(losses) == 1
 
     async_db.expire_all()

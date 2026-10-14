@@ -566,6 +566,14 @@ def test_normalized_address_refuses_the_edge_shapes() -> None:
     assert normalized_address("a@b .c") is None
 
 
+def test_normalized_address_refuses_an_empty_domain_label() -> None:
+    """A mail server refuses these, and an invitation to one used to fail where nobody saw it."""
+    assert normalized_address("x@example.test.") is None
+    assert normalized_address("x@.example.test") is None
+    assert normalized_address("x@example..test") is None
+    assert normalized_address("x@sub.example.test") == "x@sub.example.test"
+
+
 def test_normalized_address_is_linear_on_a_long_run_of_dots() -> None:
     started = time.perf_counter()
     assert normalized_address("!@!." + "!." * 50_000 + "@") is None

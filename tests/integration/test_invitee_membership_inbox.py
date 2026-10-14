@@ -44,7 +44,7 @@ from gateway.repositories.tenancy import (
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
-from .tenancy_helpers import NO_TERMS, membership_writes
+from .tenancy_helpers import NO_MAIL_LIMIT, NO_TERMS, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -110,6 +110,7 @@ async def _invite(
             workspace_assignments=workspace_assignments,
         ),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
 

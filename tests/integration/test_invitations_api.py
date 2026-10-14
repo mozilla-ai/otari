@@ -811,6 +811,8 @@ def test_accepting_from_the_inbox_activates_the_membership(
         "role": "member",
         "password_set": False,
         "verification_pending": False,
+        "can_sign_in": True,
+        "ways_in": [],
     }
 
     db_session.refresh(membership)
@@ -1179,3 +1181,269 @@ def test_an_organization_name_with_a_control_character_is_refused(
 
     assert created.status_code == 400, created.text
     assert renamed.status_code == 400, renamed.text
+
+
+# ---------- invitation mail limits ----------
+
+
+def _mail_on(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+
+
+def test_an_organization_over_its_invitation_mail_limit_gets_the_links_instead(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh tenant on an open-signup deployment once mailed 300 invitations in two seconds."""
+    _mail_on(test_config, monkeypatch)
+    monkeypatch.setattr(test_config, "invitation_mail_limit_per_organization", 2)
+
+    result = _bulk_invite(client, master_key_header, ["a@example.com", "b@example.com", "c@example.com"])
+
+    sent = [row for row in result["invited"] if row["mail_sent"]]
+    held = [row for row in result["invited"] if not row["mail_sent"]]
+    assert len(sent) == 2
+    assert len(held) == 1
+    # Still invited, with the link to share by hand, and said why.
+    assert held[0]["mail_limited"] is True
+    assert held[0]["accept_link"].startswith("https://otari.example.com/#/accept-invitation?token=")
+    assert all(row["mail_limited"] is False for row in sent)
+    single = _invite(client, master_key_header, email="d@example.com")
+    assert single["mail_sent"] is False
+    assert single["mail_limited"] is True
+
+
+def test_revoking_and_reinviting_cannot_flood_one_address(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mail_on(test_config, monkeypatch)
+    monkeypatch.setattr(test_config, "invitation_mail_limit_per_address", 2)
+
+    outcomes = []
+    for _ in range(3):
+        result = _invite(client, master_key_header, email="victim@example.com")
+        outcomes.append((result["mail_sent"], result["mail_limited"]))
+        revoked = client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{result['invitation_id']}", headers=master_key_header
+        )
+        assert revoked.status_code == 200, revoked.text
+
+    assert outcomes == [(True, False), (True, False), (False, True)]
+
+
+# ---------- reissuing a link ----------
+
+
+def _reissue(client: TestClient, headers: dict[str, str], invitation_id: str) -> Any:
+    return client.post(f"{API_ROOT}/organizations/me/member-invitations/{invitation_id}/reissue", headers=headers)
+
+
+def test_inviting_an_address_already_invited_says_how_to_send_a_new_link(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _invite(client, master_key_header, email="lost@example.com")
+
+    again = _invite_raw(client, master_key_header, email="lost@example.com")
+
+    assert again.status_code == 409, again.text
+    assert "Reissue it" in again.json()["detail"]
+
+
+def test_reissuing_gives_a_new_link_and_kills_the_old_one(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """On a deployment with no mail, the link is gone once the invite dialog closes; reissuing gets a new one."""
+    first = _invite(client, master_key_header, email="lost@example.com", role="admin")
+
+    reissued = _reissue(client, master_key_header, first["invitation_id"])
+
+    assert reissued.status_code == 200, reissued.text
+    body = reissued.json()
+    assert body["invitation_id"] == first["invitation_id"]
+    assert body["role"] == "admin"
+    assert body["mail_sent"] is False
+    assert body["accept_link"] != first["accept_link"]
+    old = client.post(f"{API_ROOT}/invitations/validate", json={"token": _token_from(first["accept_link"])})
+    assert old.status_code == 404, old.text
+    accepted = client.post(
+        f"{API_ROOT}/invitations/accept", json={"token": _token_from(body["accept_link"]), "password": PASSWORD}
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["role"] == "admin"
+
+
+def test_reissuing_emails_the_new_link_where_mail_is_configured(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _invite(client, master_key_header, email="lost@example.com")
+    _mail_on(test_config, monkeypatch)
+
+    reissued = _reissue(client, master_key_header, first["invitation_id"])
+
+    assert reissued.status_code == 200, reissued.text
+    assert reissued.json()["mail_sent"] is True
+    assert reissued.json()["accept_link"] is None
+
+
+def test_an_invitation_that_expired_after_it_was_opened_can_still_be_revoked_or_reissued(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """Opening an expired link records the expiry, and the roster then lost the invitation to act on."""
+    first = _invite(client, master_key_header, email="late@example.com")
+    invitation = db_session.get(Invitation, uuid.UUID(first["invitation_id"]))
+    assert invitation is not None
+    invitation.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    db_session.commit()
+    opened = client.post(f"{API_ROOT}/invitations/validate", json={"token": _token_from(first["accept_link"])})
+    assert opened.status_code == 400, opened.text
+
+    row = _roster_row(client, master_key_header, "late@example.com")
+    assert row["status"] == "invited"
+    assert row["invitation_id"] == first["invitation_id"]
+    assert datetime.fromisoformat(row["invitation_expires_at"]) < datetime.now(UTC)
+
+    reissued = _reissue(client, master_key_header, first["invitation_id"])
+    assert reissued.status_code == 200, reissued.text
+    row = _roster_row(client, master_key_header, "late@example.com")
+    assert datetime.fromisoformat(row["invitation_expires_at"]) > datetime.now(UTC)
+
+    invitation.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    invitation.status = "expired"
+    db_session.commit()
+    revoked = client.delete(
+        f"{API_ROOT}/organizations/me/member-invitations/{first['invitation_id']}", headers=master_key_header
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert all(row["email"] != "late@example.com" for row in _members(client, master_key_header))
+
+
+def test_revoking_or_reissuing_a_used_invitation_is_refused_in_the_inviters_words(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    result = _invite(client, master_key_header, email="done@example.com")
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])})
+    assert accepted.status_code == 200, accepted.text
+
+    revoked = client.delete(
+        f"{API_ROOT}/organizations/me/member-invitations/{result['invitation_id']}", headers=master_key_header
+    )
+    reissued = _reissue(client, master_key_header, result["invitation_id"])
+
+    assert revoked.status_code == reissued.status_code == 400
+    assert revoked.json()["detail"] == "This invitation was already accepted, so it cannot be revoked or reissued."
+    assert "Ask whoever invited you" not in reissued.json()["detail"]
+
+
+def test_an_admin_cannot_reissue_an_owner_invitation(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    result = _invite(client, master_key_header, email="olga@example.com", role="owner")
+    client.cookies.set(SESSION_COOKIE_NAME, _admin_session(client, master_key_header, db_session))
+
+    reissued = client.post(f"{API_ROOT}/organizations/me/member-invitations/{result['invitation_id']}/reissue")
+
+    assert reissued.status_code == 400, reissued.text
+
+
+# ---------- the invitee's way in ----------
+
+
+def test_a_deactivated_invitee_cannot_use_a_link_issued_before_the_deactivation(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    result = _invite(client, master_key_header, email="dee@example.com")
+    token = _token_from(result["accept_link"])
+    identity = db_session.execute(select(User).where(col(User.email) == "dee@example.com")).scalar_one()
+    identity.is_active = False
+    db_session.commit()
+
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
+
+    assert preview.status_code == accept.status_code == 400
+    # Refused as a link that is no longer valid, without the reason.
+    assert "deactivated" not in preview.json()["detail"]
+    assert _roster_row(client, master_key_header, "dee@example.com")["status"] == "invited"
+
+
+def test_two_organizations_inviting_one_new_address_tell_it_how_to_get_in(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neither link may set a password, so the page has to say which way in exists instead."""
+    _invite(client, master_key_header, email="new@example.com")
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
+    _switch(client, master_key_header, created.json()["id"])
+    token = _token_from(_invite(client, master_key_header, email="new@example.com")["accept_link"])
+
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
+    assert (preview["needs_password"], preview["can_sign_in"], preview["ways_in"]) == (False, False, [])
+
+    monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
+    monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
+    _mail_on(test_config, monkeypatch)
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
+    assert preview["ways_in"] == ["provider", "password_reset"]
+
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["can_sign_in"] is False
+    assert accepted.json()["ways_in"] == ["provider", "password_reset"]
+
+
+def test_an_invitee_who_can_already_sign_in_is_told_so(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    first = _invite(client, master_key_header, email="kim@example.com")
+    claimed = client.post(
+        f"{API_ROOT}/invitations/accept", json={"token": _token_from(first["accept_link"]), "password": PASSWORD}
+    )
+    assert claimed.json()["can_sign_in"] is True
+    # Proven since, as a reset by email would, so another organization may invite it.
+    identity = db_session.execute(select(User).where(col(User.email) == "kim@example.com")).scalar_one()
+    identity.email_vouched_at = None
+    db_session.commit()
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
+    _switch(client, master_key_header, created.json()["id"])
+    token = _token_from(_invite(client, master_key_header, email="kim@example.com")["accept_link"])
+
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
+
+    assert (preview["needs_password"], preview["can_sign_in"], preview["ways_in"]) == (False, True, [])
+
+
+def test_the_refusal_for_an_address_vouched_elsewhere_does_not_mention_the_other_organization(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    home = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()["organization"]["id"]
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Mallory"}, headers=master_key_header)
+    _switch(client, master_key_header, created.json()["id"])
+    token = _token_from(_invite(client, master_key_header, email="lin@example.com")["accept_link"])
+    claimed = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+    assert claimed.status_code == 200, claimed.text
+    _switch(client, master_key_header, home)
+
+    refused = _invite_raw(client, master_key_header, email="lin@example.com")
+
+    assert refused.status_code == 409, refused.text
+    assert "organization's invitation" not in refused.json()["detail"]
+    assert "another organization" not in refused.json()["detail"]
+
+
+def test_an_address_ending_in_a_dot_is_refused_rather_than_silently_not_mailed(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    refused = _invite_raw(client, master_key_header, email="x@example.test.")
+
+    assert refused.status_code == 400, refused.text

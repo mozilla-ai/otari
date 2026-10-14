@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
+    InvitationMailLimitDep,
     MembershipListenerDep,
     UnitOfWorkDep,
     WorkspaceListenerDep,
@@ -247,12 +248,13 @@ async def create_active_organization_member(
 ) -> ActiveOrganizationMemberCreateResultPublic:
     """Add a member to the caller's active organization, by email address.
 
-    Organization owners and admins only. The member is active immediately and
-    the response says so: this edition has no invitation to send and no way to
-    accept one, so it answers on the ``active`` arm of the result rather than
-    the ``invited`` one the platform uses. An address that belongs to no
-    identity yet creates one, which carries the address as the handle a future
-    sign-in flow will claim it by, and can do nothing until then.
+    Organization owners and admins only. The member is active immediately, with
+    no invitation to accept and no email sent, so the person has to be told
+    some other way. An address that belongs to no identity yet creates one,
+    which gets in by signing up, by "Forgot your password?" or by a Google or
+    GitHub sign-in; on a deployment with no mail and no provider it has no way
+    in, so invite it instead (``POST /me/member-invitations``), whose link can
+    set its first password.
     """
     return await service.create_active_organization_member_for_user(user=current_identity, request=body)
 
@@ -368,21 +370,25 @@ async def invite_active_organization_member(
     service: OrganizationServiceDep,
     current_identity: CurrentIdentity,
     config: Annotated[GatewayConfig, Depends(get_config)],
+    mail_limit: InvitationMailLimitDep,
     body: InviteOrganizationMemberRequest,
 ) -> InviteOrganizationMemberResultPublic:
     """Invite an address to the caller's active organization by email.
 
     Organization owners and admins only. Unlike ``POST /me/members``, the
     membership lands ``invited`` rather than ``active``: it becomes active
-    once the recipient accepts (``POST /api/v1/invitations/accept``). The response
-    always carries the accept link, whether or not it was actually emailed
-    (``mail_sent``), so an operator can share it themselves when mail is not
-    configured or the send fails.
+    once the recipient accepts (``POST /api/v1/invitations/accept``). When the
+    email did not go out (``mail_sent`` is false: mail is not configured, the
+    send failed, or the invitation mail limit was reached), the response
+    carries the accept link so the caller can share it themselves. An address
+    whose invitation is still pending is refused; reissue that invitation to
+    send a new link.
     """
     return await service.invite_active_organization_member_for_user(
         user=current_identity,
         request=body,
         config=config,
+        mail_limit=mail_limit,
     )
 
 
@@ -391,6 +397,7 @@ async def bulk_invite_active_organization_members(
     service: OrganizationServiceDep,
     current_identity: CurrentIdentity,
     config: Annotated[GatewayConfig, Depends(get_config)],
+    mail_limit: InvitationMailLimitDep,
     body: BulkInviteOrganizationMembersRequest,
 ) -> BulkInviteOrganizationMembersResultPublic:
     """Invite several addresses to the caller's active organization at once.
@@ -399,13 +406,36 @@ async def bulk_invite_active_organization_members(
     workspace assignments. Each one is checked as ``POST /me/member-invitations``
     would check it, and an address that is refused lands in ``failed`` with the
     reason rather than failing the request, so the answer is 200 even when some
-    or all were refused. Each invited entry carries its own ``mail_sent`` and
-    accept link.
+    or all were refused. Each invited entry carries its own ``mail_sent``, and
+    its accept link when that is false.
     """
     return await service.invite_active_organization_members_for_user(
         user=current_identity,
         request=body,
         config=config,
+        mail_limit=mail_limit,
+    )
+
+
+@router.post("/me/member-invitations/{invitation_id}/reissue")
+async def reissue_active_organization_member_invitation(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    mail_limit: InvitationMailLimitDep,
+    invitation_id: uuid.UUID,
+) -> InviteOrganizationMemberResultPublic:
+    """Give a pending or expired invitation a new accept link. Organization owners and admins only.
+
+    The old link stops working. The new one is emailed as an invitation is, and
+    returned in ``accept_link`` when it was not, so a lost link can be
+    recovered whether or not the deployment sends mail.
+    """
+    return await service.reissue_organization_member_invitation_for_user(
+        user=current_identity,
+        invitation_id=invitation_id,
+        config=config,
+        mail_limit=mail_limit,
     )
 
 
@@ -415,7 +445,7 @@ async def revoke_active_organization_member_invitation(
     current_identity: CurrentIdentity,
     invitation_id: uuid.UUID,
 ) -> Message:
-    """Revoke an unaccepted invitation. Organization owners and admins only.
+    """Revoke an unaccepted invitation, pending or expired. Organization owners and admins only.
 
     Suspends the paired membership rather than deleting it, the same as
     removing an active member: re-inviting the same address later revives it.
