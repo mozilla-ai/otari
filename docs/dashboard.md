@@ -241,7 +241,14 @@ an identity with no address, says who the invitation is for and offers to sign
 out and continue, because accepting always adds the invited address, whoever is
 signed in. After a
 password is set from an invitation link, the sign-in screen opens with the
-invited address filled in.
+invited address filled in. When the link cannot set a password and the address
+has none yet, the page says how to get in instead: a Google or GitHub sign-in,
+or "Forgot your password?", whichever the deployment offers.
+
+On Members, an invited row offers Reissue and Revoke, and says when its
+invitation has expired. Reissue sends a new accept link (or shows it to share,
+when the email did not go out) and the old one stops working, which is how a
+lost link is recovered.
 
 ## Authentication options
 
@@ -254,7 +261,8 @@ the three credentials they used. It is the only path that grants membership
 without somebody deciding about the person, and it is fenced accordingly: see
 [Email-domain auto-join](access-control.md#email-domain-auto-join).
 
-Mail is optional. When an invitation email does not go out, you get the accept link to share,
+Mail is optional. When an invitation email does not go out (no mail, a failed send, or the
+daily invitation mail limit), you get the accept link to share,
 and an invitee new to the deployment chooses a password on the page it opens,
 so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
 

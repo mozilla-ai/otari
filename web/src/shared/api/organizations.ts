@@ -421,6 +421,22 @@ export function useBulkInviteOrganizationMembers() {
   })
 }
 
+// A new link for a pending or expired invitation: the old one stops working,
+// and the new one is emailed, or comes back to share when it was not.
+export function useReissueOrganizationMemberInvitation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      apiFetch<InviteOrganizationMemberResult>(
+        `/organizations/me/member-invitations/${encodeURIComponent(invitationId)}/reissue`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
+  })
+}
+
 export function useRevokeOrganizationMemberInvitation() {
   const queryClient = useQueryClient()
   return useMutation({

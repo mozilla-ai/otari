@@ -15,7 +15,9 @@
  * away with no verification
  * email: the link already proves what that email would, and it is the only
  * way in on a deployment that sends no mail. When the address can already
- * sign in, accepting is one button and the next step is signing in.
+ * sign in, accepting is one button and the next step is signing in. When it
+ * cannot and the link may not set its password either (another organization
+ * has it too), the page names the way in the gateway offers instead.
  *
  * Accepting takes no identity, so the membership always goes to the invited
  * address whoever is signed in here. A session for a different address is
@@ -48,6 +50,7 @@ import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { ClaimForm } from "./ClaimForm"
+import { waysInSentence } from "./waysIn"
 
 /**
  * Whose session this browser holds, against the invited address.
@@ -185,7 +188,9 @@ export function AcceptInvitationPage() {
                   ? `Your password is set. Sign in as ${preview.data?.email ?? "the invited address"} to get started.`
                   : accept.data.verification_pending
                     ? `Verify ${preview.data?.email ?? "the invited address"} first: open the verification link we emailed when you signed up, then sign in.`
-                    : "Sign in to get started."}
+                    : accept.data.can_sign_in === false
+                      ? `${invitedEmail ?? "The invited address"} has no password yet. To get started, ${waysInSentence(accept.data.ways_in ?? [], deployment.oauth_providers)}`
+                      : "Sign in to get started."}
               </p>
               <Button
                 variant="primary"
@@ -197,6 +202,12 @@ export function AcceptInvitationPage() {
               >
                 Go to sign in
               </Button>
+              {accept.data.can_sign_in === false &&
+              accept.data.ways_in?.includes("password_reset") ? (
+                <PublicAuthLink to="#/recover-password">
+                  Choose a password
+                </PublicAuthLink>
+              ) : null}
               {/* Whoever signed up may not be this invitee, who then takes the
                   address back by choosing a password through the mailbox. */}
               {accept.data.verification_pending ? (
@@ -244,6 +255,20 @@ export function AcceptInvitationPage() {
             />
           ) : (
             <>
+              {/* Another organization has this address too, so neither link
+                  may choose its password; say which way in exists instead of
+                  ending at a sign-in screen it cannot pass. Compared with
+                  false because an older gateway sends no such field. */}
+              {preview.data.can_sign_in !== false ? null : (
+                <InfoBanner>
+                  This link can't set a password for {preview.data.email}.
+                  Accept the invitation, then{" "}
+                  {waysInSentence(
+                    preview.data.ways_in ?? [],
+                    deployment.oauth_providers,
+                  )}
+                </InfoBanner>
+              )}
               <ErrorBanner error={accept.error} />
               <Button
                 variant="primary"

@@ -285,6 +285,8 @@ describe("App", () => {
           role: "member",
           expires_at: "2026-01-08T00:00:00+00:00",
           needs_password: false,
+          can_sign_in: true,
+          ways_in: [],
         } as never
       }
       return [] as never

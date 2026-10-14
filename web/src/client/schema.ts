@@ -2564,10 +2564,12 @@ export interface paths {
          *
          *     Organization owners and admins only. Unlike ``POST /me/members``, the
          *     membership lands ``invited`` rather than ``active``: it becomes active
-         *     once the recipient accepts (``POST /api/v1/invitations/accept``). The response
-         *     always carries the accept link, whether or not it was actually emailed
-         *     (``mail_sent``), so an operator can share it themselves when mail is not
-         *     configured or the send fails.
+         *     once the recipient accepts (``POST /api/v1/invitations/accept``). When the
+         *     email did not go out (``mail_sent`` is false: mail is not configured, the
+         *     send failed, or the invitation mail limit was reached), the response
+         *     carries the accept link so the caller can share it themselves. An address
+         *     whose invitation is still pending is refused; reissue that invitation to
+         *     send a new link.
          */
         post: operations["organizations-invite_active_organization_member"];
         delete?: never;
@@ -2593,8 +2595,8 @@ export interface paths {
          *     workspace assignments. Each one is checked as ``POST /me/member-invitations``
          *     would check it, and an address that is refused lands in ``failed`` with the
          *     reason rather than failing the request, so the answer is 200 even when some
-         *     or all were refused. Each invited entry carries its own ``mail_sent`` and
-         *     accept link.
+         *     or all were refused. Each invited entry carries its own ``mail_sent``, and
+         *     its accept link when that is false.
          */
         post: operations["organizations-bulk_invite_active_organization_members"];
         delete?: never;
@@ -2615,12 +2617,36 @@ export interface paths {
         post?: never;
         /**
          * Revoke Active Organization Member Invitation
-         * @description Revoke an unaccepted invitation. Organization owners and admins only.
+         * @description Revoke an unaccepted invitation, pending or expired. Organization owners and admins only.
          *
          *     Suspends the paired membership rather than deleting it, the same as
          *     removing an active member: re-inviting the same address later revives it.
          */
         delete: operations["organizations-revoke_active_organization_member_invitation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/member-invitations/{invitation_id}/reissue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reissue Active Organization Member Invitation
+         * @description Give a pending or expired invitation a new accept link. Organization owners and admins only.
+         *
+         *     The old link stops working. The new one is emailed as an invitation is, and
+         *     returned in ``accept_link`` when it was not, so a lost link can be
+         *     recovered whether or not the deployment sends mail.
+         */
+        post: operations["organizations-reissue_active_organization_member_invitation"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2647,12 +2673,13 @@ export interface paths {
          * Create Active Organization Member
          * @description Add a member to the caller's active organization, by email address.
          *
-         *     Organization owners and admins only. The member is active immediately and
-         *     the response says so: this edition has no invitation to send and no way to
-         *     accept one, so it answers on the ``active`` arm of the result rather than
-         *     the ``invited`` one the platform uses. An address that belongs to no
-         *     identity yet creates one, which carries the address as the handle a future
-         *     sign-in flow will claim it by, and can do nothing until then.
+         *     Organization owners and admins only. The member is active immediately, with
+         *     no invitation to accept and no email sent, so the person has to be told
+         *     some other way. An address that belongs to no identity yet creates one,
+         *     which gets in by signing up, by "Forgot your password?" or by a Google or
+         *     GitHub sign-in; on a deployment with no mail and no provider it has no way
+         *     in, so invite it instead (``POST /me/member-invitations``), whose link can
+         *     set its first password.
          */
         post: operations["organizations-create_active_organization_member"];
         delete?: never;
@@ -6442,6 +6469,12 @@ export interface components {
          *     signup or a provider sign-in.
          */
         AcceptInvitationResultPublic: {
+            /**
+             * Can Sign In
+             * @description Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.
+             * @default true
+             */
+            can_sign_in: boolean;
             /** Organization Name */
             organization_name: string;
             /**
@@ -6458,6 +6491,11 @@ export interface components {
              * @default false
              */
             verification_pending: boolean;
+            /**
+             * Ways In
+             * @description When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.
+             */
+            ways_in?: ("provider" | "password_reset")[];
         };
         /**
          * AcceptedSnapshotResponse
@@ -6561,14 +6599,12 @@ export interface components {
         };
         /**
          * ActiveOrganizationMemberCreateResultPublic
-         * @description The outcome of adding a member.
+         * @description The outcome of adding a member directly.
          *
          *     The platform answers ``invited`` on both its branches, because being added
-         *     there always needs acceptance: a known address gets an ``invited``
-         *     membership, an unknown one an emailed invitation. This edition has neither
-         *     an invitation to send nor a way to accept one, so it answers on the other
-         *     arm of the same union, ``active``, and the invitation fields stay null until
-         *     that flow rehomes.
+         *     there always needs acceptance. A direct add here needs none, so it answers
+         *     on the other arm of the same union, ``active``, and the invitation fields
+         *     stay null; inviting answers ``InviteOrganizationMemberResultPublic``.
          */
         ActiveOrganizationMemberCreateResultPublic: {
             /** Attribution User Id */
@@ -6602,10 +6638,12 @@ export interface components {
          * @description A member row joined to the identity behind it, as the roster shows it.
          *
          *     Field-for-field the platform's shape, so the ported roster page is not
-         *     rewritten around a new contract, with two consequences of the OSS line:
-         *     ``email`` is nullable here (a local operator identity has no sign-in
-         *     address), and ``invitation_id`` is always null until the invitation flow
-         *     rehomes, which is what fills it.
+         *     rewritten around a new contract, except that ``email`` is nullable here (a
+         *     local operator identity has no sign-in address).
+         *
+         *     ``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's
+         *     current invitation, which may have expired, so the roster can offer to
+         *     revoke or reissue it.
          *
          *     ``attribution_user_id`` is the addition the platform has no counterpart for.
          *     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
@@ -6630,6 +6668,11 @@ export interface components {
             email?: string | null;
             /** Full Name */
             full_name?: string | null;
+            /**
+             * Invitation Expires At
+             * @description When the invitation in invitation_id expires, or expired. Null when there is none.
+             */
+            invitation_expires_at?: string | null;
             /** Invitation Id */
             invitation_id?: string | null;
             /** Organization Member Id */
@@ -9979,6 +10022,11 @@ export interface components {
          *     other member.
          */
         InvitationPreviewPublic: {
+            /**
+             * Can Sign In
+             * @description Whether the invited address can already sign in, with a password or through a provider.
+             */
+            can_sign_in: boolean;
             /** Email */
             email: string;
             /**
@@ -9988,13 +10036,18 @@ export interface components {
             expires_at: string;
             /**
              * Needs Password
-             * @description Whether the invited address has never signed in here, so accepting should also set its password. False when the address already has a way in, and then accept refuses one.
+             * @description Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.
              */
             needs_password: boolean;
             /** Organization Name */
             organization_name: string;
             /** Role */
             role: string;
+            /**
+             * Ways In
+             * @description When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with "Forgot your password?"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.
+             */
+            ways_in: ("provider" | "password_reset")[];
         };
         /**
          * InviteOrganizationMemberRequest
@@ -10048,8 +10101,14 @@ export interface components {
              */
             invitation_id: string;
             /**
+             * Mail Limited
+             * @description Whether the email was held back because the organization or the address reached its invitation mail limit for the day. Share the link yourself, or reissue the invitation later to email a new one.
+             * @default false
+             */
+            mail_limited: boolean;
+            /**
              * Mail Sent
-             * @description Whether the invitation email was actually dispatched. False when mail is not configured, or the send itself failed.
+             * @description Whether the invitation email was actually dispatched. False when mail is not configured, the send itself failed, or mail_limited.
              */
             mail_sent: boolean;
             /**
@@ -21137,6 +21196,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organizations-reissue_active_organization_member_invitation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteOrganizationMemberResultPublic"];
                 };
             };
             /** @description Validation Error */

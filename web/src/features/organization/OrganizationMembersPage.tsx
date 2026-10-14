@@ -3,6 +3,7 @@ import { useMemo, useState } from "react"
 import {
   FiCheckCircle,
   FiEdit2,
+  FiSend,
   FiSlash,
   FiUserMinus,
   FiXCircle,
@@ -58,6 +59,7 @@ import {
   useInviteOrganizationMember,
   useOrganizationContext,
   useOrganizationMembersPage,
+  useReissueOrganizationMemberInvitation,
   useRemoveOrganizationMember,
   useRevokeOrganizationMemberInvitation,
   useUpdateOrganizationMember,
@@ -155,16 +157,27 @@ function StatusMark({ status }: { status: string }) {
               ink: "text-muted",
               word: membershipLabel(status),
             }
-          : {
-              dot: "bg-text-subtle",
-              ink: "text-subtle",
-              word: membershipLabel(status),
-            }
+          : status === "expired"
+            ? { dot: "bg-warning", ink: "text-muted", word: "Invite expired" }
+            : {
+                dot: "bg-text-subtle",
+                ink: "text-subtle",
+                word: membershipLabel(status),
+              }
   return (
     <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
       <Dot className={dot} />
       {word.toUpperCase()}
     </span>
+  )
+}
+
+// An invited row whose link has passed its expiry, whether or not anyone opened it.
+function invitationExpired(member: OrganizationMember): boolean {
+  return (
+    member.status === "invited" &&
+    Boolean(member.invitation_expires_at) &&
+    new Date(member.invitation_expires_at ?? "").getTime() <= Date.now()
   )
 }
 
@@ -178,6 +191,77 @@ export function parseAddresses(text: string): string[] {
     seen.add(key)
     return true
   })
+}
+
+// After an invite or a reissue: whether it was emailed, and the link to share
+// when it was not. A delivered link goes to the invitee's mailbox alone.
+function InvitationLinkDialog({
+  result,
+  isOpen,
+  onClose,
+  title,
+}: {
+  result: InviteOrganizationMemberResult
+  isOpen: boolean
+  onClose: () => void
+  title: string
+}) {
+  const acceptLink = result.accept_link
+    ? absoluteDashboardLink(result.accept_link)
+    : null
+  return (
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title={title}
+      // Dismissable only once the email carried the link. When it did not,
+      // this is the only place the link is shown, so the acknowledgement is
+      // the way out rather than one of two.
+      isDismissable={result.mail_sent}
+      submitLabel="Done"
+      hideCancel
+      onSubmit={onClose}
+      isPending={false}
+    >
+      <InfoBanner>
+        {result.mail_sent ? (
+          <>
+            An email with an accept link was sent to{" "}
+            <strong>{result.email}</strong>.
+          </>
+        ) : result.mail_limited ? (
+          <>
+            Otari held the email back: this organization or this address has had
+            its share of invitation emails for today. Share this link with{" "}
+            <strong>{result.email}</strong> yourself.
+          </>
+        ) : (
+          // Not "mail isn't configured": mail_sent is also false when a
+          // configured transport's send failed, and that copy would send an
+          // operator to debug a configuration that may be fine.
+          <>
+            Otari did not send the email. Share this link with{" "}
+            <strong>{result.email}</strong> yourself.
+          </>
+        )}
+      </InfoBanner>
+      {acceptLink ? (
+        <>
+          <CopyableValue value={acceptLink} label="Accept link">
+            <span className="break-all text-xs">{acceptLink}</span>
+          </CopyableValue>
+          <p className="text-xs text-muted">
+            Whoever opens it can join as {result.email}, and may choose its
+            first password, so send it only to them. It works once, until{" "}
+            {formatDateTime(result.expires_at)}. Lost it? Reissue the invitation
+            from the members list for a new one.
+          </p>
+        </>
+      ) : null}
+    </FormDialog>
+  )
 }
 
 // Adding someone is an address plus a role, and optionally the workspaces to
@@ -271,6 +355,7 @@ function InviteMemberForm({
   if (outcomes) {
     const { invited, failed } = outcomes
     const unsent = invited.filter((one) => !one.mail_sent).length
+    const limited = invited.some((one) => one.mail_limited)
     return (
       <FormDialog
         isOpen={isOpen}
@@ -290,6 +375,9 @@ function InviteMemberForm({
           Invited {invited.length} of {invited.length + failed.length}.
           {unsent > 0
             ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; share those links yourself.`
+            : null}
+          {limited
+            ? " Some were held back because this organization or an address has had its share of invitation emails for today."
             : null}
         </InfoBanner>
         <ul className="flex flex-col gap-3">
@@ -321,57 +409,14 @@ function InviteMemberForm({
     )
   }
 
-  // After a successful invite: whether it was emailed, and the link to share
-  // when it was not. A delivered link goes to the invitee's mailbox alone.
   if (result) {
-    const acceptLink = result.accept_link
-      ? absoluteDashboardLink(result.accept_link)
-      : null
     return (
-      <FormDialog
+      <InvitationLinkDialog
+        result={result}
         isOpen={isOpen}
-        onOpenChange={(open) => {
-          if (!open) onClose()
-        }}
+        onClose={onClose}
         title="Invitation"
-        // Dismissable only once the email carried the link. When it did not,
-        // this is the only place the link is shown, so the acknowledgement is
-        // the way out rather than one of two.
-        isDismissable={result.mail_sent}
-        submitLabel="Done"
-        hideCancel
-        onSubmit={onClose}
-        isPending={false}
-      >
-        <InfoBanner>
-          {result.mail_sent ? (
-            <>
-              An email with an accept link was sent to{" "}
-              <strong>{result.email}</strong>.
-            </>
-          ) : (
-            // Not "mail isn't configured": mail_sent is also false when a
-            // configured transport's send failed, and that copy would send an
-            // operator to debug a configuration that may be fine.
-            <>
-              Otari did not send the email. Share this link with{" "}
-              <strong>{result.email}</strong> yourself.
-            </>
-          )}
-        </InfoBanner>
-        {acceptLink ? (
-          <>
-            <CopyableValue value={acceptLink} label="Accept link">
-              <span className="break-all text-xs">{acceptLink}</span>
-            </CopyableValue>
-            <p className="text-xs text-muted">
-              Whoever opens it can join as {result.email}, and may choose its
-              first password, so send it only to them. It works once, until{" "}
-              {formatDateTime(result.expires_at)}.
-            </p>
-          </>
-        ) : null}
-      </FormDialog>
+      />
     )
   }
 
@@ -807,6 +852,8 @@ export function OrganizationMembersPage() {
   const update = useUpdateOrganizationMember()
   const remove = useRemoveOrganizationMember()
   const revoke = useRevokeOrganizationMemberInvitation()
+  const reissue = useReissueOrganizationMemberInvitation()
+  const [reissued, setReissued] = useState<InviteOrganizationMemberResult>()
 
   // Three of this page's reads are deployment-wide (`/users`, `/budgets`,
   // `/scoped-budgets`) and have answered 403 to a tenant since #821. They are
@@ -1012,7 +1059,9 @@ export function OrganizationMembersPage() {
           return spendRow?.blocked ? (
             <StatusMark status="blocked" />
           ) : (
-            <StatusMark status={member.status} />
+            <StatusMark
+              status={invitationExpired(member) ? "expired" : member.status}
+            />
           )
         },
       },
@@ -1091,14 +1140,23 @@ export function OrganizationMembersPage() {
             context: activeContext,
             members: rows,
           })
-          // An invited row's only action is Revoke: it has nothing to demote
-          // or reassign yet, and Remove's own guard (membershipChangeBlockedReason)
-          // already refuses a row with no organization_member_id, which every
-          // invited row here has, so Remove would otherwise render enabled and
-          // do the wrong thing on a pending invitation.
+          // An invited row's actions are about its link, expired or not: Reissue
+          // sends a new one (the way back for a lost link), Revoke withdraws
+          // it. It has nothing to demote or reassign yet, and Remove would do
+          // the wrong thing on a pending invitation.
           if (member.status === "invited" && member.invitation_id) {
+            const invitationId = member.invitation_id
             return (
               <RowActionRow>
+                <RowAction
+                  icon={FiSend}
+                  label="Reissue"
+                  ariaLabel={`Reissue the invitation to ${memberLabel(member)}`}
+                  isDisabled={!manages || reissue.isPending}
+                  onPress={() =>
+                    reissue.mutate(invitationId, { onSuccess: setReissued })
+                  }
+                />
                 <RowAction
                   icon={FiXCircle}
                   label="Revoke"
@@ -1168,6 +1226,8 @@ export function OrganizationMembersPage() {
     isOperator,
     updateUser.isPending,
     updateUser.mutate,
+    reissue.isPending,
+    reissue.mutate,
     placementsByUser,
   ])
 
@@ -1233,10 +1293,12 @@ export function OrganizationMembersPage() {
           context.error ??
           members.error ??
           update.error ??
-          // The reads and the write the row's own controls use. Without these a
+          // The reads and the writes the row's own controls use. Without these a
           // failed roster renders the access, workspace and spend cells empty as
-          // though the member simply had none, and a refused Block says nothing.
+          // though the member simply had none, and a refused Block or Reissue
+          // says nothing.
           updateUser.error ??
+          reissue.error ??
           workspaces.error
         }
       />
@@ -1258,6 +1320,15 @@ export function OrganizationMembersPage() {
         isOpen={joining}
         onClose={() => setJoining(false)}
       />
+
+      {reissued ? (
+        <InvitationLinkDialog
+          result={reissued}
+          isOpen
+          onClose={() => setReissued(undefined)}
+          title="Invitation reissued"
+        />
+      ) : null}
 
       {/* Keyed on the row: its fields seed from the member on mount only, so
           the next Edit has to arrive at a fresh form. */}

@@ -823,6 +823,108 @@ describe("OrganizationMembersPage", () => {
     )
   })
 
+  it("reissues a lost link and shows the new one to share", async () => {
+    const invited = organizationMember({
+      organization_member_id: "invited-membership",
+      user_id: "cccccccc-0000-0000-0000-000000000000",
+      email: "pending@example.com",
+      full_name: null,
+      status: "invited",
+      invitation_id: "invitation-1",
+      invitation_expires_at: "2999-01-01T00:00:00+00:00",
+    })
+    const requests = mockApi({ members: [OWNER, invited] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("pending@example.com")
+    const row = rowFor("pending@example.com")
+    expect(within(row).getByText("INVITED")).toBeInTheDocument()
+    await user.click(
+      within(row).getByRole("button", {
+        name: "Reissue the invitation to pending@example.com",
+      }),
+    )
+
+    const reissue = requests.find((request) => request.method === "POST")
+    expect(reissue?.url).toContain(
+      `${API_ROOT}/organizations/me/member-invitations/invitation-1/reissue`,
+    )
+    expect(
+      await screen.findByRole("dialog", { name: "Invitation reissued" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        `${window.location.origin}${window.location.pathname}#/accept-invitation?token=abc123`,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows an invitation that expired, with Reissue and Revoke still on offer", async () => {
+    // Opening an expired link records the expiry, and the row then offered
+    // Edit and Remove with nothing saying the link was dead.
+    const expired = organizationMember({
+      organization_member_id: "invited-membership",
+      user_id: "cccccccc-0000-0000-0000-000000000000",
+      email: "late@example.com",
+      full_name: null,
+      status: "invited",
+      invitation_id: "invitation-1",
+      invitation_expires_at: "2020-01-01T00:00:00+00:00",
+    })
+    mockApi({ members: [OWNER, expired] })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("late@example.com")
+    const row = rowFor("late@example.com")
+    expect(within(row).getByText("INVITE EXPIRED")).toBeInTheDocument()
+    expect(within(row).getByRole("button", { name: "Revoke" })).toBeEnabled()
+    expect(
+      within(row).getByRole("button", {
+        name: "Reissue the invitation to late@example.com",
+      }),
+    ).toBeEnabled()
+    expect(within(row).queryByRole("button", { name: "Edit" })).toBeNull()
+  })
+
+  it("says when the email was held back by the invitation mail limit", async () => {
+    mockApi({
+      inviteResult: {
+        invitation_id: "invitation-1",
+        organization_member_id: "invited-membership",
+        email: "new@example.com",
+        role: "member",
+        status: "invited",
+        mail_sent: false,
+        mail_limited: true,
+        accept_link: "/#/accept-invitation?token=abc123",
+        expires_at: "2026-01-08T00:00:00+00:00",
+        created_at: "2026-01-01T00:00:00+00:00",
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    await user.type(screen.getByLabelText(/Email addresses/), "new@example.com")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Invite member",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/had its share of invitation emails for today/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        `${window.location.origin}${window.location.pathname}#/accept-invitation?token=abc123`,
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("asks for a page of the roster rather than walking it", async () => {
     // The other half of otari#1381: with the row carrying its own workspaces,
     // ceilings and spend, the table has nothing left to join against and can

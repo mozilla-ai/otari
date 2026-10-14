@@ -28,6 +28,10 @@ const SESSION_MARKER = "otari.dashboard.hasSession"
 // is what most tests press; the ones about claiming a seat say so.
 function mockApi(opts: {
   needsPassword?: boolean
+  /** Whether the address can already sign in; by default, unless it needs a password. */
+  canSignIn?: boolean
+  /** The gateway's `ways_in` for an address that cannot sign in yet. */
+  waysIn?: string[]
   verificationPending?: boolean
   previewError?: string
   acceptError?: string
@@ -37,6 +41,8 @@ function mockApi(opts: {
   profileStatus?: number
 }) {
   const accepted: unknown[] = []
+  const canSignIn = opts.canSignIn ?? !opts.needsPassword
+  const waysIn = opts.waysIn ?? []
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     const url = String(path)
     if (url === "/invitations/validate") {
@@ -49,6 +55,8 @@ function mockApi(opts: {
         role: "admin",
         expires_at: "2026-01-08T00:00:00+00:00",
         needs_password: opts.needsPassword ?? false,
+        can_sign_in: canSignIn,
+        ways_in: opts.needsPassword || canSignIn ? [] : waysIn,
       } as never
     }
     if (url === "/auth/profile") {
@@ -77,6 +85,8 @@ function mockApi(opts: {
         role: "admin",
         password_set: body.password !== undefined,
         verification_pending: opts.verificationPending ?? false,
+        can_sign_in: canSignIn || body.password !== undefined,
+        ways_in: canSignIn || body.password !== undefined ? [] : waysIn,
       } as never
     }
     throw new Error(`Unexpected apiFetch call: ${url}`)
@@ -283,7 +293,7 @@ describe("AcceptInvitationPage", () => {
     // A provider-verified address resolves a rostered identity that holds no
     // password at all, so where there is a provider the form is not the only
     // way in.
-    const accepted = mockApi({ needsPassword: true })
+    const accepted = mockApi({ needsPassword: true, waysIn: ["provider"] })
     const user = userEvent.setup()
     renderPage("#/accept-invitation?token=abc123", {
       mailReady: false,
@@ -385,6 +395,44 @@ describe("AcceptInvitationPage", () => {
         "true",
       )
     })
+  })
+
+  it("says which way in exists when the link may not set a password", async () => {
+    // Another organization has the address too, so neither link may choose
+    // its password, and "Sign in to get started" would be a dead end.
+    mockApi({ canSignIn: false, waysIn: ["provider", "password_reset"] })
+    const user = userEvent.setup()
+    renderPage("#/accept-invitation?token=abc123", {
+      oauthProviders: ["github"],
+    })
+
+    expect(
+      await screen.findByText(
+        /This link can't set a password for ada@example\.com\. Accept the invitation, then sign in with GitHub, or choose a password with "Forgot your password\?"\./,
+      ),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Accept invitation" }))
+
+    expect(await screen.findByText(/no password yet/)).toBeInTheDocument()
+    expect(screen.queryByText("Sign in to get started.")).toBeNull()
+    expect(
+      screen.getByRole("link", { name: "Choose a password" }),
+    ).toHaveAttribute("href", "#/recover-password")
+  })
+
+  it("sends a stranded invitee to whoever administers the gateway", async () => {
+    mockApi({ canSignIn: false })
+    const user = userEvent.setup()
+    renderPage("#/accept-invitation?token=abc123", { mailReady: false })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Accept invitation" }),
+    )
+
+    expect(
+      await screen.findByText(/ask whoever administers this gateway/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Choose a password" })).toBeNull()
   })
 
   it("offers no provider route where the deployment has none", async () => {
