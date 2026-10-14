@@ -74,6 +74,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
+    ContainerDep,
     CurrentIdentity,
     FileServiceDep,
     ModelProviderPortDep,
@@ -107,6 +108,7 @@ from gateway.models.playground import (
     PlaygroundMessagesPublic,
 )
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.ports.billing_port import BillingPort
 from gateway.schemas.files import OpenAIFileDeleted, OpenAIFileList, OpenAIFileObject
 from gateway.services import playground_dispatch, playground_service
 from gateway.services.files import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, FileDialect, FileListing, FileScope, NewFile
@@ -204,6 +206,7 @@ async def playground_chat_completions(
     model_provider: ModelProviderPortDep,
     tool_ports: ToolPortsDep,
     key_format: ApiKeyFormatPortDep,
+    container: ContainerDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> ChatCompletion | Response:
     """Run one chat completion for the signed-in caller.
@@ -255,6 +258,10 @@ async def playground_chat_completions(
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
+        # On this route's own session rather than through ``BillingPortDep``, whose
+        # session is a second one here: a deployment-paid charge has to land in the
+        # commit that settles the request on ``db``.
+        billing=container.resolve(BillingPort, db),
         session_principal=principal,
     )
 

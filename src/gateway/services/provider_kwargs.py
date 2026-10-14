@@ -590,6 +590,13 @@ class ResolvedProvider:
 
     Its owner pays the upstream, so such a request never counts toward a budget.
     """
+    deployment_paid: bool = False
+    """Whether ``kwargs`` carry a credential ``ModelProviderPort`` served.
+
+    The deployment owes the upstream bill for such a request, so it is gated on
+    and charged to its organization's funds through ``BillingPort``. Only the
+    hosted rung of the credential ladder sets it.
+    """
 
     @property
     def dispatch_model(self) -> str:

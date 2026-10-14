@@ -14,6 +14,7 @@ from pydantic import ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    BillingPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
     ToolPortsDep,
@@ -489,6 +490,7 @@ async def create_response(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
 ) -> dict[str, Any] | FastAPIResponse:
@@ -605,7 +607,7 @@ async def create_response(
             raise
     else:
         resolved = await resolve_dispatch_provider(
-            ctx, config, request_body.model, adapter=_ADAPTER, model_provider=model_provider
+            ctx, config, request_body.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
         )
         # ``provider`` is the underlying implementation handed to any-llm;
         # ``billing_instance`` is the otari routing key pricing/usage key on.

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    BillingPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
     ToolPortsDep,
@@ -834,6 +835,7 @@ async def create_message(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
 ) -> dict[str, Any] | Response:
@@ -1083,7 +1085,7 @@ async def create_message(
 
         # Standalone: single attempt streaming.
         resolved = await resolve_dispatch_provider(
-            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
         )
         call_kwargs = apply_endpoint_defaults(
             {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
@@ -1132,7 +1134,7 @@ async def create_message(
 
     # Standalone non-stream path
     resolved = await resolve_dispatch_provider(
-        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
     )
     call_kwargs = apply_endpoint_defaults(
         {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved

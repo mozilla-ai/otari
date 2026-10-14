@@ -107,6 +107,24 @@ Managed model identifiers use the catalog values published by otari.ai. otari.ai
 refuses a managed credential to a self-hosted gateway, so platform-owned secrets
 never leave mozilla.ai's infrastructure.
 
+## Deployment-paid credentials in standalone
+
+A build that binds `ModelProviderPort` through `OTARI_BOOTSTRAP` can serve a
+model on a credential the deployment owns, once an organization's own key, a
+stored provider and `config.yml` have all missed. The deployment pays that
+upstream bill, so the request also goes through `BillingPort`. Before the
+provider call, the organization is granted any credit it is owed and refused
+with `402` (`insufficient_funds`) when it has no funds paid in. When the
+request settles, its cost, including the cost a cancelled or failed request
+still owes, is charged to the organization. No funds are held while the
+request runs, so concurrent requests can take an organization below zero. A
+request on any other credential never reaches either port, and the core's
+billing adapter does nothing, so a deployment with no overlay is unaffected.
+
+Today this covers Chat Completions, Messages, Responses and the Playground for a
+plain model or a single-target alias or policy. A routing policy with fallback
+candidates and the pass-through endpoints never reach `ModelProviderPort`.
+
 ## Internal protocol
 
 The gateway and control plane exchange provider resolution, MCP configuration,

@@ -127,6 +127,7 @@ from gateway.core.env import otari_env
 from gateway.core.error_codes import (
     BUDGET_EXCEEDED,
     CONTEXT_LENGTH_EXCEEDED,
+    INSUFFICIENT_FUNDS,
     INVALID_MODEL,
     PRICING_REQUIRED,
     PROVIDER_CREDENTIAL_REJECTED,
@@ -193,6 +194,7 @@ from gateway.models.tools import (
     WebTool,
 )
 from gateway.models.usage import UsageLog
+from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
@@ -463,6 +465,7 @@ ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
 # says nothing about hosted inference or about which adapter answered: that is a
 # defect in this build, not something a caller can act on.
 HOSTED_CREDENTIAL_UNUSABLE_DETAIL = "No upstream provider is available to serve this model"
+FUNDS_CHECK_UNAVAILABLE_DETAIL = "This organization's funds could not be checked. Retry later."
 SANDBOX_UNREACHABLE_DETAIL = (
     "code_execution sandbox unreachable. Check the sandbox URL in the dashboard's "
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
@@ -1295,6 +1298,9 @@ class RequestContext:
         # which is what keeps ``users.spend`` matching the row: ``refund_reservation``
         # releases the hold *without* writing spend.
         self.tool_charge: Decimal = Decimal(0)
+        # Set once a deployment-paid request passes its funding gate, and ``None``
+        # on every other request: settlement charges the organization through it.
+        self.deployment_charge: DeploymentCharge | None = None
         # Monotonic clock reading taken at the very start of the handler
         # preamble; used to compute the usage log's latency_ms at settlement.
         self.started_at = started_at
@@ -1452,6 +1458,7 @@ async def resolve_dispatch_provider(
     *,
     adapter: FormatAdapter[Any, Any],
     model_provider: ModelProviderPort,
+    billing: BillingPort,
 ) -> ResolvedProvider:
     """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
     the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
@@ -1469,9 +1476,15 @@ async def resolve_dispatch_provider(
     and never displaces an earlier one; see that function. The caller's own
     endpoint skips it, holding its credential already, and is given the one HTTP
     client allowed to dial it.
+
+    A candidate the port served is deployment-paid, and is admitted only past
+    :func:`_require_deployment_funds`. ``billing`` must be resolved on
+    ``ctx.db``, because the charge it arms joins that session's settlement.
     """
     if ctx.resolved_provider is not None:
-        return await _prepare_for_dispatch(ctx, ctx.resolved_provider, adapter=adapter, port=model_provider)
+        return await _prepare_for_dispatch(
+            ctx, ctx.resolved_provider, adapter=adapter, port=model_provider, billing=billing
+        )
     try:
         resolved = resolve_provider_selector(
             config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id, owned_endpoints=True
@@ -1494,7 +1507,7 @@ async def resolve_dispatch_provider(
             tags=ctx.tags,
         )
         _raise_for_unresolvable_model(model_selector, exc)
-    return await _prepare_for_dispatch(ctx, resolved, adapter=adapter, port=model_provider)
+    return await _prepare_for_dispatch(ctx, resolved, adapter=adapter, port=model_provider, billing=billing)
 
 
 async def _prepare_for_dispatch(
@@ -1503,13 +1516,106 @@ async def _prepare_for_dispatch(
     *,
     adapter: FormatAdapter[Any, Any],
     port: ModelProviderPort,
+    billing: BillingPort,
 ) -> ResolvedProvider:
     if resolved.owned_endpoint is not None:
         # The client re-checks and pins the endpoint's address on every request
         # and follows no redirect; see ``services/providers``.
         client_args = {"http_client": owned_endpoint_http_client()}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
-    return await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
+    served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
+    if served.deployment_paid:
+        await _require_deployment_funds(ctx, served, adapter=adapter, billing=billing)
+    return served
+
+
+async def _require_deployment_funds(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    *,
+    adapter: FormatAdapter[Any, Any],
+    billing: BillingPort,
+) -> None:
+    """Refuse a deployment-paid request whose organization has no funds, else arm its charge.
+
+    Grants any credit the organization is owed, then refuses one with nothing
+    paid in. No hold is placed, so concurrent requests can pass on the same
+    funds; the charge at settlement allows the overdraft that leaves, and this
+    gate refuses the next request. The connection the gate checked out is handed
+    back before dispatch, which also commits any credit it granted.
+    """
+    organization_id = ctx.organization_id
+    # The port serves a credential only to a request with an organization.
+    assert organization_id is not None
+    try:
+        await billing.apply_due_credit(organization_id=organization_id)
+        await billing.require_funds_on_deposit(organization_id=organization_id)
+    except InsufficientFundsError as exc:
+        logger.info(
+            "Deployment-paid request refused for insufficient funds: organization=%s request_id=%s",
+            organization_id,
+            ctx.request_id,
+        )
+        detail = str(exc)
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=detail,
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            started_at=ctx.started_at,
+            request_id=ctx.request_id,
+            tags=ctx.tags,
+        )
+        raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)) from exc
+    except Exception as exc:
+        # As for a ModelProviderPort failure: a funding check is expected to read
+        # a database or a service, and nothing above this catches what it raises.
+        logger.error(
+            "BillingPort failed to admit a deployment-paid request: organization=%s request_id=%s: %s",
+            organization_id,
+            ctx.request_id,
+            exc,
+            exc_info=True,
+        )
+        if ctx.db is not None:
+            # Whatever the adapter wrote before failing is discarded, and a
+            # session its error left unusable is made usable for the refund.
+            try:
+                await ctx.db.rollback()
+            except DATABASE_ERRORS as rollback_error:
+                logger.warning(
+                    "Could not roll back a failed funding check: %s", describe_database_error(rollback_error)
+                )
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=FUNDS_CHECK_UNAVAILABLE_DETAIL,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            started_at=ctx.started_at,
+            request_id=ctx.request_id,
+            tags=ctx.tags,
+        )
+        raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
+    await release_session(ctx.db)
+    ctx.deployment_charge = DeploymentCharge(
+        billing=billing,
+        organization_id=organization_id,
+        api_key_id=ctx.api_key_id,
+        actor_user_id=_actor_user_id(ctx.user_id),
+        request_id=ctx.request_id,
+    )
 
 
 async def _warn_if_hosted_upstream_is_unpriced(
@@ -1750,6 +1856,7 @@ async def _serve_from_hosted_credential(
         model=resolved.model,
         kwargs=kwargs,
         alias=resolved.alias,
+        deployment_paid=True,
     )
 
 
@@ -4519,6 +4626,93 @@ def _handle_counts_toward_budget(reservation: ReservationHandle | None) -> bool:
     return reservation.counts_toward_budget if reservation is not None else True
 
 
+def _actor_user_id(user_id: str | None) -> uuid.UUID | None:
+    """The billed user as the dashboard identity it names, where it names one.
+
+    A key a member minted for themselves carries their identity's uuid as its
+    user id; any other user id is free-form and attributes to no one.
+    """
+    if user_id is None:
+        return None
+    try:
+        return uuid.UUID(user_id)
+    except ValueError:
+        return None
+
+
+@dataclass(frozen=True)
+class DeploymentCharge:
+    """Who a deployment-paid request is charged to, and the port that charges them.
+
+    ``billing`` is resolved on the request's session, the one settlement
+    reconciles the budget reservation on, so the charge lands in that commit.
+    """
+
+    billing: BillingPort
+    organization_id: uuid.UUID
+    api_key_id: str | None
+    actor_user_id: uuid.UUID | None
+    request_id: str | None
+
+
+async def charge_deployment_paid(
+    charge: DeploymentCharge | None,
+    db: AsyncSession,
+    cost: Decimal | None,
+    *,
+    provider: Any,
+    model: str,
+    expects_cost: bool,
+) -> None:
+    """Charge a deployment-paid request's settled cost, before its reservation settles.
+
+    Runs before the settlement's commit, which is what lands the charge, so the
+    budget and the organization's funds move together. One charge per settled
+    request: a tool loop's rounds settle as one row, and so as one charge.
+
+    ``expects_cost`` says the settlement should have priced something (a
+    success, or a failure the provider reported usage for); a ``None`` cost then
+    means the deployment served the request free, which is logged.
+
+    Never raises: the response has already been served. The charge runs in a
+    savepoint, so a failed one is discarded whole and the budget settlement that
+    follows still lands; the usage row is written either way.
+    """
+    if charge is None:
+        return
+    if cost is None:
+        if expects_cost:
+            logger.warning(
+                "Deployment-paid request settled with no price for %s:%s; organization %s is not charged "
+                "(request_id=%s). Price the models this build serves.",
+                provider,
+                model,
+                charge.organization_id,
+                charge.request_id,
+            )
+        return
+    if cost <= 0:
+        return
+    try:
+        async with db.begin_nested():
+            await charge.billing.charge(
+                organization_id=charge.organization_id,
+                amount=cost,
+                description=f"{provider}:{model}",
+                actor_user_id=charge.actor_user_id,
+                api_key_id=charge.api_key_id,
+            )
+    except Exception:
+        logger.error(
+            "Charge of %s for a served deployment-paid request failed; it goes uncharged: "
+            "organization=%s request_id=%s",
+            cost,
+            charge.organization_id,
+            charge.request_id,
+            exc_info=True,
+        )
+
+
 async def release_reservation(ctx: RequestContext) -> None:
     """Refund the request's budget reservation, if one was taken.
 
@@ -4710,6 +4904,9 @@ async def _log_failure_and_refund(
     )
     if ctx.reservation is not None:
         if cost:
+            await charge_deployment_paid(
+                ctx.deployment_charge, ctx.db, cost, provider=provider, model=model, expects_cost=False
+            )
             await reconcile_reservation(ctx.db, ctx.reservation, cost)
         else:
             await refund_reservation(ctx.db, ctx.reservation)
@@ -5075,6 +5272,7 @@ def build_streaming_response(
     tags: dict[str, str] | None = None,
     prices: RequestPrices | None = None,
     tool_loop: bool = False,
+    deployment_charge: DeploymentCharge | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -5105,8 +5303,18 @@ def build_streaming_response(
     than recording the request as free. Every row carries ``request_id`` as its
     ``request_group_id``, which is what lets a caller whose stream never delivered
     a cost look it up by ``Otari-Request-ID`` afterwards.
+
+    ``deployment_charge`` charges a deployment-paid request's settled cost to
+    its organization wherever a callback reconciles the reservation.
     """
     platform_active = platform_correlation_id is not None
+
+    async def _charge(cost: Decimal | None, *, expects_cost: bool) -> None:
+        assert db is not None
+        await charge_deployment_paid(
+            deployment_charge, db, cost, provider=provider, model=model, expects_cost=expects_cost
+        )
+
     # Both modes settle before the terminal suffix so its usage object can carry
     # the cost: hybrid from the platform's report, standalone from its own row.
     settles_inline = platform_active or (db is not None and log_writer is not None)
@@ -5170,6 +5378,7 @@ def build_streaming_response(
             prices=prices,
         )
         if reservation is not None:
+            await _charge(logged.cost, expects_cost=True)
             await reconcile_reservation(
                 db, reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
@@ -5223,6 +5432,7 @@ def build_streaming_response(
                 tags=tags,
                 prices=prices,
             )
+            await _charge(logged.cost, expects_cost=True)
             await reconcile_reservation(db, reservation, logged.cost or Decimal(0), actual_tokens=0)
             return
         policy = config.stream_missing_usage_policy
@@ -5247,6 +5457,7 @@ def build_streaming_response(
             # "Free" is about the tokens the provider never reported, not about
             # tool calls the gateway definitely ran and owes for.
             if tool_cost:
+                await _charge(tool_cost, expects_cost=False)
                 await reconcile_reservation(db, reservation, tool_cost)
             else:
                 await refund_reservation(db, reservation)
@@ -5279,6 +5490,7 @@ def build_streaming_response(
         # The token axis settles at its estimate for the same reason: the provider
         # reported no count, and the alternative records zero tokens for a request
         # that certainly used some.
+        await _charge(settled_cost, expects_cost=False)
         await reconcile_reservation(
             db,
             reservation,
@@ -5345,6 +5557,7 @@ def build_streaming_response(
             # owes for them, and a refund would release the hold without recording
             # that spend. This is also where the streaming tool-iteration cap
             # lands, since the cap is raised inside the generator.
+            await _charge(failed_cost, expects_cost=reported_usage is not None)
             if failed_cost:
                 await reconcile_reservation(db, reservation, failed_cost, actual_tokens=_settled_tokens(reported_usage))
             else:
@@ -5383,6 +5596,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
             )
+            await _charge(abandoned_cost, expects_cost=reported_usage is not None)
             if abandoned_cost:
                 await reconcile_reservation(
                     db, reservation, abandoned_cost, actual_tokens=_settled_tokens(reported_usage)
@@ -5753,6 +5967,7 @@ async def run_single_attempt_stream(
         tool_tally=tool_ctx.tally,
         tags=ctx.tags,
         tool_loop=served_tools.use_tool_loop,
+        deployment_charge=ctx.deployment_charge,
     )
 
 
@@ -6561,6 +6776,9 @@ async def run_standalone_non_stream(
                     prices=ctx.prices,
                 )
             if ctx.reservation is not None:
+                await charge_deployment_paid(
+                    ctx.deployment_charge, ctx.db, logged.cost, provider=provider, model=model, expects_cost=True
+                )
                 await reconcile_reservation(
                     ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
                 )

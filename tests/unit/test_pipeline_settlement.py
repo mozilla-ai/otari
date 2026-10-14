@@ -15,6 +15,7 @@ platform-fallback streaming paths. These tests pin that contract:
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 import logging
@@ -560,6 +561,8 @@ def _build(
     started_at: float | None = None,
     tool_tally: ToolUsageTally | None = None,
     request_id: str | None = None,
+    deployment_charge: pipeline.DeploymentCharge | None = None,
+    db: Any = None,
 ) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
@@ -567,7 +570,7 @@ def _build(
         provider=LLMProvider.OPENAI,
         model="gpt-4",
         config=config,
-        db=cast(Any, object()),
+        db=cast(Any, db if db is not None else object()),
         log_writer=cast(Any, object()),
         api_key_id="key-1",
         user_id="user-1",
@@ -577,6 +580,7 @@ def _build(
         started_at=started_at,
         tool_tally=tool_tally,
         request_id=request_id,
+        deployment_charge=deployment_charge,
     )
 
 
@@ -2742,6 +2746,7 @@ async def _run_standalone(
     db: Any = None,
     display_model: str | None = None,
     workspace_id: uuid.UUID | None = None,
+    deployment_charge: pipeline.DeploymentCharge | None = None,
 ) -> tuple[Any, Response]:
     """Drive the standalone non-streaming path with a faked provider call."""
 
@@ -2760,6 +2765,7 @@ async def _run_standalone(
         rate_limit_info=rate_limit_info,
         workspace_id=workspace_id,
     )
+    ctx.deployment_charge = deployment_charge
     response = Response()
     returned = await run_standalone_non_stream(
         adapter=chat._ADAPTER,
@@ -3102,3 +3108,177 @@ def test_a_code_execution_policy_failure_renders_its_status(
     reason: CodeExecutionPolicyResolutionFailure, status_code: int
 ) -> None:
     assert pipeline._code_execution_policy_failure_status(reason) == status_code
+
+
+# ---------------------------------------------------------------------------
+# Deployment-paid requests are charged where their reservation settles
+# ---------------------------------------------------------------------------
+
+
+class _ChargeRecorder:
+    """A billing port that records each charge with how many reconciles preceded it."""
+
+    def __init__(self, settlement: _Settlement) -> None:
+        self.settlement = settlement
+        self.charges: list[tuple[Decimal, str | None, int]] = []
+
+    async def charge(
+        self, *, organization_id: uuid.UUID, amount: Decimal, description: str | None = None, **_: Any
+    ) -> None:
+        assert organization_id == _ORGANIZATION_ID
+        self.charges.append((amount, description, len(self.settlement.reconciled)))
+
+
+class _SavepointDb:
+    @contextlib.asynccontextmanager
+    async def begin_nested(self) -> AsyncIterator[None]:
+        yield
+
+
+def _deployment_charge(recorder: _ChargeRecorder) -> pipeline.DeploymentCharge:
+    return pipeline.DeploymentCharge(
+        billing=cast(Any, recorder),
+        organization_id=_ORGANIZATION_ID,
+        api_key_id="key-1",
+        actor_user_id=None,
+        request_id="req-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_stream_is_charged_once_before_it_settles(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+        yield _chunk(CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+
+    await _drain(_build(stream(), GatewayConfig(), deployment_charge=_deployment_charge(recorder), db=_SavepointDb()))
+
+    # Charged before the reconcile whose commit lands it.
+    assert recorder.charges == [(Decimal("0.25"), "openai:gpt-4", 0)]
+    assert settlement.reconciled == [Decimal("0.25")]
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_stream_abandoned_after_usage_is_charged_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+        yield _chunk()
+
+    response = _build(stream(), GatewayConfig(), deployment_charge=_deployment_charge(recorder), db=_SavepointDb())
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    await iterator.aclose()
+
+    assert recorder.charges == [(Decimal("0.25"), "openai:gpt-4", 0)]
+    assert settlement.reconciled == [Decimal("0.25")]
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_stream_abandoned_before_usage_is_not_charged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+        yield _chunk()
+
+    response = _build(stream(), GatewayConfig(), deployment_charge=_deployment_charge(recorder), db=_SavepointDb())
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    await iterator.aclose()
+
+    assert recorder.charges == []
+    assert settlement.refunded == 1
+
+
+@pytest.mark.parametrize(("reported", "charged"), [(None, []), (_PARTIAL_USAGE, [Decimal("0.25")])])
+@pytest.mark.asyncio
+async def test_a_failed_deployment_paid_stream_is_charged_what_it_reported(
+    monkeypatch: pytest.MonkeyPatch, reported: CompletionUsage | None, charged: list[Decimal]
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(reported)
+        raise RuntimeError("upstream broke")
+
+    await _drain(_build(stream(), GatewayConfig(), deployment_charge=_deployment_charge(recorder), db=_SavepointDb()))
+
+    assert [amount for amount, _, _ in recorder.charges] == charged
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_stream_without_usage_is_charged_its_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+
+    await _drain(
+        _build(
+            stream(),
+            GatewayConfig(stream_missing_usage_policy="estimate"),
+            deployment_charge=_deployment_charge(recorder),
+            db=_SavepointDb(),
+        )
+    )
+
+    assert [amount for amount, _, _ in recorder.charges] == [Decimal("0.5")]
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_completion_is_charged_once_before_it_settles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    await _run_standalone(
+        monkeypatch,
+        result=_completion(usage=_usage()),
+        reservation=_reservation(),
+        db=_SavepointDb(),
+        deployment_charge=_deployment_charge(recorder),
+    )
+
+    assert recorder.charges == [(Decimal("0.25"), "openai:gpt-4", 0)]
+    assert settlement.reconciled == [Decimal("0.25")]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_deployment_paid_completion_is_not_charged(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    with pytest.raises(HTTPException):
+        await _run_standalone(
+            monkeypatch,
+            error=RuntimeError("upstream broke"),
+            reservation=_reservation(),
+            db=_SavepointDb(),
+            deployment_charge=_deployment_charge(recorder),
+        )
+
+    assert recorder.charges == []
+    assert settlement.refunded == 1

@@ -13,6 +13,7 @@ from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    BillingPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
     ToolPorts,
@@ -62,6 +63,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
+from gateway.ports.billing_port import BillingPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
 from gateway.services.files import FileService, StagedFile
@@ -455,6 +457,7 @@ async def chat_completions(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
 ) -> ChatCompletion | Response:
@@ -479,6 +482,7 @@ async def chat_completions(
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
+        billing=billing,
         tool_ports=tool_ports,
         idempotency=idempotency,
     )
@@ -496,6 +500,7 @@ async def run_chat_completion(
     config: GatewayConfig,
     log_writer: LogWriter,
     model_provider: ModelProviderPort,
+    billing: BillingPort,
     tool_ports: ToolPorts,
     session_principal: SessionPrincipal | None = None,
     idempotency: IdempotencyGuard | None = None,
@@ -686,7 +691,7 @@ async def run_chat_completion(
         # Resolve the instance to its implementation; dispatch any-llm against
         # ``implementation:model`` while billing/logging key on the instance.
         resolved = await resolve_dispatch_provider(
-            ctx, config, request.model, adapter=adapter, model_provider=model_provider
+            ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
         call_kwargs = apply_endpoint_defaults(
             {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
@@ -729,7 +734,7 @@ async def run_chat_completion(
         return surface_provider_fields(platform_result)
 
     resolved = await resolve_dispatch_provider(
-        ctx, config, request.model, adapter=adapter, model_provider=model_provider
+        ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
     call_kwargs = apply_endpoint_defaults(
         {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
