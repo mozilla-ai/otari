@@ -2,7 +2,12 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import type { PolicySpec } from "@/client"
 import { API_ROOT } from "@/shared/api/client"
-import { organizationMember, user } from "@/tests/fixtures"
+import {
+  catalogModelSummary,
+  catalogResponse,
+  organizationMember,
+  user,
+} from "@/tests/fixtures"
 
 import { PolicyForm } from "./PolicyForm"
 
@@ -10,45 +15,45 @@ import { PolicyForm } from "./PolicyForm"
  * The routing form, in the dialog every create and edit in the dashboard opens
  * in.
  *
- * It owns four queries of its own (the model catalog behind both pickers, and
- * the tool settings that decide whether guardrails can be offered at all), so
+ * It owns queries of its own (the model catalog behind every picker, and the
+ * tool settings that decide whether guardrails can be offered at all), so
  * these stories declare a stub gateway through `parameters.api` rather than
- * mocking the hooks.
+ * mocking the hooks. The catalog stub answers every search with the same
+ * models, since the matching is the server's.
  */
-const CATALOG = {
-  providers: [
-    {
-      provider: "openai",
-      models: ["gpt-4o", "gpt-4o-mini", "o3-mini"].map((id) => ({
-        id,
-        key: `openai:${id}`,
-      })),
-      ok: true,
-      discovery_unsupported: false,
-      checked_at: "2026-09-10T12:00:00Z",
-    },
-    {
-      provider: "anthropic",
-      models: ["claude-sonnet-4-5", "claude-3-5-haiku-latest"].map((id) => ({
-        id,
-        key: `anthropic:${id}`,
-      })),
-      ok: true,
-      discovery_unsupported: false,
-      checked_at: "2026-09-10T12:00:00Z",
-    },
-  ],
-}
-
-/** The same catalog with one provider that could not be listed, which is what
- *  puts the picker's hint on screen: a sentence rather than a caption, and the
- *  state that used to lift a row's picker clear of the controls beside it. */
-const CATALOG_WITH_A_FAILED_PROVIDER = {
-  providers: [
-    CATALOG.providers[0],
-    { ...CATALOG.providers[1], models: [], ok: false },
-  ],
-}
+const CATALOG = catalogResponse([
+  catalogModelSummary({
+    id: "openai/gpt-4o",
+    name: "GPT-4o",
+    selectors: ["azure:gpt-4o", "openai:gpt-4o"],
+    providers: ["azure", "openai"],
+    resolves_to: "openai:gpt-4o",
+  }),
+  catalogModelSummary({
+    id: "openai/gpt-4o-mini",
+    name: "GPT-4o mini",
+    selectors: ["openai:gpt-4o-mini"],
+    providers: ["openai"],
+    resolves_to: "openai:gpt-4o-mini",
+  }),
+  catalogModelSummary({
+    id: "anthropic/claude-sonnet-4.5",
+    name: "Claude Sonnet 4.5",
+    selectors: [
+      "anthropic:claude-sonnet-4-5",
+      "bedrock:anthropic.claude-sonnet-4-5-v1:0",
+    ],
+    providers: ["anthropic", "bedrock"],
+    resolves_to: "anthropic:claude-sonnet-4-5",
+  }),
+  catalogModelSummary({
+    id: "anthropic/claude-3.5-haiku",
+    name: "Claude 3.5 Haiku",
+    selectors: ["anthropic:claude-3-5-haiku-latest"],
+    providers: ["anthropic"],
+    resolves_to: "anthropic:claude-3-5-haiku-latest",
+  }),
+])
 
 const GUARDRAILS_ON = {
   fields: [{ key: "guardrails_url", value: "https://guardrails.internal" }],
@@ -73,24 +78,23 @@ const ROSTER = {
   count: 1,
 }
 
+const API = {
+  [`${API_ROOT}/catalog/models`]: CATALOG,
+  [`${API_ROOT}/tool-settings`]: GUARDRAILS_ON,
+  // The scope picker's two reads, which the form makes while it is open, so
+  // without these the mock answers its deliberate 501 rather than the
+  // network's 404.
+  [`${API_ROOT}/users`]: OWNERS,
+  [`${API_ROOT}/organizations/me/members`]: ROSTER,
+}
+
 const meta = {
   title: "Features/Routing/PolicyForm",
   component: PolicyForm,
-  parameters: {
-    layout: "fullscreen",
-    api: {
-      [`${API_ROOT}/models/discoverable`]: CATALOG,
-      [`${API_ROOT}/tool-settings`]: GUARDRAILS_ON,
-      // The scope picker's two reads, which the form makes while it is open, so
-      // without these the mock answers its deliberate 501 rather than the
-      // network's 404.
-      [`${API_ROOT}/users`]: OWNERS,
-      [`${API_ROOT}/organizations/me/members`]: ROSTER,
-    },
-  },
+  parameters: { layout: "fullscreen", api: API },
   args: {
     existing: null,
-    // The operator's surface, which is what the user-scope picker below needs.
+    // The operator's surface, which is what the user-scope picker needs.
     isDeploymentWide: true,
     workspaceId: null,
     onClose: () => {},
@@ -101,13 +105,37 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** A new policy, which is three fields until something more is asked for. */
+const stored = {
+  kind: "policy" as const,
+  user_id: null,
+  workspace_id: null,
+  source: "stored",
+  is_dynamic: false,
+  created_at: "2026-09-10T12:00:00Z",
+  updated_at: "2026-09-10T12:00:00Z",
+}
+
+/** A new policy: a name, a main model and its backups, with the rest folded. */
 export const New: Story = {}
 
+/** The common case, edited: one model with two backups behind it, in order. */
+export const Fallback: Story = {
+  args: {
+    existing: {
+      ...stored,
+      name: "fast",
+      spec: {
+        select: [{ default: "bedrock:anthropic.claude-sonnet-4-5-v1:0" }],
+        on_failure: ["openai:gpt-4o", "anthropic:claude-3-5-haiku-latest"],
+      } satisfies PolicySpec,
+    },
+  },
+}
+
 /**
- * The longest policy this form can author, and the reason the routing dialog is
- * `lg` on both of its steps: a fallback chain, a condition tier, a guardrail,
- * and the weighted split that replaces the single target.
+ * The longest policy this form can author, which opens with Advanced showing:
+ * a fallback chain, a condition tier, a guardrail, and the weighted split that
+ * replaces the single target.
  *
  * This is the scrolling body in its real form rather than a demo one. The header
  * and the footer stay put, the body scrolls between them, and the header gains
@@ -116,14 +144,8 @@ export const New: Story = {}
 export const LongestPolicy: Story = {
   args: {
     existing: {
-      kind: "policy" as const,
+      ...stored,
       name: "balanced",
-      user_id: null,
-      workspace_id: null,
-      source: "api",
-      is_dynamic: false,
-      created_at: "2026-09-10T12:00:00Z",
-      updated_at: "2026-09-10T12:00:00Z",
       // The spec is a `select` list, read in order, plus a shared failure
       // chain and guardrails: a condition tier first, then the weighted split
       // that serves everything else.
@@ -154,36 +176,26 @@ export const LongestPolicy: Story = {
 }
 
 /**
- * No guardrails service configured, so the affordance says why rather than
- * offering a control that would have nothing to call.
+ * No guardrails service configured, so the affordance under Advanced says why
+ * rather than offering a control that would have nothing to call.
  */
 export const WithoutGuardrailsService: Story = {
   parameters: {
-    api: {
-      [`${API_ROOT}/models/discoverable`]: CATALOG,
-      [`${API_ROOT}/tool-settings`]: { fields: [] },
-      [`${API_ROOT}/users`]: OWNERS,
-      [`${API_ROOT}/organizations/me/members`]: ROSTER,
-    },
+    api: { ...API, [`${API_ROOT}/tool-settings`]: { fields: [] } },
   },
 }
 
 /**
- * The longest policy again, with a provider the gateway could not list.
+ * The longest policy again, with a catalog that could not be read.
  *
- * The hint that reports it is a sentence, so it wraps at this dialog's width.
- * It renders under each row rather than under the picker inside one, which is
+ * The pickers still take a typed selector, and the advanced rows report the
+ * failure under each row rather than under the picker inside one, which is
  * what keeps every control in the row on one line; `web/design/forms.md`
  * ("Control rows") says why a field cannot hold it.
  */
-export const CatalogPartlyUnavailable: Story = {
+export const CatalogUnavailable: Story = {
   ...LongestPolicy,
   parameters: {
-    api: {
-      [`${API_ROOT}/models/discoverable`]: CATALOG_WITH_A_FAILED_PROVIDER,
-      [`${API_ROOT}/tool-settings`]: GUARDRAILS_ON,
-      [`${API_ROOT}/users`]: OWNERS,
-      [`${API_ROOT}/organizations/me/members`]: ROSTER,
-    },
+    api: { ...API, [`${API_ROOT}/catalog/models`]: { $status: 503 } },
   },
 }

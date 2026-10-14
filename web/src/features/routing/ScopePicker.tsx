@@ -1,5 +1,4 @@
 import type { User } from "@/client"
-import { ControlField } from "@/design-system/forms/FieldMessages"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 
@@ -31,10 +30,12 @@ export function ScopePicker({
 
   return (
     <div className="flex flex-col gap-3">
-      <ControlField
-        label="Applies to"
-        description="A global policy resolves for every caller. A scoped one resolves only for the people named, and takes precedence over a global policy of the same name."
-      />
+      {/* No label of its own: the disclosure it sits in is headed "Applies to". */}
+      <p className="text-caption">
+        A global policy resolves for every caller. A scoped one resolves only
+        for the people named, and takes precedence over a global policy of the
+        same name.
+      </p>
       {isSettled ? (
         // Withheld, not disabled: there is no write that takes a policy back,
         // so a control offering to change who this applies to would be

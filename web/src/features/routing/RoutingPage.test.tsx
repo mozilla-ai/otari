@@ -425,9 +425,30 @@ async function nameAndServe(
   name: string,
   target = "openai:gpt-5-nano",
 ) {
-  await user.type(screen.getByRole("textbox", { name: /policy name/i }), name)
-  await user.type(screen.getByRole("combobox", { name: /^serves$/i }), target)
+  await user.type(screen.getByRole("textbox", { name: /^name$/i }), name)
+  await user.type(
+    screen.getByRole("combobox", { name: /^main model$/i }),
+    target,
+  )
   await user.keyboard("{Escape}")
+}
+
+/** Open the dialog's Advanced disclosure, which create starts collapsed. */
+async function openAdvanced(user: TestUser) {
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: /^Advanced/,
+    }),
+  )
+}
+
+/** Open who-it-applies-to, which create starts collapsed on every caller. */
+async function openScope(user: TestUser) {
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: /^Applies to/,
+    }),
+  )
 }
 
 /** Switch to the scoped tab and choose people, the way an operator does.
@@ -438,6 +459,7 @@ async function nameAndServe(
  */
 async function pickUsers(user: TestUser, queries: string[]) {
   const dialog = within(screen.getByRole("dialog"))
+  await openScope(user)
   await user.click(dialog.getByRole("button", { name: "Specific users" }))
   for (const query of queries) {
     // Named by the field's own label: the multi-select primitive labels its
@@ -583,10 +605,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "cheap",
-    )
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
     await user.keyboard("{Escape}")
 
     const dialog = screen.getByRole("dialog")
@@ -608,12 +627,9 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "cheap",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5-nano",
     )
     // Close the combobox popover, which otherwise aria-hides the submit button.
@@ -698,6 +714,7 @@ describe("RoutingPage", () => {
     await user.click(await createTrigger())
     await nameAndServe(user, "cheap")
     const dialog = within(screen.getByRole("dialog"))
+    await openScope(user)
     await user.click(dialog.getByRole("button", { name: "Specific users" }))
 
     expect(dialog.getByRole("button", { name: "Create policy" })).toBeDisabled()
@@ -792,7 +809,7 @@ describe("RoutingPage", () => {
     await submitDialog(user)
     expect(await screen.findByRole("alert")).toBeInTheDocument()
 
-    await user.type(screen.getByRole("textbox", { name: /policy name/i }), "er")
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "er")
     await submitDialog(user)
 
     const writes = policyWrites(calls)
@@ -824,31 +841,35 @@ describe("RoutingPage", () => {
     ).toHaveLength(2)
   })
 
-  it("keeps the failure chain and guardrails out of the way until asked for", async () => {
+  it("keeps backups in view and everything else under Advanced", async () => {
     mockApi([])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
-    // Naming one model must stay a short task, so neither section is present yet.
-    expect(screen.queryByText("If that fails, try")).not.toBeInTheDocument()
-    expect(screen.queryByText("Always check")).not.toBeInTheDocument()
-
-    await user.click(
-      screen.getByRole("button", { name: /Add a fallback chain/ }),
-    )
-    expect(screen.getByText("If that fails, try")).toBeInTheDocument()
-    // Adding another one belongs inside the section it extends, not in the row of
-    // links that start a section. Walked up to the bordered section rather than
-    // a fixed number of parents: the heading now sits in a row of its own with
-    // the section's Remove, so counting levels would pin the markup instead of
-    // the rule.
-    const section = screen
-      .getByText("If that fails, try")
-      .closest<HTMLElement>("div.border")!
+    const dialog = within(screen.getByRole("dialog"))
+    // The common case is the whole visible form: backups are part of it.
+    expect(dialog.getByText("If unavailable, use")).toBeInTheDocument()
     expect(
-      within(section).getByRole("button", { name: /Another fallback/ }),
+      dialog.getByRole("button", { name: "Add a backup" }),
     ).toBeInTheDocument()
+    // The rest is collapsed on create, so none of its summons is reachable.
+    const advanced = dialog.getByRole("button", { name: /^Advanced/ })
+    expect(advanced).toHaveAttribute("aria-expanded", "false")
+    expect(
+      dialog.queryByRole("button", { name: /Add guardrails/ }),
+    ).not.toBeInTheDocument()
+
+    await user.click(advanced)
+    for (const summon of [
+      /Tier down when the budget fills up/,
+      /Let a router pick the cheapest/,
+      /Split traffic across providers/,
+      /next model when one hits its rate limit/,
+      /Add guardrails/,
+    ]) {
+      expect(dialog.getByRole("button", { name: summon })).toBeInTheDocument()
+    }
   })
 
   it("takes a whole section away in one press, whatever it holds", async () => {
@@ -857,6 +878,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await openAdvanced(user)
     await user.click(
       screen.getByRole("button", { name: /Let a router pick the cheapest/ }),
     )
@@ -884,9 +906,9 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await openAdvanced(user)
     for (const [summon, remove] of [
       [/Tier down when the budget fills up/, "Remove the budget tier-down"],
-      [/Add a fallback chain/, "Remove the fallback chain"],
       [/Add guardrails/, "Remove the guardrails"],
     ] as const) {
       await user.click(screen.getByRole("button", { name: summon }))
@@ -900,6 +922,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await openAdvanced(user)
     const add = await screen.findByRole("button", { name: /Add guardrails/ })
 
     // Disabled, and never silently: the reason and the route to fixing it sit next
@@ -920,11 +943,11 @@ describe("RoutingPage", () => {
 
     await user.click(await createTrigger())
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
+      screen.getByRole("textbox", { name: /^name$/i }),
       "openai:gpt-4o",
     )
     await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5-nano",
     )
     await user.keyboard("{Escape}")
@@ -943,6 +966,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await openAdvanced(user)
     await user.click(screen.getByRole("button", { name: /Add guardrails/ }))
 
     // block + block is the honest default, and its cost has to be visible where
@@ -958,15 +982,13 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "thrifty")
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "thrifty",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5-mini",
     )
     await user.keyboard("{Escape}")
+    await openAdvanced(user)
     await user.click(screen.getByRole("button", { name: /Tier down/ }))
 
     const threshold = screen.getByRole("textbox", {
@@ -996,7 +1018,7 @@ describe("RoutingPage", () => {
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
-    const nameField = screen.getByRole("textbox", { name: /policy name/i })
+    const nameField = screen.getByRole("textbox", { name: /^name$/i })
     await user.clear(nameField)
     await user.type(nameField, "speedy")
     await user.click(
@@ -1051,7 +1073,7 @@ describe("RoutingPage", () => {
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
-    const nameField = screen.getByRole("textbox", { name: /policy name/i })
+    const nameField = screen.getByRole("textbox", { name: /^name$/i })
     await user.clear(nameField)
     await user.type(nameField, "speedy")
 
@@ -1074,7 +1096,7 @@ describe("RoutingPage", () => {
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
-    const nameField = screen.getByRole("textbox", { name: /policy name/i })
+    const nameField = screen.getByRole("textbox", { name: /^name$/i })
     await user.clear(nameField)
     await user.type(nameField, "openai:gpt-5")
 
@@ -1101,7 +1123,7 @@ describe("RoutingPage", () => {
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
     expect(
-      screen.queryByRole("textbox", { name: /policy name/i }),
+      screen.queryByRole("textbox", { name: /^name$/i }),
     ).not.toBeInTheDocument()
     expect(screen.getByText(/An alias name is its key/)).toBeInTheDocument()
   })
@@ -1207,12 +1229,9 @@ describe("RoutingPage", () => {
     await user.click(
       within(empty).getByRole("button", { name: "Create your first policy" }),
     )
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "cheap",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5-nano",
     )
     await user.keyboard("{Escape}")
@@ -1257,7 +1276,7 @@ describe("RoutingPage", () => {
 
     await user.click(await createTrigger())
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
+      screen.getByRole("textbox", { name: /^name$/i }),
       "half-typed",
     )
 
@@ -1266,9 +1285,7 @@ describe("RoutingPage", () => {
     await user.click(screen.getByRole("button", { name: "Discard" }))
 
     await user.click(await createTrigger())
-    expect(screen.getByRole("textbox", { name: /policy name/i })).toHaveValue(
-      "",
-    )
+    expect(screen.getByRole("textbox", { name: /^name$/i })).toHaveValue("")
   })
 
   it("reports a refused save inside the dialog, leaving the form filled", async () => {
@@ -1283,12 +1300,9 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "cheap",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5-nano",
     )
     await user.keyboard("{Escape}")
@@ -1303,7 +1317,7 @@ describe("RoutingPage", () => {
     // Still open with the work intact, so the operator can correct the name
     // rather than retyping the policy.
     expect(screen.getByRole("dialog")).toBeInTheDocument()
-    expect(screen.getByRole("textbox", { name: /policy name/i })).toHaveValue(
+    expect(screen.getByRole("textbox", { name: /^name$/i })).toHaveValue(
       "cheap",
     )
   })
@@ -1402,7 +1416,7 @@ describe("RoutingPage", () => {
     const row = (await screen.findByText("legacy")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
     await user.click(
-      await screen.findByRole("button", { name: /Add a fallback chain/ }),
+      await screen.findByRole("button", { name: "Add a backup" }),
     )
 
     // Saving it as a policy would leave the alias row behind under the same name,
@@ -1455,7 +1469,7 @@ describe("RoutingPage", () => {
     expect(marks[1]).toBeChecked()
     // ...and no second field asking for the same model again.
     expect(
-      screen.queryByRole("combobox", { name: /^serves$/i }),
+      screen.queryByRole("combobox", { name: /^main model$/i }),
     ).not.toBeInTheDocument()
   })
 
@@ -1522,15 +1536,13 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "smart")
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "smart",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5",
     )
     await user.keyboard("{Escape}")
+    await openAdvanced(user)
     await user.click(screen.getByRole("button", { name: /let a router pick/i }))
     // The pool is seeded with the policy's target plus one empty row, so removing
     // the empty row leaves a single candidate.
@@ -1565,14 +1577,15 @@ describe("RoutingPage", () => {
 
     await user.click(await createTrigger())
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
+      screen.getByRole("textbox", { name: /^name$/i }),
       "balanced",
     )
     await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5",
     )
     await user.keyboard("{Escape}")
+    await openAdvanced(user)
     await user.click(
       screen.getByRole("button", { name: /split traffic across providers/i }),
     )
@@ -1617,15 +1630,13 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "spill")
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "spill",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5",
     )
     await user.keyboard("{Escape}")
+    await openAdvanced(user)
     await user.click(
       screen.getByRole("button", {
         name: /next model when one hits its rate limit/i,
@@ -2075,22 +2086,20 @@ describe("RoutingPage", () => {
   })
 
   it("will not author a policy that dispatches more models than the server allows", async () => {
-    // The cap counts the routed pool plus the fallback chain. Authoring past it and
+    // The cap counts the routed pool plus the backups. Authoring past it and
     // finding out via a 400 on Save is the form lying about its own rules.
     const { calls } = mockApi([])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "wide")
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "wide",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5",
     )
     await user.keyboard("{Escape}")
+    await openAdvanced(user)
     await user.click(screen.getByRole("button", { name: /let a router pick/i }))
     // Seeded with 2 candidates; add three more to reach the cap of 5.
     for (let i = 0; i < 3; i += 1) {
@@ -2100,7 +2109,11 @@ describe("RoutingPage", () => {
     expect(
       screen.getByRole("button", { name: "+ Another model" }),
     ).toBeDisabled()
-    expect(screen.getByText(/dispatches at most 5 models/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/dispatches at most 5 models, counting the backups/i),
+    ).toBeInTheDocument()
+    // The backups share the cap, so they stop growing too.
+    expect(screen.getByRole("button", { name: "Add a backup" })).toBeDisabled()
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
@@ -2334,12 +2347,9 @@ describe("RoutingPage scoped to the selected workspace", () => {
     renderInWorkspace(<RoutingPage />)
 
     await user.click(await createTrigger())
+    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "scoped")
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "scoped",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5-mini",
     )
     await user.keyboard("{Escape}")
@@ -2399,11 +2409,11 @@ describe("RoutingPage for an organization admin", () => {
 
     await user.click(await createTrigger())
     await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
+      screen.getByRole("textbox", { name: /^name$/i }),
       "tenant-fast",
     )
     await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
+      screen.getByRole("combobox", { name: /^main model$/i }),
       "openai:gpt-5-mini",
     )
     // Close the combobox popover, which otherwise aria-hides the submit button.

@@ -111,6 +111,29 @@ export function findBudgetConditions(
     }))
 }
 
+/**
+ * Why a policy name cannot be sent as a `model`, or "" when it can.
+ *
+ * The delimiters are the server's rule: a name with `:` or `/` would shadow a
+ * real `provider:model` selector. Whitespace is refused here because a caller
+ * has to send the exact string, and the server would store it.
+ */
+export function policyNameProblem(name: string): string {
+  const trimmed = name.trim()
+  if (/[:/]/.test(trimmed)) return "A policy name cannot contain “:” or “/”."
+  if (/\s/.test(trimmed)) return "A policy name cannot contain spaces."
+  return ""
+}
+
+/** Whether a spec uses anything the form keeps under Advanced. */
+export function usesAdvancedRouting(spec: PolicySpec): boolean {
+  return (
+    findBudgetConditions(spec).length > 0 ||
+    findCandidates(spec).length > 0 ||
+    (spec.guardrails ?? []).length > 0
+  )
+}
+
 /** The account of a save that wrote some of its scopes and not the others.
  *
  *  Both halves by name, because "it failed" over a part-written save leaves the
