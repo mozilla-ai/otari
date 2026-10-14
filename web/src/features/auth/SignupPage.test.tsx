@@ -465,6 +465,8 @@ describe("OAuth first", () => {
       "/api/v1/auth/oauth/github/authorize",
     )
     expect(window.sessionStorage.getItem("otari.oauth.state")).toBe("the-state")
+    // Home, not back to this form: a model chosen on the catalog reopens there.
+    expect(window.sessionStorage.getItem("otari.oauth.return")).toBe("#/")
     expect(assign).toHaveBeenCalledWith(
       "https://github.com/login/oauth/authorize?x=1",
     )

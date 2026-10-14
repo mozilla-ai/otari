@@ -70,7 +70,12 @@ export function OAuthCallbackPage({
   const { isAuthenticated, login } = useAuth()
   const { recordEvent } = useTelemetry()
   const { terms_url } = useDeployment()
-  const [failure, setFailure] = useState<string>()
+  // A failure keeps the page the sign-in started from, so trying again from
+  // the sign-in screen still ends there.
+  const [failure, setFailure] = useState<{
+    message: string
+    returnHash: string
+  }>()
   const [needsTerms, setNeedsTerms] = useState(false)
   const [passwordRemoved, setPasswordRemoved] = useState(false)
   // The effect below signs somebody in, so it must run once and not once per
@@ -92,12 +97,14 @@ export function OAuthCallbackPage({
     const state = params.get("state")
     const code = params.get("code")
 
+    const fail = (message: string) =>
+      setFailure({ message, returnHash: remembered.returnHash })
     const refuse = (message: string, errorCode: string) => {
       recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: provider,
         error_code: errorCode,
       })
-      setFailure(message)
+      fail(message)
     }
 
     if (providerError) {
@@ -155,18 +162,17 @@ export function OAuthCallbackPage({
           // Signing in is not enough to stop this page rendering, and leaving
           // the hash alone strands the person here. `DeploymentRoot` matches a
           // public auth path *before* the auth gate, so an unchanged hash keeps
-          // re-selecting this page, whose effect has already run: the pending
-          // panel would sit there with no way out, and a reload would report a
-          // state mismatch because the stored state is spent. Replaced rather
-          // than pushed, so Back from the dashboard skips this page.
-          replacePublicAuthPage("#/")
+          // re-selecting this page, whose effect has already run. So this hands
+          // the tab on to the page the sign-in started from, replacing this
+          // entry so Back from there skips this page.
+          replacePublicAuthPage(remembered.returnHash)
           return
         }
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
           authentication_method: provider,
           error_code: analyticsStatusCode(result.status),
         })
-        setFailure(result.message ?? `${label} did not sign you in.`)
+        fail(result.message ?? `${label} did not sign you in.`)
       } catch (caught) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
           authentication_method: provider,
@@ -176,7 +182,7 @@ export function OAuthCallbackPage({
         setNeedsTerms(
           caught instanceof ApiError && caught.code === "terms_not_accepted",
         )
-        setFailure(errorMessage(caught))
+        fail(errorMessage(caught))
       }
     })()
   }, [provider, hash, isAuthenticated, login, recordEvent])
@@ -220,15 +226,23 @@ export function OAuthCallbackPage({
   // Only where this tab knows which terms to show; a bootstrap that names none
   // falls back to the gateway's own wording below.
   if (needsTerms && terms_url !== null) {
-    return <OAuthTermsStep provider={provider} termsUrl={terms_url} />
+    return (
+      <OAuthTermsStep
+        provider={provider}
+        termsUrl={terms_url}
+        returnHash={failure.returnHash}
+      />
+    )
   }
 
   return (
     <PublicAuthLayout
       title="That sign-in did not complete"
-      footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+      footer={
+        <PublicAuthLink to={failure.returnHash}>Back to sign in</PublicAuthLink>
+      }
     >
-      <p className="text-center text-body">{failure}</p>
+      <p className="text-center text-body">{failure.message}</p>
     </PublicAuthLayout>
   )
 }

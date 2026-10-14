@@ -1,5 +1,7 @@
 import { type OAuthStartResult, startOAuthSignIn } from "@/shared/api/client"
 
+import { resolveSignInReturnHash } from "./publicAuthPaths"
+
 /**
  * Where the CSRF `state` waits while the browser is away at the provider.
  *
@@ -17,10 +19,22 @@ const STATE_KEY = "otari.oauth.state"
  */
 const TERMS_KEY = "otari.oauth.terms-accepted"
 
-/** Remember the state, and whether the terms were accepted, for the round trip about to start. */
+/**
+ * The hash to land on once the sign-in succeeds, so a link into the dashboard
+ * that ended on the sign-in screen still opens after the provider's round trip.
+ */
+const RETURN_KEY = "otari.oauth.return"
+
+interface RoundTripOptions {
+  termsAccepted?: boolean
+  /** Home unless the page starting the round trip stands in for another. */
+  returnHash?: string
+}
+
+/** Remember the state, the terms acceptance and the page to return to, for the round trip about to start. */
 export function rememberOAuthState(
   state: string,
-  { termsAccepted = false }: { termsAccepted?: boolean } = {},
+  { termsAccepted = false, returnHash = "#/" }: RoundTripOptions = {},
 ): void {
   // A single-use CSRF nonce rather than a credential: it authorizes nothing on
   // its own, since the exchange also needs the provider's code and the flow cookie.
@@ -31,15 +45,33 @@ export function rememberOAuthState(
   } else {
     window.sessionStorage.removeItem(TERMS_KEY)
   }
+  window.sessionStorage.removeItem(RETURN_KEY)
+  try {
+    window.sessionStorage.setItem(RETURN_KEY, returnHash)
+  } catch {
+    // Storage full: the sign-in still starts, and lands on the home page.
+  }
 }
 
-/** Take what was remembered, clearing it so one value answers one callback. */
-export function takeOAuthState(): { state: string; termsAccepted: boolean } {
+/**
+ * Take what was remembered, clearing it so one value answers one callback.
+ * The page to return to is checked on the way out: storage is not a source to
+ * navigate on unchecked.
+ */
+export function takeOAuthState(): {
+  state: string
+  termsAccepted: boolean
+  returnHash: string
+} {
   const state = window.sessionStorage.getItem(STATE_KEY) ?? ""
   const termsAccepted = window.sessionStorage.getItem(TERMS_KEY) === "true"
+  const returnHash = resolveSignInReturnHash(
+    window.sessionStorage.getItem(RETURN_KEY) ?? "",
+  )
   window.sessionStorage.removeItem(STATE_KEY)
   window.sessionStorage.removeItem(TERMS_KEY)
-  return { state, termsAccepted }
+  window.sessionStorage.removeItem(RETURN_KEY)
+  return { state, termsAccepted, returnHash }
 }
 
 /**
@@ -52,11 +84,11 @@ export function takeOAuthState(): { state: string; termsAccepted: boolean } {
  */
 export async function leaveForOAuthProvider(
   provider: string,
-  { termsAccepted = false }: { termsAccepted?: boolean } = {},
+  options: RoundTripOptions = {},
 ): Promise<OAuthStartResult> {
   const started = await startOAuthSignIn(provider)
   if (started.isOk) {
-    rememberOAuthState(started.state, { termsAccepted })
+    rememberOAuthState(started.state, options)
     window.location.assign(started.authorizationUrl)
   }
   return started
