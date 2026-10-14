@@ -537,8 +537,8 @@ describe("AppShell for a caller with no organization", () => {
     expect(
       await within(sidebar).findByRole("link", { name: "Overview" }),
     ).toBeInTheDocument()
-    // A 404 used to read as an unavailable context, which fails open onto the
-    // operator rows and the organization rail.
+    // A 404 is no organization, not an unavailable context, which would fail
+    // open onto the operator rows and the organization rail.
     expect(within(sidebar).getAllByRole("link")).toHaveLength(1)
     expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
   })

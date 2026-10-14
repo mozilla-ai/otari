@@ -419,7 +419,7 @@ function NoOrganizationOverview() {
           to="/invitations"
           className="inline-flex min-h-11 items-center self-start text-sm text-muted underline underline-offset-2 hover:text-foreground"
         >
-          View invitations →
+          View invitations <span aria-hidden>→</span>
         </Link>
       </EmptyState>
       {open_signup ? (

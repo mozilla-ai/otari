@@ -2,11 +2,28 @@ import { describe, expect, it } from "vitest"
 
 import { OAUTH_PROVIDER_LABELS } from "@/features/auth/oauthProviders"
 import {
+  isAcceptInvitationPath,
   isPublicAuthPageAvailable,
   oauthCallbackProvider,
   PUBLIC_AUTH_PAGES,
   publicAuthPath,
+  rendersAheadOfRouter,
 } from "@/features/auth/publicAuthPaths"
+
+describe("isAcceptInvitationPath", () => {
+  it("names the page by hash or by pathname, whatever its query string", () => {
+    expect(isAcceptInvitationPath("#/accept-invitation?token=abc")).toBe(true)
+    expect(isAcceptInvitationPath("/accept-invitation")).toBe(true)
+    expect(isAcceptInvitationPath("#/accept-invitations")).toBe(false)
+    expect(isAcceptInvitationPath("#/invitations")).toBe(false)
+  })
+
+  it("is one of the paths the router leaves to the page above it", () => {
+    expect(rendersAheadOfRouter("/accept-invitation")).toBe(true)
+    expect(rendersAheadOfRouter("/signup")).toBe(true)
+    expect(rendersAheadOfRouter("/usage")).toBe(false)
+  })
+})
 
 /** A deployment with mail off and no OAuth provider, which each test narrows. */
 const NOTHING_CONFIGURED = { mailReady: false, oauthProviders: [] } as const

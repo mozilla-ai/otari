@@ -102,7 +102,15 @@ export function publicAuthPath(hash: string): PublicAuthPath | null {
  * router: the accept-invitation page and every public auth page.
  */
 export function rendersAheadOfRouter(pathname: string): boolean {
-  return pathname === "/accept-invitation" || publicAuthPath(pathname) !== null
+  return isAcceptInvitationPath(pathname) || publicAuthPath(pathname) !== null
+}
+
+/**
+ * Whether a hash or a pathname names the accept-invitation page, matched on
+ * the path alone as `publicAuthPath` matches, so its `?token=…` is ignored.
+ */
+export function isAcceptInvitationPath(hashOrPath: string): boolean {
+  return hashOrPath.replace(/^#/, "").split("?")[0] === "/accept-invitation"
 }
 
 /** Which provider an OAuth callback path finishes, or null for any other page. */

@@ -10,6 +10,7 @@ import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import {
+  isAcceptInvitationPath,
   type PublicAuthPath,
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
@@ -135,7 +136,7 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // keep validating and accepting the first token. The key forces React to
   // tear down and remount on any hash change under this prefix, which is what
   // makes "once" mean once per link rather than once per tab.
-  if (hash.startsWith("#/accept-invitation")) {
+  if (isAcceptInvitationPath(hash)) {
     return (
       <PublicPageTitle page="Accept invitation">
         <AcceptInvitationPage key={hash} />

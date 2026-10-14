@@ -293,8 +293,8 @@ describe("App", () => {
     renderApp(bootstrap())
     expect(await screen.findByText("Lazy overview")).toBeInTheDocument()
 
-    // The router hears the hash change too, and its catch-all used to send
-    // the unknown path to the overview before the page above it could read it.
+    // The router hears the hash change too, and its catch-all must not send
+    // the path to the overview before the page above it can read it.
     window.location.hash = "#/accept-invitation?token=abc123"
 
     expect(await screen.findByText("ada@example.com")).toBeInTheDocument()

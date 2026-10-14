@@ -127,20 +127,27 @@ function LabelRow({
   label,
   error,
   errorId,
+  className = "",
 }: {
   label: string
   error: unknown
   errorId: string
+  /** Placement in the caller's own layout. */
+  className?: string
 }) {
   const message = error ? errorMessage(error) : null
 
-  // Content-sized where a caller nests this in a flex row of its own, which
-  // makes the `justify-between` below inert and sits a refusal beside its label
-  // rather than at the field's right edge. Deliberate: the password row shares
-  // its line with the recovery link, so stretching this to reach that edge only
-  // wraps the refusal onto a second line and grows the row as it appears.
+  // Content-sized where a caller places it with `justify-self-start` in a grid
+  // of its own, which makes the `justify-between` below inert and sits a
+  // refusal beside its label rather than at the column's right edge.
+  // Deliberate: the password row shares its line with the recovery link, so
+  // stretching this to reach that link only parts the refusal from the label it
+  // belongs to. The column is `minmax(0,1fr)`, so at 320px the refusal still
+  // wraps under the label inside it rather than pushing the link off the row.
   return (
-    <div className="flex min-h-5 flex-wrap items-center justify-between gap-x-3">
+    <div
+      className={`flex min-h-5 flex-wrap items-center justify-between gap-x-3 ${className}`}
+    >
       <span className="flex shrink-0 items-center">
         {/* `text-foreground` holds the label at its resting ink while the field
             is invalid: HeroUI turns any `.label` under `[data-invalid]` red, and
@@ -759,6 +766,7 @@ export function Login() {
                       label="Password"
                       error={errorField === "password" ? error : null}
                       errorId={ERROR_IDS.password}
+                      className="justify-self-start"
                     />
                     <Input
                       autoFocus={focusesOnArrival && prefilledEmail !== ""}

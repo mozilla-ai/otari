@@ -682,15 +682,6 @@ describe("the workspace half of the scope switcher", () => {
   })
 })
 
-/**
- * The invitee-side entry point (otari-ai#1999).
- *
- * The inbox is a chrome destination with no sidebar row, so this menu is the
- * only thing in the shell that leads to it. Its absence when nothing is
- * waiting is as much the contract as its presence when something is: a
- * permanent row for an almost-always-empty list would read as a section of the
- * product.
- */
 describe("the scope switcher for a caller with no organization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -729,6 +720,15 @@ describe("the scope switcher for a caller with no organization", () => {
   })
 })
 
+/**
+ * The invitee-side entry point (otari-ai#1999).
+ *
+ * The inbox is a chrome destination with no sidebar row, so this menu is the
+ * only thing in the shell that leads to it. Its absence when nothing is
+ * waiting is as much the contract as its presence when something is: a
+ * permanent row for an almost-always-empty list would read as a section of the
+ * product.
+ */
 describe("the invitations row in the scope switcher", () => {
   beforeEach(() => {
     vi.clearAllMocks()

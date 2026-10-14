@@ -107,6 +107,22 @@ describe("the sign-in screen on arrival", () => {
     ).toHaveFocus()
   })
 
+  it("keeps the password's label row content-sized, so a refusal sits beside the label", () => {
+    // jsdom lays nothing out, so the placement class is what is pinned: in the
+    // grid that shares its line with the recovery link, a stretched row would
+    // push the refusal against the link instead.
+    stubPointer(true)
+    render(
+      <Mounted>
+        <Login />
+      </Mounted>,
+    )
+
+    const labelRow = screen.getByText("Password").closest("div")
+    expect(labelRow?.parentElement).toHaveClass("grid")
+    expect(labelRow).toHaveClass("justify-self-start")
+  })
+
   it("fills in the address an invitation link handed over, and asks for the password", () => {
     stubPointer(true)
     rememberSignInAddress("ada@example.com")
