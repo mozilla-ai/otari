@@ -35,7 +35,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, record_auth_failure
+from gateway.api.deps import CurrentIdentity, OrganizationServiceDep, get_config, get_db, record_auth_failure
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
@@ -61,7 +61,6 @@ from gateway.services.dashboard_session_service import (
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy import webauthn_service
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
-from gateway.services.tenancy.user_service import active_organization_for_session
 
 router = APIRouter(prefix="/auth/webauthn", tags=["auth"])
 
@@ -112,7 +111,7 @@ class PasskeySessionResponse(BaseModel):
     active_organization_id: uuid.UUID | None = Field(
         description=(
             "The organization that identity is acting in, which scopes every tenancy surface. "
-            "Null when it is a member of none."
+            "Null when it is an active member of none, as an invitee who has not accepted yet is not."
         )
     )
 
@@ -212,6 +211,7 @@ async def authenticate_passkey(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
 ) -> Any:
     """Verify an assertion and set the HttpOnly session cookie.
 
@@ -247,7 +247,7 @@ async def authenticate_passkey(
         raise
     # Same transaction as the session row; see the note in ``auth_session``.
     await OrganizationDomainService(db).auto_join_for_user(identity)
-    active_organization_id = await active_organization_for_session(db, identity)
+    active_organization_id = await organizations.active_organization_id_for_sign_in(identity)
     token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
     await _commit(db, "persist a dashboard session on a passkey sign-in")
     apply_session_cookie(response, token, expires_at, secure=request_is_https(request))

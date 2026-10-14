@@ -1214,6 +1214,85 @@ async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity
     assert await _organization_count(async_db) == organizations_before + 1
 
 
+async def _unwanted_identity(db: AsyncSession) -> uuid.UUID:
+    """An address an organization once put on its roster and no longer wants: no membership anywhere."""
+    organization, _ = await _seed_owner(db)
+    identity = await UserRepository(db).create_local_identity(
+        full_name=None, active_organization_id=organization.id, email="nova@example.com"
+    )
+    await db.commit()
+    return identity.id
+
+
+def _claim_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hold each claim's provisioning until every racer has decided to provision."""
+    real = OrganizationService.provision_tenancy_for_claim
+    all_decided = asyncio.Barrier(_RACERS)
+
+    async def provision_after_all_decide(self: OrganizationService, identity: User, *, full_name: str | None) -> bool:
+        async with asyncio.timeout(_CHECKPOINT_TIMEOUT):
+            await all_decided.wait()
+        return await real(self, identity, full_name=full_name)
+
+    monkeypatch.setattr(OrganizationService, "provision_tenancy_for_claim", provision_after_all_decide)
+
+
+async def test_concurrent_open_signup_claims_of_an_unwanted_identity_found_one_organization(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The losers roll back, so no organization is left behind without an owner who can sign in."""
+    identity_id = await _unwanted_identity(async_db)
+    _claim_together(monkeypatch)
+    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com", open_signup=True)
+    organizations_before = await _organization_count(async_db)
+
+    async def signup(session: AsyncSession) -> User | None:
+        return await user_service.create_user_for_signup(
+            session,
+            config,
+            background_tasks=BackgroundTasks(),
+            email="nova@example.com",
+            password="signup-password",
+            **claim_writes(session),
+        )
+
+    outcomes = await _race(sessions, signup)
+
+    claimed = [outcome for outcome in outcomes if isinstance(outcome, User)]
+    assert [identity.id for identity in claimed] == [identity_id], outcomes
+    assert all(outcome is None for outcome in outcomes if outcome is not claimed[0]), outcomes
+    assert await _organization_count(async_db) == organizations_before + 1
+
+
+async def test_concurrent_oauth_claims_of_an_unwanted_identity_found_one_organization(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """The first claim founds the organization; the others find its membership and found nothing.
+
+    No barrier: each racer holds the account's row lock from its first read, so they queue there.
+    """
+    identity_id = await _unwanted_identity(async_db)
+    organizations_before = await _organization_count(async_db)
+
+    async def sign_in(session: AsyncSession) -> uuid.UUID:
+        resolution = await DeploymentIdentityProviderAdapter(
+            UserRepository(session),
+            OrganizationService(session, **membership_writes(session)),
+            functools.partial(user_service.forget_unproven_access, session),
+            open_signup=True,
+        ).resolve(provider="google", email="nova@example.com", full_name=None, email_verified=True)
+        await session.commit()
+        return resolution.identity.id
+
+    outcomes = await _race(sessions, sign_in)
+
+    assert outcomes == [identity_id] * _RACERS
+    assert await _organization_count(async_db) == organizations_before + 1
+
+
 async def test_a_lost_registration_whose_winner_cannot_be_read_is_unresolved(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -1391,7 +1470,7 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
                 await user_service.reset_password(
                     session,
                     GatewayConfig(open_signup=True),
-                    organizations=_reader(session),
+                    organizations=claim_writes(session)["organizations"],
                     token=token,
                     new_password=f"racer-password-{index}",
                 )

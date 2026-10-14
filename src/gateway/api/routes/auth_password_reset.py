@@ -13,8 +13,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import GrowthSignalPortDep, OrganizationServiceDep, get_config, get_db
+from gateway.api.deps import (
+    GrowthSignalPortDep,
+    OrganizationServiceDep,
+    get_config,
+    get_db,
+)
 from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
+from gateway.api.routes.organizations import OrganizationServiceDep as MembershipOrganizationServiceDep
 from gateway.core.config import GatewayConfig
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
@@ -87,7 +93,7 @@ async def confirm_reset(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
-    organizations: OrganizationServiceDep,
+    organizations: MembershipOrganizationServiceDep,
 ) -> None:
     """Complete a password reset, or choose a first password. Single-use: the token stops working after this.
 

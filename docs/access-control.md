@@ -460,12 +460,13 @@ on `open_signup`:
   organization requires an active membership in one already, so a member who was
   removed cannot make themselves a tenant.
 - `true`: an unknown address is registered, with an organization and workspace of
-  its own. Use it where the deployment serves many tenants. So is an address an
-  organization once added or invited but no longer wants (its invitation was
-  revoked, declined or expired, or the member was removed), whether it signs up
-  with the form or with a provider: it gets its own organization and workspace,
-  and signs in to them. An address with an invitation still waiting is claimed as
-  it is, and finds the invitation under Invitations.
+  its own. So is an address an organization once added or invited but no longer
+  wants (its invitation was revoked, declined or expired, or the member was
+  removed), whether it signs up with the form, with a provider or by choosing a
+  password through "Forgot your password?": it gets its own organization and
+  workspace, and signs in to them. An address with an invitation still waiting
+  is claimed as it is, and finds the invitation under Invitations. Use it where
+  the deployment serves many tenants.
 
 Signup never sets a password on an address that is already verified. That is the
 state a Google or GitHub sign-in leaves, and the person who signs in that way
@@ -539,7 +540,8 @@ the membership only while it is still waiting; a person who became a member
 another way keeps their access. An expired link says it expired every time it is
 opened, and every refusal says to ask the inviter for a new link. An address
 whose account a deployment operator deactivated cannot be invited or added until
-it is reactivated, and an organization name cannot carry line breaks or other
+it is reactivated; the refusal does not give the reason, since the admin asking
+may be another tenant's. An organization name cannot carry line breaks or other
 control characters, since it is quoted in invitation emails.
 
 When a link may not set a password (the address belongs to someone another

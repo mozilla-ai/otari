@@ -66,13 +66,22 @@ class OrganizationMemberAlreadyExistsError(TenancyConflictError):
 
 
 class OrganizationMemberDeactivatedError(TenancyConflictError):
-    """An address whose account is deactivated, so a membership would grant nothing it could use."""
+    """An address whose account is deactivated, so a membership would grant nothing it could use.
+
+    The message does not say why: on a deployment with many tenants, the admin
+    asking is not the one who deactivated the account, and the account's state
+    is not theirs to learn.
+    """
 
     def __init__(self, identifier: object):
-        super().__init__(
-            f"{identifier} belongs to a deactivated account, so it cannot be added or invited. "
-            "A deployment operator can reactivate it first."
-        )
+        super().__init__(f"{identifier} cannot be added to or invited into this organization")
+
+
+class OrganizationMemberAddressUnresolvedError(TenancyConflictError):
+    """Another write took and then released an address while it was being added or invited."""
+
+    def __init__(self, identifier: object):
+        super().__init__(f"{identifier} changed while it was being added. Try again.")
 
 
 class OrganizationMemberAddressUnprovenError(TenancyConflictError):
@@ -357,6 +366,7 @@ __all__ = [
     "OrganizationDomainNotFoundError",
     "OrganizationDomainNotVerifiedError",
     "OrganizationMemberAddressUnprovenError",
+    "OrganizationMemberAddressUnresolvedError",
     "OrganizationMemberAlreadyExistsError",
     "OrganizationMemberDeactivatedError",
     "OrganizationMemberNotFoundError",

@@ -1000,7 +1000,7 @@ def test_a_stale_link_cannot_readmit_a_member_who_was_removed(
 def test_a_pending_link_on_a_membership_that_left_invited_is_refused(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
-    """Data written before the fix can still hold such a row; accepting it must not undo anything."""
+    """A pending row on a membership that is no longer invited must not be accepted."""
     result = _invite(client, master_key_header, email="sam@example.com")
     membership = db_session.execute(
         select(OrganizationMember).where(col(OrganizationMember.id) == uuid.UUID(result["organization_member_id"]))
@@ -1073,6 +1073,28 @@ def test_a_refused_first_password_names_the_way_in_this_deployment_offers(
     assert "administers this gateway" in detail
 
 
+def test_a_refused_first_password_offers_the_provider_and_the_reset_this_deployment_has(
+    client: TestClient, master_key_header: dict[str, str], test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _add_directly(client, master_key_header, email="kay@example.com")
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Mallory"}, headers=master_key_header)
+    _switch(client, master_key_header, created.json()["id"])
+    # Invited while no mail goes out, so the link comes back to share; the ways in are switched on afterwards.
+    token = _token_from(_invite(client, master_key_header, email="kay@example.com")["accept_link"])
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://gw.example.com")
+    monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
+    monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
+
+    refused = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["detail"] == (
+        "This link cannot set a password for this address. Accept without one, then sign in with Google, "
+        'or choose a password with "Forgot your password?" on the sign-in screen.'
+    )
+
+
 def test_an_admin_can_reinvite_an_address_whose_lapsed_invitation_offered_owner(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
@@ -1080,21 +1102,18 @@ def test_an_admin_can_reinvite_an_address_whose_lapsed_invitation_offered_owner(
     client.delete(
         f"{API_ROOT}/organizations/me/member-invitations/{result['invitation_id']}", headers=master_key_header
     )
-    admin_cookie = _admin_session(client, master_key_header, db_session)
+    client.cookies.set(SESSION_COOKIE_NAME, _admin_session(client, master_key_header, db_session))
 
     reinvited = client.post(
-        f"{API_ROOT}/organizations/me/member-invitations",
-        json={"email": "olga@example.com", "role": "member"},
-        cookies={SESSION_COOKIE_NAME: admin_cookie},
+        f"{API_ROOT}/organizations/me/member-invitations", json={"email": "olga@example.com", "role": "member"}
     )
     owner_again = client.post(
-        f"{API_ROOT}/organizations/me/member-invitations",
-        json={"email": "olga@example.com", "role": "owner"},
-        cookies={SESSION_COOKIE_NAME: admin_cookie},
+        f"{API_ROOT}/organizations/me/member-invitations", json={"email": "olga@example.com", "role": "owner"}
     )
 
     assert reinvited.status_code == 201, reinvited.text
-    assert owner_again.status_code in (400, 403, 409), owner_again.text
+    assert owner_again.status_code == 400, owner_again.text
+    assert owner_again.json()["detail"] == "Only organization owners can grant the owner role"
 
 
 def test_an_expired_link_says_expired_every_time(
@@ -1146,10 +1165,12 @@ def test_a_deactivated_account_cannot_be_invited_or_added(
     )
 
     assert invited.status_code == added.status_code == 409
-    assert "deactivated" in invited.json()["detail"]
+    # Refused without the reason: the admin asking may be another tenant's.
+    assert invited.json()["detail"] == "dee@example.com cannot be added to or invited into this organization"
+    assert "deactivated" not in added.json()["detail"]
 
 
-@pytest.mark.parametrize("name", ["Acme\r\nBcc: x@example.com", "Acme\x07"])
+@pytest.mark.parametrize("name", ["Acme\r\nBcc: x@example.com", "Acme\x07", "Acme\u2028Bcc: x@example.com"])
 def test_an_organization_name_with_a_control_character_is_refused(
     client: TestClient, master_key_header: dict[str, str], name: str
 ) -> None:

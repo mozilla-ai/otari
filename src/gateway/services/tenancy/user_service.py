@@ -316,15 +316,6 @@ async def report_new_account(
     )
 
 
-async def active_organization_for_session(db: AsyncSession, identity: User) -> uuid.UUID | None:
-    """The organization a session about to be minted acts in, or ``None`` when the identity belongs to none.
-
-    A pointer left at an organization the identity was removed from is moved to
-    a live membership and staged for the caller to commit with the session.
-    """
-    return await _organizations_reader(db).active_organization_id_for_sign_in(identity)
-
-
 class _SignupRaceLostError(Exception):
     """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
 
@@ -399,15 +390,10 @@ async def create_user_for_signup(
         # address with no stored hash.
         await verify_absent_password_async(password)
         return None
-    # Under open signup an identity nobody still wants (its invitation revoked,
-    # declined or lapsed, or the member removed) gets what a new address gets.
-    founds_own_tenancy = (
-        identity is not None and config.open_signup and not await organizations.has_live_membership(identity.id)
-    )
-
     try:
         async with uow:
-            if identity is not None and founds_own_tenancy:
+            if identity is not None and config.open_signup:
+                # An identity no organization still wants gets what a new address gets, and a lost race rolls it back.
                 await organizations.provision_tenancy_for_claim(identity, full_name=full_name)
             if identity is None:
                 if not config.open_signup:
@@ -646,9 +632,14 @@ async def reset_password(
 
     A reset on an unverified identity is a claim, so it is held to
     ``unverified_identity_is_claimable`` when it completes, not only when the
-    link was mailed. Where the deployment publishes terms and the identity has
-    accepted none, ``terms_accepted`` is required, because the reset may be
-    what makes the account usable at all.
+    link was mailed. Under ``open_signup``, such a claim of an identity no
+    organization still wants gives it an organization and workspace of its own,
+    as signup and a provider sign-in do; that tenancy is committed before the
+    identity is changed. ``organizations`` must then be built on a Unit of Work.
+
+    Where the deployment publishes terms and the identity has accepted none,
+    ``terms_accepted`` is required, because the reset may be what makes the
+    account usable at all.
 
     The mailbox proof replaces an unverified or vouched address, so the
     passkeys registered before it go as well as the sessions
@@ -685,10 +676,18 @@ async def reset_password(
     if not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup):
         raise ResetTokenInvalidError
     validate_new_password(new_password)
+    needs_terms = identity.terms_accepted_at is None and config.terms_url is not None
+    if needs_terms and not terms_accepted:
+        raise TermsNotAcceptedError
+    if config.open_signup and identity.email_verified_at is None:
+        await organizations.provision_tenancy_for_claim(identity, full_name=None)
+        # That block committed, which released the lock, so the token is resolved again under a new one.
+        await users.lock(identity.id)
+        identity = await users.get_by_reset_token_hash(hash_token(token))
+        if identity is None or not identity.is_active:
+            raise ResetTokenInvalidError
     now = datetime.now(UTC)
-    if identity.terms_accepted_at is None and config.terms_url is not None:
-        if not terms_accepted:
-            raise TermsNotAcceptedError
+    if needs_terms:
         identity.terms_accepted_at = now
 
     first_claim = identity.hashed_password is None and identity.email_verified_at is None
@@ -798,7 +797,6 @@ async def _claimable_email(db: AsyncSession, identity: User, email: str) -> str:
 
 
 __all__ = [
-    "active_organization_for_session",
     "authenticate",
     "create_user_for_signup",
     "forget_unproven_access",

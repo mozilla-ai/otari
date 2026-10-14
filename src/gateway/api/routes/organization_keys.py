@@ -146,8 +146,9 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
     """The organization this request acts in, and the owner id it acts as.
 
     The organization is the caller's own ``active_organization_id``, resolved
-    through ``get_active_organization_for_user`` so a pointer with no live
-    membership behind it refuses rather than resolving; moving between
+    through ``get_active_organization_for_user``: a pointer with no live
+    membership behind it falls back to the caller's oldest live membership, and
+    refuses when there is none; moving between
     organizations is ``POST /api/v1/organizations/me/switch``. The owner id is the
     identity's UUID rendered as a string, the attribution convention
     ``get_or_create_attribution_user`` documents.

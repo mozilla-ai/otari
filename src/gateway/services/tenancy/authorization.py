@@ -172,8 +172,9 @@ async def resolve_visible_workspace_scope(
     """Resolve how much of their active organization this caller may be shown.
 
     The organization is the caller's own ``active_organization_id``, put through
-    ``get_active_organization_for_user`` so a pointer with no live membership
-    behind it raises rather than resolving. It is never taken from the request:
+    ``get_active_organization_for_user``: a pointer with no live membership
+    behind it falls back to the caller's oldest live membership, and raises
+    when there is none. It is never taken from the request:
     a caller moves between organizations with ``POST /v1/organizations/me/switch``,
     which refuses an organization they hold no active membership in, so there is
     no parameter here for a cross-tenant read to travel on.

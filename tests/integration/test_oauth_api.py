@@ -723,6 +723,34 @@ def test_open_signup_claims_a_rostered_address_rather_than_founding_a_second_ten
     assert response.json()["user_id"] == user_id
 
 
+def test_a_provider_sign_in_after_removal_names_no_organization(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same answer a password sign-in gives, rather than the organization the member was removed from."""
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": "ada@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert added.status_code == 201, added.text
+    member_id = added.json()["organization_member_id"]
+    stub_exchange(monkeypatch)
+    first = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": "s"})
+    assert first.status_code == 200, first.text
+    assert first.json()["active_organization_id"] is not None
+    client.cookies.clear()
+    removed = client.delete(f"{API_ROOT}/organizations/me/members/{member_id}", headers=master_key_header)
+    assert removed.status_code == 200, removed.text
+
+    after_removal = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"})
+
+    assert after_removal.status_code == 200, after_removal.text
+    assert after_removal.json()["active_organization_id"] is None
+
+
 def test_open_signup_gives_a_revoked_invitee_an_organization_of_its_own(
     client: TestClient,
     master_key_header: dict[str, str],

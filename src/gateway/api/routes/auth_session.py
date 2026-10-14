@@ -50,6 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     MembershipListenerDep,
+    OrganizationServiceDep,
     UnitOfWorkDep,
     WorkspaceListenerDep,
     get_config,
@@ -79,11 +80,7 @@ from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.user_service import (
-    active_organization_for_session,
-    authenticate,
-    operator_has_password,
-)
+from gateway.services.tenancy.user_service import authenticate, operator_has_password
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 router = APIRouter(prefix="/auth/session", tags=["auth"])
@@ -179,7 +176,7 @@ class SessionResponse(BaseModel):
     active_organization_id: uuid.UUID | None = Field(
         description=(
             "The organization that identity is acting in, which scopes every tenancy surface. "
-            "Null when it is a member of none, as an invitee who has not accepted yet is."
+            "Null when it is an active member of none, as an invitee who has not accepted yet is not."
         )
     )
 
@@ -295,6 +292,7 @@ async def create_session(
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
     workspace_listener: WorkspaceListenerDep,
+    organizations: OrganizationServiceDep,
 ) -> SessionResponse:
     """Verify a sign-in credential and set the HttpOnly session cookie.
 
@@ -356,7 +354,7 @@ async def create_session(
         # racing, which the service settles on its own, and a database that
         # cannot stage this cannot stage the session row either.
         await OrganizationDomainService(db).auto_join_for_user(identity)
-        active_organization_id = await active_organization_for_session(db, identity)
+        active_organization_id = await organizations.active_organization_id_for_sign_in(identity)
         token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
         await db.commit()
     except DATABASE_ERRORS as exc:

@@ -22,6 +22,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 from gateway.services.password_service import hash_password_async
+from gateway.services.tenancy.organization_service import _default_organization_name
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
     DEFAULT_WORKSPACE_NAME,
@@ -745,6 +746,41 @@ def test_open_signup_gives_an_identity_nobody_still_wants_an_organization_of_its
         assert context.json()["role"] == "owner"
 
 
+def test_open_signup_gives_an_identity_nobody_still_wants_its_own_organization_through_a_reset_too(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The third way to claim an address follows the same rule as the signup form and a provider."""
+    with _client(tmp_path, open_signup=True) as client:
+        invitation = _invite(client, email="ada@example.com")
+        client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{invitation['invitation_id']}",
+            headers={"Otari-Key": MASTER_KEY},
+        )
+        inviting_organization, _ = _organization_ids(tmp_path, email="ada@example.com")
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.INFO, logger="gateway")
+        try:
+            requested = client.post(f"{API_ROOT}/auth/password/reset", json={"email": "ada@example.com"})
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+        assert requested.status_code == 200, requested.text
+        match = _TOKEN_IN_LINK.search(caplog.text)
+        assert match, caplog.text
+
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm", json={"token": match.group(1), "new_password": PASSWORD}
+        )
+        assert confirmed.status_code == 204, confirmed.text
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        assert signed_in.status_code == 200, signed_in.text
+
+        own = signed_in.json()["active_organization_id"]
+        assert own is not None
+        assert own != inviting_organization
+        assert _organization_ids(tmp_path, email="ada@example.com") == (own, own)
+        assert client.get(f"{API_ROOT}/organizations/me").json()["role"] == "owner"
+
+
 def test_open_signup_leaves_a_pending_invitee_where_the_invitation_is(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -783,3 +819,18 @@ def test_signing_in_moves_a_stale_pointer_to_an_organization_the_member_still_be
 
         assert signed_in.json()["active_organization_id"] == created.json()["id"]
         assert client.get(f"{API_ROOT}/workspaces").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("full_name", "expected"),
+    [
+        ("Ada\nLovelace", "Ada Lovelace's organization"),
+        ("Ada\r\n\tLovelace", "Ada Lovelace's organization"),
+        ("Ada Lovelace", "Ada Lovelace's organization"),
+        ("Ada\x07", "Ada's organization"),
+        ("\x07\n", "ada's organization"),
+    ],
+)
+def test_a_default_organization_name_is_one_line_however_the_name_was_typed(full_name: str, expected: str) -> None:
+    """The name is quoted in invitation emails, where a line break would start a line the deployment did not write."""
+    assert _default_organization_name("ada@example.com", full_name) == expected

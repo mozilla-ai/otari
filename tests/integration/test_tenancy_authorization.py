@@ -374,6 +374,9 @@ async def test_membership_in_another_organization_grants_nothing(async_db: Async
     ).get_active_organization_for_user(outsider)
 
     assert resolved.id == other_organization.id
+    # A read stages nothing: the pointer is repaired where a session is minted, not by every page.
+    assert outsider.active_organization_id == organization.id
+    assert not async_db.dirty
 
 
 async def test_an_identity_with_no_membership_anywhere_is_refused(async_db: AsyncSession) -> None:

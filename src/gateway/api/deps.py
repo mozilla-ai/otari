@@ -61,7 +61,9 @@ from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.inference import InferenceService
 from gateway.services.log_writer import LogWriter
+from gateway.services.mail import Mailer
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import ForwardedToolOffer, LocalToolOffer, PlaygroundToolOffer
@@ -1199,8 +1201,16 @@ OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization
 
 
 def get_invitation_claim_settings(config: Annotated[GatewayConfig, Depends(get_config)]) -> InvitationClaimSettings:
-    """Return what this deployment asks of an invitee who chooses a first password from an invitation link."""
-    return InvitationClaimSettings(terms_url=config.terms_url)
+    """Return what this deployment asks of, and offers, an invitee who chooses a first password from an invitation link.
+
+    The terms it publishes, and the ways in a refusal can offer instead: its sign-in providers by display name,
+    and a reset link where mail can send one.
+    """
+    return InvitationClaimSettings(
+        terms_url=config.terms_url,
+        sign_in_providers=tuple(provider_label(name) for name in config.oauth_providers),
+        can_send_links=Mailer(config).can_send_links,
+    )
 
 
 InvitationClaimSettingsDep = Annotated[InvitationClaimSettings, Depends(get_invitation_claim_settings)]

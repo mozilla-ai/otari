@@ -222,10 +222,14 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # alone. Provisioning therefore creates the organization first.
     active_organization_id: uuid.UUID = Field(foreign_key="organization.id", index=True)
     # The organization provisioned for this identity, which never moves when the
-    # active one does. Nothing in this edition reads it, and it is written once,
-    # by ``create_local_identity``: switching (mozilla-ai/otari#715) moves
+    # active one does. Nothing in this edition reads it, and it is written when
+    # the identity is created: switching (mozilla-ai/otari#715) moves
     # ``active_organization_id`` and deliberately leaves this where it was,
-    # which is the whole point of there being two columns. The hosted edition
+    # which is the whole point of there being two columns. One write re-homes
+    # it: ``OrganizationService.provision_tenancy_for_claim``, when open signup
+    # gives an identity nobody had claimed and no organization still wants its
+    # own organization. That happens at most once, to an identity that never
+    # signed in and so never earned anything anchored here. The hosted edition
     # anchors recurring offered credits to it precisely so they cannot be farmed
     # by creating or switching organizations. A column the hosted edition needs
     # has to live here or nowhere, and the overlay contributes adapters and

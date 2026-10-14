@@ -34,6 +34,7 @@ from gateway.exceptions.organizations_exceptions import (
     MembershipUpdateError,
     NotAuthorizedError,
     OrganizationMemberAddressUnprovenError,
+    OrganizationMemberAddressUnresolvedError,
     OrganizationMemberAlreadyExistsError,
     OrganizationMemberDeactivatedError,
     OrganizationMemberNotFoundError,
@@ -96,7 +97,6 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
-from gateway.services.oauth_service import provider_label
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -131,16 +131,26 @@ def _validated_organization_name(name: str | None) -> str:
     return trimmed
 
 
+# Control characters, and the Unicode line and paragraph separators, which break a line without being one.
+_LINE_BREAKING_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
+
+
 def _has_control_characters(text: str) -> bool:
-    return any(unicodedata.category(character) == "Cc" for character in text)
+    return any(unicodedata.category(character) in _LINE_BREAKING_CATEGORIES for character in text)
 
 
-def _way_in_without_the_link(config: GatewayConfig | None) -> str:
+def _single_line(text: str) -> str:
+    """The text on one line: each control character or separator a space, and runs of spaces collapsed."""
+    spaced = "".join(" " if unicodedata.category(c) in _LINE_BREAKING_CATEGORIES else c for c in text)
+    return " ".join(spaced.split())
+
+
+def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
     """What an invitee whose link may not set a password can do instead, on this deployment."""
     ways: list[str] = []
-    if config is not None and config.oauth_providers:
-        ways.append("sign in with " + " or ".join(provider_label(name) for name in config.oauth_providers))
-    if config is not None and Mailer(config).can_send_links:
+    if settings.sign_in_providers:
+        ways.append("sign in with " + " or ".join(settings.sign_in_providers))
+    if settings.can_send_links:
         ways.append('choose a password with "Forgot your password?" on the sign-in screen')
     if not ways:
         return "ask whoever administers this gateway how to sign in"
@@ -240,7 +250,7 @@ def _default_organization_name(email: str, full_name: str | None) -> str:
     long one is shortened where refusing the signup over it would be absurd. The
     owner can rename the organization afterwards either way.
     """
-    who = "".join(c for c in (full_name or "") if unicodedata.category(c) != "Cc").strip() or email.split("@", 1)[0]
+    who = _single_line(full_name or "") or email.split("@", 1)[0]
     return f"{who[:_DEFAULT_ORGANIZATION_SUBJECT_LIMIT].strip()}{_DEFAULT_ORGANIZATION_NAME_SUFFIX}"
 
 
@@ -256,12 +266,15 @@ _BULK_INVITE_MAIL_CONCURRENCY = 5
 
 @dataclass(frozen=True, slots=True)
 class InvitationClaimSettings:
-    """What this deployment asks of an invitee who chooses a first password from an invitation link.
+    """What this deployment asks of, and offers, an invitee who chooses a first password from an invitation link.
 
     ``terms_url`` is the terms the deployment publishes, which that invitee accepts as signup's do.
+    ``sign_in_providers`` (display names) and ``can_send_links`` say which other ways in a refusal can offer.
     """
 
     terms_url: str | None
+    sign_in_providers: tuple[str, ...] = ()
+    can_send_links: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,22 +330,23 @@ class OrganizationService:
     # ------------------------------------------------------------------
 
     async def get_active_organization_for_user(self, user: User) -> Organization:
-        """Return the organization the caller acts in, moving a stale pointer to a live membership.
+        """Return the organization the caller acts in, falling back to a live membership if the pointer is stale.
 
-        Never creates one: a page that reads the active organization must not
-        provision anything as a side effect. The repaired pointer is staged on
-        the caller's session and lands with whatever this request commits.
+        Reads only: it neither creates an organization nor writes the fallback
+        back, so a page that reads the active organization changes nothing. The
+        pointer itself is repaired where a session is minted
+        (``active_organization_id_for_sign_in``) and by ``get_active_or_bootstrap``.
         """
-        organization = await self._repair_active_organization(user)
+        organization = await self._live_active_organization(user)
         if organization is None:
             raise NotAuthorizedError(f"Identity {user.id} has no active membership in this organization")
         return organization
 
-    async def _repair_active_organization(self, user: User) -> Organization | None:
-        """The organization the caller can act in, staging the pointer onto it, or ``None`` if there is none.
+    async def _live_active_organization(self, user: User, *, repair: bool = False) -> Organization | None:
+        """The organization the caller can act in, or ``None`` if there is none.
 
-        Keeps the pointer where it is while its membership is live, and otherwise
-        moves it to the caller's oldest live membership.
+        The pointer while its membership is live, and otherwise the caller's
+        oldest live membership. ``repair`` stages the pointer onto that fallback.
         """
         organization = await self.organizations.get(user.active_organization_id)
         if organization is not None:
@@ -345,7 +359,8 @@ class OrganizationService:
         recovered = await self.organizations.get(fallback.organization_id)
         if recovered is None:
             return None
-        await self.users.set_active_organization(user, recovered.id)
+        if repair:
+            await self.users.set_active_organization(user, recovered.id)
         return recovered
 
     async def active_organization_id_for_sign_in(self, user: User) -> uuid.UUID | None:
@@ -353,7 +368,7 @@ class OrganizationService:
 
         Stages the repaired pointer for the caller to commit with the session.
         """
-        organization = await self._repair_active_organization(user)
+        organization = await self._live_active_organization(user, repair=True)
         return organization.id if organization is not None else None
 
     async def _require_active_membership(self, user: User, organization: Organization) -> OrganizationMember:
@@ -539,7 +554,7 @@ class OrganizationService:
         identity is created inside the one that already exists.
         """
         stale_id = user.active_organization_id
-        organization = await self._repair_active_organization(user)
+        organization = await self._live_active_organization(user, repair=True)
         if organization is None:
             raise OrganizationNotFoundError(stale_id)
         if organization.id != stale_id:
@@ -666,16 +681,23 @@ class OrganizationService:
             await self._found_own_tenancy(identity, organization, address=address)
             return SignupRegistration(identity=identity, created=True)
 
-    async def provision_tenancy_for_claim(self, identity: User, *, full_name: str | None) -> None:
-        """Give an existing identity an organization and workspace of its own, and point it at them.
+    async def provision_tenancy_for_claim(self, identity: User, *, full_name: str | None) -> bool:
+        """Give an existing identity an organization and workspace of its own, point it at them, and say if it did.
 
-        For an identity a signup claims under open signup while no organization
+        For an identity a claim takes under open signup while no organization
         still wants it (its invitation was revoked, declined or lapsed, or it was
         removed): it gets what a new address gets, and its active and default
         organizations move to the one it owns, so nothing keeps pointing at an
         organization it no longer belongs to.
+
+        The identity is locked and asked again inside the block, so of two
+        claims racing on it only the first founds an organization; the second
+        finds the membership the first committed and does nothing.
         """
         async with self._require_unit_of_work():
+            await self.users.lock(identity.id)
+            if await self.has_live_membership(identity.id):
+                return False
             assert identity.email is not None  # a claim is always by address
             name = _default_organization_name(identity.email, full_name or identity.full_name)
             organization = await self.organizations.create_organization(
@@ -684,8 +706,8 @@ class OrganizationService:
                 created_by_user_id=None,
             )
             await self._found_own_tenancy(identity, organization, address=identity.email)
-            identity.default_organization_id = organization.id
-            await self.users.set_active_organization(identity, organization.id)
+            await self.users.set_home_organization(identity, organization.id)
+        return True
 
     async def _found_own_tenancy(self, identity: User, organization: Organization, *, address: str) -> None:
         """Make the identity the owner of a fresh organization, with a workspace to work in."""
@@ -1459,17 +1481,13 @@ class OrganizationService:
         """
         if invitee is None or not _has_never_signed_in(invitee):
             return False
+        elsewhere = [m for m in await self.members.get_by_user(invitee.id) if m.organization_id != organization_id]
+        if any(membership.status == "active" for membership in elsewhere):
+            return False
+        invited = [membership.id for membership in elsewhere if membership.status == "invited"]
         now = datetime.now(UTC)
-        for membership in await self.members.get_by_user(invitee.id):
-            if membership.organization_id == organization_id:
-                continue
-            if membership.status == "active":
-                return False
-            if membership.status == "invited":
-                pending = await self.invitations.get_pending_by_organization_members([membership.id])
-                if any(invitation.expires_at >= now for invitation in pending):
-                    return False
-        return True
+        pending = await self.invitations.get_pending_by_organization_members(invited)
+        return not any(invitation.expires_at >= now for invitation in pending)
 
     async def get_invitation_preview(self, token: str) -> InvitationPreviewPublic:
         """Look up a pending invitation by token, for the accept page. No auth: the token is the proof.
@@ -1497,7 +1515,6 @@ class OrganizationService:
         password: str | None = None,
         full_name: str | None = None,
         terms_accepted: bool = False,
-        config: GatewayConfig | None = None,
     ) -> InvitationAcceptance:
         """Resolve a pending invitation to an active membership, optionally setting a first password.
 
@@ -1543,7 +1560,7 @@ class OrganizationService:
         invitee = await self.users.get(membership.user_id)
         if password is not None:
             if invitee is None or not await self._invitation_may_set_password(invitee, organization.id):
-                raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(config))
+                raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
                 "email_verified_at": now,
@@ -1565,7 +1582,7 @@ class OrganizationService:
             )
             if not claimed:
                 await self.db.rollback()
-                raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(config))
+                raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
         result = await self._resolve_invitation_to_active_membership(invitation, membership, organization)
         verification_pending = (
             invitee is not None and invitee.hashed_password is not None and invitee.email_verified_at is None
@@ -1816,9 +1833,8 @@ class OrganizationService:
         emailed link is a separate credential from this call, and leaving the
         membership ``invited`` would leave that link working, so accepting it
         later would flip the membership to ``active`` and silently undo the
-        decline; this is the same reasoning
-        ``_update_membership`` records for the other
-        paths that suspend. It is not a dead end either: a later invite to the
+        decline; ``_update_membership`` gives the same reasoning for every
+        path that suspends. It is not a dead end either: a later invite to the
         same address revives a suspended membership through the branch
         re-adding a removed member already uses.
 
@@ -1849,7 +1865,8 @@ class OrganizationService:
     ) -> None:
         """Revoke an unaccepted invitation. Organization owners and admins only.
 
-        Cancels the invitation and, while it is still invited, suspends its paired membership, mirroring
+        Cancels the invitation, and suspends its paired membership while that
+        membership is still invited, mirroring
         ``remove_active_organization_member_for_user``'s suspend-not-delete
         reasoning: re-inviting the same address later revives it rather than
         starting over. Goes through the same ``_validate_membership_update``
@@ -1927,7 +1944,7 @@ class OrganizationService:
                 email=email, full_name=None, active_organization_id=organization.id
             ) or await self.users.get_by_email(email)
             if target is None:
-                raise SignupRegistrationUnresolvedError
+                raise OrganizationMemberAddressUnresolvedError(email)
         if not target.is_active:
             raise OrganizationMemberDeactivatedError(email)
         return target
@@ -1986,10 +2003,9 @@ class OrganizationService:
         Suspension rather than deletion, as on the platform: the row is what
         every historical attribution resolves through, so it outlives the access
         it granted. If the membership was `invited`, its pending invitation is
-        cancelled in the same transaction (see
-        ``_update_membership``): the dashboard routes an
-        invited row to Revoke instead, which does the same thing, but this
-        stays correct for a caller that removes one directly.
+        cancelled in the same transaction (see ``_update_membership``): the
+        dashboard routes an invited row to Revoke instead, which does the same
+        thing, but this stays correct for a caller that removes one directly.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(

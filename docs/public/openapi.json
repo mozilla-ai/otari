@@ -9586,7 +9586,7 @@
                 "type": "null"
               }
             ],
-            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is a member of none.",
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none, as an invitee who has not accepted yet is not.",
             "title": "Active Organization Id"
           },
           "expires_at": {
@@ -12532,7 +12532,7 @@
                 "type": "null"
               }
             ],
-            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is a member of none.",
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none, as an invitee who has not accepted yet is not.",
             "title": "Active Organization Id"
           },
           "expires_at": {
@@ -16910,7 +16910,7 @@
                 "type": "null"
               }
             ],
-            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is a member of none, as an invitee who has not accepted yet is.",
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none, as an invitee who has not accepted yet is not.",
             "title": "Active Organization Id"
           },
           "expires_at": {

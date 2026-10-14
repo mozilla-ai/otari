@@ -633,3 +633,34 @@ def test_an_unnamed_passkey_is_numbered_past_an_orphan(
 
     second = SoftwareAuthenticator(rp_id="moved.testserver", origin=moved_origin)
     assert _register(client, master_key_header, second)["name"] == "Passkey 2"
+
+
+def test_a_passkey_sign_in_after_removal_names_no_organization(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    authenticator: SoftwareAuthenticator,
+    passkeys_configured: None,
+) -> None:
+    """The same answer a password sign-in gives, rather than the organization the member was removed from."""
+    invited = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "eve@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert invited.status_code == 201, invited.text
+    token = invited.json()["accept_link"].split("token=")[1]
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+    assert accepted.status_code == 200, accepted.text
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "eve@example.com", "password": PASSWORD})
+    assert signed_in.status_code == 200, signed_in.text
+    _register(client, {}, authenticator)
+    client.cookies.clear()
+    removed = client.delete(
+        f"{API_ROOT}/organizations/me/members/{invited.json()['organization_member_id']}", headers=master_key_header
+    )
+    assert removed.status_code == 200, removed.text
+
+    after_removal = _sign_in(client, authenticator)
+
+    assert after_removal.status_code == 200, after_removal.text
+    assert after_removal.json()["active_organization_id"] is None

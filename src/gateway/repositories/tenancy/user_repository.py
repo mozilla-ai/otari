@@ -274,6 +274,11 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         await self.db.refresh(identity)
         return identity
 
+    async def set_home_organization(self, user: User, organization_id: uuid.UUID) -> User:
+        """Stage an organization the identity now owns as both its default and its active one."""
+        user.default_organization_id = organization_id
+        return await self.set_active_organization(user, organization_id)
+
     async def set_active_organization(self, user: User, organization_id: uuid.UUID) -> User:
         """Stage a change of the identity's active organization."""
         user.active_organization_id = organization_id
