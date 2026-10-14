@@ -25,6 +25,14 @@ class Tool(StrEnum):
     WEB_SEARCH = auto()  # -> "otari_web_search"
 
 
+def first_matching_tool(tools: list[dict[str, Any]] | None, predicate: Callable[[Any], bool]) -> dict[str, Any] | None:
+    """The first tool entry whose ``type`` matches ``predicate``, left in place."""
+    for entry in tools or []:
+        if isinstance(entry, dict) and predicate(entry.get("type")):
+            return entry
+    return None
+
+
 def extract_first_matching_tool(
     tools: list[dict[str, Any]] | None,
     predicate: Callable[[Any], bool],

@@ -296,6 +296,19 @@ def _blocked_axis(
     return BlockedAxis("budget")
 
 
+def _budget_exceeded(detail: str, blocked: BlockedAxis, *, budget_scope: str) -> HTTPException:
+    """The 403 for a budget with no room, with ``Retry-After`` when its window ending would let the request in."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=detail,
+        headers=error_codes.error_headers(
+            error_codes.BUDGET_EXCEEDED,
+            budget_scope=budget_scope,
+            retry_after=blocked.retry_after(datetime.now(UTC)),
+        ),
+    )
+
+
 def _normalize_strategy(strategy: str | None) -> str:
     normalized = (strategy or "for_update").strip().lower()
     if normalized not in {"for_update", "cas", "disabled"}:
@@ -761,19 +774,15 @@ async def reserve_budget(
                 requests=held_requests,
                 new_request=new_request,
             )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=refusal_detail(
+            raise _budget_exceeded(
+                refusal_detail(
                     refused.subject,
                     blocked,
                     new_request=new_request,
                     reserved_output_tokens=reserved_output_tokens,
                 ),
-                headers=error_codes.error_headers(
-                    error_codes.BUDGET_EXCEEDED,
-                    budget_scope=refused.scope_type,
-                    retry_after=blocked.retry_after(datetime.now(UTC)),
-                ),
+                blocked,
+                budget_scope=refused.scope_type,
             )
 
     if budget is None:
@@ -893,19 +902,15 @@ async def reserve_budget(
             if refused_on is not None
             else BlockedAxis("budget")
         )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=refusal_detail(
+        raise _budget_exceeded(
+            refusal_detail(
                 f"User '{user_id}'",
                 blocked,
                 new_request=new_request,
                 reserved_output_tokens=reserved_output_tokens,
             ),
-            headers=error_codes.error_headers(
-                error_codes.BUDGET_EXCEEDED,
-                budget_scope="user",
-                retry_after=blocked.retry_after(datetime.now(UTC)),
-            ),
+            blocked,
+            budget_scope="user",
         )
 
     return await _held_handle(
@@ -1190,14 +1195,8 @@ async def increase_reservation(
                 requests=0,
                 new_request=False,
             )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=refusal_detail(refused.subject, blocked, new_request=False),
-                headers=error_codes.error_headers(
-                    error_codes.BUDGET_EXCEEDED,
-                    budget_scope=refused.scope_type,
-                    retry_after=blocked.retry_after(datetime.now(UTC)),
-                ),
+            raise _budget_exceeded(
+                refusal_detail(refused.subject, blocked, new_request=False), blocked, budget_scope=refused.scope_type
             )
         # Recorded here, next to the hold it describes, and before the per-user
         # call below can refuse: what the caller's refund releases is what the

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from gateway.core.env import otari_env
 from gateway.models.tools import CodeExecutor
-from gateway.services.tools._declarations import Tool, extract_first_matching_tool
+from gateway.services.tools._declarations import Tool, extract_first_matching_tool, first_matching_tool
 from gateway.services.tools._native import Dialect
 from gateway.services.tools._web_names import (
     ANTHROPIC_WEB_FETCH_TYPE,
@@ -102,10 +102,7 @@ def _native_web_search_pairing(type_value: Any) -> tuple[str, Dialect] | None:
 
 def first_provider_web_search_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """The first provider-named web-search declaration in ``tools``, if any."""
-    for entry in tools or []:
-        if isinstance(entry, dict) and is_provider_web_search_tool_type(entry.get("type")):
-            return entry
-    return None
+    return first_matching_tool(tools, is_provider_web_search_tool_type)
 
 
 def provider_runs_web_search_natively(
@@ -167,10 +164,7 @@ def _is_any_web_fetch_tool_type(type_value: Any) -> bool:
 
 def first_provider_web_fetch_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """The first provider-named web-fetch declaration in ``tools``, if any."""
-    for entry in tools or []:
-        if isinstance(entry, dict) and is_provider_web_fetch_tool_type(entry.get("type")):
-            return entry
-    return None
+    return first_matching_tool(tools, is_provider_web_fetch_tool_type)
 
 
 def provider_runs_web_fetch_natively(

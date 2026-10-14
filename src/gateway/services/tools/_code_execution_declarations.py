@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from gateway.models.tools import CodeExecutor
-from gateway.services.tools._declarations import Tool, extract_first_matching_tool
+from gateway.services.tools._declarations import Tool, extract_first_matching_tool, first_matching_tool
 from gateway.services.tools._native import Dialect
 
 if TYPE_CHECKING:
@@ -89,10 +89,7 @@ def declares_code_execution(tools: list[dict[str, Any]] | None) -> bool:
 
 def first_provider_code_execution_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """The first provider-named code-execution entry in ``tools``, left in place."""
-    for entry in tools or []:
-        if isinstance(entry, dict) and _is_provider_code_execution_tool_type(entry.get("type")):
-            return entry
-    return None
+    return first_matching_tool(tools, _is_provider_code_execution_tool_type)
 
 
 def native_code_execution_dialect(tool_entry: Mapping[str, Any] | None) -> Dialect | None:
