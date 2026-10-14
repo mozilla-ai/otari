@@ -25,9 +25,16 @@ Callers send `model: fast`. If the first provider fails before any response is
 sent, Otari tries the fallback. The response keeps the policy name; Activity and
 usage record the models that were attempted.
 
-In the dashboard, create one from Routing: name it, pick the main model, and
-list the backups under "If unavailable, use". The backups are `on_failure`, in
-the order shown. Conditions, routers and guardrails are under Advanced.
+In the dashboard, choose Create policy on Routing, then Fallback: name it, pick
+the main model, and list the backups under "If unavailable, use". The backups
+are `on_failure`, in the order shown. Create policy offers one kind at a time
+(Fallback, Split traffic, Smart router, Spill over at rate limits, Tier down on
+budget), each with only its own fields. To combine them, open the policy from
+the list once it exists: its page has a section each for the main selection,
+the fallback chain, a budget tier-down and guardrails, and each section saves on
+its own, writing the rest of the policy back unchanged. A policy from
+`config.yml`, or one using options the page cannot show, opens read-only with
+its spec in full.
 
 ## Selection and failure are separate
 
@@ -148,9 +155,10 @@ The policy says which is which: `candidates` handles "full", `on_failure`
 handles "broke". `Otari-Router: off` skips the order and starts from the
 default.
 
-In the dashboard, create one from Routing: open Advanced, choose "Move to the
-next model when one hits its rate limit", order the models with the arrows, and
-add the limit under Settings, Rate limit rules, counted for "Each model".
+In the dashboard, choose Create policy on Routing, then "Spill over at rate
+limits", order the models with the arrows, and add the limit under Settings,
+Rate limit rules, counted for "Each model". On an existing policy, pick "Spill
+over" in its Main selection section.
 
 
 The `knn` router uses scored examples to rank candidates for each user's
