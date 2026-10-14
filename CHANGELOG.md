@@ -4,6 +4,49 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.25.0](https://github.com/mozilla-ai/otari/releases/tag/v0.25.0) - 2026-10-14
+
+
+
+### Bug Fixes
+
+- Log database errors by SQLSTATE, never by their values in [#2254](https://github.com/mozilla-ai/otari/pull/2254) by [@daavoo](https://github.com/daavoo) ([`992df95`](https://github.com/mozilla-ai/otari/commit/992df95505870edeb2447e4c9eada9a102cac271))
+- **pricing:** Answer invalid_model for an unknown model before the pricing gate in [#2266](https://github.com/mozilla-ai/otari/pull/2266) by [@daavoo](https://github.com/daavoo) ([`e5be6da`](https://github.com/mozilla-ai/otari/commit/e5be6da167e7025ade7e0f8c9fd31bebadc4f6f1))
+- **web:** Show "Can't reach the gateway" only when it stays unreachable in [#2268](https://github.com/mozilla-ai/otari/pull/2268) by [@daavoo](https://github.com/daavoo) ([`3fb4474`](https://github.com/mozilla-ai/otari/commit/3fb44742b4110401169924f51b3bfb2497749d10))
+- **chat:** Treat a completion with no choices as a provider error in [#2269](https://github.com/mozilla-ai/otari/pull/2269) by [@daavoo](https://github.com/daavoo) ([`dd553cc`](https://github.com/mozilla-ai/otari/commit/dd553cc309a3af4fc779d003f3b7d990b893ccf8))
+- **tools:** Use the provider's own tools unless a fallback needs Otari's in [#2263](https://github.com/mozilla-ai/otari/pull/2263) by [@hasangzl](https://github.com/hasangzl) ([`c7acd73`](https://github.com/mozilla-ai/otari/commit/c7acd733180285d77dff2a9e038fab5ddc6a33c0))
+- **web:** Offer to price a model only on a request it served in [#2271](https://github.com/mozilla-ai/otari/pull/2271) by [@daavoo](https://github.com/daavoo) ([`d307183`](https://github.com/mozilla-ai/otari/commit/d307183129fc1342ec6c89ced7f9229f734343b1))
+- **auth:** Refuse closed signup for an identity the roster no longer holds in [#2276](https://github.com/mozilla-ai/otari/pull/2276) by [@tbille](https://github.com/tbille) ([`09ea4d0`](https://github.com/mozilla-ai/otari/commit/09ea4d0dd98463cb93846e3cd9e80efe689d4ae4))
+- **organizations:** Require a membership to create one where signup is closed in [#2277](https://github.com/mozilla-ai/otari/pull/2277) by [@tbille](https://github.com/tbille) ([`66d2bef`](https://github.com/mozilla-ai/otari/commit/66d2befb598e9c2430be7749721ddaab81c968be))
+- **auth:** Hold a provider sign-in to closed signup's live-membership rule in [#2280](https://github.com/mozilla-ai/otari/pull/2280) by [@tbille](https://github.com/tbille) ([`eae6dd7`](https://github.com/mozilla-ai/otari/commit/eae6dd7dbca931a9a3fea5b4cd3e04115f9325fa))
+- **auth:** Let a password reset claim an account nobody has signed in to in [#2281](https://github.com/mozilla-ai/otari/pull/2281) by [@tbille](https://github.com/tbille) ([`baf148e`](https://github.com/mozilla-ai/otari/commit/baf148e22b9190ad07b24b6c6d6769adf384633c))
+- **BREAKING:** **auth:** Verify a signup only with its own password, and hold every claim to one rule in [#2288](https://github.com/mozilla-ai/otari/pull/2288) by [@tbille](https://github.com/tbille) ([`f86f280`](https://github.com/mozilla-ai/otari/commit/f86f280eaaa8d911647f2b522cca126c3c974693))
+- **organizations:** Close stale invitation links and give a claimed identity a home in [#2289](https://github.com/mozilla-ai/otari/pull/2289) by [@tbille](https://github.com/tbille) ([`44f4645`](https://github.com/mozilla-ai/otari/commit/44f4645f3d786c4ffd5b1a03bf290681b02f610c))
+- **web:** Send an invitee with no organization to their invitations in [#2279](https://github.com/mozilla-ai/otari/pull/2279) by [@tbille](https://github.com/tbille) ([`b5b38f6`](https://github.com/mozilla-ai/otari/commit/b5b38f64dcb572ef28db6274ddb2d67704a8e896))
+- **web:** Give a signed-in person with no organization a working dashboard in [#2290](https://github.com/mozilla-ai/otari/pull/2290) by [@tbille](https://github.com/tbille) ([`b0a5fc8`](https://github.com/mozilla-ai/otari/commit/b0a5fc803877fd3e76a45594e0cbca95e5133b9b))
+- **budgets:** Refuse a blocked owner's service key on the end-user routes in [#2287](https://github.com/mozilla-ai/otari/pull/2287) by [@claude[bot]](https://github.com/claude[bot]) ([`a592188`](https://github.com/mozilla-ai/otari/commit/a59218870ba7c5bdfb8ca64742b9115f8b03f5c8))
+- **BREAKING:** **identity:** Key OAuth sign-in on the provider subject in [#2236](https://github.com/mozilla-ai/otari/pull/2236) by [@peteski22](https://github.com/peteski22) ([`ad2b5e5`](https://github.com/mozilla-ai/otari/commit/ad2b5e54bbd25c9959b5abfa403387cd1ce7924c))
+- **identity:** Require the published terms when a provider sign-in creates an account in [#2297](https://github.com/mozilla-ai/otari/pull/2297) by [@tbille](https://github.com/tbille) ([`195ef37`](https://github.com/mozilla-ai/otari/commit/195ef3772b0d3bb2a1547d1c806ed18d7517a79f))
+- **identity:** Give locked-out members a way back and say why auth refuses in [#2298](https://github.com/mozilla-ai/otari/pull/2298) by [@tbille](https://github.com/tbille) ([`ef9a86a`](https://github.com/mozilla-ai/otari/commit/ef9a86ab699ef59ab0c8af0807b884da82fb78eb))
+- **invitations:** Bound invitation mail, reissue lost links, and say how an invitee gets in in [#2299](https://github.com/mozilla-ai/otari/pull/2299) by [@tbille](https://github.com/tbille) ([`812ed9a`](https://github.com/mozilla-ai/otari/commit/812ed9a78fdfdc633941ea698c61c043eb388599))
+- **organizations:** Give an unwanted address its organization when it is claimed in [#2300](https://github.com/mozilla-ai/otari/pull/2300) by [@tbille](https://github.com/tbille) ([`425e674`](https://github.com/mozilla-ai/otari/commit/425e674caaca8e43424553e5723d0fe80bb0102c))
+- **dashboard:** Smooth the sign-in pages found rough in the auth QA pass in [#2301](https://github.com/mozilla-ai/otari/pull/2301) by [@tbille](https://github.com/tbille) ([`11a2a4f`](https://github.com/mozilla-ai/otari/commit/11a2a4f6cf61068bfef360f80ccf22034b7295ab))
+
+
+### Features
+
+- **routing:** Name the serving model in an Otari-Model header in [#2262](https://github.com/mozilla-ai/otari/pull/2262) by [@hasangzl](https://github.com/hasangzl) ([`c1227f3`](https://github.com/mozilla-ai/otari/commit/c1227f35f735ff51e1617d9a23f74ba69ffd39ce))
+- **budgets:** Send Retry-After when a budget refuses a request in [#2265](https://github.com/mozilla-ai/otari/pull/2265) by [@daavoo](https://github.com/daavoo) ([`6e187a9`](https://github.com/mozilla-ai/otari/commit/6e187a9a3d8b1840d0a91296dd75a1625b96ca13))
+- **budgets:** Let a service key manage its own end users in [#2267](https://github.com/mozilla-ai/otari/pull/2267) by [@daavoo](https://github.com/daavoo) ([`d149ef7`](https://github.com/mozilla-ai/otari/commit/d149ef777ed4c280e7d52f8da475b91da09f0392))
+- **tools:** Take over Anthropic's web fetch with an Otari-Web-Fetch header in [#2264](https://github.com/mozilla-ai/otari/pull/2264) by [@hasangzl](https://github.com/hasangzl) ([`a745195`](https://github.com/mozilla-ai/otari/commit/a74519514e2be8b46f655ce5f92521cc43aab1d6))
+- **any-search:** Check Exa's answer fields and run live tests in CI in [#2272](https://github.com/mozilla-ai/otari/pull/2272) by [@aittalam](https://github.com/aittalam) ([`f5ff91a`](https://github.com/mozilla-ai/otari/commit/f5ff91a62fb7b260c7bf0146ff2d20ea5cf5ef1b))
+- **search:** Run the direct endpoint on any-search in [#2273](https://github.com/mozilla-ai/otari/pull/2273) by [@aittalam](https://github.com/aittalam) ([`0ce9057`](https://github.com/mozilla-ai/otari/commit/0ce90577fce23470e7d159f4b2925f9490358f57))
+- **budgets:** Accept end-user ids that contain '/' in [#2292](https://github.com/mozilla-ai/otari/pull/2292) by [@daavoo](https://github.com/daavoo) ([`bb59024`](https://github.com/mozilla-ai/otari/commit/bb59024e704bd5b0a44981510b791cb130cc6e66))
+- **tools:** Let one request combine web tools, code execution and MCP in [#2274](https://github.com/mozilla-ai/otari/pull/2274) by [@hasangzl](https://github.com/hasangzl) ([`af3fd2a`](https://github.com/mozilla-ai/otari/commit/af3fd2aea796ce312a1344114a4f4b19298eede8))
+- **tools:** Choose what a workspace with no tool policy gets in [#2296](https://github.com/mozilla-ai/otari/pull/2296) by [@daavoo](https://github.com/daavoo) ([`4101863`](https://github.com/mozilla-ai/otari/commit/41018632d00876193cf5274731d238fe9b8d8f4e))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.24.0...v0.25.0
 ## [0.24.0](https://github.com/mozilla-ai/otari/releases/tag/v0.24.0) - 2026-10-13
 
 
