@@ -71,6 +71,7 @@ from gateway.exceptions.identity_exceptions import (
     VerificationTokenInvalidError,
 )
 from gateway.models.tenancy import User
+from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.repositories.identity import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
@@ -288,6 +289,31 @@ async def forget_unproven_access(db: AsyncSession, user_id: uuid.UUID) -> None:
     """
     await revoke_user_dashboard_sessions(db, user_id)
     await WebAuthnCredentialRepository(db).delete_for_user(user_id)
+
+
+async def report_new_account(
+    growth: GrowthSignalPort,
+    identity: User | None,
+    *,
+    background_tasks: BackgroundTasks,
+    new_account: bool = True,
+) -> None:
+    """Report an account a claim just made usable to ``GrowthSignalPort`` as a signup, or do nothing.
+
+    Every claim path answers ``None`` on its enumeration-safe refusals, so only a
+    genuine claim notifies, and the signal reaches the operator's vendor rather
+    than the caller, so it reveals nothing the response hides. ``new_account``
+    is false for a sign-in that resolved an account that was already usable.
+    """
+    if identity is None or not new_account or identity.email is None:
+        return
+    await growth.record_signup(
+        background_tasks=background_tasks,
+        user_id=identity.id,
+        email=identity.email,
+        full_name=identity.full_name,
+        created_at=identity.created_at,
+    )
 
 
 class _SignupRaceLostError(Exception):
@@ -763,6 +789,7 @@ __all__ = [
     "password_sign_in_possible",
     "request_password_reset",
     "resend_verification_email",
+    "report_new_account",
     "reset_password",
     "set_password",
     "unverified_identity_is_claimable",

@@ -16,7 +16,11 @@ from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyServ
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.user_service import forget_unproven_access, unverified_identity_is_claimable
+from gateway.services.tenancy.user_service import (
+    forget_unproven_access,
+    report_new_account,
+    unverified_identity_is_claimable,
+)
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
 __all__ = [
@@ -28,5 +32,6 @@ __all__ = [
     "WorkspaceService",
     "ensure_bootstrap_identity",
     "forget_unproven_access",
+    "report_new_account",
     "unverified_identity_is_claimable",
 ]

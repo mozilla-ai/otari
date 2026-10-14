@@ -24,6 +24,7 @@ from gateway.models.tenancy import (
     InvitationPreviewPublic,
     ValidateInvitationRequest,
 )
+from gateway.services.tenancy import report_new_account
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
 
@@ -66,13 +67,5 @@ async def accept_invitation(
         full_name=body.full_name,
         terms_accepted=body.terms_accepted,
     )
-    claimed = acceptance.claimed
-    if claimed is not None and claimed.email is not None:
-        await growth.record_signup(
-            background_tasks=background_tasks,
-            user_id=claimed.id,
-            email=claimed.email,
-            full_name=claimed.full_name,
-            created_at=claimed.created_at,
-        )
+    await report_new_account(growth, acceptance.claimed, background_tasks=background_tasks)
     return acceptance.result

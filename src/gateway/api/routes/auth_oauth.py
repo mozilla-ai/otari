@@ -79,6 +79,7 @@ from gateway.services.oauth_service import (
     provider_label,
     require_configured,
 )
+from gateway.services.tenancy import report_new_account
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
 router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
@@ -322,14 +323,7 @@ async def callback(
         await db.rollback()
         raise database_error(f"persist a dashboard session on a {provider} sign-in", exc) from None
     logger.info("Signed in %s with %s", identity.id, provider_label(provider))
-    if resolution.new_account and identity.email is not None:
-        await growth.record_signup(
-            background_tasks=background_tasks,
-            user_id=identity.id,
-            email=identity.email,
-            full_name=identity.full_name,
-            created_at=identity.created_at,
-        )
+    await report_new_account(growth, identity, background_tasks=background_tasks, new_account=resolution.new_account)
     apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
     return OAuthSessionResponse(
         expires_at=expires_at,

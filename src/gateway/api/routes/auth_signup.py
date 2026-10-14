@@ -40,6 +40,7 @@ from gateway.core.config import GatewayConfig
 from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
+from gateway.services.tenancy import report_new_account
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import (
     create_user_for_signup,
@@ -160,19 +161,7 @@ async def signup(
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
-    # Only a genuine claim notifies, which is what keeps the seam from undoing
-    # the enumeration-safety above: the response is identical either way, and a
-    # signal an operator's own vendor receives is not something the caller can
-    # observe. ``email`` is set on any claimed identity, which is looked up by
-    # address in the first place.
-    if claimed is not None and claimed.email is not None:
-        await growth.record_signup(
-            background_tasks=background_tasks,
-            user_id=claimed.id,
-            email=claimed.email,
-            full_name=claimed.full_name,
-            created_at=claimed.created_at,
-        )
+    await report_new_account(growth, claimed, background_tasks=background_tasks)
     return SignupResponse(message=_OPEN_SIGNUP_MESSAGE if config.open_signup else _SIGNUP_MESSAGE)
 
 
