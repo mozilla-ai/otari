@@ -20,7 +20,8 @@ export function PlaygroundWelcome({
       <div className="flex flex-col gap-1.5">
         <h2 className="text-display-sub">Try a prompt.</h2>
         <p className="text-base text-muted">
-          Answers, tokens, latency and cost from any model in this workspace.
+          Chat with any model in this workspace, attach tools and files, and see
+          tokens, latency and cost.
         </p>
       </div>
       <PlaygroundComposer {...composerProps} />
