@@ -7,6 +7,7 @@
 // storage: it lives in the sign-in form's state until the request goes out and
 // is gone on reload.
 
+import type { QueryClient } from "@tanstack/react-query"
 import type { OAuthAuthorizeResponse, OAuthCallbackRequest } from "@/client"
 import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
@@ -18,6 +19,45 @@ export class ApiError extends Error {
     super(message)
     this.name = "ApiError"
     this.status = status
+  }
+}
+
+/**
+ * The dashboard's default retry policy for a failed query: twice, except for
+ * an auth failure, which will not fix itself. `app/provider.tsx` installs it,
+ * and a hook that refuses one more status composes with it rather than
+ * restating it.
+ */
+export function defaultQueryRetry(failureCount: number, error: unknown) {
+  if (
+    error instanceof ApiError &&
+    (error.status === 401 || error.status === 403)
+  ) {
+    return false
+  }
+  return failureCount < 2
+}
+
+/**
+ * The client's own retry policy, plus a 404: for a read whose 404 is an answer
+ * rather than a failure, so asking again only holds the page behind the
+ * backoff. Composed with the client's default rather than with
+ * `defaultQueryRetry` directly, so a client configured otherwise keeps its
+ * policy for every other status.
+ */
+export function retryUnlessNotFound(queryClient: QueryClient) {
+  const fallback = queryClient.getDefaultOptions().queries?.retry
+  return (failureCount: number, error: Error): boolean => {
+    if (error instanceof ApiError && error.status === 404) {
+      return false
+    }
+    if (typeof fallback === "function") {
+      return fallback(failureCount, error)
+    }
+    if (typeof fallback === "number") {
+      return failureCount < fallback
+    }
+    return fallback ?? defaultQueryRetry(failureCount, error)
   }
 }
 

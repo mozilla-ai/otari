@@ -23,10 +23,14 @@ import {
 } from "@/app/nav/overlayAccountBadge"
 import { AccountMenuRows } from "@/app/nav/overlayAccountMenuRows"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
-import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
+import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useProfile } from "@/shared/api/auth"
+import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTheme } from "@/shared/hooks/useTheme"
 import {
@@ -88,7 +92,8 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // address stands in and is a better answer than a role. An identity with
 // neither, and a context that has not landed or could not be read, get
 // "Signed in": naming nobody is the honest answer, and it is what the trigger
-// showed before the first paint anyway.
+// showed before the first paint anyway. A caller with no organization, whom
+// the context answers with a 404, is named from the profile read instead.
 function sessionIdentity(caller: OrganizationContext["caller"]): {
   name: string
   initials: string
@@ -331,10 +336,13 @@ export function AccountMenu({
 }) {
   const { logout } = useAuth()
   const { docs_url, terms_url, privacy_url, feedback_enabled } = useDeployment()
-  const hostsSurface = useSurfaceVisibility()
+  const isNavVisible = useNavVisibility()
   const organization = useOrganizationContext()
+  // A caller with no organization has no context to read a name from, so the
+  // profile names them instead; everyone else needs no second request.
+  const profile = useProfile(isNoOrganizationError(organization.error))
   const [open, setOpen] = useState(false)
-  const identity = sessionIdentity(organization.data?.caller)
+  const identity = sessionIdentity(organization.data?.caller ?? profile.data)
   const badgeLabel = useAccountBadgeLabel()
   const triggerLabel = badgeLabel
     ? `Account: ${identity.name}, ${badgeLabel}`
@@ -469,7 +477,7 @@ export function AccountMenu({
           ) : null}
           <div className={MENU_DIVIDER} />
           {/* The top bar's destinations remain reachable in the mobile drawer. */}
-          {hostsSurface(PLAYGROUND_NAV_ITEM) && (
+          {isNavVisible(PLAYGROUND_NAV_ITEM) && (
             <MenuLink
               label={PLAYGROUND_NAV_ITEM.label}
               icon={PLAYGROUND_NAV_ITEM.icon}

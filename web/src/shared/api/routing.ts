@@ -14,6 +14,7 @@ import {
   MODELS,
   ROUTER_STATUS,
   ROUTING_POLICIES,
+  workspaceMeta,
 } from "@/shared/api/queryKeys"
 
 // Which of the two routing surfaces this caller may read, the `useKeysScope`
@@ -68,6 +69,7 @@ export function useAliases(workspaceId?: string) {
   const scope = useRoutingScope()
   return useQuery({
     queryKey: [ALIASES, scope.aliases, workspaceId ?? null],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<AliasResponse[]>(inWorkspace(scope.aliases, workspaceId)),
     staleTime: 60_000,
@@ -79,6 +81,7 @@ export function useRoutingPolicies(workspaceId?: string) {
   const scope = useRoutingScope()
   return useQuery({
     queryKey: [ROUTING_POLICIES, scope.policies, workspaceId ?? null],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<RoutingPolicyResponse[]>(
         inWorkspace(scope.policies, workspaceId),

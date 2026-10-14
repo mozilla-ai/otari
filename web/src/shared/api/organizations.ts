@@ -1,6 +1,7 @@
 import {
   hashKey,
   keepPreviousData,
+  type Query,
   useMutation,
   useQuery,
   useQueryClient,
@@ -36,7 +37,12 @@ import type {
   UpdateOrgProviderKeyRequest,
   UpdateOrgProviderModelRequest,
 } from "@/client"
-import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
+import {
+  ApiError,
+  apiFetch,
+  longRequestSignal,
+  retryUnlessNotFound,
+} from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   CATALOG,
@@ -67,21 +73,13 @@ const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
 // A 404 is not retried: it is an identity with no active membership anywhere
 // (see `isNoOrganizationError`), and asking again only holds every page that
 // waits on this answer behind the backoff. Any other failure keeps the
-// client's own retry policy.
+// dashboard's own retry policy.
 export function useOrganizationContext(enabled = true) {
-  const defaultRetry = useQueryClient().getDefaultOptions().queries?.retry
   return useQuery({
     queryKey: ORGANIZATION_CONTEXT,
     queryFn: () => apiFetch<OrganizationContext>("/organizations/me"),
     staleTime: 60_000,
-    retry: (failureCount, error) => {
-      if (isNoOrganizationError(error)) return false
-      if (typeof defaultRetry === "function") {
-        return defaultRetry(failureCount, error)
-      }
-      if (typeof defaultRetry === "number") return failureCount < defaultRetry
-      return defaultRetry ?? failureCount < 3
-    },
+    retry: retryUnlessNotFound(useQueryClient()),
     enabled,
   })
 }
@@ -264,9 +262,17 @@ export function useSwitchOrganization() {
       // mounted under that id until the selection follows the new context on
       // the next render, so refetching it here asks for a workspace the caller
       // no longer acts in and earns a 404. It is only marked stale, and the
-      // page asks for the new workspace once the selection moves.
-      const isKeyedOnLeftWorkspace = (queryHash: string) =>
-        leftWorkspaceIds.some((id) => queryHash.includes(id))
+      // page asks for the new workspace once the selection moves. Such a query
+      // is found by the workspace it declares (`workspaceMeta`), not by
+      // searching its key, which also holds ids that are not workspaces.
+      const isKeyedOnLeftWorkspace = (query: Query) => {
+        const workspaceId = query.meta?.workspaceId
+        return (
+          typeof workspaceId === "string" &&
+          workspaceId !== "" &&
+          leftWorkspaceIds.includes(workspaceId)
+        )
+      }
       // Written, not invalidated, and written first: the invalidation below is
       // where every query decides whether to refetch, and one gated on the role
       // in here would decide it against the organization just left, asking for
@@ -277,10 +283,10 @@ export function useSwitchOrganization() {
       void queryClient.invalidateQueries({
         predicate: (query) =>
           query.queryHash !== ORGANIZATION_CONTEXT_HASH &&
-          !isKeyedOnLeftWorkspace(query.queryHash),
+          !isKeyedOnLeftWorkspace(query),
       })
       void queryClient.invalidateQueries({
-        predicate: (query) => isKeyedOnLeftWorkspace(query.queryHash),
+        predicate: isKeyedOnLeftWorkspace,
         refetchType: "none",
       })
     },

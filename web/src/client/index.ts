@@ -70,9 +70,10 @@ export type PasswordResponse = Schemas["PasswordResponse"]
 
 // ---------------------------------------------------------------------------
 // The one thing about itself an identity may change that is not a credential:
-// the name it goes by. `PATCH /v1/auth/profile` answers with the same
+// the name it goes by. `GET` and `PATCH /v1/auth/profile` answer with the same
 // `CallerIdentity` the membership context carries, so the account page can seat
-// the new name where the shell read the old one.
+// the new name where the shell read the old one, and a caller with no
+// organization can still be named.
 // ---------------------------------------------------------------------------
 export type UpdateProfileRequest = Schemas["UpdateProfileRequest"]
 

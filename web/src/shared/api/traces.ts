@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import type { TraceCount, TraceDetail, TraceList, TraceSeries } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { TRACES } from "@/shared/api/queryKeys"
+import { TRACES, workspaceMeta } from "@/shared/api/queryKeys"
 
 // What narrows the session list. Empty strings and arrays are "no filter", the
 // same reading the URL state gives a cleared key. `workspaceId` is the shell's
@@ -49,6 +49,7 @@ export function useTraces(
   const scope = useTraceScope()
   return useQuery({
     queryKey: [TRACES, "list", scope.base, filters, page, pageSize],
+    meta: workspaceMeta(filters.workspaceId),
     queryFn: () => {
       const params = traceParams(filters)
       params.set("skip", String(page * pageSize))
@@ -65,6 +66,7 @@ export function useTraceCount(filters: TraceFilters) {
   const scope = useTraceScope()
   return useQuery({
     queryKey: [TRACES, "count", scope.base, filters],
+    meta: workspaceMeta(filters.workspaceId),
     queryFn: () =>
       apiFetch<TraceCount>(
         `${scope.base}/count?${traceParams(filters).toString()}`,
@@ -79,6 +81,7 @@ export function useTraceSeries(filters: TraceFilters, bucket: "hour" | "day") {
   const scope = useTraceScope()
   return useQuery({
     queryKey: [TRACES, "series", scope.base, filters, bucket],
+    meta: workspaceMeta(filters.workspaceId),
     queryFn: () => {
       const params = traceParams(filters)
       params.set("bucket", bucket)
@@ -101,6 +104,7 @@ export function useTrace(traceId: string, workspaceId = "") {
     : ""
   return useQuery({
     queryKey: [TRACES, "detail", scope.base, traceId, workspaceId],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<TraceDetail>(
         `${scope.base}/${encodeURIComponent(traceId)}${query}`,

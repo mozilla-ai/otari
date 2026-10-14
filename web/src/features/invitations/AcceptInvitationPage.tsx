@@ -25,6 +25,7 @@
 
 import { Button, Link } from "@heroui/react"
 import { useState } from "react"
+import type { CallerIdentity } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { useAuth } from "@/features/auth/AuthContext"
@@ -34,9 +35,10 @@ import {
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
 import { rememberSignInAddress } from "@/features/auth/signInAddress"
+import { useProfile } from "@/shared/api/auth"
+import { ApiError } from "@/shared/api/client"
 import {
   useAcceptInvitation,
-  useOrganizationContext,
   useValidateInvitation,
 } from "@/shared/api/organizations"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
@@ -44,6 +46,47 @@ import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { ClaimForm } from "./ClaimForm"
+
+/**
+ * Whose session this browser holds, against the invited address.
+ *
+ * `"invited"` only when the session's address is known and is the invited
+ * one. An address that cannot be known (an identity with none, or a gateway
+ * older than the profile read, which 404s) counts as someone else's, since the
+ * accept would not go to it either. Any other failed read is `"unreadable"`:
+ * neither answer can be claimed, so the page holds its actions.
+ */
+type SessionStanding =
+  | "signed-out"
+  | "checking"
+  | "unreadable"
+  | "invited"
+  | "someone-else"
+
+function sessionStanding(
+  isAuthenticated: boolean,
+  profile: { data?: CallerIdentity; error: unknown; isPending: boolean },
+  invitedEmail: string | undefined,
+): SessionStanding {
+  if (!isAuthenticated) {
+    return "signed-out"
+  }
+  if (profile.isPending) {
+    return "checking"
+  }
+  if (
+    profile.error &&
+    !(profile.error instanceof ApiError && profile.error.status === 404)
+  ) {
+    return "unreadable"
+  }
+  const sessionEmail = profile.data?.email
+  return sessionEmail &&
+    invitedEmail &&
+    sessionEmail.toLowerCase() === invitedEmail.toLowerCase()
+    ? "invited"
+    : "someone-else"
+}
 
 export function AcceptInvitationPage() {
   // Read once, safely: App.tsx renders this keyed on the hash
@@ -56,18 +99,12 @@ export function AcceptInvitationPage() {
   const preview = useValidateInvitation(token ?? "")
   const accept = useAcceptInvitation()
   const { isAuthenticated, logout } = useAuth()
-  // Whose session this browser holds, where the context can say. A caller with
-  // no organization gets a 404 and no address, so a mismatch is only claimed
-  // when both addresses are known.
-  const sessionContext = useOrganizationContext(isAuthenticated)
-  const sessionEmail = isAuthenticated
-    ? sessionContext.data?.caller?.email
-    : undefined
+  // The profile rather than the organization context, which 404s for a caller
+  // with no organization and so cannot say whose session this is.
+  const profile = useProfile(isAuthenticated)
+  const sessionEmail = profile.data?.email ?? ""
   const invitedEmail = preview.data?.email
-  const isSomeoneElse =
-    typeof sessionEmail === "string" &&
-    invitedEmail !== undefined &&
-    sessionEmail.toLowerCase() !== invitedEmail.toLowerCase()
+  const standing = sessionStanding(isAuthenticated, profile, invitedEmail)
   const deployment = useDeployment()
   // Absent on a hosted deployment, which serves no such page; see
   // `welcomeGuideHref`. The rule above it goes with it, since a card ending in
@@ -109,7 +146,7 @@ export function AcceptInvitationPage() {
             member of <strong>{accept.data.organization_name}</strong>, with the{" "}
             <strong>{accept.data.role}</strong> role.
           </p>
-          {isAuthenticated && !isSomeoneElse && !accept.data.password_set ? (
+          {standing === "invited" && !accept.data.password_set ? (
             <>
               <p className="text-center text-xs text-muted">
                 You're already signed in, so there is nothing left to set up.
@@ -153,7 +190,7 @@ export function AcceptInvitationPage() {
             </>
           )}
         </>
-      ) : preview.isLoading || sessionContext.isLoading ? (
+      ) : preview.isLoading || standing === "checking" ? (
         <p className="text-sm text-muted">Checking your invitation…</p>
       ) : preview.error ? (
         <>
@@ -167,11 +204,14 @@ export function AcceptInvitationPage() {
             <strong>{preview.data.email}</strong> to join with the{" "}
             <strong>{preview.data.role}</strong> role.
           </p>
-          {isSomeoneElse ? (
+          {standing === "unreadable" ? (
+            // Either action would be a guess about whose session this is.
+            <ErrorBanner error={profile.error} />
+          ) : standing === "someone-else" ? (
             <>
               <InfoBanner tone="warning">
                 This invitation is for {preview.data.email}, and you're signed
-                in as {sessionEmail}. Sign out to accept it as{" "}
+                in as {sessionEmail || "someone else"}. Sign out to accept it as{" "}
                 {preview.data.email}.
               </InfoBanner>
               <Button variant="primary" fullWidth onPress={() => void logout()}>

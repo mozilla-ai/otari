@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ActivationApiKey, WorkspaceActivation } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { ACTIVATION, KEYS, NO_RETRY } from "@/shared/api/queryKeys"
+import {
+  ACTIVATION,
+  KEYS,
+  NO_RETRY,
+  workspaceMeta,
+} from "@/shared/api/queryKeys"
 
 // ---------------------------------------------------------------------------
 // The first-request setup guide
@@ -29,6 +34,7 @@ export function useWorkspaceActivation(
 ) {
   return useQuery({
     queryKey: [ACTIVATION, workspaceId],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceActivation>(
         `/workspaces/${encodeURIComponent(workspaceId as string)}/activation`,

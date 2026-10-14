@@ -353,6 +353,34 @@ describe("AccountMenu", () => {
 
     expect(screen.getByText("Signed in")).toBeInTheDocument()
   })
+
+  it("names a caller with no organization from their profile", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith("/auth/profile")
+        ? Response.json({
+            ...OPERATOR,
+            email: "ada@example.com",
+            full_name: null,
+          })
+        : Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    await openMenu()
+
+    expect(await screen.findByText("ada@example.com")).toBeInTheDocument()
+    // Playground is workspace-scoped, and this caller has no workspace.
+    expect(screen.queryByRole("link", { name: "Playground" })).toBeNull()
+  })
+
+  it("asks for no profile when the context already names the caller", async () => {
+    mockCaller({ full_name: "Ada Lovelace" })
+    await renderMenu()
+
+    expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument()
+    const profileReads = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([input]) => String(input).endsWith("/auth/profile"))
+    expect(profileReads).toHaveLength(0)
+  })
   describe("the Deployment row", () => {
     it("offers one row that opens the deployment rail, with the mark it opens", async () => {
       mockCaller(OPERATOR)

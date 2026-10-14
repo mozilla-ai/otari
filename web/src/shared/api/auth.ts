@@ -17,12 +17,13 @@ import type {
   VerifyEmailRequest,
   VerifyEmailResponse,
 } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
 import {
   NO_RETRY,
   ORGANIZATION_MEMBERS,
   ORGANIZATIONS,
   PASSKEYS,
+  PROFILE,
 } from "@/shared/api/queryKeys"
 import { createPasskey } from "@/shared/helpers/webauthn"
 
@@ -89,8 +90,28 @@ export function useSetPassword() {
       void queryClient.invalidateQueries({
         queryKey: [ORGANIZATIONS, "context"],
       })
+      void queryClient.invalidateQueries({ queryKey: [PROFILE] })
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
     },
+  })
+}
+
+/**
+ * Who the signed-in identity is (`GET /v1/auth/profile`), whether or not it
+ * belongs to an organization.
+ *
+ * The organization context carries the same `caller` and is read on every page
+ * anyway, so this is for what that context cannot answer: a caller with no
+ * organization, whom it refuses with a 404. A 404 here is a gateway older than
+ * the route, so it is not retried, and a caller reads it as "unknown".
+ */
+export function useProfile(enabled = true) {
+  return useQuery({
+    queryKey: [PROFILE],
+    queryFn: () => apiFetch<CallerIdentity>("/auth/profile"),
+    staleTime: 60_000,
+    retry: retryUnlessNotFound(useQueryClient()),
+    enabled,
   })
 }
 
@@ -101,10 +122,12 @@ export function useSetPassword() {
  * name, which is the state a roster entry added by address starts in, and every
  * surface that draws a person falls back to the address from there.
  *
- * Two caches carry that name. The membership context is where the sidebar reads
- * it, and the response is exactly the `caller` it holds, so that one is seeded
- * from the answer before being invalidated: the account control renames itself
- * on the same tick rather than a round trip later. The roster is the other, where
+ * Three caches carry that name. The membership context is where the sidebar
+ * reads it, and the response is exactly the `caller` it holds, so that one is
+ * seeded from the answer before being invalidated: the account control renames
+ * itself on the same tick rather than a round trip later. The profile read is
+ * the same shape for a caller with no organization, and is seeded the same way.
+ * The roster is the third, where
  * `userDisplay` resolves a user id for Usage, Activity and Budgets. The context
  * is touched at its own key rather than at `[ORGANIZATIONS]`, which would re-read
  * the memberships list as well and nothing here moves it.
@@ -122,6 +145,7 @@ export function useUpdateProfile() {
         [ORGANIZATIONS, "context"],
         (previous) => (previous ? { ...previous, caller } : previous),
       )
+      queryClient.setQueryData<CallerIdentity>([PROFILE], caller)
       void queryClient.invalidateQueries({
         queryKey: [ORGANIZATIONS, "context"],
       })

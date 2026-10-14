@@ -9,7 +9,7 @@ import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPag
 import { ApiError, apiFetch } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
-import { bootstrap, organizationContext } from "@/tests/fixtures"
+import { bootstrap } from "@/tests/fixtures"
 
 // Mocks the network boundary (apiFetch), not the hooks, per
 // .github/instructions/frontend-standards.instructions.md: the hooks
@@ -31,8 +31,10 @@ function mockApi(opts: {
   verificationPending?: boolean
   previewError?: string
   acceptError?: string
-  /** Whose session this browser holds; omitted, the context read 404s. */
+  /** Whose session this browser holds; omitted, the profile read 404s. */
   sessionEmail?: string
+  /** A status the profile read fails with instead. */
+  profileStatus?: number
 }) {
   const accepted: unknown[] = []
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
@@ -49,19 +51,20 @@ function mockApi(opts: {
         needs_password: opts.needsPassword ?? false,
       } as never
     }
-    if (url === "/organizations/me") {
-      if (opts.sessionEmail === undefined) {
-        throw new ApiError(404, "Organization not found")
+    if (url === "/auth/profile") {
+      if (opts.profileStatus !== undefined) {
+        throw new ApiError(opts.profileStatus, "Internal server error")
       }
-      return organizationContext({
-        caller: {
-          user_id: "33333333-3333-3333-3333-333333333333",
-          email: opts.sessionEmail,
-          full_name: null,
-          has_password: true,
-          claims_deployment: false,
-        },
-      }) as never
+      if (opts.sessionEmail === undefined) {
+        throw new ApiError(404, "Not Found")
+      }
+      return {
+        user_id: "33333333-3333-3333-3333-333333333333",
+        email: opts.sessionEmail,
+        full_name: null,
+        has_password: true,
+        claims_deployment: false,
+      } as never
     }
     if (url === "/invitations/accept") {
       if (opts.acceptError) {
@@ -351,6 +354,41 @@ describe("AcceptInvitationPage", () => {
     ).toBeInTheDocument()
     expect(screen.queryByText(/signed in as/)).toBeNull()
     expect(accepted).toEqual([])
+  })
+
+  it("treats a session whose address cannot be read as someone else's", async () => {
+    // The profile 404s on a gateway older than the route, so whose session
+    // this is cannot be known, and "you're already signed in" would be a guess.
+    window.localStorage.setItem(SESSION_MARKER, "1")
+    const accepted = mockApi({})
+    renderPage("#/accept-invitation?token=abc123")
+
+    expect(
+      await screen.findByText(/This invitation is for ada@example.com/),
+    ).toHaveTextContent("you're signed in as someone else")
+    expect(
+      screen.getByRole("button", { name: "Sign out and continue" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Accept invitation" }),
+    ).toBeNull()
+    expect(accepted).toEqual([])
+  })
+
+  it("holds every action when whose session this is cannot be read", async () => {
+    window.localStorage.setItem(SESSION_MARKER, "1")
+    mockApi({ profileStatus: 500 })
+    renderPage("#/accept-invitation?token=abc123")
+
+    expect(await screen.findByText("Internal server error")).toBeInTheDocument()
+    expect(screen.getByText("Acme")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Accept invitation" }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Sign out and continue" }),
+    ).toBeNull()
+    expect(screen.queryByText(/already signed in/i)).toBeNull()
   })
 
   it("offers no password for somebody else's address to a session", async () => {

@@ -72,6 +72,10 @@ export const ORGANIZATION_CONTEXT = [ORGANIZATIONS, "context"] as const
 // and nesting would re-read the context (and every page gated on it) as well.
 export const ORGANIZATION_MEMBERS = "organization-members"
 export const DEPLOYMENT_ADMIN = "deployment-admin"
+// The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
+// the organization context cannot describe because it has no organization. Not
+// a child of ORGANIZATIONS: switching organization does not change who you are.
+export const PROFILE = "profile"
 // Its own key rather than a child of ORGANIZATIONS, for the reason the members
 // key is: the organization context is read on nearly every page, and a rate
 // edit should not make all of them refetch.
@@ -151,3 +155,17 @@ export const HEALTH_POLL_MS = 15_000
 // operator just clicked. Failing once and showing the error is the honest
 // behavior, and it frees the socket.
 export const NO_RETRY = { retry: false } as const
+
+/**
+ * The workspace a query reads, declared on its `meta` for the one reader that
+ * has to find such queries: switching organization marks the ones keyed on a
+ * workspace of the organization just left as stale without refetching them
+ * (`useSwitchOrganization`). Declared rather than searched for in the key,
+ * because a key also holds ids that are not workspaces (a trace's own id), and
+ * a key's shape differs per domain. `""` is no workspace.
+ */
+export function workspaceMeta(workspaceId: string | null | undefined): {
+  workspaceId: string
+} {
+  return { workspaceId: workspaceId ?? "" }
+}

@@ -16,7 +16,7 @@ import {
   OverviewIndex,
   OverviewPage,
 } from "@/features/overview/OverviewPage"
-import { API_ROOT } from "@/shared/api/client"
+import { API_ROOT, defaultQueryRetry } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -1779,9 +1779,9 @@ describe("OverviewIndex for an identity with no organization", () => {
 
   it("does not retry the 404 that says there is no organization", async () => {
     mockWithoutOrganization([])
-    // The app's own retry policy, which retries anything but 401 and 403.
+    // The app's own default, which would retry a 404 twice.
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: 2 } },
+      defaultOptions: { queries: { retry: defaultQueryRetry } },
     })
 
     renderHome({ client })

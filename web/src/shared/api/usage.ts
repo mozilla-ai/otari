@@ -21,7 +21,7 @@ import type {
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { USAGE } from "@/shared/api/queryKeys"
+import { USAGE, workspaceMeta } from "@/shared/api/queryKeys"
 import { isoAgo } from "@/shared/helpers/timeRange"
 
 // ---------- activity / request log ----------
@@ -123,6 +123,7 @@ export function useUsageLogs(
   const scope = useUsageScope()
   return useQuery({
     queryKey: [USAGE, "list", scope.base, filters, page, pageSize],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () => {
       const params = usageParams(filters)
       params.set("skip", String(page * pageSize))
@@ -152,6 +153,7 @@ export function useUsageCount(filters: UsageFilters, enabled = true) {
   const scope = useUsageScope()
   return useQuery({
     queryKey: [USAGE, "count", scope.base, filters],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () =>
       apiFetch<UsageCount>(
         `${scope.base}/count?${usageParams(filters).toString()}`,
@@ -180,6 +182,7 @@ export function useLiveUsageCount(filters: UsageFilters, enabled = true) {
   const scope = useUsageScope()
   return useQuery({
     queryKey: [USAGE, "count", "live", scope.base, filters],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () =>
       apiFetch<UsageCount>(
         `${scope.base}/count?${usageParams(filters).toString()}`,
@@ -291,6 +294,7 @@ export function useUnpricedUsage(
       workspaceId,
       windowSeconds,
     ],
+    meta: workspaceMeta(workspaceId),
     queryFn: () => {
       const params = usageParams({
         workspace_id: workspaceId || undefined,
@@ -418,6 +422,7 @@ export function useUsageSummary(
       bucket,
       dimensions ?? "all",
     ],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () => {
       const params = usageParams(filters)
       params.set("bucket", bucket)
@@ -452,6 +457,7 @@ export function useUsageGroupedSeries(
   const scope = useUsageScope(usageScope)
   return useQuery({
     queryKey: [USAGE, "series", scope.base, filters, bucket, groupBy],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () => {
       const params = usageParams(filters)
       params.set("bucket", bucket)
