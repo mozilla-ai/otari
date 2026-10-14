@@ -47,6 +47,7 @@ _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     LLMProvider.TOGETHER: None,
     # No end-user field on the provider's API.
     LLMProvider.GEMINI: None,
+    LLMProvider.LINER: None,
     LLMProvider.MISTRAL: None,
     LLMProvider.VERTEXAI: None,
     # The operator's own model server: nobody upstream enforces a policy.
