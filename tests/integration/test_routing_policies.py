@@ -2040,6 +2040,140 @@ def test_a_catalog_id_reaches_the_offering_a_key_may_use(catalog_client: TestCli
     assert [(r["model"], r["selection_reason"]) for r in _usage_rows(catalog_client)] == [("m1-b", "catalog")]
 
 
+_LEGACY_ID = "openai/gpt-x"
+_SOLO_ID = "openai/gpt-solo"
+
+
+@pytest.fixture
+def legacy_catalog_client(routing_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
+    """``openai/gpt-x`` is the legacy spelling of ``openai:gpt-x`` and the catalog ID of a model Azure also serves.
+
+    The index ranks Azure first, so a plan led by ``openai:gpt-x`` follows the name rather than the ranking.
+    """
+
+    async def _idle(*_args: Any, **_kwargs: Any) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("gateway.main.run_selector_index_refresher", _idle)
+    config = routing_config.model_copy(
+        update={
+            "providers": {
+                **routing_config.providers,
+                "azure": {
+                    "provider_type": "azureopenai",
+                    "api_key": "sk-azure",
+                    "api_base": "https://example.openai.azure.com",
+                },
+            }
+        }
+    )
+    rows = [
+        selectors.OfferingRow("azure:gpt-x", "azure", "azureopenai", 1.0),
+        selectors.OfferingRow("openai:gpt-x", "openai", "openai", None),
+        selectors.OfferingRow("openai:gpt-solo", "openai", "openai", 1.0),
+    ]
+    identities = {
+        _LEGACY_ID: (_LEGACY_ID, ("azure:gpt-x", "openai:gpt-x")),
+        _SOLO_ID: (_SOLO_ID, ("openai:gpt-solo",)),
+    }
+    for client in build_test_client(config):
+        selectors.set_selector_index(selectors.build_selector_index(rows, identities))
+        yield client
+    selectors.reset_selector_index()
+
+
+def _openai_unavailable(calls: list[str]) -> Any:
+    async def dispatch(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"].startswith("openai:"):
+            raise _http_error(503)
+        return _completion("gpt-x")
+
+    return dispatch
+
+
+def test_a_legacy_spelling_of_a_catalog_id_falls_back_after_the_offering_it_names(
+    legacy_catalog_client: TestClient,
+) -> None:
+    _create_user(legacy_catalog_client)
+    calls: list[str] = []
+
+    with patch("gateway.api.routes.chat.acompletion", new=_openai_unavailable(calls)):
+        resp = _chat(legacy_catalog_client, _LEGACY_ID)
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-x", "azureopenai:gpt-x"]
+    assert resp.json()["model"] == _LEGACY_ID
+    rows = _usage_rows(legacy_catalog_client)
+    served = [r for r in rows if r["status"] == "success"]
+    absorbed = [r for r in rows if r["status"] == "absorbed"]
+    assert [(r["provider"], r["model"], r["attempt_position"], r["selection_reason"]) for r in served] == [
+        ("azure", "gpt-x", 2, "on_failure")
+    ]
+    assert served[0]["policy_name"] == _LEGACY_ID
+    assert [(r["provider"], r["model"], r["attempt_position"]) for r in absorbed] == [("openai", "gpt-x", 1)]
+
+
+def test_a_legacy_spelling_of_a_catalog_id_is_served_by_the_offering_it_names(
+    legacy_catalog_client: TestClient,
+) -> None:
+    _create_user(legacy_catalog_client)
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-x"))) as mock:
+        resp = _chat(legacy_catalog_client, _LEGACY_ID)
+
+    assert resp.status_code == 200, resp.text
+    assert _awaited_model(mock) == "openai:gpt-x"
+    assert [(r["provider"], r["selection_reason"], r["policy_name"]) for r in _usage_rows(legacy_catalog_client)] == [
+        ("openai", "catalog", _LEGACY_ID)
+    ]
+
+
+def test_the_colon_spelling_of_an_offering_never_falls_back(legacy_catalog_client: TestClient) -> None:
+    _create_user(legacy_catalog_client)
+    calls: list[str] = []
+
+    with patch("gateway.api.routes.chat.acompletion", new=_openai_unavailable(calls)):
+        resp = _chat(legacy_catalog_client, "openai:gpt-x")
+
+    assert resp.status_code != 200
+    assert calls == ["openai:gpt-x"]
+    assert [r["policy_name"] for r in _usage_rows(legacy_catalog_client)] == [None]
+
+
+def test_a_legacy_spelling_of_a_single_offering_model_never_falls_back(legacy_catalog_client: TestClient) -> None:
+    _create_user(legacy_catalog_client)
+    calls: list[str] = []
+
+    with patch("gateway.api.routes.chat.acompletion", new=_openai_unavailable(calls)):
+        resp = _chat(legacy_catalog_client, _SOLO_ID)
+
+    assert resp.status_code != 200
+    assert calls == ["openai:gpt-solo"]
+    assert [r["policy_name"] for r in _usage_rows(legacy_catalog_client)] == [None]
+
+
+def test_a_legacy_spelling_gains_no_offering_the_keys_allow_list_excludes(legacy_catalog_client: TestClient) -> None:
+    _create_user(legacy_catalog_client)
+    key_resp = legacy_catalog_client.post(
+        f"{API_ROOT}/keys",
+        json={"user_id": "test-user", "allowed_models": ["openai:gpt-x"]},
+        headers=HEADERS,
+    )
+    assert key_resp.status_code == 200, key_resp.text
+    calls: list[str] = []
+
+    with patch("gateway.api.routes.chat.acompletion", new=_openai_unavailable(calls)):
+        resp = legacy_catalog_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": _LEGACY_ID, "messages": [{"role": "user", "content": "hi"}]},
+            headers={API_KEY_HEADER: f"Bearer {key_resp.json()['key']}"},
+        )
+
+    assert resp.status_code != 200
+    assert calls == ["openai:gpt-x"]
+
+
 def _cap_anthropic_spend(client: TestClient) -> None:
     """Price the anthropic fallback, and give a workspace budget narrowed to anthropic no room for it."""
     priced = client.post(

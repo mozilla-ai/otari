@@ -198,29 +198,49 @@ def resolve_catalog_offerings(
 ) -> tuple[str, ...]:
     """Every offering a catalog ID stands for, best first, or an empty tuple.
 
-    The first is the one :func:`resolve_catalog_selector` answers.
-    Empty for a pinned spelling, for a selector that already names an offering, and for one the index does not know.
+    A catalog ID spelled like the legacy ``provider/model`` of one of its own offerings
+    (``openai/gpt-4o`` while ``openai:gpt-4o`` is served) lists that offering first,
+    then the others in their usual order.
+    Empty for a pinned spelling, for a full selector, for a legacy spelling of an offering of another model,
+    and for a selector the index does not know.
     """
     index = _index
     view = _organization_view(index, workspace_id, organization_id)
-    if _names_an_offering(index, view, model_selector):
+    if _names_verbatim(index, view, model_selector):
         return ()
     spelling = model_selector.lower()
-    if view is not None and (offerings := view.offerings.get(spelling)) is not None:
+    offerings = view.offerings.get(spelling) if view is not None else None
+    if offerings is None:
+        offerings = index.offerings.get(spelling, ())
+    named = _legacy_offering(index, view, model_selector)
+    if named is None:
         return offerings
-    return index.offerings.get(spelling, ())
+    if named not in offerings:
+        return ()
+    return (named, *(offering for offering in offerings if offering != named))
+
+
+def _names_verbatim(index: SelectorIndex, view: OrganizationSelectors | None, model_selector: str) -> bool:
+    return model_selector in index.full or (view is not None and model_selector in view.full)
+
+
+def _legacy_offering(index: SelectorIndex, view: OrganizationSelectors | None, model_selector: str) -> str | None:
+    """The offering ``prefix/rest`` names in the legacy spelling, ``prefix:rest``, where it is served."""
+    prefix, slash, rest = model_selector.partition("/")
+    if not slash:
+        return None
+    named = f"{prefix}:{rest}"
+    return named if _names_verbatim(index, view, named) else None
 
 
 def _names_an_offering(index: SelectorIndex, view: OrganizationSelectors | None, model_selector: str) -> bool:
-    """Whether ``model_selector`` already names an offering, so no catalog spelling applies to it."""
-    org_full = view.full if view is not None else frozenset()
-    if model_selector in index.full or model_selector in org_full:
-        return True
-    # ``openai/gpt-4o`` is both the legacy spelling of an offering on the
-    # ``openai`` instance and, read as vendor/model, a catalog id. Where the
-    # instance really serves that id, the caller meant the offering.
-    prefix, slash, rest = model_selector.partition("/")
-    return bool(slash) and (f"{prefix}:{rest}" in index.full or f"{prefix}:{rest}" in org_full)
+    """Whether ``model_selector`` already names an offering, so no catalog spelling rewrites it.
+
+    ``openai/gpt-4o`` is both the legacy spelling of an offering on the ``openai`` instance and,
+    read as vendor/model, a catalog id. Where the instance serves that id, the name resolves to the offering,
+    and only a failover plan (:func:`resolve_catalog_offerings`) reaches the model's other offerings.
+    """
+    return _names_verbatim(index, view, model_selector) or _legacy_offering(index, view, model_selector) is not None
 
 
 def short_selector_for(full_selector: str, *, organization_id: uuid.UUID | None = None) -> str | None:

@@ -142,6 +142,63 @@ def test_offerings_answer_only_a_catalog_id(index: selectors.SelectorIndex) -> N
     assert selectors.resolve_catalog_offerings("nope") == ()
 
 
+@pytest.fixture
+def legacy_index() -> Iterator[selectors.SelectorIndex]:
+    """``openai/gpt-4o`` is the legacy spelling of ``openai:gpt-4o`` and the id of a model three providers serve."""
+    rows = [
+        selectors.OfferingRow("azure:gpt-4o", "azure", "azureopenai", 2.5),
+        selectors.OfferingRow("groq:gpt-4o", "groq", "groq", 2.0),
+        selectors.OfferingRow("openai:gpt-4o", "openai", "openai", None),
+        selectors.OfferingRow("openai:gpt-4o-mini", "openai", "openai", 0.1),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o", "groq:gpt-4o", "openai:gpt-4o")),
+        "openai/gpt-4o-mini": ("gpt-4o-mini", ("openai:gpt-4o-mini",)),
+    }
+    built = selectors.build_selector_index(rows, identities)
+    selectors.set_selector_index(built)
+    yield built
+    selectors.reset_selector_index()
+
+
+def test_a_legacy_spelling_of_a_catalog_id_lists_the_offering_it_names_first(
+    legacy_index: selectors.SelectorIndex,
+) -> None:
+    assert legacy_index.offerings["openai/gpt-4o"] == ("groq:gpt-4o", "azure:gpt-4o", "openai:gpt-4o")
+    assert selectors.resolve_catalog_offerings("openai/gpt-4o") == ("openai:gpt-4o", "groq:gpt-4o", "azure:gpt-4o")
+    # Alone, the spelling resolves to the offering it names.
+    assert selectors.resolve_catalog_selector("openai/gpt-4o") is None
+    assert selectors.resolve_catalog_offerings("openai/gpt-4o-mini") == ("openai:gpt-4o-mini",)
+
+
+def test_the_colon_spelling_of_an_offering_lists_no_other_offering(legacy_index: selectors.SelectorIndex) -> None:
+    assert selectors.resolve_catalog_offerings("openai:gpt-4o") == ()
+    assert selectors.resolve_catalog_offerings("azure:gpt-4o") == ()
+
+
+def test_a_legacy_spelling_of_an_organizations_own_offering_lists_it_first() -> None:
+    deployment = [selectors.OfferingRow("azure:gpt-4o", "azure", "azureopenai", 2.5)]
+    own = [selectors.OfferingRow("openai:gpt-4o", "openai", "openai", None)]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o", "openai:gpt-4o"))
+    }
+    view = selectors.build_organization_selectors(deployment, own, identities)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment, {"openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o",))}, organizations={_ORG_A: view}
+        )
+    )
+    try:
+        assert view.offerings["openai/gpt-4o"] == ("azure:gpt-4o", "openai:gpt-4o")
+        assert selectors.resolve_catalog_offerings("openai/gpt-4o", organization_id=_ORG_A) == (
+            "openai:gpt-4o",
+            "azure:gpt-4o",
+        )
+        assert selectors.resolve_catalog_offerings("openai/gpt-4o", organization_id=_ORG_B) == ("azure:gpt-4o",)
+    finally:
+        selectors.reset_selector_index()
+
+
 def test_a_vendor_is_matched_to_its_own_provider_by_the_identity_table() -> None:
     """``moonshotai`` is the vendor's id segment; ``moonshot`` is the provider it publishes on."""
     rows = [
