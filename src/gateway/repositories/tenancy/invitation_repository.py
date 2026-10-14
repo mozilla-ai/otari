@@ -61,22 +61,33 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
         The roster's view of an ``invited`` row: an invitation that expired is
         still the one to revoke or reissue, so it is not filtered out the way
         ``get_pending_by_organization_members`` filters it.
+
+        Ranked in SQL, so a membership's older expired rows are never loaded:
+        the work stays bounded by the page, not by its invitation history.
         """
         ids = list(organization_member_ids)
         if not ids:
             return {}
-        result = await self.db.execute(
-            select(Invitation)
+        ranked = (
+            select(
+                col(Invitation.id).label("id"),
+                func.row_number()
+                .over(
+                    partition_by=col(Invitation.organization_member_id),
+                    order_by=(col(Invitation.created_at).desc(), col(Invitation.id).desc()),
+                )
+                .label("rank"),
+            )
             .where(
                 col(Invitation.organization_member_id).in_(ids),
                 col(Invitation.status).in_(("pending", "expired")),
             )
-            .order_by(col(Invitation.created_at).desc(), col(Invitation.id).desc())
+            .subquery()
         )
-        current: dict[uuid.UUID, Invitation] = {}
-        for invitation in result.scalars().all():
-            current.setdefault(invitation.organization_member_id, invitation)
-        return current
+        result = await self.db.execute(
+            select(Invitation).join(ranked, col(Invitation.id) == ranked.c.id).where(ranked.c.rank == 1)
+        )
+        return {invitation.organization_member_id: invitation for invitation in result.scalars().all()}
 
     async def get_live_pending_for_user_with_context(
         self,
