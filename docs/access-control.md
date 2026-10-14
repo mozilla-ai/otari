@@ -440,9 +440,10 @@ unknown address does depends on `open_signup`:
 - `false` (default): signup only completes an identity an owner or admin already
   added or invited by address, and only while it is still wanted: an active
   member, or an invitee whose invitation is still pending. An address nobody has
-  added gets no account, and neither does one whose invitation was revoked or
-  expired or whose membership was removed. This is the posture a single-tenant
-  deployment wants, since anyone who can reach the dashboard can reach the form.
+  added gets no account. An identity whose invitation was revoked or expired, or
+  whose membership was removed, still exists, but signup refuses to claim it.
+  This is the posture a single-tenant deployment wants, since anyone who can
+  reach the dashboard can reach the form.
 - `true`: an unknown address is registered, with an organization and workspace of
   its own. Use it where the deployment serves many tenants.
 
