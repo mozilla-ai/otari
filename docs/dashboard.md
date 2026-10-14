@@ -54,7 +54,9 @@ Account settings also carries the name you are known by, which is not a
 credential: it is what the account menu, the organization roster and the user
 column on Usage and Activity show. Someone an admin added to the roster by
 address has no name until they set one here. Clearing it puts those surfaces
-back to naming you by your sign-in address.
+back to naming you by your sign-in address. The dashboard reads who is signed in
+from `GET /api/v1/auth/profile`, which answers whether or not you belong to an
+organization, so the account menu names you even before you join one.
 
 ## First-run walkthrough
 
@@ -226,9 +228,10 @@ says how to get in, and the sidebar holds only Overview. Creating an
 organization is offered to them only where `open_signup` is on, since the
 gateway refuses it otherwise.
 
-Opening an invitation link in a browser signed in as a different address says
-who the invitation is for and offers to sign out and continue, because
-accepting always adds the invited address, whoever is signed in. After a
+Opening an invitation link in a browser signed in as a different address, or as
+an identity with no address, says who the invitation is for and offers to sign
+out and continue, because accepting always adds the invited address, whoever is
+signed in. After a
 password is set from an invitation link, the sign-in screen opens with the
 invited address filled in.
 

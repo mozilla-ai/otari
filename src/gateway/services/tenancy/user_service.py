@@ -70,7 +70,7 @@ from gateway.exceptions.identity_exceptions import (
     UnmodifiedPasswordError,
     VerificationTokenInvalidError,
 )
-from gateway.models.tenancy import User
+from gateway.models.tenancy import CallerIdentityPublic, User
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.repositories.identity import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
@@ -85,7 +85,7 @@ from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
-from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
+from gateway.services.tenancy.provisioning_service import load_bootstrap_identity, password_claims_deployment
 from gateway.services.tenancy.tokens import generate_token, hash_token
 from gateway.services.tenancy.verification_email import render_verification_email
 
@@ -255,6 +255,17 @@ async def update_full_name(db: AsyncSession, identity: User, *, full_name: str |
     await db.commit()
     await db.refresh(identity)
     return identity
+
+
+async def describe_caller(db: AsyncSession, identity: User) -> CallerIdentityPublic:
+    """The identity as it is published to itself, whether or not it belongs to an organization."""
+    return CallerIdentityPublic(
+        user_id=identity.id,
+        email=identity.email,
+        full_name=identity.full_name,
+        has_password=identity.hashed_password is not None,
+        claims_deployment=await password_claims_deployment(db, identity),
+    )
 
 
 def _normalized_full_name(full_name: str | None) -> str | None:
@@ -812,6 +823,7 @@ async def _claimable_email(db: AsyncSession, identity: User, email: str) -> str:
 __all__ = [
     "authenticate",
     "create_user_for_signup",
+    "describe_caller",
     "forget_unproven_access",
     "operator_has_password",
     "password_sign_in_possible",

@@ -455,7 +455,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Own Profile
+         * @description Report who the caller is, whether or not they belong to an organization.
+         *
+         *     The same shape ``GET /api/v1/organizations/me`` carries as ``caller``, for
+         *     an identity that context cannot describe because it has no active
+         *     membership.
+         */
+        get: operations["auth-get_own_profile"];
         put?: never;
         post?: never;
         delete?: never;
@@ -17280,6 +17288,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-get_own_profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallerIdentityPublic"];
                 };
             };
         };

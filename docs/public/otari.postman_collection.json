@@ -766,6 +766,26 @@
           }
         },
         {
+          "name": "Get Own Profile",
+          "request": {
+            "description": "Report who the caller is, whether or not they belong to an organization.\n\nThe same shape ``GET /api/v1/organizations/me`` carries as ``caller``, for\nan identity that context cannot describe because it has no active\nmembership.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "profile"
+              ],
+              "raw": "{{baseUrl}}/api/v1/auth/profile"
+            }
+          }
+        },
+        {
           "name": "Update Own Profile",
           "request": {
             "body": {

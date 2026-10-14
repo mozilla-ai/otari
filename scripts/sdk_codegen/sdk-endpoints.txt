@@ -186,9 +186,10 @@ DELETE /api/v1/auth/session                         # dashboard-only
 # flow. An SDK authenticates with the master key or an API key and never holds
 # a password, so there is nothing here for one to wrap.
 PUT /api/v1/auth/password                           # dashboard-only
-# The name the signed-in identity goes by: the account page's own write, beside
+# Who the signed-in identity is, and the name it goes by: the account page's own read and write, beside
 # the credential ones. An SDK authenticates as a key rather than as a person and
 # has no account page to render, so there is nothing here for one to wrap.
+GET /api/v1/auth/profile                            # dashboard-only
 PATCH /api/v1/auth/profile                          # dashboard-only
 # A signed-in person's message to the Otari team, sent from the top bar (the
 # account menu on a phone).
