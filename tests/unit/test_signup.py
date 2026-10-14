@@ -10,6 +10,7 @@ observe an emailed link without a real SMTP server.
 
 import logging
 import re
+import uuid
 from pathlib import Path
 
 import pytest
@@ -694,3 +695,91 @@ def test_open_signup_stores_the_name_the_way_the_account_page_does(
         _captured_verification_link(caplog, client, email="ada@example.com", full_name=submitted)
 
     assert _name_and_organization(tmp_path, email="ada@example.com") == (stored, organization)
+
+
+def _organization_ids(tmp_path: Path, *, email: str) -> tuple[str, str | None]:
+    engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
+    with engine.begin() as connection:
+        row = connection.execute(
+            text('SELECT active_organization_id, default_organization_id FROM "user" WHERE email = :email'),
+            {"email": email},
+        ).one()
+    engine.dispose()
+    return (str(uuid.UUID(str(row[0]))), str(uuid.UUID(str(row[1]))) if row[1] is not None else None)
+
+
+@pytest.mark.parametrize("ending", ["revoked", "removed"])
+def test_open_signup_gives_an_identity_nobody_still_wants_an_organization_of_its_own(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, ending: str
+) -> None:
+    """What a new address gets, rather than an account pointed at an organization that let it go."""
+    with _client(tmp_path, open_signup=True) as client:
+        if ending == "revoked":
+            invitation = _invite(client, email="ada@example.com")
+            client.delete(
+                f"{API_ROOT}/organizations/me/member-invitations/{invitation['invitation_id']}",
+                headers={"Otari-Key": MASTER_KEY},
+            )
+        else:
+            added = client.post(
+                f"{API_ROOT}/organizations/me/members",
+                json={"email": "ada@example.com", "role": "member"},
+                headers={"Otari-Key": MASTER_KEY},
+            )
+            _remove(client, str(added.json()["organization_member_id"]))
+        inviting_organization, _ = _organization_ids(tmp_path, email="ada@example.com")
+
+        token = _captured_verification_link(caplog, client, email="ada@example.com")
+        assert (
+            client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
+        )
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        assert signed_in.status_code == 200, signed_in.text
+
+        own = signed_in.json()["active_organization_id"]
+        assert own is not None
+        assert own != inviting_organization
+        assert _organization_ids(tmp_path, email="ada@example.com") == (own, own)
+        context = client.get(f"{API_ROOT}/organizations/me")
+        assert context.status_code == 200, context.text
+        assert context.json()["role"] == "owner"
+
+
+def test_open_signup_leaves_a_pending_invitee_where_the_invitation_is(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path, open_signup=True) as client:
+        _invite(client, email="ada@example.com")
+        before = _organization_ids(tmp_path, email="ada@example.com")
+
+        _captured_verification_link(caplog, client, email="ada@example.com")
+
+        assert _organization_ids(tmp_path, email="ada@example.com") == before
+
+
+def test_signing_in_after_removal_names_no_organization(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    with _client(tmp_path) as client:
+        membership_id = _signed_in_member(client, caplog, email="eve@example.com")
+        _remove(client, membership_id)
+        client.cookies.clear()
+
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "eve@example.com", "password": PASSWORD})
+
+        assert signed_in.status_code == 200, signed_in.text
+        assert signed_in.json()["active_organization_id"] is None
+
+
+def test_signing_in_moves_a_stale_pointer_to_an_organization_the_member_still_belongs_to(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        membership_id = _signed_in_member(client, caplog, email="ada@example.com")
+        created = client.post(f"{API_ROOT}/organizations", json={"name": "Ada Corp"})
+        assert created.status_code == 201, created.text
+        _remove(client, membership_id)
+        client.cookies.clear()
+
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+
+        assert signed_in.json()["active_organization_id"] == created.json()["id"]
+        assert client.get(f"{API_ROOT}/workspaces").status_code == 200

@@ -81,6 +81,7 @@ from gateway.services.oauth_service import (
 )
 from gateway.services.tenancy import report_new_account
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
+from gateway.services.tenancy.user_service import active_organization_for_session
 
 router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
 
@@ -168,8 +169,11 @@ class OAuthSessionResponse(BaseModel):
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
     user_id: uuid.UUID = Field(description="The identity this session speaks for.")
-    active_organization_id: uuid.UUID = Field(
-        description="The organization that identity is acting in, which scopes every tenancy surface."
+    active_organization_id: uuid.UUID | None = Field(
+        description=(
+            "The organization that identity is acting in, which scopes every tenancy surface. "
+            "Null when it is a member of none."
+        )
     )
 
 
@@ -317,6 +321,7 @@ async def callback(
         # cannot stage this cannot stage the session row either.
         identity = resolution.identity
         await OrganizationDomainService(db).auto_join_for_user(identity)
+        active_organization_id = await active_organization_for_session(db, identity)
         token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
         await db.commit()
     except DATABASE_ERRORS as exc:
@@ -328,7 +333,7 @@ async def callback(
     return OAuthSessionResponse(
         expires_at=expires_at,
         user_id=identity.id,
-        active_organization_id=identity.active_organization_id,
+        active_organization_id=active_organization_id,
     )
 
 

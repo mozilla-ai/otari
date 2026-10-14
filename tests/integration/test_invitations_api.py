@@ -16,12 +16,14 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import Invitation, Organization, OrganizationMember, User
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
 
 def _invite(
@@ -950,3 +952,209 @@ def test_bulk_invite_refuses_an_empty_list(client: TestClient, master_key_header
         headers=master_key_header,
     )
     assert response.status_code == 422
+
+
+# ---------- the lifecycle of a link once its membership moves on ----------
+
+
+def _add_directly(client: TestClient, headers: dict[str, str], *, email: str, role: str = "member") -> str:
+    added = client.post(f"{API_ROOT}/organizations/me/members", json={"email": email, "role": role}, headers=headers)
+    assert added.status_code == 201, added.text
+    return str(added.json()["organization_member_id"])
+
+
+def _members(client: TestClient, headers: dict[str, str]) -> list[dict[str, Any]]:
+    members: list[dict[str, Any]] = client.get(f"{API_ROOT}/organizations/me/members", headers=headers).json()["data"]
+    return members
+
+
+def _admin_session(client: TestClient, headers: dict[str, str], db_session: Session) -> str:
+    """An admin of the operator's organization, signed in, and its session cookie."""
+    result = _invite(client, headers, email="admin@example.com", role="admin")
+    accepted = client.post(
+        f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"]), "password": PASSWORD}
+    )
+    assert accepted.status_code == 200, accepted.text
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "admin@example.com", "password": PASSWORD})
+    assert signed_in.status_code == 200, signed_in.text
+    cookie = signed_in.cookies[SESSION_COOKIE_NAME]
+    client.cookies.clear()
+    return cookie
+
+
+def test_a_stale_link_cannot_readmit_a_member_who_was_removed(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Invite, add directly, remove: the first link must not bring the member back."""
+    result = _invite(client, master_key_header, email="sam@example.com")
+    member_id = _add_directly(client, master_key_header, email="sam@example.com")
+    removed = client.delete(f"{API_ROOT}/organizations/me/members/{member_id}", headers=master_key_header)
+    assert removed.status_code in (200, 204), removed.text
+
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])})
+
+    assert accept.status_code == 400, accept.text
+    assert all(row["email"] != "sam@example.com" for row in _members(client, master_key_header))
+
+
+def test_a_pending_link_on_a_membership_that_left_invited_is_refused(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """Data written before the fix can still hold such a row; accepting it must not undo anything."""
+    result = _invite(client, master_key_header, email="sam@example.com")
+    membership = db_session.execute(
+        select(OrganizationMember).where(col(OrganizationMember.id) == uuid.UUID(result["organization_member_id"]))
+    ).scalar_one()
+    membership.status = "suspended"
+    db_session.commit()
+
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])})
+
+    assert accept.status_code == 400, accept.text
+    db_session.refresh(membership)
+    assert membership.status == "suspended"
+
+
+def test_revoking_a_stale_invitation_leaves_an_active_member_active(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    result = _invite(client, master_key_header, email="sam@example.com")
+    membership = db_session.execute(
+        select(OrganizationMember).where(col(OrganizationMember.id) == uuid.UUID(result["organization_member_id"]))
+    ).scalar_one()
+    membership.status = "active"
+    db_session.commit()
+
+    revoked = client.delete(
+        f"{API_ROOT}/organizations/me/member-invitations/{result['invitation_id']}", headers=master_key_header
+    )
+
+    assert revoked.status_code == 200, revoked.text
+    assert _roster_row(client, master_key_header, "sam@example.com")["status"] == "active"
+    invitation = db_session.get(Invitation, uuid.UUID(result["invitation_id"]))
+    assert invitation is not None
+    db_session.refresh(invitation)
+    assert invitation.status == "cancelled"
+
+
+def test_a_revoked_invitation_elsewhere_does_not_stop_a_link_setting_a_first_password(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Only a live membership in another organization vouches for the address."""
+    first = _invite(client, master_key_header, email="ada@example.com")
+    revoked = client.delete(
+        f"{API_ROOT}/organizations/me/member-invitations/{first['invitation_id']}", headers=master_key_header
+    )
+    assert revoked.status_code == 200, revoked.text
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
+    assert created.status_code == 201, created.text
+    _switch(client, master_key_header, created.json()["id"])
+    token = _token_from(_invite(client, master_key_header, email="ada@example.com")["accept_link"])
+
+    assert client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()["needs_password"] is True
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+    assert accept.status_code == 200, accept.text
+
+
+def test_a_refused_first_password_names_the_way_in_this_deployment_offers(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _add_directly(client, master_key_header, email="kay@example.com")
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Mallory"}, headers=master_key_header)
+    _switch(client, master_key_header, created.json()["id"])
+    token = _token_from(_invite(client, master_key_header, email="kay@example.com")["accept_link"])
+
+    refused = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+
+    assert refused.status_code == 400, refused.text
+    # No mail and no provider here, so neither is offered as a way in.
+    detail = refused.json()["detail"]
+    assert "Forgot your password" not in detail
+    assert "administers this gateway" in detail
+
+
+def test_an_admin_can_reinvite_an_address_whose_lapsed_invitation_offered_owner(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    result = _invite(client, master_key_header, email="olga@example.com", role="owner")
+    client.delete(
+        f"{API_ROOT}/organizations/me/member-invitations/{result['invitation_id']}", headers=master_key_header
+    )
+    admin_cookie = _admin_session(client, master_key_header, db_session)
+
+    reinvited = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "olga@example.com", "role": "member"},
+        cookies={SESSION_COOKIE_NAME: admin_cookie},
+    )
+    owner_again = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "olga@example.com", "role": "owner"},
+        cookies={SESSION_COOKIE_NAME: admin_cookie},
+    )
+
+    assert reinvited.status_code == 201, reinvited.text
+    assert owner_again.status_code in (400, 403, 409), owner_again.text
+
+
+def test_an_expired_link_says_expired_every_time(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    result = _invite(client, master_key_header, email="eli@example.com")
+    invitation = db_session.get(Invitation, uuid.UUID(result["invitation_id"]))
+    assert invitation is not None
+    invitation.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    db_session.commit()
+    token = _token_from(result["accept_link"])
+
+    first = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
+    second = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
+
+    assert first.status_code == second.status_code == 400
+    assert first.json()["detail"] == second.json()["detail"]
+    assert "expired" in second.json()["detail"]
+    assert "Ask whoever invited you" in second.json()["detail"]
+
+
+def test_an_unknown_link_answers_in_a_sentence_with_a_next_step(client: TestClient) -> None:
+    response = client.post(f"{API_ROOT}/invitations/validate", json={"token": "not-a-real-token"})
+
+    assert response.status_code == 404
+    assert response.json()["detail"].startswith("This invitation link is not valid")
+    assert "Ask whoever invited you" in response.json()["detail"]
+
+
+def test_a_deactivated_account_cannot_be_invited_or_added(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _add_directly(client, master_key_header, email="dee@example.com")
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
+    _switch(client, master_key_header, created.json()["id"])
+    identity = db_session.execute(select(User).where(col(User.email) == "dee@example.com")).scalar_one()
+    identity.is_active = False
+    db_session.commit()
+
+    invited = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "dee@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": "dee@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+
+    assert invited.status_code == added.status_code == 409
+    assert "deactivated" in invited.json()["detail"]
+
+
+@pytest.mark.parametrize("name", ["Acme\r\nBcc: x@example.com", "Acme\x07"])
+def test_an_organization_name_with_a_control_character_is_refused(
+    client: TestClient, master_key_header: dict[str, str], name: str
+) -> None:
+    created = client.post(f"{API_ROOT}/organizations", json={"name": name}, headers=master_key_header)
+    renamed = client.patch(f"{API_ROOT}/organizations/me", json={"name": name}, headers=master_key_header)
+
+    assert created.status_code == 400, created.text
+    assert renamed.status_code == 400, renamed.text

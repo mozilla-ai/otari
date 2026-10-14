@@ -9577,10 +9577,17 @@
         "description": "A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).\n\nThe same three fields ``POST /api/v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
         "properties": {
           "active_organization_id": {
-            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
-            "format": "uuid",
-            "title": "Active Organization Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is a member of none.",
+            "title": "Active Organization Id"
           },
           "expires_at": {
             "description": "When the session cookie stops being accepted.",
@@ -12516,10 +12523,17 @@
         "description": "A dashboard session minted by a passkey (the token travels only in the cookie).\n\nThe same three fields ``POST /api/v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
         "properties": {
           "active_organization_id": {
-            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
-            "format": "uuid",
-            "title": "Active Organization Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is a member of none.",
+            "title": "Active Organization Id"
           },
           "expires_at": {
             "description": "When the session cookie stops being accepted.",
@@ -16887,10 +16901,17 @@
         "description": "A freshly minted dashboard session (the token travels only in the cookie).",
         "properties": {
           "active_organization_id": {
-            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
-            "format": "uuid",
-            "title": "Active Organization Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is a member of none, as an invitee who has not accepted yet is.",
+            "title": "Active Organization Id"
           },
           "expires_at": {
             "description": "When the session cookie stops being accepted.",

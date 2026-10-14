@@ -65,6 +65,16 @@ class OrganizationMemberAlreadyExistsError(TenancyConflictError):
         super().__init__(f"{identifier} is already an active member of this organization")
 
 
+class OrganizationMemberDeactivatedError(TenancyConflictError):
+    """An address whose account is deactivated, so a membership would grant nothing it could use."""
+
+    def __init__(self, identifier: object):
+        super().__init__(
+            f"{identifier} belongs to a deactivated account, so it cannot be added or invited. "
+            "A deployment operator can reactivate it first."
+        )
+
+
 class OrganizationMemberAddressUnprovenError(TenancyConflictError):
     """An address another organization vouched for, added or invited by a different one.
 
@@ -202,6 +212,17 @@ class OrganizationNameRequiredError(TenancyValidationError):
         super().__init__("An organization name is required")
 
 
+class OrganizationNameInvalidError(TenancyValidationError):
+    """An organization name carrying a control character, such as a line break.
+
+    The name travels into invitation emails, where a line break could start a
+    line the inviter wrote rather than the deployment.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("An organization name cannot contain line breaks or other control characters")
+
+
 class OrganizationSlugUnavailableError(TenancyConflictError):
     """A created organization's derived slug collided with one already stored.
 
@@ -252,22 +273,30 @@ class InvitationNotFoundError(TenancyNotFoundError):
     probe for which is true.
     """
 
-    def __init__(self, identifier: object = "invitation") -> None:
-        super().__init__(f"{identifier} not found or already used")
+    def __init__(self, identifier: object | None = None) -> None:
+        if identifier is None:
+            super().__init__(
+                "This invitation link is not valid or has already been used. Ask whoever invited you for a new one."
+            )
+        else:
+            super().__init__(f"{identifier} not found or already used")
 
 
 class InvitationExpiredError(TenancyValidationError):
     """The invitation's ``expires_at`` has passed."""
 
     def __init__(self) -> None:
-        super().__init__("This invitation has expired")
+        super().__init__("This invitation has expired. Ask whoever invited you for a new one.")
 
 
 class InvitationAlreadyUsedError(TenancyValidationError):
     """The invitation is not ``pending`` (already accepted, cancelled, or expired)."""
 
     def __init__(self) -> None:
-        super().__init__("This invitation has already been used or is no longer valid")
+        super().__init__(
+            "This invitation has already been used or is no longer valid. "
+            "Ask whoever invited you for a new one if you still need it."
+        )
 
 
 class InvitationPasswordNotAcceptedError(TenancyValidationError):
@@ -279,10 +308,8 @@ class InvitationPasswordNotAcceptedError(TenancyValidationError):
     account it names.
     """
 
-    def __init__(self) -> None:
-        super().__init__(
-            "This link cannot set a password for this address; accept without one, then sign in or reset your password"
-        )
+    def __init__(self, way_in: str) -> None:
+        super().__init__(f"This link cannot set a password for this address. Accept without one, then {way_in}.")
 
 
 class WorkspaceActivationUnavailableError(TenancyConflictError):
@@ -331,7 +358,9 @@ __all__ = [
     "OrganizationDomainNotVerifiedError",
     "OrganizationMemberAddressUnprovenError",
     "OrganizationMemberAlreadyExistsError",
+    "OrganizationMemberDeactivatedError",
     "OrganizationMemberNotFoundError",
+    "OrganizationNameInvalidError",
     "OrganizationNameRequiredError",
     "OrganizationNotFoundError",
     "OrganizationSlugUnavailableError",

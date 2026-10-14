@@ -79,7 +79,11 @@ from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.user_service import authenticate, operator_has_password
+from gateway.services.tenancy.user_service import (
+    active_organization_for_session,
+    authenticate,
+    operator_has_password,
+)
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 router = APIRouter(prefix="/auth/session", tags=["auth"])
@@ -172,8 +176,11 @@ class SessionResponse(BaseModel):
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
     user_id: uuid.UUID = Field(description="The identity this session speaks for.")
-    active_organization_id: uuid.UUID = Field(
-        description="The organization that identity is acting in, which scopes every tenancy surface."
+    active_organization_id: uuid.UUID | None = Field(
+        description=(
+            "The organization that identity is acting in, which scopes every tenancy surface. "
+            "Null when it is a member of none, as an invitee who has not accepted yet is."
+        )
     )
 
 
@@ -349,6 +356,7 @@ async def create_session(
         # racing, which the service settles on its own, and a database that
         # cannot stage this cannot stage the session row either.
         await OrganizationDomainService(db).auto_join_for_user(identity)
+        active_organization_id = await active_organization_for_session(db, identity)
         token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
         await db.commit()
     except DATABASE_ERRORS as exc:
@@ -359,7 +367,7 @@ async def create_session(
     return SessionResponse(
         expires_at=expires_at,
         user_id=identity.id,
-        active_organization_id=identity.active_organization_id,
+        active_organization_id=active_organization_id,
     )
 
 

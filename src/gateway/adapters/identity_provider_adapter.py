@@ -71,6 +71,10 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         An account nobody has verified yet is signed in only where ``unverified_identity_is_claimable`` allows,
         the rule the signup form and a password reset follow.
 
+        Under ``open_signup``, claiming an unverified account that no organization still wants (its
+        invitation revoked, declined or lapsed, or the member removed) gives it an organization and
+        workspace of its own and points it at them, the way a new account is created.
+
         ``new_account`` is true when this sign-in created the account, or is the first way in to one an
         organization added and nobody had claimed.
 
@@ -111,6 +115,12 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
             raise OAuthIdentityUnknownError(label)
 
         first_claim = identity.hashed_password is None and identity.email_verified_at is None
+        founds_own_tenancy = (
+            not created
+            and self._open_signup
+            and identity.email_verified_at is None
+            and not await self._organizations.has_live_membership(identity.id)
+        )
         if identity.oauth_provider is None:
             identity.oauth_provider = provider
         if identity.email_verified_at is None or identity.email_vouched_at is not None:
@@ -126,6 +136,8 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         if not identity.full_name and full_name:
             identity.full_name = full_name
         self._users.stage(identity)
+        if founds_own_tenancy:
+            await self._organizations.provision_tenancy_for_claim(identity, full_name=full_name)
         return IdentityResolution(identity=identity, new_account=created or first_claim)
 
 

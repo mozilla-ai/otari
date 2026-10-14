@@ -930,6 +930,34 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
     assert len(pending) == 1
 
 
+async def test_organizations_inviting_one_new_address_at_once_all_succeed(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Each invite creates the address's identity if it is missing; the losers find the winner's."""
+    owners = [owner.id for _, owner in [await _seed_owner(async_db) for _ in range(_RACERS)]]
+
+    async def invite(owner_id: uuid.UUID) -> object:
+        async with sessions() as session:
+            try:
+                owner = await UserRepository(session).get(owner_id)
+                assert owner is not None
+                return await OrganizationService(
+                    session, **membership_writes(session)
+                ).invite_active_organization_member_for_user(
+                    user=owner,
+                    request=InviteOrganizationMemberRequest(email="nova@example.com"),
+                    config=GatewayConfig(),
+                )
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    outcomes = await asyncio.gather(*(invite(owner_id) for owner_id in owners))
+
+    assert [outcome for outcome in outcomes if isinstance(outcome, Exception)] == []
+    assert len(await _identities_with_email(async_db, "nova@example.com")) == 1
+
+
 async def test_concurrent_accepts_of_one_invitation_produce_one_active_membership(
     async_db: AsyncSession,
     sessions: async_sessionmaker[AsyncSession],

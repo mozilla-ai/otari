@@ -61,6 +61,7 @@ from gateway.services.dashboard_session_service import (
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy import webauthn_service
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
+from gateway.services.tenancy.user_service import active_organization_for_session
 
 router = APIRouter(prefix="/auth/webauthn", tags=["auth"])
 
@@ -108,8 +109,11 @@ class PasskeySessionResponse(BaseModel):
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
     user_id: uuid.UUID = Field(description="The identity this session speaks for.")
-    active_organization_id: uuid.UUID = Field(
-        description="The organization that identity is acting in, which scopes every tenancy surface."
+    active_organization_id: uuid.UUID | None = Field(
+        description=(
+            "The organization that identity is acting in, which scopes every tenancy surface. "
+            "Null when it is a member of none."
+        )
     )
 
 
@@ -243,13 +247,14 @@ async def authenticate_passkey(
         raise
     # Same transaction as the session row; see the note in ``auth_session``.
     await OrganizationDomainService(db).auto_join_for_user(identity)
+    active_organization_id = await active_organization_for_session(db, identity)
     token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
     await _commit(db, "persist a dashboard session on a passkey sign-in")
     apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
     return PasskeySessionResponse(
         expires_at=expires_at,
         user_id=identity.id,
-        active_organization_id=identity.active_organization_id,
+        active_organization_id=active_organization_id,
     )
 
 

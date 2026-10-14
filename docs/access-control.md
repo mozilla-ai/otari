@@ -460,7 +460,12 @@ on `open_signup`:
   organization requires an active membership in one already, so a member who was
   removed cannot make themselves a tenant.
 - `true`: an unknown address is registered, with an organization and workspace of
-  its own. Use it where the deployment serves many tenants.
+  its own. Use it where the deployment serves many tenants. So is an address an
+  organization once added or invited but no longer wants (its invitation was
+  revoked, declined or expired, or the member was removed), whether it signs up
+  with the form or with a provider: it gets its own organization and workspace,
+  and signs in to them. An address with an invitation still waiting is claimed as
+  it is, and finds the invitation under Invitations.
 
 Signup never sets a password on an address that is already verified. That is the
 state a Google or GitHub sign-in leaves, and the person who signs in that way
@@ -526,6 +531,27 @@ cannot add or invite it, since the vouching organization's admins could have
 chosen its password. A later provider sign-in on it replaces the password with
 the provider, and resetting the password by email also proves the address;
 either lifts both restrictions.
+
+A link stops working as soon as its membership stops waiting on it: when the
+person is added directly, removed, or accepts or declines from their inbox, any
+invitation still pending for them is cancelled. Revoking an invitation suspends
+the membership only while it is still waiting; a person who became a member
+another way keeps their access. An expired link says it expired every time it is
+opened, and every refusal says to ask the inviter for a new link. An address
+whose account a deployment operator deactivated cannot be invited or added until
+it is reactivated, and an organization name cannot carry line breaks or other
+control characters, since it is quoted in invitation emails.
+
+When a link may not set a password (the address belongs to someone another
+organization still has as a member or invitee), the refusal names the way in this
+deployment offers: a provider sign-in where one is configured, or "Forgot your
+password?" where mail is. Memberships that were revoked, declined, expired or
+removed do not count.
+
+Signing in answers which organization the session acts in. If the person was
+removed from the one they last used, it is the oldest one they still belong to,
+and if they belong to none it is empty; the dashboard then shows their
+invitations.
 
 Invitation tokens are bearer credentials. Whoever holds an unused link can join
 as the invited address, and choose its first password where the link allows one,

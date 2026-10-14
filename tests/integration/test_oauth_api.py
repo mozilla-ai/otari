@@ -723,6 +723,34 @@ def test_open_signup_claims_a_rostered_address_rather_than_founding_a_second_ten
     assert response.json()["user_id"] == user_id
 
 
+def test_open_signup_gives_a_revoked_invitee_an_organization_of_its_own(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    invitation = _invite(client, master_key_header, email="ada@example.com")
+    revoked = client.delete(
+        f"{API_ROOT}/organizations/me/member-invitations/{invitation['invitation_id']}", headers=master_key_header
+    )
+    assert revoked.status_code == 200, revoked.text
+    inviting_organization = _identity(db_session, "ada@example.com").active_organization_id
+    stub_exchange(monkeypatch)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 200, response.text
+    own = response.json()["active_organization_id"]
+    assert own is not None
+    assert own != str(inviting_organization)
+    db_session.expire_all()
+    identity = _identity(db_session, "ada@example.com")
+    assert str(identity.default_organization_id) == own
+    assert client.get(f"{API_ROOT}/organizations/me").json()["role"] == "owner"
+
+
 def test_an_unverified_provider_address_is_refused_even_when_it_is_on_the_roster(
     client: TestClient,
     master_key_header: dict[str, str],

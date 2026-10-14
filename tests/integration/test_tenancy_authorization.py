@@ -359,10 +359,31 @@ async def test_a_suspended_member_has_no_access_at_all(async_db: AsyncSession) -
 
 
 async def test_membership_in_another_organization_grants_nothing(async_db: AsyncSession) -> None:
-    """An owner of one organization is a stranger to the next."""
+    """An owner of one organization is a stranger to the next.
+
+    A pointer at the other organization resolves to the caller's own, never to
+    the one it names.
+    """
     organization = await _organization(async_db, slug="acme")
     other_organization = await _organization(async_db, slug="globex")
     outsider = await _member(async_db, other_organization, role="owner", full_name="Outsider")
+    await UserRepository(async_db).set_active_organization(outsider, organization.id)
+
+    resolved = await OrganizationService(
+        async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+    ).get_active_organization_for_user(outsider)
+
+    assert resolved.id == other_organization.id
+
+
+async def test_an_identity_with_no_membership_anywhere_is_refused(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme")
+    other_organization = await _organization(async_db, slug="globex")
+    outsider = await _member(async_db, other_organization, role="member", full_name="Outsider")
+    members = OrganizationMemberRepository(async_db)
+    membership = await members.get_active_by_organization_and_user(other_organization.id, outsider.id)
+    assert membership is not None
+    await members.update_membership(membership, {"status": "suspended"})
     await UserRepository(async_db).set_active_organization(outsider, organization.id)
 
     with pytest.raises(NotAuthorizedError):
