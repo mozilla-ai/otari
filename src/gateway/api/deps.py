@@ -8,7 +8,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
@@ -37,7 +37,7 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
-from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.budgets import BudgetRepositories, in_reach_of, in_scopes
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
@@ -1641,6 +1641,22 @@ async def _caller_workspace_ids(
 CallerWorkspaces = Annotated[frozenset[uuid.UUID], Depends(_caller_workspace_ids)]
 
 
+def _caller_budgets(organization_id: CallerOrganization) -> ColumnElement[bool]:
+    """The budgets a deployment-wide route may address: the deployment's own and the caller's organization's."""
+    return in_reach_of(organization_id)
+
+
+CallerBudgets = Annotated[ColumnElement[bool], Depends(_caller_budgets)]
+
+
+async def _caller_ceilings(organization_id: CallerOrganization, budgets: BudgetServiceDep) -> ColumnElement[bool]:
+    """The spend ceilings a deployment-wide route may address: those whose scope is in the caller's organization."""
+    return in_scopes(await budgets.scope_ids_in(organization_id))
+
+
+CallerCeilings = Annotated[ColumnElement[bool], Depends(_caller_ceilings)]
+
+
 def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
     """The scope of the deployment-operator trace routes: every workspace in the caller's organization."""
     return TraceScope.workspaces(workspace_ids)
@@ -1660,6 +1676,8 @@ __all__ = [
     "BillingPortDep",
     "CodeExecutionPolicyPortDep",
     "ContainerDep",
+    "CallerBudgets",
+    "CallerCeilings",
     "CallerOrganization",
     "CallerWorkspaces",
     "CurrentIdentity",

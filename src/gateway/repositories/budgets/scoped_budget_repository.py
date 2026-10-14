@@ -71,7 +71,7 @@ class ScopeIdSets:
     api_key_ids: tuple[str, ...]
 
 
-def _in_scopes(scopes: ScopeIdSets) -> ColumnElement[bool]:
+def in_scopes(scopes: ScopeIdSets) -> ColumnElement[bool]:
     """Match a ceiling whose scope ID is in the set for its own scope kind, so an ID never matches across kinds."""
     return or_(
         (ScopedBudget.scope_type == SCOPE_ORGANIZATION) & ScopedBudget.scope_id.in_(scopes.organization_ids),
@@ -157,7 +157,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
 
     async def count_in_scopes(self, scopes: ScopeIdSets) -> int:
         """Count the ceilings on these scopes."""
-        result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(_in_scopes(scopes)))
+        result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(in_scopes(scopes)))
         return result.scalar_one()
 
     async def delete_for_member(self, member_id: uuid.UUID) -> None:
@@ -329,7 +329,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 Budget.request_limit,
             )
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-            .where(_in_scopes(scopes))
+            .where(in_scopes(scopes))
         )
         # NOTE: The scope predicate matches every row on a known scope type, which is what makes the cast sound.
         return [
@@ -360,7 +360,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         result = await self.db.execute(
             select(ScopedBudget, Budget)
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-            .where(_in_scopes(scopes))
+            .where(in_scopes(scopes))
             .order_by(ScopedBudget.created_at, ScopedBudget.id)
             .offset(skip)
             .limit(limit)

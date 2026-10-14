@@ -12,7 +12,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User
 from gateway.rate_limit import BudgetMinuteLimits
-from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.budgets import BudgetRepositories, ScopeIdSets
 from gateway.schemas.budgets import (
     BudgetResponse,
     CreateBudgetRequest,
@@ -69,11 +69,17 @@ class BudgetService:
         self._budgets = repositories.budgets
         self._api_keys = api_keys
         self._organizations = organizations
-        self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
+        self._scopes = ScopeOwnership(organizations, api_keys)
+        self._organization = _OrganizationSurface(repositories, self._scopes, organizations)
         self._end_users = _EndUsers(repositories)
         self._deployment = _DeploymentSurface(repositories)
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
         self._moves = _ReservationMoves(repositories)
+
+    async def scope_ids_in(self, organization_id: uuid.UUID) -> ScopeIdSets:
+        """Return the IDs of every scope of every kind inside an organization, which a spend ceiling can name."""
+        async with self._uow:
+            return await self._scopes.get_scope_ids_in(organization_id)
 
     async def apply_declared_access(
         self,

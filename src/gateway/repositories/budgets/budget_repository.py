@@ -3,7 +3,7 @@ from collections.abc import Collection, Sequence
 from decimal import Decimal
 from typing import Never
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -11,6 +11,11 @@ from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
 from gateway.models.budgets import BUDGET_ORIGIN_CONFIG, Budget, BudgetResetLog
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
+
+
+def in_reach_of(organization_id: uuid.UUID) -> ColumnElement[bool]:
+    """Match a budget the deployment owns, or one this organization owns."""
+    return or_(Budget.organization_id.is_(None), Budget.organization_id == organization_id)
 
 
 class BudgetRepository(BaseRepository[Budget, Never, Never]):
