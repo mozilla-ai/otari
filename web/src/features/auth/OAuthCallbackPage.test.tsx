@@ -409,8 +409,6 @@ describe("OAuthCallbackPage", () => {
     expect(window.location.hash).toBe("#/auth/google/callback")
   })
 
-  // Back from the dashboard used to reopen this page, which replayed the spent
-  // state and said the sign-in "did not start in this tab".
   it("replaces its own history entry on success, so Back skips it", async () => {
     window.location.hash =
       "#/auth/google/callback?code=the-code&state=the-state"
