@@ -41,7 +41,7 @@ _CATALOG_MODELS = (
     ("openai", "gpt-4o-mini"),
     ("anthropic", "claude-sonnet-4-5"),
     ("google", "gemini-2.5-pro"),
-    ("deepseek", "deepseek-chat"),
+    ("deepseek", "deepseek-v4-pro"),
 )
 _TS = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 
