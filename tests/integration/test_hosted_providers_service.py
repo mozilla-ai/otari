@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from any_llm import LLMProvider
 from any_llm.types.model import Model
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -1224,6 +1225,39 @@ async def test_a_discovery_dial_lists_on_the_stored_credential(
     assert call["provider"] == "openai"
     assert call["api_key"] == KEY
     assert call["api_base"] == "https://hosted.test/v1"
+    assert call["client_args"] == {"timeout": 9}
+
+
+async def test_a_discovery_dial_hands_any_llm_the_stored_endpoint(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The endpoint and client extras reach ``alist_models``, as a configured instance's do.
+
+    Whether the provider's own client then honors them is any-llm's: its groq
+    provider drops ``api_base`` when it builds the client.
+    """
+    service = _service(async_db)
+    listed: list[dict[str, object]] = []
+
+    async def _alist_models(**kwargs: object) -> list[Model]:
+        listed.append(kwargs)
+        return [Model(id="llama-3.3-70b", object="model", created=0, owned_by="groq")]
+
+    monkeypatch.setattr("gateway.services.model_discovery_service.alist_models", _alist_models)
+    await service.create_provider(
+        HostedProviderCreateRequest(
+            provider="groq", api_key=KEY, api_base="http://groq.test/openai/v1", client_args={"timeout": 9}
+        )
+    )
+    listed.clear()
+
+    discovery = await (await service.discovery_dials())["groq"]()
+
+    assert discovery.error is None
+    [call] = listed
+    assert call["provider"] == LLMProvider.GROQ
+    assert call["api_key"] == KEY
+    assert call["api_base"] == "http://groq.test/openai/v1"
     assert call["client_args"] == {"timeout": 9}
 
 
