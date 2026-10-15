@@ -182,6 +182,23 @@ The first search provider with the key in the URL and errors inside a 200.
 - Mojeek reports no cost, so the live tests' `EXPECTED` says so, and says what the host relies on
   instead: dated hits and a snippet, since a hit carries no page text.
 
+### 2026-10-15, Serply (iteration two, any-search)
+
+The first search provider with the query in the URL and the key in a header.
+
+- Set `query_in_url` without `key_in_url` when only the query travels in the URL; the real-socket
+  log test still applies, since httpx logs the URL with the query in it.
+- A provider can pass parameters through that its documentation does not list: Serply forwards
+  Google's own `tbs` and `tbm`, which is how `time_range` is mapped. Check each one live before
+  offering it, and say in the docstring when it was checked: `tbm=nws` works, `tbm=isch` returned
+  no `results`.
+- A result can carry a value of the right type that is not what the field promises: Serply
+  sometimes returns an opaque Google token in `link` in place of a URL. Drop such an item rather
+  than failing the whole search, and fill the count from the items after it.
+- A documentation's default can be wrong: Serply documents `desktop` as its `X-User-Agent`
+  default, but its answers reported `mobile`. Describe an option by what it does, not by a default
+  you have not seen.
+
 ### 2026-10-13, Tabstack (the first fetch-only provider)
 
 - The error shape a provider documents may not be what it sends. Tabstack documents
