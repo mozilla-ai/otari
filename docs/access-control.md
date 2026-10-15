@@ -408,6 +408,101 @@ service minting thousands a day does not fill the keys page; each carries
 keys with `GET /api/v1/keys/{key_id}/end-user-keys` and
 `PATCH /api/v1/keys/{key_id}/end-user-keys/{child_key_id}`.
 
+#### Signed end-user tokens
+
+Minting puts Otari on the path of every job start. A service can instead sign
+each job a token itself, offline, and the token authenticates as an end-user key
+on its first use. It carries the mint request's fields and is held to exactly
+the same bounds.
+
+The deployment turns it on with `end_user_tokens_enabled: true` (off by
+default, standalone mode only). A service key that may mint (one with
+`max_child_ttl_sec`) then registers the public half of an Ed25519 key pair with
+its own key; the private half never leaves the service:
+
+```http
+POST /api/v1/end-user-signing-keys
+Authorization: Bearer <service key>
+
+{"public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA...\n-----END PUBLIC KEY-----\n",
+ "name": "2026-10"}
+```
+
+The answer (201) carries the `kid` Otari assigned, which every token names. A
+key that may not mint, a key past five signing keys (409), and anything but an
+Ed25519 public key in PEM form (400, a private key included) are refused.
+
+A token is `otari-eut1.` followed by a compact JWS signed with `EdDSA`. Its
+header is exactly `{"alg": "EdDSA", "typ": "otari-eut+jwt", "kid": "<kid>"}`,
+and its claims are:
+
+| Claim | |
+|---|---|
+| `iss` | Required: `otari:api-key:<the service key's id>` |
+| `sub` | Required: the end user's `external_id` |
+| `iat`, `exp` | Required, integer seconds. `exp - iat` is at most the service key's `max_child_ttl_sec`; `exp` is also when the key expires |
+| `jti` | Required: one id per token, 1 to 128 printable ASCII characters without spaces, such as the run id |
+| `budget_id`, `tags`, `allowed_models` | Optional, as on the mint route |
+
+Any other claim or header field refuses the token, and so does any other `alg`.
+A token whose `iat` is more than 60 seconds ahead of Otari's clock is refused,
+and so is one at or past its `exp`. In Python, with PyJWT and `cryptography`:
+
+```python
+import time
+
+import jwt
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+private_key = load_pem_private_key(open("signing-key.pem", "rb").read(), password=None)
+now = int(time.time())
+claims = {
+    "iss": f"otari:api-key:{SERVICE_KEY_ID}",
+    "sub": "run-1234",
+    "iat": now,
+    "exp": now + 3600,
+    "jti": "run-1234",
+    "budget_id": "per-run",
+    "tags": {"agent": "bug-fix", "requested_by": "alice"},
+}
+token = "otari-eut1." + jwt.encode(
+    claims, private_key, algorithm="EdDSA", headers={"kid": KID, "typ": "otari-eut+jwt"}
+)
+```
+
+The job presents the token wherever it would present a key
+(`Authorization: Bearer`, `Otari-Key` or `x-api-key`). Its first use creates the
+end user, when it is new, and an end-user key that `GET /api/v1/end-user-keys`
+lists, keyed by the service key and `jti`, so concurrent first uses converge on
+one key. Every later use must be the same token: one reusing the `jti` with any
+claim changed, or signed by another of the service key's signing keys, is
+refused. From then on a request is exactly a request on a minted key, as above.
+
+Every refusal is the 401 an unknown key gets; the `gateway_auth_failures`
+metric records why, under a reason starting `end_user_token_`. A token stops
+working:
+
+- when its key is revoked: find it with `GET /api/v1/end-user-keys?jti=<jti>`
+  and `PATCH` it inactive as any minted key, or delete it as an operator. A
+  token is never materialized twice, so neither brings it back;
+- when its signing key is deleted, `DELETE /api/v1/end-user-signing-keys/{kid}`,
+  which refuses every token that key signed, used or not, and revokes the keys
+  they became. Rotate by registering a new key, signing with it, and deleting the
+  old one once its tokens have expired;
+- when the service key stops being able to mint (`max_child_ttl_sec` cleared),
+  or is inactive, expired or deleted, as for any minted key.
+
+A token not yet used cannot be revoked by its `jti`; deleting its signing key is
+the way. An operator reads and deletes a service key's signing keys with
+`GET /api/v1/keys/{key_id}/end-user-signing-keys` and
+`DELETE /api/v1/keys/{key_id}/end-user-signing-keys/{kid}`.
+
+The `otari-eut1.` prefix is what tells a token from a key or any other bearer
+token, before anything is parsed: a compact JWT has two dots and the prefix
+adds a third, so no path that reads a JWT, such as an OpenID Connect identity
+token, ever reads one of these, and a JWT without the prefix is never read as
+one. The `iss` is not a URL for the same reason.
+
 ### Where end users apply
 
 End users are supported on the endpoints above. The other endpoints

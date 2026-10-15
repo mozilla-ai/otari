@@ -94,6 +94,7 @@ the corresponding startup value after the database is available.
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
+| `end_user_tokens_enabled` | Lets a service key that may mint end-user keys register Ed25519 public keys, and authenticates the end-user tokens its control plane signs with them. Defaults to `false`. See [Signed end-user tokens](access-control.md#signed-end-user-tokens). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
