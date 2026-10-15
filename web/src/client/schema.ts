@@ -10409,8 +10409,6 @@ export interface components {
         HostedModelCreateRequest: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /** Input Price Per Million */
@@ -10433,8 +10431,6 @@ export interface components {
         HostedModelPublic: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /**
@@ -10478,8 +10474,6 @@ export interface components {
         HostedModelUpdateRequest: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /** Enabled */

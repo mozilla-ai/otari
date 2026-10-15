@@ -7730,18 +7730,6 @@
             ],
             "title": "Cache Read Price Per Million"
           },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
-          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -7804,17 +7792,6 @@
               }
             ],
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -7927,18 +7904,6 @@
               }
             ],
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
