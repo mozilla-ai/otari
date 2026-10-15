@@ -59,6 +59,9 @@ def with_bedrock_read_timeout(client_args: Mapping[str, Any] | None) -> dict[str
     a YAML file gives, is merged over the default, so a read timeout it sets wins.
     A pre-built ``client`` is left as built. The mapping is copied, never mutated,
     because it can be the one held by the deployment's config.
+
+    Raises:
+        ValueError: ``config`` is neither a ``Config`` nor a mapping.
     """
     args = dict(client_args or {})
     if "client" in args:
@@ -71,6 +74,9 @@ def with_bedrock_read_timeout(client_args: Mapping[str, Any] | None) -> dict[str
         args["config"] = default.merge(config)
     elif isinstance(config, Mapping):
         args["config"] = default.merge(Config(**config))
+    else:
+        msg = f"Bedrock client_args.config must be a botocore Config or a mapping, not {type(config).__name__}."
+        raise ValueError(msg)
     return args
 
 

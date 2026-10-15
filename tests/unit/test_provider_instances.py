@@ -122,6 +122,25 @@ def test_validate_rejects_non_list_models() -> None:
         config.validate_provider_instances()
 
 
+@pytest.mark.parametrize(
+    ("providers", "match"),
+    [
+        ({"bedrock": {"client_args": {"config": {"read_timeot": 120}}}}, "not a valid botocore Config"),
+        ({"aws": {"provider_type": "bedrock", "client_args": {"config": 120}}}, "must be a mapping"),
+    ],
+)
+def test_validate_rejects_a_bedrock_config_botocore_cannot_build(providers: dict[str, Any], match: str) -> None:
+    """Every Bedrock client merges this config in, so a typo would fail each request instead."""
+    with pytest.raises(ValueError, match=match):
+        GatewayConfig(providers=providers).validate_provider_instances()
+
+
+def test_validate_accepts_a_bedrock_config_botocore_can_build() -> None:
+    GatewayConfig(
+        providers={"bedrock": {"client_args": {"config": {"read_timeout": 120}}}}
+    ).validate_provider_instances()  # no raise
+
+
 def test_validate_allows_instance_without_provider_type() -> None:
     # Backward compatible: keys that are real providers need no provider_type and
     # are not hard-validated here.

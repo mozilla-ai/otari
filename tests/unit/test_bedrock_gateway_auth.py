@@ -112,3 +112,8 @@ def test_a_prebuilt_client_and_the_callers_mapping_are_left_alone() -> None:
     no_config: dict[str, Any] = {"region_name": "us-east-1"}
     with_bedrock_read_timeout(no_config)
     assert "config" not in no_config
+
+
+def test_a_config_botocore_cannot_take_is_refused() -> None:
+    with pytest.raises(ValueError, match="botocore Config or a mapping"):
+        with_bedrock_read_timeout({"config": 120})

@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import yaml
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
+from botocore.config import Config as BotocoreConfig
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -487,6 +488,25 @@ class RelyingParty(NamedTuple):
 
 # Gotcha: fields are ordered last base first, then this class's own.
 # The settings view keeps that order, so moving a base reorders it.
+def _validate_bedrock_client_config(instance: str, client_args: Any) -> None:
+    """Fail at startup on a Bedrock ``client_args.config`` botocore cannot build.
+
+    The gateway merges it into every Bedrock client it builds, so a typo in an
+    option name would otherwise fail each request with a ``TypeError``.
+    """
+    config = client_args.get("config") if isinstance(client_args, dict) else None
+    if config is None or isinstance(config, BotocoreConfig):
+        return
+    if not isinstance(config, dict):
+        msg = f"providers.{instance}.client_args.config must be a mapping of botocore Config options."
+        raise ValueError(msg)
+    try:
+        BotocoreConfig(**config)
+    except TypeError as exc:
+        msg = f"providers.{instance}.client_args.config is not a valid botocore Config: {exc}"
+        raise ValueError(msg) from exc
+
+
 class GatewayConfig(
     InferenceSettings,
     BudgetSettings,
@@ -1992,6 +2012,7 @@ class GatewayConfig(
             if not isinstance(entry, dict):
                 continue
             declared = entry.get("provider_type")
+            impl = instance
             if isinstance(declared, str) and declared:
                 impl = PROVIDER_TYPE_ALIASES.get(declared, declared)
                 try:
@@ -1999,6 +2020,8 @@ class GatewayConfig(
                 except ValueError as exc:
                     msg = f"providers.{instance}.provider_type '{declared}' is not a known provider implementation."
                     raise ValueError(msg) from exc
+            if impl == LLMProvider.BEDROCK.value:
+                _validate_bedrock_client_config(instance, entry.get("client_args"))
             models = entry.get("models")
             if models is not None and not (isinstance(models, list) and all(isinstance(m, str) for m in models)):
                 msg = f"providers.{instance}.models must be a list of model id strings."
