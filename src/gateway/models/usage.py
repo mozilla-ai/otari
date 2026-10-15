@@ -14,8 +14,9 @@ from gateway.models.money import UsdCost
 # Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
 PRICING_REFERENCE_MAX_LENGTH = 511
 
-# The bounds on the tags a usage row carries, OpenAI's for ``metadata``: 16
-# pairs, keys up to 64 characters, values up to 512.
+# The bounds on a request's tags and on a key's own, OpenAI's for ``metadata``:
+# 16 pairs, keys up to 64 characters, values up to 512. A usage row carries
+# both merged, so it may hold up to twice as many pairs.
 MAX_REQUEST_TAGS = 16
 MAX_TAG_KEY_LENGTH = 64
 MAX_TAG_VALUE_LENGTH = 512
