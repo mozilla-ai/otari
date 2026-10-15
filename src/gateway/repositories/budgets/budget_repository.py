@@ -97,8 +97,14 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         return result.scalar_one_or_none()
 
     async def list_in_reach_of(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
-        """Return a page of the budgets the deployment owns and this organization owns."""
-        result = await self.db.execute(select(Budget).where(_in_reach_of(organization_id)).offset(skip).limit(limit))
+        """Return a page of the budgets the deployment owns and this organization owns, oldest first."""
+        result = await self.db.execute(
+            select(Budget)
+            .where(_in_reach_of(organization_id))
+            .order_by(Budget.created_at, Budget.budget_id)
+            .offset(skip)
+            .limit(limit)
+        )
         return list(result.scalars().all())
 
     async def get_many(self, budget_ids: Sequence[str]) -> dict[str, Budget]:
