@@ -417,7 +417,7 @@ export function ModelDetailView({
     (model) => model.pricing === null,
   ).length
   const defaultPricing = model.default_pricing
-  // All false is what a model models.dev does not describe looks like, so it
+  // A model models.dev does not describe has every flag false, so all false
   // reads as unknown rather than as five refusals.
   const hasCapabilities = CAPABILITY_LABELS.some(
     ({ key }) => model.capabilities[key],
