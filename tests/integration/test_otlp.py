@@ -742,9 +742,14 @@ def _claude_export(*spans: dict[str, Any], scope: str = "com.anthropic.claude-pl
 
 
 def _messages_create(
-    span_id: str = "1" * 16, *, kind: int = 2, compaction: dict[str, Any] | None = None
+    span_id: str = "1" * 16,
+    *,
+    kind: int = 2,
+    compaction: dict[str, Any] | None = None,
+    stream: bool = False,
 ) -> dict[str, Any]:
     attrs = {
+        **({"gen_ai.request.stream": True} if stream else {}),
         **_CLAUDE_USAGE,
         "gen_ai.operation.name": "chat",
         "gen_ai.request.model": "claude-opus-latest",
@@ -794,8 +799,9 @@ def test_otlp_claude_platform_request_is_booked_once(
     request = rows["msg_claude_1"]
     assert (request.provider, request.model) == ("anthropic", "claude-opus-4-8")
     assert (request.prompt_tokens, request.cache_read_tokens, request.cache_write_tokens) == (1000, 200, 100)
-    # Input counts the cache, so 700 fresh tokens; the 1h share of the write bills at its own rate.
-    expected = _usd(700, "15") + _usd(200, "1.5") + _usd(60, "18.75") + _usd(40, "30") + _usd(50, "75")
+    assert request.cache_write_1h_tokens == 40
+    # Input counts the cache, so 700 fresh tokens; both TTLs bill at the one cache-write rate.
+    expected = _usd(700, "15") + _usd(200, "1.5") + _usd(100, "18.75") + _usd(50, "75")
     assert request.cost == expected
     assert rows["msg_claude_1:compaction"].cost == _usd(300, "15") + _usd(20, "75")
 
@@ -810,6 +816,20 @@ def test_otlp_claude_sdk_and_api_spans_of_one_request_are_one_row(
     client.post("/otlp/v1/traces", json=_claude_export(_messages_create()), headers=headers)
 
     assert list(_claude_rows(db_session)) == ["msg_claude_1"]
+
+
+def test_otlp_claude_streamed_sdk_span_leaves_the_1h_split_unknown(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A streamed SDK span splits only the writes before the first token, so its 1h count is not kept."""
+    headers = _exempt_key(client, master_key_header)
+    sdk = _claude_export(_messages_create("4" * 16, kind=3, stream=True), scope="com.anthropic.sdk.python")
+
+    resp = client.post("/otlp/v1/traces", json=sdk, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    [row] = _claude_rows(db_session).values()
+    assert (row.cache_write_tokens, row.cache_write_1h_tokens) == (100, 0)
 
 
 def test_otlp_claude_managed_agents_session_is_booked_per_model_request(

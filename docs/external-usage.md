@@ -145,17 +145,22 @@ treats a redirect as fatal, so the URL must reach Otari directly. Full content
 gains nothing here, since Otari keeps no prompt or response, and its larger
 spans can push an export past the 8 MiB request limit. Every span of the
 destination binds to the one key's user, so to keep Claude workspaces apart,
-add one destination per workspace, each with its own key.
+add one destination per workspace, each with its own key, and set its
+**Workspaces** to **Selected** with only that workspace. The Claude API sends a
+workspace's spans to every destination that covers it, so two destinations left
+on **All** would each book the same usage under a different key.
 
 Spans from the Claude Platform and from the Claude SDKs (instrumentation scope
 `com.anthropic.*`) are recorded under the source `claude_platform`, and each
 token is booked once even though a request repeats its usage on several spans:
 
 - A Messages API request is booked from its `anthropic.messages.create` span,
-  keyed by the response id, at the model that served it, with its cache reads,
-  5-minute and 1-hour cache writes, and a second row for its compactions'
-  tokens. When the SDK and the API both export the request, the second span is
-  a duplicate.
+  keyed by the response id, at the model that served it, with its cache reads
+  and cache writes, and a second row for its compactions' tokens. Cache writes
+  bill at the one cache-write rate; the 1-hour share is kept as its own count,
+  except from a streamed request's SDK span, which splits out only the writes
+  made before the first output token. When the SDK and the API both export the
+  request, the second span is a duplicate.
 - A Managed Agents session is booked from its `anthropic.model_request` spans,
   labeled with the session id, which also groups the session's threads into one
   agent trace.

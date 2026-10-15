@@ -18,12 +18,13 @@ completions, and tool payloads are rejected by the request schema, not stored.
 
 import functools
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -140,6 +141,148 @@ class ExternalEventsRequest(BaseModel):
                 f"source '{SERVED_HERE_SLUG}' is reserved for usage Otari served itself; pick another slug."
             )
         return value
+
+
+# Spans from the Claude Platform (a Console telemetry destination) and the Claude SDKs.
+# Their usage repeats on several levels of one request's span tree, so they get their
+# own mapping rather than the generic GenAI one, which would book every level.
+CLAUDE_SCOPE_PREFIX = "com.anthropic."
+CLAUDE_SOURCE = "claude_platform"
+_CLAUDE_SDK_SCOPE_PREFIX = "com.anthropic.sdk."
+# The SDKs name the cloud a Claude client reaches in their own words.
+_CLAUDE_PROVIDERS = {"aws.bedrock": "bedrock", "gcp.vertex_ai": "vertexaianthropic"}
+
+
+def _count(value: Any) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _claude_event(
+    attrs: Mapping[str, Any],
+    *,
+    event_id: str,
+    model: Any,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read: int = 0,
+    cache_write: int = 0,
+    cache_write_1h: int = 0,
+    reasoning: int = 0,
+    timestamp: datetime | None,
+    duration_ms: float | None,
+    failed: bool,
+) -> ExternalUsageEvent | None:
+    provider = str(attrs.get("gen_ai.provider.name") or "anthropic")
+    session = attrs.get("anthropic.session.id") or attrs.get("gen_ai.conversation.id")
+    if not (model and timestamp and (input_tokens or output_tokens)):
+        return None
+    try:
+        return ExternalUsageEvent(
+            source_event_id=event_id,
+            timestamp=timestamp,
+            provider=_CLAUDE_PROVIDERS.get(provider, provider),
+            model=str(model),
+            status="error" if failed else "success",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            cache_write_1h_tokens=cache_write_1h,
+            reasoning_tokens=reasoning,
+            # ``gen_ai.usage.input_tokens`` counts the cache reads and writes here,
+            # unlike Claude Code's additive counts.
+            cache_tokens_in_prompt=True,
+            duration_ms=int(duration_ms) if duration_ms is not None else None,
+            session_label=str(session) if session else None,
+        )
+    except ValidationError:
+        return None
+
+
+def claude_usage_events(
+    name: str,
+    attrs: Mapping[str, Any],
+    *,
+    scope: str,
+    span_key: str,
+    timestamp: datetime | None,
+    duration_ms: float | None,
+    failed: bool,
+) -> list[ExternalUsageEvent]:
+    """Map one Claude Platform or Claude SDK span onto the usage it alone accounts for.
+
+    A request's usage repeats on its ``anthropic.messages.create`` span, the
+    ``anthropic.model_request`` spans under it and its ``anthropic.compaction``
+    spans, so each token is booked from one level only: the request span on the
+    Messages API, which also carries its compactions' tokens, and the model
+    request spans in a Managed Agents session, which has no request span with
+    usage. The SDK's client span and the API's server span for one request share
+    a response id, so whichever arrives second is a duplicate. Outcome evaluation
+    spans carry tokens but no model to price them by, and are not booked.
+
+    ``span_key`` identifies the span itself (its trace and span ids), for the rows
+    that have no response id to key on.
+    """
+    events: list[ExternalUsageEvent | None] = []
+    if name == "anthropic.messages.create":
+        response_id = attrs.get("gen_ai.response.id")
+        if not response_id:
+            return []
+        model = attrs.get("gen_ai.response.model") or attrs.get("gen_ai.request.model")
+        # A streamed response's SDK span splits out only the cache writes made before
+        # the first output token, so its 1h share is left unknown; the write total is whole.
+        partial_split = scope.startswith(_CLAUDE_SDK_SCOPE_PREFIX) and attrs.get("gen_ai.request.stream") is True
+        events.append(
+            _claude_event(
+                attrs,
+                event_id=str(response_id),
+                input_tokens=_count(attrs.get("gen_ai.usage.input_tokens")),
+                output_tokens=_count(attrs.get("gen_ai.usage.output_tokens")),
+                cache_read=_count(attrs.get("gen_ai.usage.cache_read.input_tokens")),
+                cache_write=_count(attrs.get("gen_ai.usage.cache_write.input_tokens")),
+                cache_write_1h=0
+                if partial_split
+                else _count(attrs.get("anthropic.usage.cache_creation.ephemeral_1h_input_tokens")),
+                reasoning=_count(attrs.get("gen_ai.usage.reasoning.output_tokens")),
+                model=model,
+                timestamp=timestamp,
+                duration_ms=duration_ms,
+                failed=failed,
+            )
+        )
+        # Compaction tokens are outside the request's ``gen_ai.usage.*`` counts and
+        # carry no cache breakdown, so their cached share bills at the input rate.
+        events.append(
+            _claude_event(
+                attrs,
+                event_id=f"{response_id}:compaction",
+                input_tokens=_count(attrs.get("anthropic.usage.compaction.input_tokens")),
+                output_tokens=_count(attrs.get("anthropic.usage.compaction.output_tokens")),
+                model=model,
+                timestamp=timestamp,
+                duration_ms=None,
+                failed=failed,
+            )
+        )
+    elif name == "anthropic.model_request" and attrs.get("anthropic.session.id"):
+        events.append(
+            _claude_event(
+                attrs,
+                event_id=span_key,
+                model=attrs.get("gen_ai.response.model") or attrs.get("gen_ai.request.model"),
+                input_tokens=_count(attrs.get("gen_ai.usage.input_tokens")),
+                output_tokens=_count(attrs.get("gen_ai.usage.output_tokens")),
+                cache_read=_count(attrs.get("gen_ai.usage.cache_read.input_tokens")),
+                cache_write=_count(attrs.get("gen_ai.usage.cache_write.input_tokens")),
+                timestamp=timestamp,
+                duration_ms=duration_ms,
+                failed=failed,
+            )
+        )
+    return [event for event in events if event is not None]
 
 
 class ExternalIngestError(BaseModel):
