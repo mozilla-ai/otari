@@ -2163,6 +2163,10 @@ export interface paths {
          *     operator-gated because a provider error message describes the gateway's own
          *     configuration.
          *
+         *     Covers the configured provider instances and every hosted provider switched
+         *     on, whatever organization it is restricted to. A hosted provider that a
+         *     configured instance of the same name shadows is not listed.
+         *
          *     Answers from the discovery cache, which a background refresher keeps warm, so
          *     the call does not wait on a slow or unreachable provider. Each provider
          *     carries the ``checked_at`` its result was produced at; a null one has not been
@@ -4752,6 +4756,10 @@ export interface paths {
         /**
          * Provider Health
          * @description Report every configured provider's reachability, with a last-checked time.
+         *
+         *     Covers the configured provider instances and every hosted provider switched
+         *     on, each hosted provider under its provider name. One whose stored key no
+         *     configured `OTARI_SECRET_KEY` reads is reported unreachable with that reason.
          *
          *     Reuses the per-provider model-discovery test path, so a provider is healthy
          *     when its credentials can list models. Results are served from the discovery

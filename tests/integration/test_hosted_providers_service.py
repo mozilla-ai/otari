@@ -50,7 +50,7 @@ from gateway.schemas.providers import (
     HostedProviderCreateRequest,
     HostedProviderUpdateRequest,
 )
-from gateway.services.model_discovery_service import ProviderDiscovery
+from gateway.services.model_discovery_service import ProviderDiscovery, get_model_cache
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.providers import HostedProviderService
@@ -1180,3 +1180,83 @@ async def test_a_credential_no_configured_key_can_read_is_unserved_rather_than_f
     assert await service.resolve("openai", organization_id=None) is None
     assert await service.serveable_models(organization_id=None) == {}
     assert (await service.list_providers()).data[0].api_key_last4 == "1234"
+
+
+# --------------------------------------------------------------------------- #
+# Discovery and health
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_discovery_dials_are_the_deployments_view(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every provider switched on, a restricted one included; one switched off is not there."""
+    owner = await _organization(async_db, "owner")
+    service = _service(async_db)
+    _discovery(monkeypatch, "gpt-4o")
+    await service.create_provider(
+        HostedProviderCreateRequest(provider="openai", api_key=KEY, restricted_to_organization_id=owner.id)
+    )
+    await service.create_provider(HostedProviderCreateRequest(provider="mistral", api_key=KEY))
+    await service.create_provider(HostedProviderCreateRequest(provider="anthropic", api_key=KEY, enabled=False))
+
+    dials = await service.discovery_dials()
+
+    assert set(dials) == {"openai", "mistral"}
+
+
+async def test_a_discovery_dial_lists_on_the_stored_credential(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service(async_db)
+    calls = _discovery(monkeypatch, "gpt-4o")
+    await service.create_provider(
+        HostedProviderCreateRequest(
+            provider="openai", api_key=KEY, api_base="https://hosted.test/v1", client_args={"timeout": 9}
+        )
+    )
+    calls.clear()
+
+    discovery = await (await service.discovery_dials())["openai"]()
+
+    assert [model.id for model in discovery.models] == ["gpt-4o"]
+    [call] = calls
+    assert call["provider"] == "openai"
+    assert call["api_key"] == KEY
+    assert call["api_base"] == "https://hosted.test/v1"
+    assert call["client_args"] == {"timeout": 9}
+
+
+async def test_an_undecryptable_provider_is_reported_to_discovery_without_a_dial(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service(async_db)
+    calls = _discovery(monkeypatch, "gpt-4o")
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    calls.clear()
+
+    discovery = await (await service.discovery_dials())["openai"]()
+
+    assert discovery.models == []
+    assert discovery.error is not None and "OTARI_SECRET_KEY" in discovery.error
+    assert KEY not in discovery.error
+    assert calls == []
+
+
+async def test_a_change_to_a_provider_drops_its_cached_listing(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The next read dials the credential as it now stands, not the listing made on the old one."""
+    service = _service(async_db)
+    _discovery(monkeypatch, "gpt-4o")
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
+    cache = get_model_cache()
+    cache.set("openai", [Model(id="stale", object="model", created=0, owned_by="openai")])
+
+    await service.update_provider("openai", HostedProviderUpdateRequest(api_key="sk-live-rotated-5678"))
+    assert cache.stale("openai") is None
+
+    cache.set("openai", [Model(id="stale", object="model", created=0, owned_by="openai")])
+    await service.delete_provider("openai")
+    assert cache.stale("openai") is None

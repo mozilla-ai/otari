@@ -11,6 +11,7 @@ resolves community defaults: every use case reads in one block, dials, then
 writes in another.
 """
 
+import functools
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -50,7 +51,12 @@ from gateway.schemas.providers import (
     HostedProvidersPublic,
     HostedProviderUpdateRequest,
 )
-from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
+from gateway.services.model_discovery_service import (
+    DiscoveryDial,
+    ProviderDiscovery,
+    get_model_cache,
+    test_provider_credentials,
+)
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.providers._hosted_catalog_sweep import UNDECRYPTABLE, HostedCatalogSweep, LiveByoPairs
 from gateway.services.providers._hosted_credentials import (
@@ -220,7 +226,10 @@ class HostedProviderService:
                 await self._require_organization(request.restricted_to_organization_id)
                 row.restricted_to_organization_id = request.restricted_to_organization_id
             await self.providers.save(row)
-            return self._public(row, client_args=client_args_of(row))
+            public = self._public(row, client_args=client_args_of(row))
+        # The cached listing was made on what this request may just have changed.
+        get_model_cache().clear(row.provider)
+        return public
 
     async def delete_provider(self, provider: str) -> None:
         """Remove a provider and the roster offered on it. Pricing history stays.
@@ -232,6 +241,7 @@ class HostedProviderService:
             row = await self._provider_or_raise(provider)
             await self.models.delete_for_provider(row.provider)
             await self.providers.delete_row(row)
+        get_model_cache().clear(row.provider)
 
     async def list_models(self, provider: str, *, skip: int = 0, limit: int = 500) -> HostedModelsPublic:
         """One page of a provider's offered models, each priced as it currently serves.
@@ -395,6 +405,27 @@ class HostedProviderService:
         """A usable credential for ``provider`` on behalf of ``organization_id``, or None."""
         return await self.runtime.resolve(provider, model, organization_id=organization_id)
 
+    async def discovery_dials(self) -> dict[str, DiscoveryDial]:
+        """Each provider switched on, with the dial that lists its models on the stored credential.
+
+        The deployment's view, for model discovery and provider health: a
+        provider restricted to one organization is here too. One whose
+        ciphertext no configured key reads is here with a dial that reports
+        that rather than calling out, because an operator checking health is
+        the reader who has to learn it.
+        """
+        async with self.uow:
+            rows = [row for row in await self.providers.list_all() if row.enabled]
+        dials: dict[str, DiscoveryDial] = {}
+        for row in rows:
+            credential = credential_of(row, quiet=True)
+            dials[row.provider] = (
+                functools.partial(_undecryptable, row.provider)
+                if credential is None
+                else functools.partial(self._dial, row.provider, credential)
+            )
+        return dials
+
     async def _dial(self, provider: str, credential: ResolvedHostedProvider) -> ProviderDiscovery:
         return await test_provider_credentials(
             provider,
@@ -433,6 +464,10 @@ class HostedProviderService:
         if model is None:
             raise HostedModelNotFoundError(model_id)
         return model
+
+
+async def _undecryptable(provider: str) -> ProviderDiscovery:
+    return ProviderDiscovery(provider=provider, models=[], error=UNDECRYPTABLE)
 
 
 def _listed(discovery: ProviderDiscovery) -> set[str]:

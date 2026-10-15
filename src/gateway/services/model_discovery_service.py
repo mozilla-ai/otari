@@ -27,7 +27,7 @@ of upstream calls:
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -263,6 +263,17 @@ def _supports_list_models(provider_name: str) -> bool:
         return False
 
 
+# Lists one provider's models on a credential the caller already holds,
+# reporting failure rather than raising, as ``_discover_uncached`` does.
+DiscoveryDial = Callable[[], Awaitable[ProviderDiscovery]]
+
+# The deployment's hosted providers, each with the dial that lists its models.
+# Injected, because the providers domain holds their credentials: the names are
+# read in one transaction and the dials made after it, so no session is open
+# across an upstream call or shared between concurrent ones.
+HostedDiscovery = Callable[[], Awaitable[Mapping[str, DiscoveryDial]]]
+
+
 def _discoverable_instances(config: GatewayConfig) -> list[str]:
     """Instance names to run discovery for: the configured provider instances only.
 
@@ -275,6 +286,20 @@ def _discoverable_instances(config: GatewayConfig) -> list[str]:
     happens to be present in the environment.
     """
     return list(config.providers.keys())
+
+
+async def discovery_sources(config: GatewayConfig, hosted: HostedDiscovery | None) -> dict[str, DiscoveryDial | None]:
+    """The configured instances, then the hosted providers no instance shadows.
+
+    ``None`` in place of a dial means a configured instance, dialed from
+    ``config``. A hosted provider an instance of the same name shadows is left
+    out, because the instance serves every request that names it.
+    """
+    sources: dict[str, DiscoveryDial | None] = dict.fromkeys(_discoverable_instances(config))
+    if hosted is not None:
+        for provider, dial in (await hosted()).items():
+            sources.setdefault(provider, dial)
+    return sources
 
 
 def _declared_models(config: GatewayConfig, instance: str) -> list[Model]:
@@ -467,6 +492,7 @@ async def discover_provider_models(
     *,
     serve_stale: bool = False,
     force: bool = False,
+    dial: DiscoveryDial | None = None,
 ) -> ProviderDiscovery:
     """Discover one instance's models, cached (positive + negative) and single-flighted.
 
@@ -480,13 +506,16 @@ async def discover_provider_models(
     expired so the provider is dialed, without clearing the cache first: the
     in-flight registration still coalesces concurrent callers, so the background
     refresher and a request arriving mid-tick share one dial rather than racing.
+
+    ``dial`` lists a hosted provider's models in place of the configured
+    instance's (see :data:`HostedDiscovery`); it is cached under the same name.
     """
     cache = get_model_cache()
     return await cache.get_or_discover(
         instance,
         positive_ttl=0 if force else config.model_cache_ttl_seconds,
         negative_ttl=0 if force else config.model_discovery_negative_ttl_seconds,
-        discover=lambda: _discover_uncached(config, instance),
+        discover=dial or (lambda: _discover_uncached(config, instance)),
         serve_stale=serve_stale and not force,
     )
 
@@ -565,23 +594,29 @@ async def test_provider_credentials(
 async def discover_models_with_status(
     config: GatewayConfig,
     *,
+    hosted: HostedDiscovery | None,
     serve_stale: bool = False,
     force: bool = False,
 ) -> list[ProviderDiscovery]:
-    """Discover every configured instance's models concurrently, keeping errors.
+    """Discover every configured instance's and hosted provider's models concurrently, keeping errors.
 
     Deliberately not gated on ``config.model_discovery``: that flag governs what
     GET /v1/models publishes to API callers, and an operator who curates that
     listing still has to be able to see what their own credentials can reach.
-    Scoped to the configured provider instances (``_discoverable_instances``), so
-    this operator view agrees with GET /v1/models.
+    That includes the deployment's hosted providers (``hosted``), every one of
+    them whatever organization it is restricted to, since this is the
+    deployment's view and not any tenant's.
     """
-    instances = _discoverable_instances(config)
+    sources = await discovery_sources(config, hosted)
+    instances = list(sources)
     # return_exceptions so one provider that somehow escapes _discover_uncached
     # cannot 500 the whole operator listing (this route awaits with no guard);
     # surface it as a per-provider error instead. Real cancellation still bubbles.
     results = await asyncio.gather(
-        *(discover_provider_models(config, name, serve_stale=serve_stale, force=force) for name in instances),
+        *(
+            discover_provider_models(config, name, serve_stale=serve_stale, force=force, dial=dial)
+            for name, dial in sources.items()
+        ),
         return_exceptions=True,
     )
     discoveries: list[ProviderDiscovery] = []
@@ -609,6 +644,11 @@ async def discover_all_models(
     (``_discoverable_instances``): a provider only sources models once an operator
     has configured it (in config.yml or via the Providers page), so an empty
     gateway lists nothing even if a provider's credential env var is present.
+
+    A hosted provider is not dialed here, although the operator views above
+    dial it. What it contributes to the catalog is the roster the operator
+    switched on, which ``ModelProviderPort`` answers per organization; its
+    upstream listing is wider than that, and the same for every organization.
 
     Args:
         config: Gateway configuration with provider credentials.
@@ -713,19 +753,21 @@ def _refresh_interval(config: GatewayConfig, *, had_failure: bool = False) -> fl
     return max(_MIN_REFRESH_INTERVAL_SECONDS, interval)
 
 
-async def refresh_discovery_cache(config: GatewayConfig) -> bool:
-    """Re-dial every configured provider and store the result.
+async def refresh_discovery_cache(config: GatewayConfig, *, hosted: HostedDiscovery | None) -> bool:
+    """Re-dial every configured instance and hosted provider and store the result.
 
     Returns whether any provider reported a failure, which sets the next tick's
     delay. Failures are already per-provider (``discover_models_with_status``
     reports them rather than raising), so this only guards against an unexpected
     error taking the refresher down with it.
     """
-    discoveries = await discover_models_with_status(config, force=True)
+    discoveries = await discover_models_with_status(config, hosted=hosted, force=True)
     return any(discovery.error is not None for discovery in discoveries)
 
 
-async def run_discovery_refresher(config: GatewayConfig, interval: float | None = None) -> None:
+async def run_discovery_refresher(
+    config: GatewayConfig, *, hosted: HostedDiscovery | None, interval: float | None = None
+) -> None:
     """Keep the discovery cache warm so no read waits on a provider dial.
 
     Discovery was the last cache in the gateway still filled on the request path,
@@ -743,12 +785,15 @@ async def run_discovery_refresher(config: GatewayConfig, interval: float | None 
     and while it is 0 the reads dial for themselves, so refreshing here would
     only add a second dialer. Ticking without dialing keeps the loop ready to
     resume the moment an operator turns caching back on.
+
+    ``hosted`` is asked each tick, so a hosted provider added, switched off or
+    rekeyed since the last one is dialed as it now stands.
     """
     while True:
         had_failure = False
         try:
             if background_discovery_enabled(config):
-                had_failure = await refresh_discovery_cache(config)
+                had_failure = await refresh_discovery_cache(config, hosted=hosted)
         except asyncio.CancelledError:
             raise
         except Exception:

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    HostedProviderServiceDep,
     RequestSessionModelProviderPortDep,
     extract_credential_token,
     get_config,
@@ -225,6 +226,7 @@ async def list_models(
 @operator_router.get("/models/discoverable")
 async def list_discoverable_models(
     config: Annotated[GatewayConfig, Depends(get_config)],
+    hosted: HostedProviderServiceDep,
     refresh: Annotated[
         bool,
         Query(description="Re-dial every provider instead of answering from the discovery cache."),
@@ -238,13 +240,19 @@ async def list_discoverable_models(
     operator-gated because a provider error message describes the gateway's own
     configuration.
 
+    Covers the configured provider instances and every hosted provider switched
+    on, whatever organization it is restricted to. A hosted provider that a
+    configured instance of the same name shadows is not listed.
+
     Answers from the discovery cache, which a background refresher keeps warm, so
     the call does not wait on a slow or unreachable provider. Each provider
     carries the ``checked_at`` its result was produced at; a null one has not been
     dialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.
     """
     serve_stale = background_discovery_enabled(config) and not refresh
-    discoveries = await discover_models_with_status(config, serve_stale=serve_stale, force=refresh)
+    discoveries = await discover_models_with_status(
+        config, hosted=hosted.discovery_dials, serve_stale=serve_stale, force=refresh
+    )
     cache = get_model_cache()
     providers = [
         DiscoverableProvider(
