@@ -17,7 +17,7 @@ import { Kbd } from "@/design-system/indicators/Kbd"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
-import { formatCost, formatNumber } from "@/shared/helpers/format"
+import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
 
 import {
   formatDuration,
@@ -221,13 +221,28 @@ function Attributes({
     [
       "Prompt tokens",
       observation.promptTokens != null
-        ? formatNumber(observation.promptTokens)
+        ? formatNumber(observation.promptTokens) +
+          (observation.cachedTokens
+            ? ` (${formatNumber(observation.cachedTokens)} cached)`
+            : "")
+        : undefined,
+    ],
+    [
+      "Cache write tokens",
+      observation.cacheWriteTokens
+        ? formatNumber(observation.cacheWriteTokens)
         : undefined,
     ],
     [
       "Completion tokens",
       observation.completionTokens != null
         ? formatNumber(observation.completionTokens)
+        : undefined,
+    ],
+    [
+      "Reasoning tokens",
+      observation.reasoningTokens
+        ? formatNumber(observation.reasoningTokens)
         : undefined,
     ],
     [
@@ -358,6 +373,7 @@ export function TracePeek({
         totalCost: observation.cost ?? 0,
         promptTokens: observation.promptTokens ?? 0,
         completionTokens: observation.completionTokens ?? 0,
+        cachedTokens: observation.cachedTokens ?? 0,
         totalTokens:
           (observation.promptTokens ?? 0) + (observation.completionTokens ?? 0),
         model: observation.model,
@@ -370,6 +386,7 @@ export function TracePeek({
         totalCost: summary.totalCost,
         promptTokens: summary.promptTokens,
         completionTokens: summary.completionTokens,
+        cachedTokens: summary.cachedTokens,
         totalTokens: summary.totalTokens,
         model: summary.models[0],
       }
@@ -593,6 +610,11 @@ export function TracePeek({
                 </button>
               )}
             </Tooltip>
+          ) : null}
+          {shown.cachedTokens > 0 && shown.promptTokens > 0 ? (
+            <span>
+              {formatPct(shown.cachedTokens / shown.promptTokens)} cached
+            </span>
           ) : null}
           {model ? <span>{model}</span> : null}
         </div>

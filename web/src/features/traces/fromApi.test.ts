@@ -38,6 +38,34 @@ describe("toTrace", () => {
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
   })
 
+  it("carries a call's cache and reasoning counts, and a turn's cached reads", () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            cache_read_tokens: 6,
+            cache_write_tokens: 2,
+            reasoning_tokens: 1,
+          }
+        : span,
+    )
+    const turns = [
+      { ...detail.turns[0], cache_read_tokens: 6 },
+      { ...detail.turns[0], index: 1, step_ids: ["req-2"] },
+    ]
+    const trace = toTrace(traceSummary(), { ...detail, spans, turns })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("llm-1")).toMatchObject({
+      promptTokens: 10,
+      cachedTokens: 6,
+      cacheWriteTokens: 2,
+      reasoningTokens: 1,
+    })
+    expect(byId.get("turn-0")?.cachedTokens).toBe(6)
+  })
+
   it("marks a failure a fallback recovered as a warning, not an error", () => {
     const trace = toTrace(traceSummary(), traceDetail())
     const recovered = trace.observations.find((o) => o.id === "llm-2")
