@@ -136,7 +136,7 @@ def test_a_failed_attempt_reports_no_prompt() -> None:
     trace.record_llm_call(_llm_call(_usage_row(status="error", prompt_tokens=None, completion_tokens=None)))
 
     [span] = trace.spans
-    assert span.input_tokens is None
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (None, None, None)
 
 
 def test_an_absorbed_attempt_is_a_recovered_error() -> None:
