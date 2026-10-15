@@ -127,7 +127,8 @@ may also define:
   not replace (both apply)
 - whether mismatched client `user` fields are accepted
 - whether content-free agent telemetry is captured
-- whether it is a service key, which may name end users
+- whether it is a service key, which may name end users, and how long a key
+  it [mints for one of them](#end-user-keys) may live
 - application metadata
 
 The plaintext key is returned only when it is created or rotated. Store it then.
@@ -326,6 +327,85 @@ keys, where each one carries `parent_user_id` (the key's user) and
 `external_id`: `GET /api/v1/users?parent_user_id=...&external_id=...` filters on
 them, and it can put an end user on any deployment budget, not only one on a
 key's list.
+
+### End-user keys
+
+A service that hands work to jobs it does not trust, such as one container per
+agent run, should not give them its service key: a job holding it could name a
+fresh end user per request and escape any per-job cap. Instead the service mints
+each job a key bound to one end user. The job holds only that key; a leak of it
+reaches that end user's spend and nothing else, and it expires with the job.
+
+An operator lets a service key mint by setting `max_child_ttl_sec`, the longest
+a minted key may live, on the key (`POST` or `PATCH /api/v1/keys`, or in
+config.yml). Null, the default, mints none, and only a service key takes it.
+The service then mints with its own key, never the master key:
+
+```http
+POST /api/v1/end-user-keys
+Authorization: Bearer <service key>
+
+{"external_id": "run-1234", "expires_in_sec": 3600, "budget_id": "per-run",
+ "tags": {"agent": "bug-fix", "requested_by": "alice"}}
+```
+
+The answer (201) carries the key, returned this once, with its `id`,
+`expires_at`, `external_id`, `end_user_id` and the `budget_id` the end user is
+on. The fields are:
+
+| Field | |
+|---|---|
+| `external_id` | The end user the key bills, created on first use exactly as a request naming it would create it |
+| `expires_in_sec` | Required, from 1 to the service key's `max_child_ttl_sec` (400 past it) |
+| `budget_id` | A budget on the service key's `end_user_budget_ids` for a new end user, else the key's default; any other is refused with 403 and `end_user_budget_not_allowed`. An end user that exists keeps its budget |
+| `allowed_models` | Within the service key's own allow-list (400 otherwise); null inherits it |
+| `tags` | Written on every usage row the key writes, over the request's own tags, since the service set them and the job did not. Same bounds as request tags |
+| `key_name` | Display name, defaulting to `external_id` |
+
+A request on a minted key:
+
+- bills its end user whatever the body says: `user` and `metadata.user_id` are
+  left as provider-side tags and never refused, so a client such as Claude Code,
+  which fills them with telemetry of its own, neither fails nor moves spend;
+- is capped by the end user's budget and pooled under the service key's own
+  ceiling (the `api_token` scoped budget on the service key), with the workspace
+  and organization ceilings and the service key's user's member ceilings as
+  usual;
+- reaches the models its own allow-list allows, cut at request time to what the
+  service key reaches, so narrowing the service key narrows every key it minted;
+- is refused with 401 once the key expires or is revoked, or once the service
+  key is inactive, expired or no longer a service key, or its user is blocked or
+  deleted.
+
+A minted key never mints and never names another end user, and an operator
+cannot make it a service key, give it `max_child_ttl_sec` or clear its expiry.
+It takes no ceiling of its own: a scoped budget naming one is refused with 400
+on both `/api/v1/scoped-budgets` and `/api/v1/organizations/me/spend-ceilings`,
+because nothing removes such a ceiling when the key is deleted. Its end user's
+budget is its cap.
+
+| Request | Does |
+|---|---|
+| `POST /api/v1/end-user-keys` | Mints a key, as above |
+| `GET /api/v1/end-user-keys` | Lists the keys this service key minted that still work, oldest first; `external_id` narrows to one end user's, `include_inactive=true` adds revoked and expired ones |
+| `PATCH /api/v1/end-user-keys/{key_id}` `{"is_active": false}` | Revokes a key; the only change, and it is final |
+
+These routes take the minting service key alone, as the end-user routes do: a
+key that may not mint is refused with 403, and the master key and a dashboard
+session do not authenticate them. A key another service key minted answers 404.
+
+The job's cost is its end user's spend, `GET /api/v1/end-users?external_id=run-1234`,
+which stays correct after the key is gone. An expired key is deleted
+`child_key_retention_sec` after it expires (30 days by default; the sweep runs
+every `child_key_sweep_interval_sec`). Its usage rows keep the end user they
+billed, and the end user stays. Deleting the service key deletes every key it
+minted.
+
+`GET /api/v1/keys` leaves minted keys out unless `include_children=true`, so a
+service minting thousands a day does not fill the keys page; each carries
+`parent_key_id` there. An operator lists and revokes one service key's minted
+keys with `GET /api/v1/keys/{key_id}/end-user-keys` and
+`PATCH /api/v1/keys/{key_id}/end-user-keys/{child_key_id}`.
 
 ### Where end users apply
 

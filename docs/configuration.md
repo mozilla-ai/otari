@@ -300,6 +300,7 @@ the next start. It takes:
 | `is_service_key` | Lets requests name end users. See [Service keys and end users](access-control.md#service-keys-and-end-users). |
 | `end_user_budget_ids` | Budgets a request may start a new end user on with `Otari-End-User-Budget`. |
 | `end_user_budget_id` | Budget a new end user starts on when the request names none. Must be on `end_user_budget_ids` when both are set. |
+| `max_child_ttl_sec` | Lets a service key mint keys bound to one of its end users, each living at most this many seconds. See [End-user keys](access-control.md#end-user-keys). |
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
 | `reject_user_mismatch` | Per-key override of the deployment setting. |
