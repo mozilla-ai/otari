@@ -33,7 +33,6 @@ PRICE_SOURCE_DEPLOYMENT: PriceSource = "deployment"
 _CACHE_RATE_FIELDS = (
     "cache_read_price_per_million",
     "cache_write_price_per_million",
-    "cache_write_1h_price_per_million",
 )
 
 

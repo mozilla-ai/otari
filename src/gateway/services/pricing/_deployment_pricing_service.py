@@ -33,7 +33,6 @@ from gateway.services.pricing_service import default_model_pricing, normalize_ef
 _CACHE_RATE_FIELDS = (
     "cache_read_price_per_million",
     "cache_write_price_per_million",
-    "cache_write_1h_price_per_million",
 )
 _RATE_FIELDS = ("input_price_per_million", "output_price_per_million", *_CACHE_RATE_FIELDS)
 
@@ -107,7 +106,6 @@ class DeploymentPricingService:
                     output_price_per_million=default.output_price_per_million,
                     cache_read_price_per_million=default.cache_read_price_per_million,
                     cache_write_price_per_million=default.cache_write_price_per_million,
-                    cache_write_1h_price_per_million=default.cache_write_1h_price_per_million,
                     pricing_tiers=default.pricing_tiers or [],
                     unit=default.unit or "tokens",
                     origin=SEED_ORIGIN,
@@ -166,7 +164,6 @@ class DeploymentPricingService:
                     output_price_per_million=to_usd(output_price_per_million),
                     cache_read_price_per_million=cache_rate("cache_read_price_per_million"),
                     cache_write_price_per_million=cache_rate("cache_write_price_per_million"),
-                    cache_write_1h_price_per_million=cache_rate("cache_write_1h_price_per_million"),
                     pricing_tiers=latest.pricing_tiers or [] if latest is not None else [],
                     unit=latest.unit if latest is not None else "tokens",
                     origin=API_ORIGIN,
@@ -176,7 +173,6 @@ class DeploymentPricingService:
                 version.output_price_per_million = to_usd(output_price_per_million)
                 version.cache_read_price_per_million = cache_rate("cache_read_price_per_million")
                 version.cache_write_price_per_million = cache_rate("cache_write_price_per_million")
-                version.cache_write_1h_price_per_million = cache_rate("cache_write_1h_price_per_million")
                 version.origin = API_ORIGIN
             await self.pricing.flush()
             return version

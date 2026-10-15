@@ -444,7 +444,6 @@ def _rates_come_as_a_pair(request: HostedModelCreateRequest | HostedModelUpdateR
     cache_fields = {
         "cache_read_price_per_million",
         "cache_write_price_per_million",
-        "cache_write_1h_price_per_million",
     }
     if request.input_price_per_million is None and cache_fields & request.model_fields_set:
         msg = "cache rates need input_price_per_million and output_price_per_million beside them"
@@ -470,7 +469,6 @@ class HostedModelCreateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _prices_come_as_a_pair(self) -> Self:
@@ -496,7 +494,6 @@ class HostedModelUpdateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
     enabled: bool | None = None
 
     @model_validator(mode="after")
@@ -513,7 +510,6 @@ class HostedModelRates(SQLModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
 
     @classmethod
     def from_version(cls, version: ModelPricing, source: PriceSource) -> HostedModelRates:
@@ -524,7 +520,6 @@ class HostedModelRates(SQLModel):
             output_price_per_million=float(version.output_price_per_million),
             cache_read_price_per_million=as_float(version.cache_read_price_per_million),
             cache_write_price_per_million=as_float(version.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(version.cache_write_1h_price_per_million),
         )
 
 
@@ -545,7 +540,6 @@ class HostedModelPublic(SQLModel):
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
     price_source: PriceSource | None = None
     enabled: bool
     created_at: datetime
@@ -562,7 +556,6 @@ class HostedModelPublic(SQLModel):
             output_price_per_million=rates.output_price_per_million if rates else None,
             cache_read_price_per_million=rates.cache_read_price_per_million if rates else None,
             cache_write_price_per_million=rates.cache_write_price_per_million if rates else None,
-            cache_write_1h_price_per_million=rates.cache_write_1h_price_per_million if rates else None,
             price_source=rates.source if rates else None,
             enabled=row.enabled,
             created_at=row.created_at,
