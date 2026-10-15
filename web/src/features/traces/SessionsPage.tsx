@@ -391,8 +391,8 @@ export function SessionsPage() {
         <TracePeek
           trace={open}
           error={detail.isError ? detail.error : undefined}
-          initialSpanId={url.get("span") || undefined}
-          onSpanChange={(spanId) => url.patch({ span: spanId ?? "" })}
+          initialSpanId={url.get("span")}
+          onSpanChange={(spanId) => url.patch({ span: spanId })}
           onClose={() => url.patch({ peek: "", peek_workspace: "", span: "" })}
           onPrevious={previous ? () => openPeek(previous) : undefined}
           onNext={next ? () => openPeek(next) : undefined}

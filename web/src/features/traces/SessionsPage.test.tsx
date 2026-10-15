@@ -49,11 +49,11 @@ const keyCeiling = (overrides: Partial<ScopedBudget> = {}) =>
     ...overrides,
   })
 
-// The page's own query string, so a test can read what the URL now holds.
-function SearchProbe() {
+// The `span` the URL now holds.
+function SpanProbe() {
   const { searchStr } = useLocation()
   return (
-    <output aria-label="Current search">
+    <output aria-label="Span in the URL">
       {new URLSearchParams(searchStr).get("span") ?? ""}
     </output>
   )
@@ -88,7 +88,7 @@ describe("SessionsPage", () => {
     renderPage(
       <>
         <SessionsPage />
-        <SearchProbe />
+        <SpanProbe />
       </>,
       `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-2`,
     )
@@ -106,12 +106,12 @@ describe("SessionsPage", () => {
     await user.click(within(peek).getByRole("button", { name: /Bash/ }))
 
     expect(
-      screen.getByRole("status", { name: "Current search" }),
+      screen.getByRole("status", { name: "Span in the URL" }),
     ).toHaveTextContent("call-toolu_1")
     await user.click(within(peek).getByRole("button", { name: "Close" }))
     await waitFor(() =>
       expect(
-        screen.getByRole("status", { name: "Current search" }),
+        screen.getByRole("status", { name: "Span in the URL" }),
       ).toHaveTextContent(/^$/),
     )
   })

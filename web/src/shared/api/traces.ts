@@ -1,4 +1,8 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   TraceCount,
   TraceDetail,
@@ -6,7 +10,7 @@ import type {
   TraceSeries,
   TraceSummary,
 } from "@/client"
-import { ApiError, apiFetch } from "@/shared/api/client"
+import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { TRACES, workspaceMeta } from "@/shared/api/queryKeys"
 
@@ -127,22 +131,17 @@ export function useTrace(traceId: string, workspaceId = "") {
 
 // The session a request from the usage log was traced into, by the
 // `request_group_id` its rows carry. A request with no trace stored (served
-// before traces were on, or expired since) reads as null rather than an error.
+// before traces were on, or expired since) answers 404, which is not retried.
 export function useRequestTrace(requestId: string, enabled = true) {
   const scope = useTraceScope()
   return useQuery({
     queryKey: [TRACES, "request", scope.base, requestId],
-    queryFn: async () => {
-      try {
-        return await apiFetch<TraceSummary>(
-          `${scope.base}/requests/${encodeURIComponent(requestId)}`,
-        )
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 404) return null
-        throw error
-      }
-    },
+    queryFn: () =>
+      apiFetch<TraceSummary>(
+        `${scope.base}/requests/${encodeURIComponent(requestId)}`,
+      ),
     enabled: enabled && scope.isReady && requestId !== "",
     staleTime: 60_000,
+    retry: retryUnlessNotFound(useQueryClient()),
   })
 }

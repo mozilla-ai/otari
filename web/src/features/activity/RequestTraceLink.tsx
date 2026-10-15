@@ -10,8 +10,8 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
 // gateway names an LLM span after the usage row it records. Nothing shows
 // until the session is found, and nothing at all for a request without one.
 export function RequestTraceLink({ entry }: { entry: UsageEntry }) {
-  const hostsTraces = useSurfaces()("traces")
-  const trace = useRequestTrace(entry.request_group_id ?? "", hostsTraces)
+  const hasTraces = useSurfaces()("traces")
+  const trace = useRequestTrace(entry.request_group_id ?? "", hasTraces)
   if (!trace.data) return null
   return (
     <Link
@@ -21,7 +21,8 @@ export function RequestTraceLink({ entry }: { entry: UsageEntry }) {
         peek_workspace: trace.data.workspace_id,
         span: entry.id,
       }}
-      className={buttonVariants({ size: "sm", variant: "ghost" })}
+      // The phone touch floor in globals.css reaches HeroUI's Button only.
+      className={`${buttonVariants({ size: "sm", variant: "ghost" })} max-md:min-h-11`}
     >
       <FiGitBranch aria-hidden="true" className="size-4" />
       View trace

@@ -257,7 +257,7 @@ function Attributes({
 export function TracePeek({
   trace,
   error,
-  initialSpanId,
+  initialSpanId = "",
   onSpanChange,
   onClose,
   onPrevious,
@@ -268,8 +268,8 @@ export function TracePeek({
   error?: unknown
   /** The span to open on, as a link names it. Read once, when the panel opens. */
   initialSpanId?: string
-  /** Reports each span picked in the panel, so the URL can follow it. */
-  onSpanChange?: (spanId: string | null) => void
+  /** Reports each span picked in the panel ("" for the session), so the URL can follow it. */
+  onSpanChange?: (spanId: string) => void
   onClose: () => void
   onPrevious?: () => void
   onNext?: () => void
@@ -319,7 +319,7 @@ export function TracePeek({
   const isDetailShown = selection?.isDetailShown ?? false
   const setSelectedId = (id: string | null) => {
     setSelection({ traceId: trace.id, id, isDetailShown: true })
-    onSpanChange?.(id)
+    onSpanChange?.(id ?? "")
   }
   const showTree = () =>
     setSelection({ traceId: trace.id, id: selectedId, isDetailShown: false })
@@ -396,7 +396,7 @@ export function TracePeek({
   }, [])
 
   // A panel opened on a span brings it into view once the spans arrive.
-  const isSpanUnseen = useRef(initialSpanId !== undefined)
+  const isSpanUnseen = useRef(initialSpanId !== "")
   useEffect(() => {
     if (!loaded || !isSpanUnseen.current) return
     isSpanUnseen.current = false
