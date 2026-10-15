@@ -112,12 +112,12 @@ function CatalogSweepPreview({
 }: {
   preview: ReturnType<typeof useHostedCatalogRefreshPreview>
 }) {
-  if (preview.isPending) {
-    return <p>Working out what would be removed…</p>
-  }
   if (preview.error) {
     // The confirm refuses to fire in this state, so the banner is the answer.
     return <ErrorBanner error={preview.error} />
+  }
+  if (preview.isPending || preview.isFetching) {
+    return <p>Working out what would be removed…</p>
   }
   const result = preview.data
   const failures = catalogRefreshFailures(result)
@@ -166,9 +166,16 @@ export function HostedProvidersPage() {
   const remove = useDeleteHostedProvider()
   const sweep = useHostedCatalogRefresh()
   const [isSweepOpen, setIsSweepOpen] = useState(false)
+  const [sweepOpenCount, setSweepOpenCount] = useState(0)
   // Asked only while the dialog is open, because answering dials every
-  // configured provider.
-  const preview = useHostedCatalogRefreshPreview(isSweepOpen)
+  // configured provider, and asked afresh on every opening.
+  const preview = useHostedCatalogRefreshPreview(
+    isSweepOpen ? sweepOpenCount : 0,
+  )
+  // The sweep takes no list, so the confirm waits for one this opening read
+  // successfully and shows: never a previous opening's, a failed or an
+  // in-flight one.
+  const isPreviewShown = preview.isSuccess && !preview.isFetching
 
   const [isAdding, setIsAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
@@ -320,7 +327,10 @@ export function HostedProvidersPage() {
             <Button
               className="min-h-11 md:min-h-9"
               isPending={sweep.isPending}
-              onPress={() => setIsSweepOpen(true)}
+              onPress={() => {
+                setSweepOpenCount((n) => n + 1)
+                setIsSweepOpen(true)
+              }}
             >
               <FiRefreshCw aria-hidden className="size-4" />
               Refresh and purge
@@ -409,10 +419,11 @@ export function HostedProvidersPage() {
         // The sweep's own pending state only: the preview dials every provider,
         // and folding it in would leave Cancel dead for that whole fan-out.
         isPending={sweep.isPending}
+        isConfirmDisabled={!isPreviewShown}
         error={sweep.error}
         onConfirm={() => {
           // Nothing is confirmed against a list nobody has seen.
-          if (!preview.data) return
+          if (!isPreviewShown) return
           sweep.mutate(undefined, { onSuccess: () => setIsSweepOpen(false) })
         }}
       />

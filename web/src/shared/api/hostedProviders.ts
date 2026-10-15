@@ -204,20 +204,25 @@ export function useRefreshHostedModels(provider: string) {
 }
 
 /**
- * What a catalog sweep would remove, read while its confirm dialog is open.
+ * What a catalog sweep would remove, read once per opening of its confirm
+ * dialog.
  *
- * Not cached past the dialog (`gcTime: 0`): the next press must ask again
- * rather than confirm against a list from five minutes ago.
+ * `opening` counts the openings and is 0 while the dialog is closed. Keying on
+ * it gives every opening a query with no data, so a reopen shows the pending
+ * state rather than the last opening's list, and `gcTime: 0` drops that list
+ * once nothing observes it. Never stale within an opening, so a window focus
+ * cannot swap the list under a confirm that was about to fire on it.
  */
-export function useHostedCatalogRefreshPreview(enabled: boolean) {
+export function useHostedCatalogRefreshPreview(opening: number) {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [HOSTED_PROVIDERS_REFRESH_PREVIEW],
+    queryKey: [HOSTED_PROVIDERS_REFRESH_PREVIEW, opening],
     queryFn: () =>
       apiFetch<HostedCatalogRefresh>("/hosted-providers/refresh/preview", {
         signal: longRequestSignal(),
       }),
-    enabled,
+    enabled: opening > 0,
+    staleTime: Number.POSITIVE_INFINITY,
     gcTime: 0,
   })
 }

@@ -14,6 +14,8 @@ export interface ConfirmDialogProps {
   confirmLabel: string
   confirmVariant?: "danger" | "primary"
   isPending: boolean
+  /** Holds the confirm back while what it would act on is not yet shown. */
+  isConfirmDisabled?: boolean
   error?: unknown
   onConfirm: () => void
 }
@@ -26,6 +28,7 @@ export function ConfirmDialog({
   confirmLabel,
   confirmVariant = "danger",
   isPending,
+  isConfirmDisabled = false,
   error,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -59,6 +62,7 @@ export function ConfirmDialog({
                 <Button
                   variant={confirmVariant}
                   isPending={isPending}
+                  isDisabled={isConfirmDisabled}
                   onPress={onConfirm}
                 >
                   {confirmLabel}

@@ -77,12 +77,15 @@ function mockApi(
     providers?: HostedProvider[]
     models?: HostedModel[]
     sweep?: HostedCatalogRefresh
+    /** Answers each preview read in turn; the sweep's own body otherwise. */
+    previews?: (() => Promise<Response>)[]
   } = {},
 ) {
   const granted = opts.granted ?? true
   const providers = opts.providers ?? [hostedProvider()]
   const models = opts.models ?? [hostedModel()]
   const sweep = opts.sweep ?? EMPTY_SWEEP
+  const previews = [...(opts.previews ?? [])]
   const requests: Request[] = []
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -97,6 +100,10 @@ function mockApi(
     }
     if (url.includes(`${API_ROOT}/providers/catalog`)) {
       return jsonResponse([{ id: "anthropic", name: "Anthropic" }])
+    }
+    if (url.includes(`${hosted}/refresh/preview`)) {
+      const next = previews.shift()
+      if (next) return next()
     }
     if (url.includes(`${hosted}/refresh`)) {
       return jsonResponse(sweep)
@@ -361,5 +368,81 @@ describe("HostedProvidersPage", () => {
     expect(
       await screen.findByText("Removed 1 model nothing here serves."),
     ).toBeInTheDocument()
+  })
+
+  it("asks for a fresh preview on every opening and holds the confirm until it lands", async () => {
+    let answerSecond: (response: Response) => void = () => {}
+    const requests = mockApi({
+      previews: [
+        async () =>
+          jsonResponse({
+            ...EMPTY_SWEEP,
+            removed: ["mistral:old-model"],
+            removed_count: 1,
+          }),
+        () =>
+          new Promise<Response>((resolve) => {
+            answerSecond = resolve
+          }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Refresh and purge" }),
+    )
+    let dialog = await screen.findByRole("alertdialog")
+    expect(
+      await within(dialog).findByText("mistral:old-model"),
+    ).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+
+    await user.click(screen.getByRole("button", { name: "Refresh and purge" }))
+    dialog = await screen.findByRole("alertdialog")
+    // The last opening's list is gone, and nothing can be confirmed yet.
+    expect(
+      within(dialog).getByText("Working out what would be removed…"),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByText("mistral:old-model")).toBeNull()
+    const confirm = within(dialog).getByRole("button", {
+      name: "Refresh and purge",
+    })
+    expect(confirm).toBeDisabled()
+    await user.click(confirm)
+
+    answerSecond(jsonResponse(EMPTY_SWEEP))
+    await waitFor(() => expect(confirm).toBeEnabled())
+    expect(
+      hostedRequests(requests).filter((request) =>
+        request.url.endsWith("/refresh/preview"),
+      ),
+    ).toHaveLength(2)
+    expect(hostedRequests(requests, "POST")).toEqual([])
+  })
+
+  it("never confirms a sweep whose preview failed", async () => {
+    const requests = mockApi({
+      previews: [
+        async () => jsonResponse({ detail: "Upstream unreachable" }, 502),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Refresh and purge" }),
+    )
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      await within(dialog).findByText("Upstream unreachable"),
+    ).toBeInTheDocument()
+    const confirm = within(dialog).getByRole("button", {
+      name: "Refresh and purge",
+    })
+    expect(confirm).toBeDisabled()
+    await user.click(confirm)
+    expect(hostedRequests(requests, "POST")).toEqual([])
   })
 })
