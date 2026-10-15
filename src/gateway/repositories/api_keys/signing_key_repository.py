@@ -42,6 +42,16 @@ class SigningKeyRepository(BaseRepository[EndUserSigningKey, Never, Never]):
         result = await self.db.execute(select(EndUserSigningKey).where(EndUserSigningKey.id == kid))
         return result.scalar_one_or_none()
 
+    async def hold(self, kid: str) -> bool:
+        """Share-lock the signing key with this kid until the transaction ends, saying whether it is there.
+
+        Deleting it waits for the lock, so its delete sees whatever the holder committed.
+        """
+        result = await self.db.execute(
+            select(EndUserSigningKey.id).where(EndUserSigningKey.id == kid).with_for_update(read=True)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def delete_for(self, api_key_id: str, kid: str) -> bool:
         """Delete the signing key ``api_key_id`` holds under this kid, saying whether there was one."""
         result = await self.db.execute(

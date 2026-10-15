@@ -184,6 +184,13 @@ class ApiKeyService:
         holder = await self._keys.get_with_owner(signing_key.api_key_id)
         return None if holder is None else (signing_key, holder)
 
+    async def hold_signing_key(self, kid: str) -> bool:
+        """Hold the signing key with this kid until the caller's block ends, so it cannot be deleted mid-way.
+
+        Says whether it is still there.
+        """
+        return await self._signing_keys.hold(kid)
+
     async def find_token_redemption(
         self, parent_id: str, jti: str
     ) -> tuple[EndUserTokenRedemption, APIKey | None] | None:

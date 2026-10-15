@@ -1463,7 +1463,7 @@ BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
 
 
 def build_budget_service(session: AsyncSession) -> BudgetService:
-    """Build the budget service for startup work, on a Unit of Work over a session of its own."""
+    """Build the budget service on a Unit of Work over ``session``, for startup work and end-user token auth."""
     return get_budget_service(get_unit_of_work(session), session)
 
 

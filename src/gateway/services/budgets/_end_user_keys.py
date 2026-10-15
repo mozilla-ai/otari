@@ -164,6 +164,9 @@ class _EndUserKeys:
 
         redeemed = await self._api_keys.find_token_redemption(parent.id, claims.jti)
         if redeemed is None:
+            # A delete of the signing key racing this first use would otherwise miss the key it creates.
+            if not await self._api_keys.hold_signing_key(signing_key.id):
+                raise EndUserTokenRefusedError("end_user_token_unknown_kid")
             child = await self._materialize(parent, claims, signing_key.id, digest, config)
             if child is not None:
                 logger.info(

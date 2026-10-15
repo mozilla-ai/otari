@@ -20,8 +20,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
-from gateway.api.deps import build_budget_service
+from gateway.api.deps import build_api_key_service, build_budget_service
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey, EndUserSigningKey, EndUserTokenRedemption
 from gateway.models.usage import UsageLog
 from gateway.repositories.api_keys import ApiKeyRepository
@@ -412,6 +413,47 @@ def test_deleting_the_signing_key_refuses_every_token_it_signed(
     assert _chat(client, kept).status_code == 200
     by_user = {child.key_name: child.is_active for child in _children(db_session, service_id)}
     assert by_user == {"run-1": False, "run-3": True}
+
+
+def test_deleting_a_signing_key_during_a_first_use_revokes_the_key_it_creates(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    postgres_url: str,
+    token_config: GatewayConfig,
+) -> None:
+    _setup(client, master_key_header)
+    service_id, service = _service_key(client, master_key_header)
+    kid, private_key = _register(client, service)
+    token = _token(private_key, kid, service_id)
+    original_add = ApiKeyRepository.add_token_child
+
+    async def race() -> None:
+        engine = create_async_engine(_to_async_url(postgres_url))
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        deleting: list[asyncio.Task[None]] = []
+
+        async def delete() -> None:
+            async with sessions() as session:
+                await build_api_key_service(UnitOfWork(session)).delete_signing_key(APIKey(id=service_id), kid)
+
+        async def add_while_deleting(self: ApiKeyRepository, **fields: Any) -> Any:
+            # The delete starts after this first use found the signing key and before it commits the key it creates.
+            deleting.append(asyncio.create_task(delete()))
+            await asyncio.sleep(0.5)
+            return await original_add(self, **fields)
+
+        try:
+            async with sessions() as session:
+                with patch.object(ApiKeyRepository, "add_token_child", add_while_deleting):
+                    await build_budget_service(session).authenticate_end_user_token(token, token_config)
+            await deleting[0]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(race())
+    [child] = _children(db_session, service_id)
+    assert child.is_active is False
 
 
 def test_a_token_whose_key_was_deleted_is_not_materialized_again(
