@@ -487,15 +487,16 @@ signed-in member's.
 | Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
 | Anthropic, including Azure and Vertex AI | `metadata.user_id` |
 | Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model |
+| Gemini API | the `safety_identifier` label, cut to the 63 characters a label value allows, on chat completions and Messages |
 | Any other provider with a native Messages API, on Messages | `metadata.user_id` |
 
 Bedrock's abuse detection reads no end-user identifier, but `requestMetadata`,
 like the request body that carries `metadata.user_id`, lands in the account's
 invocation logs, which is where the prompt ids in an AWS abuse report are traced
 back to a user. Every other provider gets nothing: some have no such field
-(Gemini, Vertex AI, Mistral), some run your own models, and for the rest an
-unknown field can fail the call. A Responses or Messages request
-served as a chat completion gets that provider's chat field.
+(Vertex AI, whose labels are for billing only, and Mistral), some run your own
+models, and for the rest an unknown field can fail the call. A Responses or
+Messages request served as a chat completion gets that provider's chat field.
 
 Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
 characters (`openssl rand -base64 32`) to key the digest. Without it the digest

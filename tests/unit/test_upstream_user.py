@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import re
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -40,15 +41,17 @@ _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     LLMProvider.AZUREANTHROPIC: "metadata",
     LLMProvider.VERTEXAIANTHROPIC: "metadata",
     LLMProvider.BEDROCK: "requestMetadata",
+    # Gemini API documents a ``safety_identifier`` label for aggregators.
+    LLMProvider.GEMINI: "labels",
     # The SDK any-llm calls has no ``user`` argument, so the call would fail.
     LLMProvider.COHERE: None,
     LLMProvider.HUGGINGFACE: None,
     LLMProvider.OLLAMA: None,
     LLMProvider.TOGETHER: None,
     # No end-user field on the provider's API.
-    LLMProvider.GEMINI: None,
     LLMProvider.LINER: None,
     LLMProvider.MISTRAL: None,
+    # Vertex AI documents ``labels`` for billing and reporting, not abuse monitoring.
     LLMProvider.VERTEXAI: None,
     # The operator's own model server: nobody upstream enforces a policy.
     LLMProvider.LLAMACPP: None,
@@ -137,11 +140,30 @@ def test_each_provider_gets_its_own_field(provider: LLMProvider, field: str | No
         "user": {"user": "id"},
         "metadata": {"metadata": {"user_id": "id"}},
         "requestMetadata": {"requestMetadata": {"otari_user": "id"}},
+        "labels": {"http_options": {"extra_body": {"labels": {"safety_identifier": "id"}}}},
         None: {},
     }[field]
 
     assert chat_user_fields(provider, "id") == expected
     assert chat_user_fields(provider.value, "id") == expected
+
+
+def _gemini_label(identifier: str) -> str:
+    return cast(
+        str,
+        chat_user_fields(LLMProvider.GEMINI, identifier)["http_options"]["extra_body"]["labels"]["safety_identifier"],
+    )
+
+
+def test_gemini_gets_a_label_value_it_accepts() -> None:
+    identifier = upstream_user_identifier("ws", "alice", _KEY)
+
+    label = _gemini_label(identifier)
+
+    # A Gemini label value is at most 63 lowercase letters, digits, underscores and dashes.
+    assert re.fullmatch(r"[a-z0-9_-]{1,63}", label)
+    assert identifier.startswith(label)
+    assert label == _gemini_label(identifier)
 
 
 def test_an_unknown_provider_gets_nothing() -> None:
@@ -239,6 +261,30 @@ async def test_the_bedrock_converse_call_receives_request_metadata() -> None:
     assert "user" not in captured
 
 
+@pytest.mark.asyncio
+async def test_the_gemini_request_body_carries_a_safety_identifier_label() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_request(_: Any, http_request: Any, *__: Any, **___: Any) -> None:
+        captured.update(http_request.data)
+        raise _Stop
+
+    # Patched below the SDK's request conversion, which refuses a ``labels`` config
+    # field on the Gemini API.
+    with (
+        patch("google.genai._api_client.BaseApiClient._async_request", new=fake_request),
+        pytest.raises(_Stop),
+    ):
+        await acompletion(
+            model="gemini:gemini-2.5-flash",
+            messages=[{"role": "user", "content": "hi"}],
+            api_key="gemini-key",
+            **chat_user_fields(LLMProvider.GEMINI, "id"),
+        )
+
+    assert captured["labels"] == {"safety_identifier": "id"}
+
+
 def _identifier(**overrides: Any) -> str | None:
     inputs: dict[str, Any] = {"enabled": True, "key": None, "workspace_id": "ws", "tag": None, "user_id": "alice"}
     return end_user_identifier(**{**inputs, **overrides})
@@ -273,7 +319,7 @@ def test_turned_on_a_request_with_nothing_to_derive_it_from_is_refused(missing: 
         (LLMProvider.ANTHROPIC, True, {"metadata": {"user_id": "id"}}),
         (LLMProvider.OPENAI, False, {"user": "id"}),
         (LLMProvider.BEDROCK, False, {"requestMetadata": {"otari_user": "id"}}),
-        (LLMProvider.GEMINI, False, {}),
+        (LLMProvider.GEMINI, False, {"http_options": {"extra_body": {"labels": {"safety_identifier": "id"}}}}),
     ],
 )
 def test_messages_use_metadata_natively_and_the_chat_field_otherwise(

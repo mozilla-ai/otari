@@ -24,6 +24,7 @@ _PROVIDERS = {
     "openai": {"api_key": "sk-openai"},
     "anthropic": {"api_key": "sk-anthropic"},
     "gemini": {"api_key": "gemini-key"},
+    "mistral": {"api_key": "mistral-key"},
     "bedrock": {"api_key": "bedrock-key", "region_name": "us-east-1"},
 }
 
@@ -172,15 +173,26 @@ def test_bedrock_gets_request_metadata(make_client: ClientFactory, captured: lis
     assert "user" not in captured[0]
 
 
+def test_gemini_gets_a_safety_identifier_label(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, model="gemini:gemini-2.5-flash", user="alice")
+
+    identifier = upstream_user_identifier(workspace, "alice", None)
+    assert captured[0]["http_options"] == {"extra_body": {"labels": {"safety_identifier": identifier[:63]}}}
+    assert "user" not in captured[0]
+
+
 def test_a_provider_with_no_end_user_field_gets_nothing(
     make_client: ClientFactory, captured: list[dict[str, Any]]
 ) -> None:
     client = make_client()
     headers, _ = _keyed_user(client)
 
-    _chat(client, headers, model="gemini:gemini-2.5-flash", user="alice")
+    _chat(client, headers, model="mistral:mistral-small-latest", user="alice")
 
-    assert not {"user", "metadata", "requestMetadata", UPSTREAM_USER_FIELD} & set(captured[0])
+    assert not {"user", "metadata", "requestMetadata", "http_options", UPSTREAM_USER_FIELD} & set(captured[0])
 
 
 def test_a_streamed_request_carries_it(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
