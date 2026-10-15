@@ -42,7 +42,6 @@ from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.settings.tools import warn_about_tool_instances
-from gateway.core.unit_of_work import create_unit_of_work
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError
@@ -78,7 +77,6 @@ from gateway.services.model_catalog_service import (
     run_catalog_refresher,
 )
 from gateway.services.model_discovery_service import (
-    DiscoveryDial,
     reset_discovery_cache,
     run_discovery_refresher,
 )
@@ -107,6 +105,7 @@ from gateway.services.provider_store_service import (
     run_provider_refresher,
 )
 from gateway.services.providers import (
+    hosted_discovery,
     load_provider_endpoints_at_startup,
     reset_provider_endpoint_cache,
     run_provider_endpoint_refresher,
@@ -291,12 +290,6 @@ def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Co
     return run_sandbox_container_sweeper()
 
 
-async def _hosted_discovery_dials(config: GatewayConfig) -> dict[str, DiscoveryDial]:
-    """The hosted providers' discovery dials, read in a transaction of the refresher tick's own."""
-    async with create_unit_of_work() as uow:
-        return await build_hosted_provider_service(uow, config=config).discovery_dials()
-
-
 # The periodic background workers a standalone deployment runs.
 # A new worker is one entry here.
 #
@@ -342,7 +335,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "model discovery",
         lambda config, _container: run_discovery_refresher(
-            config, hosted=functools.partial(_hosted_discovery_dials, config)
+            config, hosted=hosted_discovery(functools.partial(build_hosted_provider_service, config=config))
         ),
         reset_discovery_cache,
     ),
