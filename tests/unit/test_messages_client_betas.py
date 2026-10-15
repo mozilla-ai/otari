@@ -208,3 +208,48 @@ async def test_bedrock_claude_with_structured_output_reaches_converse_with_reque
     request = calls["converse"]
     assert request["requestMetadata"] == {"otari_user": "id"}
     assert "anthropic_beta" not in json.dumps(request)
+
+
+CONTEXT_MANAGEMENT = {"edits": [{"type": "clear_tool_uses_20250919"}]}
+
+
+def test_a_provider_without_a_messages_api_has_context_management_dropped() -> None:
+    kwargs = {"model": OPEN_MODEL, "context_management": CONTEXT_MANAGEMENT}
+
+    forwarded, saw_mcp = _split_client_betas(kwargs)
+
+    assert "context_management" not in forwarded
+    assert saw_mcp is False
+    assert kwargs["context_management"] == CONTEXT_MANAGEMENT
+
+
+def test_context_management_and_betas_are_dropped_together() -> None:
+    kwargs = {
+        "model": OPEN_MODEL,
+        "context_management": CONTEXT_MANAGEMENT,
+        "betas": [MCP_CLIENT_BETA, CONTEXT_MANAGEMENT_BETA],
+    }
+
+    forwarded, saw_mcp = _split_client_betas(kwargs)
+
+    assert "context_management" not in forwarded
+    assert "betas" not in forwarded
+    assert saw_mcp is True
+
+
+@pytest.mark.parametrize("model", [ANTHROPIC, BEDROCK_CLAUDE])
+def test_a_native_provider_keeps_context_management(model: str) -> None:
+    kwargs = {"model": model, "context_management": CONTEXT_MANAGEMENT, "betas": [CONTEXT_MANAGEMENT_BETA]}
+
+    forwarded, _ = _split_client_betas(kwargs)
+
+    assert forwarded["context_management"] == CONTEXT_MANAGEMENT
+    assert forwarded["betas"] == [CONTEXT_MANAGEMENT_BETA]
+
+
+@pytest.mark.asyncio
+async def test_a_bridged_model_is_dispatched_despite_context_management() -> None:
+    # Claude Code sends context_management on every request; any-llm refuses it on the bridge.
+    calls = await _dispatch_to_bedrock(BEDROCK_LLAMA, context_management=CONTEXT_MANAGEMENT)
+
+    assert "converse" in calls

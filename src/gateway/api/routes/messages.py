@@ -182,18 +182,29 @@ def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     its own, where any-llm refuses the request outright: a beta names an Anthropic
     feature that model was never going to serve, so forwarding it would make
     a request stop working purely because its model changed, which is the swap
-    `auto` exists to keep invisible.
+    `auto` exists to keep invisible. ``context_management`` goes with them, for
+    the same reason: it configures Anthropic's server-side context editing, and
+    Claude Code sends it on every request.
     """
+    native = None
+    provider_kwargs = kwargs
+    if kwargs.get("context_management") is not None:
+        native = _dispatched_natively(kwargs)
+        if not native:
+            provider_kwargs = {key: value for key, value in kwargs.items() if key != "context_management"}
+
     betas = kwargs.get("betas")
     if not isinstance(betas, list) or not betas:
-        return kwargs, False
+        return provider_kwargs, False
 
+    if native is None:
+        native = _dispatched_natively(kwargs)
     saw_mcp_beta = MCP_CLIENT_BETA in betas
-    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA] if _dispatched_natively(kwargs) else []
+    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA] if native else []
     if provider_betas == betas:
-        return kwargs, False
+        return provider_kwargs, False
 
-    provider_kwargs = {**kwargs}
+    provider_kwargs = {**provider_kwargs}
     if provider_betas:
         provider_kwargs["betas"] = provider_betas
     else:
