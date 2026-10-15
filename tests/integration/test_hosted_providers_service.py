@@ -13,7 +13,9 @@ from decimal import Decimal
 import pytest
 from any_llm.types.model import Model
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -1019,6 +1021,25 @@ async def test_a_restriction_naming_no_organization_is_refused(
     with pytest.raises(HostedProviderUnknownOrganizationError):
         await service.update_provider("openai", HostedProviderUpdateRequest(restricted_to_organization_id=unknown))
     assert await service.resolve("openai", organization_id=uuid.uuid4()) is not None
+
+
+async def test_an_organization_a_provider_is_restricted_to_cannot_be_deleted_under_it(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither widened to every organization nor deleted with the organization: the delete is refused."""
+    owner_id = (await _organization(async_db, "owner")).id
+    service = _service(async_db)
+    _discovery(monkeypatch)
+    await service.create_provider(
+        HostedProviderCreateRequest(provider="openai", api_key=KEY, restricted_to_organization_id=owner_id)
+    )
+
+    with pytest.raises(IntegrityError):
+        await async_db.execute(delete(Organization).where(col(Organization.id) == owner_id))
+    await async_db.rollback()
+
+    row = (await async_db.execute(select(HostedProvider))).scalar_one()
+    assert row.restricted_to_organization_id == owner_id
 
 
 async def test_a_credential_no_configured_key_can_read_is_unserved_rather_than_fatal(

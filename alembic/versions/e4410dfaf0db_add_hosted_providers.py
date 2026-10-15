@@ -43,7 +43,7 @@ def upgrade() -> None:
         sa.Column("restricted_to_organization_id", sa.Uuid(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["restricted_to_organization_id"], ["organization.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["restricted_to_organization_id"], ["organization.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("provider", name="uq_hosted_providers_provider"),
     )

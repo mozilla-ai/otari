@@ -213,9 +213,11 @@ class HostedProvider(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
     # The one organization served on this provider, or None for every one. Any
     # other organization is answered as if the provider were not configured.
-    # Deleting that organization deletes the row rather than widening it.
+    # RESTRICT: SET NULL would open the provider to every organization, and
+    # CASCADE would destroy the operator's credential with it, so deleting the
+    # organization fails until the restriction is lifted or the provider removed.
     restricted_to_organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), index=True, default=None
+        Uuid, ForeignKey("organization.id", ondelete="RESTRICT"), index=True, default=None
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
