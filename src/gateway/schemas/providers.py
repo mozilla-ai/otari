@@ -393,8 +393,9 @@ class HostedProviderPublic(SQLModel):
     """One hosted provider, named by its provider and the tail of its key.
 
     No shape in this section carries key material: a stored credential is
-    known by its last four characters and nothing else, and ``client_args``
-    goes out with credential-shaped values masked.
+    known by its last four characters and nothing else, ``client_args`` goes
+    out with credential-shaped values masked, and ``api_base`` with the
+    password in its userinfo and its query values masked.
     """
 
     id: uuid.UUID
@@ -408,17 +409,21 @@ class HostedProviderPublic(SQLModel):
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: HostedProvider, *, client_args: dict[str, Any] | None) -> HostedProviderPublic:
+    def from_row(
+        cls, row: HostedProvider, *, client_args: dict[str, Any] | None, api_base: str | None
+    ) -> HostedProviderPublic:
         """Read one row for the API: no key, and the extras with credential-shaped values masked.
 
         ``client_args`` is passed in decrypted, because the row holds them
-        encrypted and the service is what reads them back.
+        encrypted and the service is what reads them back. ``api_base`` is
+        passed in already masked, because the URL masking lives in the service
+        layer this one may not import.
         """
         return cls(
             id=row.id,
             provider=row.provider,
             api_key_last4=row.api_key_last4,
-            api_base=row.api_base,
+            api_base=api_base,
             client_args=redact_secret_like_values(client_args),
             enabled=row.enabled,
             restricted_to_organization_id=row.restricted_to_organization_id,

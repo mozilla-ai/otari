@@ -13,6 +13,7 @@ writes in another.
 
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -63,6 +64,8 @@ from gateway.services.providers._hosted_credentials import (
     normalize_api_base,
     normalize_provider,
     origin_of,
+    public_api_base,
+    unmask_api_base,
 )
 from gateway.services.providers._hosted_offers import HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
@@ -118,7 +121,9 @@ class HostedProviderService:
         """One page of hosted providers, enabled or not."""
         async with self.uow:
             rows, count = await self.providers.list_page(skip=skip, limit=limit)
-            return HostedProvidersPublic(data=[self._public(row) for row in rows], count=count)
+            return HostedProvidersPublic(
+                data=[self._public(row, client_args=client_args_of(row)) for row in rows], count=count
+            )
 
     async def create_provider(self, request: HostedProviderCreateRequest) -> HostedProviderPublic:
         """Configure a provider, offering everything it lists on the new key.
@@ -164,7 +169,7 @@ class HostedProviderService:
                 # The pre-check races the insert; the unique constraint decides.
                 raise HostedProviderAlreadyExistsError(conflict.provider) from conflict
             await self.offers.offer(provider, discovered, defaults)
-            return HostedProviderPublic.from_row(row, client_args=request.client_args)
+            return self._public(row, client_args=request.client_args)
 
     async def update_provider(self, provider: str, request: HostedProviderUpdateRequest) -> HostedProviderPublic:
         """Rotate the key, repoint the base, change the extras, or toggle a provider.
@@ -179,6 +184,7 @@ class HostedProviderService:
             HostedProviderNotFoundError: no such provider.
             HostedProviderUnknownOrganizationError: the restriction names no organization here.
             HostedProviderUnsafeApiBaseError: ``api_base`` is refused by the SSRF gate.
+            HostedProviderApiBaseMaskedError: ``api_base`` carries the mask but is not the stored one echoed back.
             HostedProviderKeyRequiredError: the base moves to another origin and no key came with it.
             HostedProviderClientArgsUnreadableError: a masked entry has nothing stored to keep.
             SecretBoxUnavailableTenancyError: no usable ``OTARI_SECRET_KEY``.
@@ -191,6 +197,8 @@ class HostedProviderService:
         async with self.uow:
             row = await self._provider_or_raise(provider)
             if request.api_base is not None:
+                if api_base is not None:
+                    api_base = unmask_api_base(api_base, row.api_base)
                 new_origin = origin_of(api_base)
                 if new_origin is not None and new_origin != origin_of(row.api_base) and encrypted is None:
                     # The stored key would otherwise be sent to an endpoint the
@@ -212,7 +220,7 @@ class HostedProviderService:
                 await self._require_organization(request.restricted_to_organization_id)
                 row.restricted_to_organization_id = request.restricted_to_organization_id
             await self.providers.save(row)
-            return self._public(row)
+            return self._public(row, client_args=client_args_of(row))
 
     async def delete_provider(self, provider: str) -> None:
         """Remove a provider and the roster offered on it. Pricing history stays.
@@ -407,8 +415,8 @@ class HostedProviderService:
             raise HostedProviderUnsafeApiBaseError(str(exc)) from None
 
     @staticmethod
-    def _public(row: HostedProvider) -> HostedProviderPublic:
-        return HostedProviderPublic.from_row(row, client_args=client_args_of(row))
+    def _public(row: HostedProvider, *, client_args: dict[str, Any] | None) -> HostedProviderPublic:
+        return HostedProviderPublic.from_row(row, client_args=client_args, api_base=public_api_base(row.api_base))
 
     async def _require_organization(self, organization_id: uuid.UUID | None) -> None:
         if organization_id is not None and not await self.organization_exists(organization_id):

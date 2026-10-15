@@ -8136,7 +8136,7 @@
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, named by its provider and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, and ``client_args``\ngoes out with credential-shaped values masked.",
+        "description": "One hosted provider, named by its provider and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.",
         "properties": {
           "api_base": {
             "anyOf": [

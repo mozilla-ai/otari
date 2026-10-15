@@ -247,6 +247,19 @@ class HostedProviderAlreadyExistsError(TenancyConflictError):
         super().__init__(f"A hosted provider for '{provider}' is already configured")
 
 
+class HostedProviderApiBaseMaskedError(TenancyValidationError):
+    """An endpoint carrying the credential mask that is not the stored endpoint echoed back.
+
+    The API shows a stored ``api_base`` with the password in its userinfo and
+    its query values masked. Echoed back unchanged it keeps the stored value;
+    edited, there is no telling which credential the mask stood for, and
+    taken literally the mask would be sent to the provider as one.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("The endpoint carries a masked credential. Enter the endpoint in full to change it.")
+
+
 class HostedProviderClientArgsUnreadableError(TenancyValidationError):
     """A masked client argument was echoed back with nothing stored to keep under it.
 
@@ -314,6 +327,7 @@ __all__ = [
     "HostedModelNameRequiredError",
     "HostedModelNotFoundError",
     "HostedProviderAlreadyExistsError",
+    "HostedProviderApiBaseMaskedError",
     "HostedProviderNotFoundError",
     "HostedProviderClientArgsUnreadableError",
     "HostedProviderKeyRequiredError",

@@ -8,21 +8,26 @@ crosses the API boundary.
 import json
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from any_llm import LLMProvider
 
 from gateway.core.config import PROVIDER_TYPE_ALIASES
-from gateway.exceptions.providers_exceptions import HostedProviderUnknownProviderError
+from gateway.exceptions.providers_exceptions import (
+    HostedProviderApiBaseMaskedError,
+    HostedProviderUnknownProviderError,
+)
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.providers import HostedProvider
+from gateway.models.secret_fields import REDACTED_VALUE
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
     decrypt_secret,
     encrypt_secret,
 )
+from gateway.services.url_safety import redact_url_secrets
 
 # What the secret-box error names as the thing that could not be stored.
 STORED = "hosted provider credentials"
@@ -48,6 +53,40 @@ def normalize_api_base(api_base: str | None) -> str | None:
         return None
     trimmed = api_base.strip()
     return trimmed or None
+
+
+def public_api_base(api_base: str | None) -> str | None:
+    """An endpoint as the API shows it, with a credential in its userinfo or query masked."""
+    return redact_url_secrets(api_base) if api_base is not None else None
+
+
+def unmask_api_base(incoming: str, stored: str | None) -> str:
+    """The stored endpoint where the caller echoed back its masked form, else what was sent.
+
+    The edit form sends the endpoint it was shown, so an unchanged base comes
+    back masked and has to keep the credential it hides.
+
+    Raises:
+        HostedProviderApiBaseMaskedError: the endpoint carries the mask but is
+            not the stored one echoed back, so the mask would be stored as the
+            credential.
+    """
+    if stored is not None and incoming == public_api_base(stored):
+        return stored
+    if _carries_mask(incoming):
+        raise HostedProviderApiBaseMaskedError
+    return incoming
+
+
+def _carries_mask(api_base: str) -> bool:
+    try:
+        parts = urlsplit(api_base)
+        username, password = parts.username, parts.password
+    except ValueError:
+        return False
+    if REDACTED_VALUE in (username, password):
+        return True
+    return any(value == REDACTED_VALUE for _, value in parse_qsl(parts.query, keep_blank_values=True))
 
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}

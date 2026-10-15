@@ -10567,8 +10567,9 @@ export interface components {
          * @description One hosted provider, named by its provider and the tail of its key.
          *
          *     No shape in this section carries key material: a stored credential is
-         *     known by its last four characters and nothing else, and ``client_args``
-         *     goes out with credential-shaped values masked.
+         *     known by its last four characters and nothing else, ``client_args`` goes
+         *     out with credential-shaped values masked, and ``api_base`` with the
+         *     password in its userinfo and its query values masked.
          */
         HostedProviderPublic: {
             /** Api Base */

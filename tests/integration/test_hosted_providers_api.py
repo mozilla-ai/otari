@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
@@ -118,6 +119,44 @@ def test_no_response_body_anywhere_in_the_walk_carries_key_material(
         assert "sk-live" not in body, call
         assert "shh" not in body, call
         assert "encrypted_api_key" not in body, call
+
+
+def test_a_credential_in_the_base_url_is_masked_and_an_echo_keeps_it(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """The edit form sends back the base it was shown, so the mask has to read as "keep what is stored"."""
+    stored = "https://proxy-user:proxy-pass@proxy.example.com/v1?token=t0ken"
+    masked = "https://proxy-user:***@proxy.example.com/v1?token=***"
+
+    created = _create(client, master_key_header, api_base=stored)
+    listed = client.get(PATH, headers=master_key_header).json()["data"][0]
+    echoed = client.patch(f"{PATH}/openai", json={"api_base": masked, "enabled": False}, headers=master_key_header)
+
+    assert created["api_base"] == masked
+    assert listed["api_base"] == masked
+    assert echoed.status_code == 200, echoed.text
+    assert echoed.json()["api_base"] == masked
+    assert _stored_api_base(db_session_factory) == stored
+
+    edited = client.patch(
+        f"{PATH}/openai", json={"api_base": "https://proxy-user:***@proxy.example.com/v2"}, headers=master_key_header
+    )
+    assert edited.status_code == 400
+    assert _stored_api_base(db_session_factory) == stored
+
+    replaced = client.patch(
+        f"{PATH}/openai", json={"api_base": "https://proxy.example.com/v2"}, headers=master_key_header
+    )
+    assert replaced.json()["api_base"] == "https://proxy.example.com/v2"
+
+
+def _stored_api_base(session_factory: Callable[[], Session]) -> str | None:
+    session = session_factory()
+    try:
+        value: str | None = session.execute(text("SELECT api_base FROM hosted_providers")).scalar_one()
+        return value
+    finally:
+        session.close()
 
 
 def test_a_configured_provider_comes_back_by_its_tail_and_offers_what_it_listed(
