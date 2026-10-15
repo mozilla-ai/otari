@@ -77,6 +77,8 @@ function mockApi(
     granted?: boolean | "absent"
     /** Answers the list 404, as the router refusing a non-operator. */
     listRefused?: boolean
+    /** Answers a provider PATCH with this refusal. */
+    patchRefusal?: string
     providers?: HostedProvider[]
     models?: HostedModel[]
     sweep?: HostedCatalogRefresh
@@ -124,6 +126,9 @@ function mockApi(
       }
       if (method === "DELETE") {
         return jsonResponse({ message: "Hosted provider deleted" })
+      }
+      if (method === "PATCH" && opts.patchRefusal) {
+        return jsonResponse({ detail: opts.patchRefusal }, 400)
       }
       return jsonResponse({ ...providers[0], ...body }, 201)
     }
@@ -269,6 +274,7 @@ describe("HostedProvidersPage", () => {
     const requests = mockApi({
       providers: [
         hostedProvider({
+          api_base: "https://proxy.example.com/v1",
           restricted_to_organization_id: "33333333-3333-4333-8333-333333333333",
         }),
       ],
@@ -278,10 +284,9 @@ describe("HostedProvidersPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Edit openai" }))
     const dialog = await screen.findByRole("dialog")
-    await user.type(
-      within(dialog).getByRole("textbox", { name: "API base URL" }),
-      "https://proxy.example.com/v1",
-    )
+    const base = within(dialog).getByRole("textbox", { name: "API base URL" })
+    await user.clear(base)
+    await user.type(base, "https://proxy.example.com/v2")
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
@@ -290,9 +295,58 @@ describe("HostedProvidersPage", () => {
     const patch = hostedRequests(requests, "PATCH")[0]
     expect(patch.url).toContain("/hosted-providers/openai")
     expect(patch.body).toEqual({
-      api_base: "https://proxy.example.com/v1",
+      api_base: "https://proxy.example.com/v2",
       client_args: null,
     })
+  })
+
+  it("asks for the key again before pointing a provider at another host", async () => {
+    const requests = mockApi()
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "API base URL" }),
+      "https://proxy.example.com/v1",
+    )
+    expect(
+      within(dialog).getByText(
+        "This endpoint is on another host, scheme or port, so enter the key again.",
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await user.type(within(dialog).getByLabelText(/API key/), "sk-new")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "PATCH")[0].body).toMatchObject({
+      api_key: "sk-new",
+      api_base: "https://proxy.example.com/v1",
+    })
+  })
+
+  it("keeps the edit open on the server's refusal, naming it", async () => {
+    mockApi({
+      patchRefusal:
+        "Pointing a hosted provider at another origin requires entering its key again",
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    expect(
+      await within(dialog).findByText(
+        /Pointing a hosted provider at another origin requires entering its key again/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
   it("switches a provider off from its row", async () => {

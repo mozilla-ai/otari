@@ -21,6 +21,8 @@ import {
 } from "@/features/providers/providerFields"
 import { useUpdateHostedProvider } from "@/shared/api/hostedProviders"
 
+import { movesToAnotherOrigin } from "./endpointOrigin"
+
 // The editor for one hosted provider. The provider itself is immutable (the
 // update body cannot change it), so it is named in the description. The key box
 // starts empty and stays optional, which is the whole shape of a write-only
@@ -73,8 +75,13 @@ export function EditHostedProviderForm({
     draft.redacted,
   )
   const { isDirty } = useDirtySnapshot(draft)
+  const needsKey =
+    draft.apiKey === "" &&
+    movesToAnotherOrigin(provider.api_base ?? null, draft.apiBase)
   const canSubmit =
-    parsedClientArgs.ok && Object.keys(credentialErrors).length === 0
+    parsedClientArgs.ok &&
+    Object.keys(credentialErrors).length === 0 &&
+    !needsKey
 
   const submit = () => {
     if (!canSubmit || !parsedClientArgs.ok) return
@@ -123,6 +130,13 @@ export function EditHostedProviderForm({
         onChange={(apiKey) => setDraft({ ...draft, apiKey })}
         placeholder="Leave blank to keep the stored key"
         description="Typing a new key here replaces the stored one. There is no way to read the old one back."
+        isRequired={needsKey}
+        isInvalid={needsKey}
+        errorMessage={
+          needsKey
+            ? "This endpoint is on another host, scheme or port, so enter the key again."
+            : undefined
+        }
       />
       <Field
         label="API base URL"
