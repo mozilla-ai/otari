@@ -21,9 +21,20 @@ function Warning({ children }: { children: string }) {
   )
 }
 
+/**
+ * Providers whose callers declare tools in the provider's own format, which
+ * Otari forwards untouched (Gemini's `google_search` and `code_execution`), so
+ * the provider runs them even though no Anthropic or OpenAI form is native there.
+ */
+const OWN_TOOL_FORMATS = new Set(["gemini", "vertexai"])
+
 /** Who runs the built-in tools on one offering, or nothing where nobody does. */
 function toolsCaption(offering: FallbackOffering): string | undefined {
-  if (offering.own_tools.length > 0) return "Own tools"
+  if (
+    offering.own_tools.length > 0 ||
+    OWN_TOOL_FORMATS.has(offering.provider_type)
+  )
+    return "Own tools"
   if (offering.otari_tools.length > 0) return "Otari's tools"
   return undefined
 }

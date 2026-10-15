@@ -75,6 +75,19 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).getAllByLabelText("then")).toHaveLength(1)
   })
 
+  it("labels Gemini's tools as its own", async () => {
+    const gemini: AutomaticFallback = {
+      ...SONNET,
+      id: "google/gemini-x",
+      name: "Gemini X",
+      offerings: [offering("gemini:models/gemini-x", [], ["web_search"])],
+    }
+    await renderWithRouter(<AutomaticFallbacks fallbacks={[gemini]} />)
+
+    const row = await rowOf("Gemini X")
+    expect(within(row).getByText("Own tools")).toBeInTheDocument()
+  })
+
   it("warns that a model on one provider has no backup", async () => {
     const gemini: AutomaticFallback = {
       ...SONNET,
