@@ -916,4 +916,51 @@ describe("RoutingPage for an organization admin", () => {
       screen.queryByRole("button", { name: "Delete" }),
     ).not.toBeInTheDocument()
   })
+
+  it("lists the automatic fallbacks the gateway reports, in its order", async () => {
+    const { calls } = mockApi(undefined, undefined, undefined, {
+      fallbacks: [
+        {
+          id: "anthropic/claude-sonnet-5.5",
+          name: "Claude Sonnet 5.5",
+          offerings: [
+            {
+              selector: "bedrock:anthropic.claude-sonnet-5-5",
+              provider: "bedrock",
+              provider_type: "bedrock",
+              own_tools: [],
+              otari_tools: ["web_search"],
+            },
+            {
+              selector: "anthropic:claude-sonnet-5-5",
+              provider: "anthropic",
+              provider_type: "anthropic",
+              own_tools: ["web_search"],
+              otari_tools: [],
+            },
+          ],
+          requests: 12,
+          fell_back: 2,
+          pinned: 0,
+          pinned_provider: null,
+        },
+      ],
+    })
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("Claude Sonnet 5.5")).closest("tr")!
+    // The server's order, not the catalog's: Bedrock is tried first here.
+    const bedrock = within(row).getByText("Amazon Bedrock")
+    const anthropic = within(row).getByText("Anthropic")
+    expect(
+      bedrock.compareDocumentPosition(anthropic) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(within(row).getByText("12")).toBeInTheDocument()
+    expect(
+      calls.some(({ url }) =>
+        url.endsWith(`${API_ROOT}/organizations/me/automatic-fallbacks`),
+      ),
+    ).toBe(true)
+  })
 })

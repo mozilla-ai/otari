@@ -1850,6 +1850,90 @@
         "title": "AuthorizeResponse",
         "type": "object"
       },
+      "AutomaticFallbackPublic": {
+        "description": "One model the caller's organization used in the window, and the fallback a catalog ID gives it.",
+        "properties": {
+          "fell_back": {
+            "description": "Of `requests`, the successful ones a later offering served.",
+            "title": "Fell Back",
+            "type": "integer"
+          },
+          "id": {
+            "description": "The catalog ID a caller sends to get the fallback, e.g. `anthropic/claude-sonnet-5`.",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "offerings": {
+            "description": "What a request sent by catalog ID tries, first first. One entry means no backup.",
+            "items": {
+              "$ref": "#/components/schemas/FallbackOfferingPublic"
+            },
+            "title": "Offerings",
+            "type": "array"
+          },
+          "pinned": {
+            "description": "Of `requests`, those that named an offering or a policy rather than the catalog ID, and so got no automatic fallback.",
+            "title": "Pinned",
+            "type": "integer"
+          },
+          "pinned_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instance most pinned requests reached.",
+            "title": "Pinned Provider"
+          },
+          "requests": {
+            "description": "Requests served in the window, each counted once however many attempts.",
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "offerings",
+          "requests",
+          "fell_back",
+          "pinned",
+          "pinned_provider"
+        ],
+        "title": "AutomaticFallbackPublic",
+        "type": "object"
+      },
+      "AutomaticFallbacksResponse": {
+        "description": "The automatic fallbacks the caller's organization used.",
+        "properties": {
+          "models": {
+            "description": "Most requested first.",
+            "items": {
+              "$ref": "#/components/schemas/AutomaticFallbackPublic"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "window_days": {
+            "description": "How many days of traffic the counts cover.",
+            "title": "Window Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_days",
+          "models"
+        ],
+        "title": "AutomaticFallbacksResponse",
+        "type": "object"
+      },
       "BackendType": {
         "description": "How a guardrail executes.",
         "enum": [
@@ -7042,6 +7126,51 @@
           "model"
         ],
         "title": "ExternalUsageEvent",
+        "type": "object"
+      },
+      "FallbackOfferingPublic": {
+        "description": "One offering a catalog ID tries, and who runs the built-in tools on it.",
+        "properties": {
+          "otari_tools": {
+            "description": "Built-in tools Otari runs in this provider's place, for that caller.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Otari Tools",
+            "type": "array"
+          },
+          "own_tools": {
+            "description": "Built-in tools this provider runs itself, for a caller that declares them in the provider's own words and leaves the choice of executor to the deployment.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Own Tools",
+            "type": "array"
+          },
+          "provider": {
+            "description": "The provider instance the selector names.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_type": {
+            "description": "The any-llm implementation behind the instance.",
+            "title": "Provider Type",
+            "type": "string"
+          },
+          "selector": {
+            "description": "The offering, in `instance:model` form.",
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "provider",
+          "provider_type",
+          "own_tools",
+          "otari_tools"
+        ],
+        "title": "FallbackOfferingPublic",
         "type": "object"
       },
       "GateResultResponse": {
@@ -29423,6 +29552,36 @@
         "summary": "Delete Organization Alias",
         "tags": [
           "aliases"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/automatic-fallbacks": {
+      "get": {
+        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them, priced for this organization, with who runs the\nbuilt-in tools on each, beside its traffic: how many requests a backup served,\nand how many named one offering and so had no fallback. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
+        "operationId": "routing-list_automatic_fallbacks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticFallbacksResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Automatic Fallbacks",
+        "tags": [
+          "routing"
         ]
       }
     },

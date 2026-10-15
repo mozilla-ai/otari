@@ -227,6 +227,7 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # same reason.
     RouterMount(organization_routing.policies_router, Plane.CONTROL),
     RouterMount(organization_routing.aliases_router, Plane.CONTROL),
+    RouterMount(organization_routing.fallbacks_router, Plane.CONTROL),
     # The caller's own keys, in workspaces they may see. The deployment-wide
     # ``keys.router`` keeps its operator gate.
     RouterMount(organization_keys.router, Plane.CONTROL),

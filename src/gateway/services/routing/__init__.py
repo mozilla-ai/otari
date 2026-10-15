@@ -15,6 +15,9 @@ compiler stays pure and synchronous, and a backend's asynchronous work
 (embedding, reading stored examples) happens in the request pipeline, which
 passes the resulting order in as a value.
 
+``RoutingService`` reads what routing gives an organization's callers: the
+automatic fallbacks a catalog ID gets with no policy, and the traffic that used them.
+
 ``recommend.py`` answers a different question: which model a coding agent's
 subagent should start on. That is put to a decision model, not compiled from
 a policy, and the harness acts on the answer itself.
@@ -22,6 +25,7 @@ a policy, and the harness acts on the answer itself.
 
 from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
 from gateway.services.routing._local_policies import refuse_local_policy
+from gateway.services.routing._service import FALLBACK_WINDOW, AutomaticFallback, FallbackOffering, RoutingService
 from gateway.services.routing.backends import (
     KNN_BACKEND,
     NOOP_BACKEND,
@@ -54,19 +58,23 @@ from gateway.services.routing.recommend import build_decision_request, candidate
 from gateway.types.budget_state import BudgetState
 
 __all__ = [
+    "FALLBACK_WINDOW",
     "KNN_BACKEND",
     "NOOP_BACKEND",
     "PRIORITY_BACKEND",
     "WEIGHTED_BACKEND",
     "BudgetState",
+    "AutomaticFallback",
     "CompiledPlan",
     "DroppedCandidate",
+    "FallbackOffering",
     "KnnRoutingMemory",
     "NoEligibleCandidatesError",
     "RouterBackend",
     "RouterOrdering",
     "RoutingContext",
     "RoutingDecision",
+    "RoutingService",
     "RoutingSignal",
     "UnreadableRecommendationError",
     "backend_is_priority",

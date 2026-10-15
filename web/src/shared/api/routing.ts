@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query"
 import type {
   AliasResponse,
+  AutomaticFallbacksResponse,
   CreateAliasRequest,
   RouterStatus,
   RoutingPolicyResponse,
@@ -16,6 +17,7 @@ import { apiFetch } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
   ALIASES,
+  AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
   ROUTER_STATUS,
@@ -94,6 +96,20 @@ export function useRoutingPolicies(workspaceId?: string) {
       ),
     staleTime: 60_000,
     enabled: scope.isReady,
+  })
+}
+
+// The models the caller's organization used in the last 30 days, each with the
+// offerings its catalog ID tries in order. One endpoint for every caller: the
+// server scopes the traffic to the workspaces the caller may see.
+export function useAutomaticFallbacks() {
+  return useQuery({
+    queryKey: [AUTOMATIC_FALLBACKS],
+    queryFn: () =>
+      apiFetch<AutomaticFallbacksResponse>(
+        "/organizations/me/automatic-fallbacks",
+      ),
+    staleTime: 60_000,
   })
 }
 

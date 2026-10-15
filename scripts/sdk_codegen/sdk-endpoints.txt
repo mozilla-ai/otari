@@ -354,6 +354,7 @@ DELETE /api/v1/organizations/me/routing-policies/{name}         # dashboard-only
 GET /api/v1/organizations/me/aliases                            # dashboard-only
 POST /api/v1/organizations/me/aliases                           # dashboard-only
 DELETE /api/v1/organizations/me/aliases/{name}                  # dashboard-only
+GET /api/v1/organizations/me/automatic-fallbacks                # dashboard-only
 # The member's own keys (otari-ai#1941), excluded for the same reason as the
 # usage reads above: scoped by the caller's dashboard session, which an SDK
 # caller does not hold.

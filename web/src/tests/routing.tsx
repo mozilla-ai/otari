@@ -4,6 +4,7 @@ import type { ReactElement } from "react"
 import { vi } from "vitest"
 
 import type {
+  AutomaticFallback,
   CatalogModelSummary,
   OrganizationContext,
   OrganizationMember,
@@ -139,6 +140,8 @@ export function mockApi(
     // What the model catalog answers, matched on a search term the way the
     // server matches it.
     catalog?: CatalogModelSummary[]
+    // What /api/v1/organizations/me/automatic-fallbacks answers.
+    fallbacks?: AutomaticFallback[]
   } = {},
 ) {
   let list = [...policies]
@@ -197,6 +200,9 @@ export function mockApi(
           return new Response(null, { status: 204 })
         }
         return jsonResponse(memberAliasList)
+      }
+      if (url.includes(`${API_ROOT}/organizations/me/automatic-fallbacks`)) {
+        return jsonResponse({ window_days: 30, models: opts.fallbacks ?? [] })
       }
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(opts.context ?? organizationContext())

@@ -363,6 +363,10 @@ export type UpdateOrganizationDomainRequest =
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
+export type AutomaticFallbacksResponse = Schemas["AutomaticFallbacksResponse"]
+export type AutomaticFallback = Schemas["AutomaticFallbackPublic"]
+export type FallbackOffering = Schemas["FallbackOfferingPublic"]
+
 // `spec` is the one field taken from ./local rather than the generator: the wire
 // contract declares it a free-form object, so the generated type is
 // `Record<string, unknown>` and the Routing page reads its internals. Everything

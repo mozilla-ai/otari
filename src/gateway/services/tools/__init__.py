@@ -3,6 +3,8 @@
 ``BUILTIN_TOOLS`` lists every such tool, and ``BuiltinTool`` is the shape of one entry.
 ``native_rendering`` answers how one tool's calls are announced in a given wire dialect,
 ``decide_candidate_tools`` which of a request's built-in tools Otari runs on each candidate it may be sent to,
+``provider_tools`` the same for one provider before any request exists, for a caller that leaves the choice
+to the deployment,
 and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``Tool`` names the ``tools[].type`` values the gateway runs itself.
 ``read_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
@@ -64,6 +66,7 @@ from gateway.services.tools._native import (
     NativeCall,
     NativeRendering,
 )
+from gateway.services.tools._provider_tools import provider_tools
 from gateway.services.tools._registry import BUILTIN_TOOLS, native_rendering
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
 from gateway.services.tools._search_tool_connection import (
@@ -181,6 +184,7 @@ __all__ = [
     "native_rendering",
     "parse_code_execution_header",
     "provider_runs_code_natively",
+    "provider_tools",
     "read_web_declarations",
     "read_web_fetch_max_uses",
     "read_web_search_max_uses",

@@ -58,6 +58,7 @@ from gateway.repositories.tools import (
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.traces import TracesRepositories
+from gateway.repositories.usage_and_telemetry import UsageLogRepository
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
@@ -77,7 +78,7 @@ from gateway.services.overview import OverviewService
 from gateway.services.playground_service import ForwardedToolOffer, LocalToolOffer, PlaygroundToolOffer
 from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
 from gateway.services.rate_limits import RateLimitService
-from gateway.services.routing import clear_router_backend_cache
+from gateway.services.routing import RoutingService, clear_router_backend_cache
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     InvitationClaimSettings,
@@ -104,6 +105,7 @@ from gateway.services.tools import (
 )
 from gateway.services.traces import TraceService
 from gateway.services.usage_admin_service import usage_in
+from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.types.traces import TraceScope
 
@@ -1504,10 +1506,18 @@ def get_trace_service(uow: UnitOfWorkDep) -> TraceService:
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
 
 
-async def get_organization_trace_scope(
+@dataclass(frozen=True)
+class VisibleWorkspaces:
+    """The caller's active organization, and the workspaces in it they may read."""
+
+    organization_id: uuid.UUID
+    workspace_ids: frozenset[uuid.UUID]
+
+
+async def get_visible_workspaces(
     identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
-) -> TraceScope:
-    """The workspaces of their active organization this caller may read traces in.
+) -> VisibleWorkspaces:
+    """The workspaces of their active organization this caller may read.
 
     The same rule the organization's usage reads use, resolved per request: an
     owner or an admin reads every workspace in the organization, anyone else the
@@ -1515,11 +1525,28 @@ async def get_organization_trace_scope(
     """
     organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     scope = await resolve_visible_workspace_scope(db, user=identity, organizations=organizations)
-    if scope.workspace_ids is None:
-        return TraceScope.workspaces(
-            frozenset(await WorkspaceRepository(db).get_ids_by_organization(scope.organization.id))
-        )
-    return TraceScope.workspaces(frozenset(scope.workspace_ids))
+    workspace_ids = (
+        await WorkspaceRepository(db).get_ids_by_organization(scope.organization.id)
+        if scope.workspace_ids is None
+        else scope.workspace_ids
+    )
+    return VisibleWorkspaces(organization_id=scope.organization.id, workspace_ids=frozenset(workspace_ids))
+
+
+VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspaces)]
+
+
+async def get_organization_trace_scope(visible: VisibleWorkspacesDep) -> TraceScope:
+    """The workspaces of their active organization this caller may read traces in."""
+    return TraceScope.workspaces(visible.workspace_ids)
+
+
+def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
+    """Build the routing service, and the usage service it reads traffic through, on the request's Unit of Work."""
+    return RoutingService(config, UsageService(uow, UsageLogRepository(uow)))
+
+
+RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
 
 
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
@@ -1712,6 +1739,9 @@ __all__ = [
     "FileServiceDep",
     "OptionalFileServiceDep",
     "OverviewServiceDep",
+    "RoutingServiceDep",
+    "VisibleWorkspaces",
+    "VisibleWorkspacesDep",
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",

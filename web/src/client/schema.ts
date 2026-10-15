@@ -2159,6 +2159,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/automatic-fallbacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Automatic Fallbacks
+         * @description The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.
+         *
+         *     A request that sends a model's catalog ID moves to the model's next offering
+         *     when one fails, with no policy. Each model lists its offerings in the order
+         *     such a request tries them, priced for this organization, with who runs the
+         *     built-in tools on each, beside its traffic: how many requests a backup served,
+         *     and how many named one offering and so had no fallback. The traffic is the
+         *     workspaces the caller may see in their active organization, by the rule the
+         *     organization's usage reads use.
+         */
+        get: operations["routing-list_automatic_fallbacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/budgets": {
         parameters: {
             query?: never;
@@ -7416,6 +7444,60 @@ export interface components {
             state: string;
         };
         /**
+         * AutomaticFallbackPublic
+         * @description One model the caller's organization used in the window, and the fallback a catalog ID gives it.
+         */
+        AutomaticFallbackPublic: {
+            /**
+             * Fell Back
+             * @description Of `requests`, the successful ones a later offering served.
+             */
+            fell_back: number;
+            /**
+             * Id
+             * @description The catalog ID a caller sends to get the fallback, e.g. `anthropic/claude-sonnet-5`.
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Offerings
+             * @description What a request sent by catalog ID tries, first first. One entry means no backup.
+             */
+            offerings: components["schemas"]["FallbackOfferingPublic"][];
+            /**
+             * Pinned
+             * @description Of `requests`, those that named an offering or a policy rather than the catalog ID, and so got no automatic fallback.
+             */
+            pinned: number;
+            /**
+             * Pinned Provider
+             * @description The instance most pinned requests reached.
+             */
+            pinned_provider: string | null;
+            /**
+             * Requests
+             * @description Requests served in the window, each counted once however many attempts.
+             */
+            requests: number;
+        };
+        /**
+         * AutomaticFallbacksResponse
+         * @description The automatic fallbacks the caller's organization used.
+         */
+        AutomaticFallbacksResponse: {
+            /**
+             * Models
+             * @description Most requested first.
+             */
+            models: components["schemas"]["AutomaticFallbackPublic"][];
+            /**
+             * Window Days
+             * @description How many days of traffic the counts cover.
+             */
+            window_days: number;
+        };
+        /**
          * BackendType
          * @description How a guardrail executes.
          * @enum {string}
@@ -9785,6 +9867,37 @@ export interface components {
             timestamp: string;
             /** User Id */
             user_id?: string | null;
+        };
+        /**
+         * FallbackOfferingPublic
+         * @description One offering a catalog ID tries, and who runs the built-in tools on it.
+         */
+        FallbackOfferingPublic: {
+            /**
+             * Otari Tools
+             * @description Built-in tools Otari runs in this provider's place, for that caller.
+             */
+            otari_tools: string[];
+            /**
+             * Own Tools
+             * @description Built-in tools this provider runs itself, for a caller that declares them in the provider's own words and leaves the choice of executor to the deployment.
+             */
+            own_tools: string[];
+            /**
+             * Provider
+             * @description The provider instance the selector names.
+             */
+            provider: string;
+            /**
+             * Provider Type
+             * @description The any-llm implementation behind the instance.
+             */
+            provider_type: string;
+            /**
+             * Selector
+             * @description The offering, in `instance:model` form.
+             */
+            selector: string;
         };
         /** GateResultResponse */
         GateResultResponse: {
@@ -20516,6 +20629,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "routing-list_automatic_fallbacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomaticFallbacksResponse"];
                 };
             };
         };

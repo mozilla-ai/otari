@@ -15,6 +15,7 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
 import {
+  useAutomaticFallbacks,
   useDeleteAlias,
   useDeleteOrganizationAlias,
   useDeleteOrganizationRoutingPolicy,
@@ -24,6 +25,7 @@ import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
+import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
 import { BackupsCell, MainModelCell } from "./PolicyCells"
 import type { Intent } from "./policyDraft"
@@ -336,6 +338,8 @@ export function RoutingPage() {
         </TableScrollFrame>
       )}
 
+      {isStandalone ? <AutomaticFallbacksSection /> : null}
+
       <ConfirmDialog
         isOpen={pendingDelete !== undefined}
         // Cleared on the way out: a refusal otherwise sits on the mutation and
@@ -387,5 +391,21 @@ export function RoutingPage() {
         }}
       />
     </div>
+  )
+}
+
+/**
+ * The models callers used in the last 30 days, with the offerings their catalog
+ * ID tries and who runs the built-in tools on each, as the gateway reports them.
+ */
+function AutomaticFallbacksSection() {
+  const fallbacks = useAutomaticFallbacks()
+  return (
+    <AutomaticFallbacks
+      fallbacks={fallbacks.data?.models ?? []}
+      toolsNote="Tools shown for callers that declare them in the provider's own words and leave the choice to Otari: a provider's own where it runs them, Otari's where it does not."
+      isLoading={fallbacks.isLoading}
+      error={fallbacks.error}
+    />
   )
 }

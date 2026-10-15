@@ -307,6 +307,34 @@ def test_offerings_come_from_the_callers_organization_view(organization_index: s
     )
 
 
+def test_catalog_models_list_each_id_in_the_callers_view_with_its_order_and_name() -> None:
+    """Each catalog ID with its offerings in ``resolve_catalog_offerings``'s order, and its own name."""
+    own = [selectors.OfferingRow(_BYO_DEEPSEEK, "nebius", "nebius", 0.3)]
+    identities = {**_IDENTITIES, "deepseek/deepseek-v4.1-flash": ("deepseekv4.1flash", (_BYO_DEEPSEEK,))}
+    names = {"z-ai/glm-5.3": "GLM-5.3", "deepseek/deepseek-v4.1-flash": "DeepSeek V4.1 Flash"}
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            _ROWS,
+            _IDENTITIES,
+            organizations={_ORG_A: selectors.build_organization_selectors(_ROWS, own, identities, names)},
+            names=names,
+        )
+    )
+    try:
+        mine = {model.id: model for model in selectors.catalog_models(organization_id=_ORG_A)}
+        theirs = {model.id: model for model in selectors.catalog_models(organization_id=_ORG_B)}
+    finally:
+        selectors.reset_selector_index()
+
+    assert mine["deepseek/deepseek-v4.1-flash"].offerings == (_BYO_DEEPSEEK,)
+    assert mine["deepseek/deepseek-v4.1-flash"].name == "DeepSeek V4.1 Flash"
+    assert "deepseek/deepseek-v4.1-flash" not in theirs
+    assert theirs["z-ai/glm-5.3"].name == "GLM-5.3"
+    assert theirs["z-ai/glm-5.3"].offerings[0] == "nebius:zai-org/GLM-5.3"
+    # No name indexed: the catalog ID stands in for one.
+    assert theirs["openai/gpt-oss-120b"].name == "openai/gpt-oss-120b"
+
+
 def test_an_organizations_unpriced_key_follows_the_priced_offerings() -> None:
     """An unpriced offering would settle at no cost, so a priced one answers first."""
     own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", None)]

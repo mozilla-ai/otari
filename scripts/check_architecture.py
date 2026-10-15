@@ -1766,7 +1766,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),
     },
     "gateway.models.usage.UsageLog": {
-        "repository": None,
+        "repository": "gateway/repositories/usage_and_telemetry/usage_log_repository.py",
         "baseline": (
             "gateway/api/routes/_passthrough.py",
             "gateway/api/routes/_pipeline.py",

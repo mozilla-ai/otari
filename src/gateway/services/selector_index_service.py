@@ -111,6 +111,10 @@ def _identities(grouped: Iterable[ModelIdentity]) -> Identities:
     return {identity.id: (identity.key, identity.selectors) for identity in grouped}
 
 
+def _names(grouped: Iterable[ModelIdentity]) -> dict[str, str]:
+    return {identity.id: identity.name for identity in grouped}
+
+
 def _organization_rate(
     overrides: dict[str, list[OverridePeriod]],
     selector: str,
@@ -191,7 +195,7 @@ async def _organization_views(
             _row(seed, instance, rate(seed.selector, instance, seed.model_id)) for seed, instance in own_seeds
         ]
         views[organization_id] = build_organization_selectors(
-            deployment_rows, organization_rows, _identities(union.values())
+            deployment_rows, organization_rows, _identities(union.values()), _names(union.values())
         )
     return views
 
@@ -239,7 +243,8 @@ async def rebuild_selector_index(
         seed, _metadata, instance, _model_id, _provider_type = offering_seed(config, catalog, obj)
         seeds.append(seed)
         rows.append(_row(seed, instance, obj.pricing.input_price_per_million if obj.pricing is not None else None))
-    identities = _identities(group_offerings(seeds).values())
+    grouped = group_offerings(seeds).values()
+    identities = _identities(grouped)
     organizations = await _organization_views(db, config, catalog, rows, seeds)
     set_selector_index(
         build_selector_index(
@@ -247,6 +252,7 @@ async def rebuild_selector_index(
             identities,
             organizations=organizations,
             workspace_organization=await workspace_organizations(db) if organizations else {},
+            names=_names(grouped),
         )
     )
 
