@@ -94,24 +94,42 @@ tries retryable fallbacks before a response begins, and reports each outcome.
 Workspace MCP and web-search configuration are resolved through the same control
 plane.
 
-## Managed models and BYO credentials
+## Hosted providers and BYO credentials
 
 A request is served on the first credential the ladder finds. A provider
 instance configured on the deployment, in `config.yml` or through the Providers
 page, serves every request that names it, including a bare `provider:model`
 request whose provider spells that instance's name. Where no instance answers,
 the organization's own provider key serves the request. Where that is missing
-too, one of the deployment's **hosted providers** does. A hosted provider is a credential the
-deployment's operator configures for the deployment to serve requests on, one
-per provider, with a roster of the models offered on it and the rate each is
-charged at on the deployment price list. Only a model switched on in that roster
-is served on the hosted credential: a model switched off, or one the roster does
-not list, is refused with `424`. A standalone deployment configures them
-on the Hosted providers page; a hosted control plane holds them for its data
-plane. The deployment settles the upstream bill for a hosted model, which is why
-its rate belongs to the deployment and not to any one organization.
+too, one of the deployment's **hosted providers** does.
 
-Hybrid mode can therefore receive two kinds of provider credential:
+A hosted provider is a credential the deployment's operator configures for the
+deployment to serve requests on: one per provider, with a roster of the models
+offered on it and the rate each is charged at on the deployment price list.
+Only a model switched on in that roster is served on the hosted credential: a
+model switched off, or one the roster does not list, is refused with `424`. The
+deployment settles the upstream bill for a hosted model, which is why its rate
+belongs to the deployment and not to any one organization. A hosted provider
+can be restricted to one organization, and every other organization is then
+served as if it did not exist. Any standalone or hosted deployment configures
+them on the Hosted providers page or through `/api/v1/hosted-providers`.
+
+What a hosted provider contributes to the catalog is its roster: the models
+switched on under it, answered for the caller's organization. It also takes
+part in the operator's views of the deployment's credentials, beside the
+configured instances. `GET /api/v1/models/discoverable` lists what each hosted
+provider's stored key can reach, and `GET /api/v1/providers/health` reports
+whether it answers, each under the provider's name. Both are the deployment's
+view, so a provider restricted to one organization is included, and a provider
+switched off is not. A hosted provider whose key no configured
+`OTARI_SECRET_KEY` reads is reported unhealthy with that reason rather than
+dialed. A configured instance named like a hosted provider shadows it here as
+it does at dispatch, so only the instance is listed. The background discovery
+refresher keeps both views warm for hosted providers as it does for instances.
+
+otari.ai is one deployment of this feature: its hosted control plane holds the
+hosted providers that serve its managed models. Hybrid mode can therefore
+receive two kinds of provider credential:
 
 - A workspace's own provider key. The upstream provider bills that workspace.
   Any hybrid gateway can use it, including a self-hosted one.
