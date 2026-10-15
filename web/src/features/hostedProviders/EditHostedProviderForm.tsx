@@ -77,7 +77,7 @@ export function EditHostedProviderForm({
   const { isDirty } = useDirtySnapshot(draft)
   const needsKey =
     draft.apiKey === "" &&
-    movesToAnotherOrigin(provider.api_base ?? null, draft.apiBase)
+    movesToAnotherOrigin(provider.api_base ?? "", draft.apiBase)
   const canSubmit =
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&

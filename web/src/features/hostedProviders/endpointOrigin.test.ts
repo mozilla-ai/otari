@@ -11,7 +11,7 @@ describe("originOf", () => {
   })
 
   it("reads a blank or hostless value as the provider's default", () => {
-    expect(originOf(null)).toBe("")
+    expect(originOf("")).toBe("")
     expect(originOf("  ")).toBe("")
     expect(originOf("example.com/v1")).toBe("")
   })
@@ -43,7 +43,7 @@ describe("movesToAnotherOrigin", () => {
         "https://example.com:8443",
       ),
     ).toBe(true)
-    expect(movesToAnotherOrigin(null, "https://proxy.example.com")).toBe(true)
+    expect(movesToAnotherOrigin("", "https://proxy.example.com")).toBe(true)
   })
 
   it("keeps the key when the endpoint goes back to the default", () => {
