@@ -65,6 +65,11 @@ export function HostedModelForm({
     editing ? draftFrom(editing) : EMPTY_DRAFT,
   )
   const [query, setQuery] = useState("")
+  // Repricing opens on the first rate, the field it is for. Not after a unit
+  // change: that swaps the rate fields, and a remounted field must not pull
+  // focus out of the radio group the operator is still in.
+  const [unitChanged, setUnitChanged] = useState(false)
+  const focusFirstRate = editing !== undefined && !unitChanged
 
   const { isDirty } = useDirtySnapshot(draft)
   const { parsed } = readDraft(draft)
@@ -109,7 +114,9 @@ export function HostedModelForm({
       label={label}
       value={draft[key]}
       onChange={(value) => setDraft({ ...draft, [key]: value })}
+      inputMode="decimal"
       placeholder="0.00"
+      autoFocus={focusFirstRate && key === "input"}
       isRequired={
         editing !== undefined && (key === "input" || key === "output")
       }
@@ -164,7 +171,10 @@ export function HostedModelForm({
         label="Priced per"
         orientation="horizontal"
         value={draft.unit}
-        onChange={(value) => setDraft({ ...draft, unit: pricingUnitOf(value) })}
+        onChange={(value) => {
+          setUnitChanged(true)
+          setDraft({ ...draft, unit: pricingUnitOf(value) })
+        }}
         options={PRICING_UNIT_OPTIONS}
         description="What the rate bills: tokens the provider reports, each call (or rerank search unit), or each image returned. Price audio and moderation models per request."
       />

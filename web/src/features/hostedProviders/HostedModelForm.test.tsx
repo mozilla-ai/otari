@@ -141,4 +141,23 @@ describe("HostedModelForm", () => {
     ).toBeInTheDocument()
     expect(onSaved).not.toHaveBeenCalled()
   })
+
+  it("offers a decimal keyboard on every rate and opens a reprice on the first", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderForm(model())
+
+    const input = screen.getByLabelText(/Input, per 1M tokens/)
+    await waitFor(() => expect(input).toHaveFocus())
+    for (const label of [/Input, per 1M/, /Output, per 1M/, /Cache read/]) {
+      expect(screen.getByLabelText(label)).toHaveAttribute(
+        "inputmode",
+        "decimal",
+      )
+    }
+
+    // The swapped-in field does not take focus from the unit just picked.
+    await user.click(screen.getByRole("radio", { name: "Requests" }))
+    expect(screen.getByLabelText(/Price per 1,000 requests/)).not.toHaveFocus()
+  })
 })
