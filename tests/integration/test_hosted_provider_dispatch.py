@@ -19,10 +19,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
+
+from .conftest import build_test_client
 
 KEY = "sk-live-hosted-1234"
 
@@ -244,3 +246,32 @@ def test_a_model_switched_off_is_refused_as_not_offered_rather_than_unconfigured
     assert "OPENAI_API_KEY" not in response.text
     assert KEY not in response.text
     called.assert_not_called()
+
+
+@pytest.fixture
+def configured_openai_client(postgres_url: str) -> Iterator[TestClient]:
+    """A deployment whose ``config.yml`` defines an ``openai`` instance, beside a hosted openai."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-config-instance"}},
+    )
+    yield from build_test_client(config)
+
+
+def test_a_configured_instance_of_the_same_name_never_reaches_the_hosted_key(
+    configured_openai_client: TestClient,
+) -> None:
+    """Rates kept under the instance name serve on the instance's own key, so they cannot open the hosted one."""
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    client = configured_openai_client
+    _create_user(client, headers)
+    _hosted_openai(client, headers)
+    _price(client, headers, "openai:o3")
+
+    for model in ("openai:gpt-4o", "openai:o3", "openai:not-on-the-roster"):
+        captured, _ = _post_chat_capture(client, headers, model)
+        assert captured["api_key"] == "sk-config-instance", model
