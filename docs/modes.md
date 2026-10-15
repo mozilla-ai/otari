@@ -124,8 +124,17 @@ view, so a provider restricted to one organization is included, and a provider
 switched off is not. A hosted provider whose key no configured
 `OTARI_SECRET_KEY` reads is reported unhealthy with that reason rather than
 dialed. A configured instance named like a hosted provider shadows it here as
-it does at dispatch, so only the instance is listed. The background discovery
-refresher keeps both views warm for hosted providers as it does for instances.
+it does at dispatch, so only the instance is listed.
+
+Being in those views means a hosted provider's model listing is dialed upstream
+on the deployment's stored key, at its `api_base` when one is set. The
+background discovery refresher does so as the gateway starts and then on every
+tick, every `model_cache_ttl_seconds` (sooner, every
+`model_discovery_negative_ttl_seconds`, after a round with a failure), for as
+long as `model_discovery` is on and that TTL is above 0. A `refresh=true` read
+of either view dials at once, and changing or deleting a hosted provider drops
+its cached listing so the next read dials the credential as it now stands. A
+provider switched off and one whose key cannot be decrypted are never dialed.
 
 otari.ai is one deployment of this feature: its hosted control plane holds the
 hosted providers that serve its managed models. Hybrid mode can therefore
