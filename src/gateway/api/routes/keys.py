@@ -565,7 +565,7 @@ async def update_key(
 def _refuse_child_changes(key: APIKey, request: UpdateKeyRequest) -> None:
     """Refuse a change that would let a key a service key minted outgrow it.
 
-    Such a key never names or mints for another user, and it always expires.
+    Such a key never names or mints for another user, it always expires, and its revocation is final.
     """
     if key.parent_key_id is None:
         return
@@ -575,11 +575,13 @@ def _refuse_child_changes(key: APIKey, request: UpdateKeyRequest) -> None:
         or request.max_child_ttl_sec is not None
         or bool({"end_user_budget_id", "end_user_budget_ids"} & fields)
         or ("expires_at" in fields and request.expires_at is None)
+        or (bool(request.is_active) and not key.is_active)
     )
     if widened:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A key a service key minted cannot be made a service key, mint keys or lose its expiry",
+            detail="A key a service key minted cannot be made a service key, mint keys, lose its expiry or be "
+            "reactivated",
         )
 
 

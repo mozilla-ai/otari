@@ -378,7 +378,8 @@ A request on a minted key:
   deleted.
 
 A minted key never mints and never names another end user, and an operator
-cannot make it a service key, give it `max_child_ttl_sec` or clear its expiry.
+cannot make it a service key, give it `max_child_ttl_sec`, clear its expiry or
+reactivate it once revoked.
 It takes no ceiling of its own: a scoped budget naming one is refused with 400
 on both `/api/v1/scoped-budgets` and `/api/v1/organizations/me/spend-ceilings`,
 because nothing removes such a ceiling when the key is deleted. Its end user's

@@ -405,7 +405,7 @@ def test_the_key_list_leaves_minted_keys_out_unless_asked(
 def test_a_minted_key_cannot_be_widened_by_an_update(client: TestClient, master_key_header: dict[str, str]) -> None:
     _setup(client, master_key_header)
     _, service = _service_key(client, master_key_header)
-    child_id, _ = _minted(client, service, "run-1")
+    child_id, child = _minted(client, service, "run-1")
 
     for change in ({"is_service_key": True}, {"max_child_ttl_sec": 60}, {"expires_at": None}):
         refused = client.patch(f"{KEYS}/{child_id}", json=change, headers=master_key_header)
@@ -413,6 +413,13 @@ def test_a_minted_key_cannot_be_widened_by_an_update(client: TestClient, master_
     assert (
         client.patch(f"{KEYS}/{child_id}", json={"key_name": "renamed"}, headers=master_key_header).status_code == 200
     )
+    assert client.patch(f"{KEYS}/{child_id}", json={"is_active": True}, headers=master_key_header).status_code == 200
+
+    revoked = client.patch(f"{END_USER_KEYS}/{child_id}", json={"is_active": False}, headers=service)
+    assert revoked.status_code == 200, revoked.text
+    reactivated = client.patch(f"{KEYS}/{child_id}", json={"is_active": True}, headers=master_key_header)
+    assert reactivated.status_code == 400, reactivated.text
+    assert _chat(client, child).status_code == 401
 
 
 def test_max_child_ttl_sec_needs_a_service_key(client: TestClient, master_key_header: dict[str, str]) -> None:
