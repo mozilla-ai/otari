@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from gateway.core.usage import cache_tokens_in_prompt_for
 from gateway.log_config import logger
 from gateway.services.traces._collector import identifier_or_none
 from gateway.services.traces._identity import SessionRef
@@ -151,17 +150,20 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
     duration = (
         min(round((end - start).total_seconds() * 1000), _INT32_MAX) if start is not None and end is not None else None
     )
-    provider = _str(attributes, "gen_ai.provider.name", "gen_ai.system")
     input_tokens = _int(attributes, "gen_ai.usage.input_tokens")
     cache_read = (
         _int(attributes, "gen_ai.usage.cache_read_tokens")
         or _int(attributes, "gen_ai.usage.cache_read.input_tokens")
         or _int(attributes, "gen_ai.usage.cached_tokens")
     )
-    cache_write = _int(attributes, "gen_ai.usage.cache_write_tokens")
-    # The whole prompt, cached tokens included, as the gateway's own spans count it.
-    if input_tokens is not None and not cache_tokens_in_prompt_for(provider or ""):
-        input_tokens = min(input_tokens + (cache_read or 0) + (cache_write or 0), _INT32_MAX)
+    cache_write = _int(attributes, "gen_ai.usage.cache_creation.input_tokens") or _int(
+        attributes, "gen_ai.usage.cache_write_tokens"
+    )
+    cached = (cache_read or 0) + (cache_write or 0)
+    # The GenAI conventions count cached tokens inside ``input_tokens``, so cached
+    # tokens that outnumber it were reported on top of it instead.
+    if input_tokens is not None and cached > input_tokens:
+        input_tokens = min(input_tokens + cached, _INT32_MAX)
     return SpanRecord(
         span_id=_span_id(span.trace_id, span.span_id),
         parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
@@ -175,11 +177,12 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
         end_time=end,
         duration_ms=duration,
         model=identifier_or_none(_str(attributes, "gen_ai.response.model", "gen_ai.request.model")),
-        provider=identifier_or_none(provider),
+        provider=identifier_or_none(_str(attributes, "gen_ai.provider.name", "gen_ai.system")),
         input_tokens=input_tokens,
         output_tokens=_int(attributes, "gen_ai.usage.output_tokens"),
         cache_read_tokens=cache_read,
         cache_write_tokens=cache_write,
+        reasoning_tokens=_int(attributes, "gen_ai.usage.reasoning.output_tokens"),
         tool_name=tool_name,
         tool_type=identifier_or_none(_str(attributes, "gen_ai.tool.type")),
         tool_call_id=identifier_or_none(_str(attributes, "gen_ai.tool.call.id")),

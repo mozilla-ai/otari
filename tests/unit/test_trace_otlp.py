@@ -165,34 +165,53 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
 
 
 @pytest.mark.parametrize(
-    ("provider", "input_tokens", "cache_key"),
+    ("provider", "input_tokens", "cache_read_key", "cache_write_key"),
     [
         pytest.param(
-            "anthropic", 300, "gen_ai.usage.cache_read.input_tokens", id="anthropic-adds-cached-tokens-on-top"
+            "anthropic",
+            48_210,
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            id="inside-as-the-conventions-count-them",
         ),
-        pytest.param("openai", 48_210, "gen_ai.usage.cached_tokens", id="openai-counts-them-inside"),
+        pytest.param(
+            "openai",
+            48_210,
+            "gen_ai.usage.cached_tokens",
+            "gen_ai.usage.cache_write_tokens",
+            id="inside-under-older-names",
+        ),
+        pytest.param(
+            "anthropic",
+            300,
+            "gen_ai.usage.cache_read_tokens",
+            "gen_ai.usage.cache_write_tokens",
+            id="on-top-when-they-outnumber-it",
+        ),
     ],
 )
-def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_provider_reported_its_cache(
-    provider: str, input_tokens: int, cache_key: str
+def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported_its_cache(
+    provider: str, input_tokens: int, cache_read_key: str, cache_write_key: str
 ) -> None:
     attrs = {
         "gen_ai.provider.name": provider,
         "gen_ai.usage.input_tokens": input_tokens,
-        cache_key: 41_900,
-        "gen_ai.usage.cache_write_tokens": 6_010,
+        cache_read_key: 41_900,
+        cache_write_key: 6_010,
+        "gen_ai.usage.reasoning.output_tokens": 12,
     }
     [write] = _project(_span("a", attrs=attrs))
 
     [span] = write.spans
     assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (48_210, 41_900, 6_010)
+    assert span.reasoning_tokens == 12
 
 
 def test_cached_tokens_never_lift_the_whole_prompt_past_what_the_store_holds() -> None:
     attrs = {
         "gen_ai.provider.name": "anthropic",
-        "gen_ai.usage.input_tokens": _INT32_MAX,
-        "gen_ai.usage.cache_read_tokens": 10,
+        "gen_ai.usage.input_tokens": 10,
+        "gen_ai.usage.cache_read_tokens": _INT32_MAX,
     }
     [write] = _project(_span("a", attrs=attrs))
 
