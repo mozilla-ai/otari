@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_ROOT
 from gateway.core.metered_pricing import priced_per_request, quantize_cost
 from gateway.log_config import logger
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import OPERATOR_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.services.pricing import (
     ModelsDevPrice,
@@ -215,8 +215,14 @@ async def _find_organization_override(
     organization_id: uuid.UUID,
     model_keys: list[str],
     as_of: datetime,
+    *,
+    operator_set_only: bool = False,
 ) -> OrganizationModelPricing | None:
     """An organization's override for the first of ``model_keys`` that has one.
+
+    ``operator_set_only`` leaves out every override the organization wrote
+    itself, for a request the deployment paid for (see
+    :func:`resolve_model_pricing`).
 
     One statement over every candidate key, not one per key. This runs on the
     request path ahead of the deployment lookup, so an organization with no
@@ -250,6 +256,7 @@ async def _find_organization_override(
                 OrganizationModelPricing.effective_to.is_(None),
                 OrganizationModelPricing.effective_to > as_of,
             ),
+            OrganizationModelPricing.origin == OPERATOR_ORIGIN if operator_set_only else true(),
         )
         # At most one row per key can match once the overlap rule holds, so the
         # second ordering term only decides between a row that predates the rule
@@ -273,6 +280,7 @@ class OverridePeriod(NamedTuple):
     effective_from: datetime
     effective_to: datetime | None
     pricing: ModelPricing
+    origin: str | None = None
 
 
 async def load_organization_override_index(
@@ -305,7 +313,12 @@ async def load_organization_override_index(
             # end", where ``normalize_effective_at`` would read it as "ends now".
             effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
             index.setdefault(row.model_key, []).append(
-                OverridePeriod(normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row))
+                OverridePeriod(
+                    normalize_effective_at(row.effective_from),
+                    effective_to,
+                    override_as_model_pricing(row),
+                    row.origin,
+                )
             )
     for periods in index.values():
         periods.sort(key=lambda period: period.effective_from)
@@ -316,8 +329,13 @@ def resolve_organization_override(
     index: dict[str, list[OverridePeriod]],
     model_keys: Sequence[str],
     as_of: datetime,
+    *,
+    deployment_paid: bool = False,
 ) -> ModelPricing | None:
     """The override applying at ``as_of``, resolved from a preloaded index.
+
+    ``deployment_paid`` reads only the overrides the deployment operator set,
+    as :func:`resolve_model_pricing` does for such a request.
 
     The in-memory statement of the same rule :func:`_find_organization_override`
     expresses in SQL, and it has to stay the same rule: an event priced through
@@ -337,6 +355,8 @@ def resolve_organization_override(
         for period in index.get(model_key, ()):
             if period.effective_from > as_of:
                 break
+            if deployment_paid and period.origin != OPERATOR_ORIGIN:
+                continue
             if period.effective_to is None or period.effective_to > as_of:
                 match = period.pricing
         if match is not None:
@@ -520,6 +540,7 @@ async def find_model_pricing(
     as_of: datetime | None = None,
     use_defaults: bool = True,
     organization_id: uuid.UUID | None = None,
+    deployment_paid: bool = False,
 ) -> ModelPricing | None:
     """Look up model pricing as of a timestamp.
 
@@ -558,6 +579,7 @@ async def find_model_pricing(
         as_of=as_of,
         use_defaults=use_defaults,
         organization_id=organization_id,
+        deployment_paid=deployment_paid,
     )
     return resolved.pricing if resolved is not None else None
 
@@ -607,15 +629,25 @@ async def resolve_model_pricing(
     as_of: datetime | None = None,
     use_defaults: bool = True,
     organization_id: uuid.UUID | None = None,
+    deployment_paid: bool = False,
 ) -> ResolvedPricing | None:
-    """:func:`find_model_pricing`, also reporting which source supplied the rate."""
+    """:func:`find_model_pricing`, also reporting which source supplied the rate.
+
+    ``deployment_paid`` is a request served on the deployment's own credential.
+    Its organization's override prices it only when the deployment operator set
+    that override: one the organization wrote, whether under a provider key it
+    has since archived or before the deployment served the model, would let a
+    tenant name the deployment's cost basis, down to zero.
+    """
     lookup_time = normalize_effective_at(as_of)
     model_key = f"{provider}:{model}" if provider else model
     key_forms = pricing_key_forms(model_key)
     legacy_keys = key_forms[1:]
 
     if organization_id is not None:
-        override = await _find_organization_override(db, organization_id, key_forms, lookup_time)
+        override = await _find_organization_override(
+            db, organization_id, key_forms, lookup_time, operator_set_only=deployment_paid
+        )
         if override is not None:
             pricing = override_as_model_pricing(override)
             return ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
@@ -698,13 +730,17 @@ class RequestPrices:
 
     def __init__(self, organization_id: uuid.UUID | None) -> None:
         self.organization_id = organization_id
-        self._resolved: dict[tuple[str | None, str], ResolvedPricing | None] = {}
+        self._resolved: dict[tuple[str | None, str, bool], ResolvedPricing | None] = {}
 
-    async def resolve(self, db: AsyncSession, provider: str | None, model: str) -> ResolvedPricing | None:
-        """:func:`resolve_model_pricing` for this request's organization, once per model."""
-        key = (provider, model)
+    async def resolve(
+        self, db: AsyncSession, provider: str | None, model: str, *, deployment_paid: bool = False
+    ) -> ResolvedPricing | None:
+        """:func:`resolve_model_pricing` for this request's organization, once per model and payer."""
+        key = (provider, model, deployment_paid)
         if key not in self._resolved:
-            resolved = await resolve_model_pricing(db, provider, model, organization_id=self.organization_id)
+            resolved = await resolve_model_pricing(
+                db, provider, model, organization_id=self.organization_id, deployment_paid=deployment_paid
+            )
             # Detached, so a rollback between admission and settlement, which
             # expires every instance in the session, cannot expire the rate too.
             if resolved is not None:

@@ -33173,7 +33173,7 @@
     },
     "/api/v1/organizations/me/pricing/{pricing_id}": {
       "delete": {
-        "description": "Remove an override, returning the model to the deployment price list.",
+        "description": "Remove an override, returning the model to the deployment price list.\n\nRefused with a 403 for a rate the deployment operator set, which only the\noperator may remove.",
         "operationId": "organization-pricing-delete_organization_pricing",
         "parameters": [
           {
@@ -33216,7 +33216,7 @@
         ]
       },
       "put": {
-        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today.",
+        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today, and with a 403 for a rate the deployment operator\nset, which only the operator may change.",
         "operationId": "organization-pricing-replace_organization_pricing",
         "parameters": [
           {

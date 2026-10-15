@@ -359,7 +359,8 @@ async def replace_organization_pricing(
 
     Refused with a 403 on the same deployment-supplied-model rule the create path
     carries, so a row stored before that rule existed cannot be edited into a rate
-    nobody could create today.
+    nobody could create today, and with a 403 for a rate the deployment operator
+    set, which only the operator may change.
     """
     override = await service.replace_for_caller(identity, pricing_id, _to_input(body))
     response = OrganizationModelPricingPublic.from_model(override)
@@ -374,6 +375,10 @@ async def delete_organization_pricing(
     service: ServiceDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Remove an override, returning the model to the deployment price list."""
+    """Remove an override, returning the model to the deployment price list.
+
+    Refused with a 403 for a rate the deployment operator set, which only the
+    operator may remove.
+    """
     await service.delete_for_caller(identity, pricing_id)
     await _commit(db, "delete organization pricing")

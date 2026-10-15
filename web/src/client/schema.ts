@@ -3173,13 +3173,17 @@ export interface paths {
          *
          *     Refused with a 403 on the same deployment-supplied-model rule the create path
          *     carries, so a row stored before that rule existed cannot be edited into a rate
-         *     nobody could create today.
+         *     nobody could create today, and with a 403 for a rate the deployment operator
+         *     set, which only the operator may change.
          */
         put: operations["organization-pricing-replace_organization_pricing"];
         post?: never;
         /**
          * Delete Organization Pricing
          * @description Remove an override, returning the model to the deployment price list.
+         *
+         *     Refused with a 403 for a rate the deployment operator set, which only the
+         *     operator may remove.
          */
         delete: operations["organization-pricing-delete_organization_pricing"];
         options?: never;

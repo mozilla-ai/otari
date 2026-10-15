@@ -24,8 +24,8 @@ UNIT_METERS: tuple[str, ...] = ("requests", "search_units", "images")
 # The largest count one attempt may report under any meter.
 MAX_REPORTED_UNITS = 1_000_000
 
-# ``origin`` on the same two tables is ``config``, ``api``, ``migration`` or
-# ``seed``. ``seed`` marks a rate an offered-models surface copied from the
+# ``origin`` on the same two tables is ``config``, ``api``, ``migration``,
+# ``seed`` or, on an override only, ``operator``. ``seed`` marks a rate an offered-models surface copied from the
 # community dataset, an organization's on its own keys or the deployment's on
 # its hosted providers: the one origin a later refresh may move. Named because
 # three modules compare against it and a bare "seed" in any of them reads as a
@@ -36,6 +36,12 @@ SEED_ORIGIN = "seed"
 # refresh moving it. Named for the same reason: the two are written in different
 # modules from the one that reads them back.
 API_ORIGIN = "api"
+
+# What an organization override carries when the deployment operator set it,
+# rather than the organization's own owner or admin. Only such a rate prices a
+# request the deployment paid for: one the organization wrote itself would let a
+# tenant name the cost of the deployment's own upstream.
+OPERATOR_ORIGIN = "operator"
 
 # Which rung of the ladder answered for a rate a reader is shown, in the order
 # ``pricing_service.find_model_pricing`` walks. One vocabulary, because the

@@ -134,7 +134,13 @@ each model is billed at. An organization may set its own rate for a model it
 supplies the provider key for. A model reached through one of the deployment's
 own provider instances is not one of those: the deployment holds that credential
 and settles its upstream bill, so its rate is the deployment price list's, which
-is `/api/v1/pricing` and has no page of its own. The models.dev defaults are
+is `/api/v1/pricing` and has no page of its own. The same holds for a model the
+deployment serves on one of its hosted providers: a request served there is
+priced only from a rate the deployment operator set, either the price list or a
+rate the operator set for this organization, never from one the organization
+wrote itself, even one written while its own key still covered the model. A rate
+the operator set for an organization is listed beside the organization's own,
+and only the operator may change or remove it. The models.dev defaults are
 likewise kept current through `/api/v1/pricing/refresh` rather than from the
 dashboard.
 

@@ -1527,8 +1527,49 @@ async def _prepare_for_dispatch(
         client_args = {"http_client": owned_endpoint_http_client()}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
     served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
+    if served.deployment_paid:
+        await _hold_at_deployment_paid_rate(ctx, served, adapter=adapter)
     await _admit_or_refuse(ctx, served, adapter=adapter, billing=billing)
     return served
+
+
+async def _hold_at_deployment_paid_rate(
+    ctx: RequestContext, served: ResolvedProvider, *, adapter: FormatAdapter[Any, Any]
+) -> None:
+    """Grow the hold to the rate a request on the deployment's credential settles at, else refuse it.
+
+    Admission priced the selector before the credential was known, so an
+    override the organization wrote itself may have priced it. Settlement
+    ignores such an override for a deployment-paid request, and a zero one
+    takes no hold at all, which would let the request past the budget gate and
+    ``require_pricing`` alike.
+    """
+    try:
+        await _grow_reservation(ctx, served.instance, served.model, deployment_paid=True, refused_detail=None)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=served.model,
+            provider=served.instance,
+            endpoint=adapter.endpoint,
+            detail=detail,
+            status_code=exc.status_code,
+            started_at=ctx.started_at,
+            request_id=ctx.request_id,
+            tags=ctx.tags,
+        )
+        kind = (
+            ErrorKind.INVALID_REQUEST
+            if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED
+            else error_kind_for_status(exc.status_code)
+        )
+        headers = dict(exc.headers) if exc.headers is not None else None
+        raise adapter.error(exc.status_code, detail, kind, headers=headers) from exc
 
 
 async def _admit_or_refuse(
@@ -1660,6 +1701,7 @@ async def _warn_if_hosted_upstream_is_unpriced(
             upstream,
             resolved.model,
             organization_id=ctx.organization_id,
+            deployment_paid=True,
         )
     except SQLAlchemyError:
         logger.warning(
@@ -2049,10 +2091,27 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
     handler refunds the original hold. That is the honest failure. The alternative,
     proceeding on the cheaper hold, would quietly take spend past the cap.
     """
+    await _grow_reservation(
+        ctx,
+        attempt.instance,
+        attempt.model,
+        deployment_paid=False,
+        refused_detail=budget_exhausted_mid_failover_detail(),
+    )
+
+
+async def _grow_reservation(
+    ctx: RequestContext, instance: str, model: str, *, deployment_paid: bool, refused_detail: str | None
+) -> None:
+    """Grow the reservation to cover ``instance:model`` at the rate it settles at.
+
+    ``refused_detail`` replaces the detail of a budget refusal, which otherwise
+    propagates as the budget gate raised it.
+    """
     if ctx.db is None or ctx.reservation is None or ctx.estimate_inputs is None:
         return
     prices = ctx.prices if ctx.prices is not None else RequestPrices(ctx.organization_id)
-    resolved = await prices.resolve(ctx.db, attempt.instance, attempt.model)
+    resolved = await prices.resolve(ctx.db, instance, model, deployment_paid=deployment_paid)
     pricing = resolved.pricing if resolved is not None else None
     # `require_pricing` is a billing safety gate: it refuses a request the gateway
     # cannot price, because it then cannot debit it. The gate at admission prices
@@ -2064,13 +2123,13 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
         pricing, require_pricing=ctx.config.require_pricing
     ):
         logger.warning(
-            "Fallback candidate %s:%s has no pricing and require_pricing is on; stopping the chain",
-            attempt.instance,
-            attempt.model,
+            "Candidate %s:%s has no pricing and require_pricing is on; stopping the chain",
+            instance,
+            model,
         )
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=no_pricing_error_detail(f"{attempt.instance}:{attempt.model}"),
+            detail=no_pricing_error_detail(f"{instance}:{model}"),
             headers=error_headers(PRICING_REQUIRED),
         )
     repriced = estimate_cost(
@@ -2085,19 +2144,15 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
             ctx.db,
             ctx.reservation,
             estimate=repriced,
-            model=f"{attempt.instance}:{attempt.model}",
+            model=f"{instance}:{model}",
             model_is_free=is_free_pricing(pricing),
             strategy=ctx.config.budget_strategy,
         )
     except HTTPException as exc:
-        logger.warning(
-            "Reservation top-up refused for fallback candidate %s:%s; stopping the chain",
-            attempt.instance,
-            attempt.model,
-        )
-        raise HTTPException(
-            status_code=exc.status_code, detail=budget_exhausted_mid_failover_detail(), headers=exc.headers
-        ) from exc
+        logger.warning("Reservation top-up refused for candidate %s:%s; stopping the chain", instance, model)
+        if refused_detail is None:
+            raise
+        raise HTTPException(status_code=exc.status_code, detail=refused_detail, headers=exc.headers) from exc
 
 
 BUDGETS_UNAVAILABLE_DETAIL = "Budgets could not be checked for a fallback, so it was not sent."
@@ -4372,7 +4427,8 @@ async def record_usage(
             row a request writes is findable by the id the caller holds.
         tags: The caller's request tags (``RequestContext.tags``), stored as-is.
         deployment_paid: The request was admitted as deployment-paid
-            (``RequestContext.deployment_charge`` is set), stored as-is.
+            (``RequestContext.deployment_charge`` is set), stored as-is, and
+            priced from no override the organization wrote itself.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -4440,7 +4496,7 @@ async def record_usage(
         # so this is dictionary reads rather than queries after the first request
         # on a key.
         if prices is not None:
-            resolved = await prices.resolve(db, provider, model)
+            resolved = await prices.resolve(db, provider, model, deployment_paid=deployment_paid)
         else:
             resolved = await resolve_model_pricing(
                 db,
@@ -4448,6 +4504,7 @@ async def record_usage(
                 model,
                 as_of=usage_log.timestamp,
                 organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
+                deployment_paid=deployment_paid,
             )
         priced: tuple[Decimal, dict[str, int], list[ChargeLine]] | None = None
         if resolved is not None and priced_per_request(resolved.pricing):
@@ -4505,6 +4562,7 @@ async def bills_per_request(
     api_key_id: str | None,
     workspace_id: uuid.UUID | None,
     prices: RequestPrices | None = None,
+    deployment_paid: bool = False,
 ) -> bool:
     """Whether ``model`` is priced per request at the rate :func:`record_usage` will settle it at.
 
@@ -4513,7 +4571,7 @@ async def bills_per_request(
     asks this first.
     """
     if prices is not None:
-        resolved = await prices.resolve(db, provider, model)
+        resolved = await prices.resolve(db, provider, model, deployment_paid=deployment_paid)
     else:
         if workspace_id is None:
             workspace_id = await workspace_for_key_id(db, api_key_id)
@@ -4522,6 +4580,7 @@ async def bills_per_request(
             provider,
             model,
             organization_id=await organization_for_workspace_id(db, workspace_id),
+            deployment_paid=deployment_paid,
         )
     return resolved is not None and priced_per_request(resolved.pricing)
 
@@ -5371,7 +5430,13 @@ def build_streaming_response(
         # A model priced per request is billed by the request, not by the usage
         # it reports, so a completed stream without usage is an ordinary success.
         if await bills_per_request(
-            db, provider=provider, model=model, api_key_id=api_key_id, workspace_id=workspace_id, prices=prices
+            db,
+            provider=provider,
+            model=model,
+            api_key_id=api_key_id,
+            workspace_id=workspace_id,
+            prices=prices,
+            deployment_paid=deployment_paid,
         ):
             logged = await record_usage(
                 db=db,
@@ -6719,6 +6784,7 @@ async def run_standalone_non_stream(
                     api_key_id=ctx.api_key_id,
                     workspace_id=ctx.workspace_id,
                     prices=ctx.prices,
+                    deployment_paid=ctx.deployment_charge is not None,
                 )
             ):
                 logged = await record_usage(
