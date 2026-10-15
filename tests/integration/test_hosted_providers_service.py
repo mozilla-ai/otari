@@ -495,6 +495,26 @@ async def test_adding_a_model_prices_it_at_what_was_asked(
     assert version.origin == API_ORIGIN
 
 
+async def test_a_model_can_be_priced_per_request(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stored per million requests, and a reprice that names no unit keeps the stored one rather than tokens."""
+    service = _service(async_db)
+    await _provider(service, monkeypatch)
+
+    added = await service.add_model(
+        "openai",
+        HostedModelCreateRequest(
+            model="rerank", input_price_per_million=2000, output_price_per_million=0, unit="requests"
+        ),
+    )
+    repriced = await service.update_model(
+        "openai", added.id, HostedModelUpdateRequest(input_price_per_million=3000, output_price_per_million=0)
+    )
+
+    assert (added.unit, added.input_price_per_million) == ("requests", 2000.0)
+    assert (repriced.unit, repriced.input_price_per_million) == ("requests", 3000.0)
+    assert {version.unit for version in await _versions(async_db, "openai:rerank")} == {"requests"}
+
+
 async def test_an_offer_without_a_price_seeds_the_default(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

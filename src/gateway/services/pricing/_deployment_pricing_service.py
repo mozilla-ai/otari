@@ -135,13 +135,15 @@ class DeploymentPricingService:
         input_price_per_million: float,
         output_price_per_million: float,
         cache_rates: Mapping[str, float | None],
+        unit: str | None = None,
     ) -> ModelPricing:
         """Record the deployment's rates for ``model_key`` as a new version at the current instant.
 
         ``cache_rates`` holds only the cache fields the caller set: a field
         present with ``None`` clears the rate, and a field absent inherits the
-        latest stored version's value. Tiers and the unit carry forward from
-        that version too, because the callers of this method collect neither.
+        latest stored version's value. An omitted ``unit`` carries forward from
+        that version, as the tiers do, because the callers of this method do
+        not collect them.
         """
         unknown = set(cache_rates) - set(_CACHE_RATE_FIELDS)
         if unknown:
@@ -167,7 +169,7 @@ class DeploymentPricingService:
                     cache_read_price_per_million=cache_rate("cache_read_price_per_million"),
                     cache_write_price_per_million=cache_rate("cache_write_price_per_million"),
                     pricing_tiers=latest.pricing_tiers or [] if latest is not None else [],
-                    unit=latest.unit if latest is not None else "tokens",
+                    unit=unit or (latest.unit if latest is not None else "tokens"),
                     origin=API_ORIGIN,
                 )
             else:
@@ -175,6 +177,8 @@ class DeploymentPricingService:
                 version.output_price_per_million = to_usd(output_price_per_million)
                 version.cache_read_price_per_million = cache_rate("cache_read_price_per_million")
                 version.cache_write_price_per_million = cache_rate("cache_write_price_per_million")
+                if unit is not None:
+                    version.unit = unit
                 version.origin = API_ORIGIN
             await self.pricing.flush()
             return version

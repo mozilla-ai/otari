@@ -158,4 +158,5 @@ class HostedOffers:
             cache_rates={
                 field: getattr(request, field) for field in _CACHE_RATE_FIELDS if field in request.model_fields_set
             },
+            unit=request.unit,
         )

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import model_validator
 from sqlmodel import Field, SQLModel
@@ -443,18 +443,20 @@ def _rates_come_as_a_pair(request: HostedModelCreateRequest | HostedModelUpdateR
     """Refuse half a price.
 
     ``model_pricing`` stores input and output in one row, so a single rate has
-    no shape to land in. The cache rates are that row's optional half: each may
-    come alone, but only beside the pair that gives the row its base rates.
+    no shape to land in. The cache rates and the unit are that row's optional
+    half: each may come alone, but only beside the pair that gives the row its
+    base rates.
     """
     if (request.input_price_per_million is None) != (request.output_price_per_million is None):
         msg = "input_price_per_million and output_price_per_million must be set together"
         raise ValueError(msg)
-    cache_fields = {
+    rate_fields = {
         "cache_read_price_per_million",
         "cache_write_price_per_million",
+        "unit",
     }
-    if request.input_price_per_million is None and cache_fields & request.model_fields_set:
-        msg = "cache rates need input_price_per_million and output_price_per_million beside them"
+    if request.input_price_per_million is None and rate_fields & request.model_fields_set:
+        msg = "cache rates and unit need input_price_per_million and output_price_per_million beside them"
         raise ValueError(msg)
 
 
@@ -463,7 +465,9 @@ class HostedModelCreateRequest(SQLModel):
 
     Omitting the rates means the deployment serves the model at whatever the
     price ladder already answers: a stored deployment price, else the community
-    default, which the offer stores as the deployment's own rate.
+    default, which the offer stores as the deployment's own rate. ``unit`` is
+    what the rates are per, as on ``POST /pricing``: a request or image rate is
+    still stored per million.
     """
 
     model_config = {
@@ -477,6 +481,7 @@ class HostedModelCreateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
+    unit: Literal["tokens", "requests", "images"] | None = None
 
     @model_validator(mode="after")
     def _prices_come_as_a_pair(self) -> Self:
@@ -490,8 +495,9 @@ class HostedModelUpdateRequest(SQLModel):
     A price is the input/output pair or nothing: sending the pair writes a new
     pricing version, and the cache rates then follow ``POST /pricing``'s own
     semantics (a field the caller omits inherits the most recent stored value,
-    an explicit null clears it). ``enabled`` travels alone freely, so a toggle
-    never re-sends rates it did not change.
+    an explicit null clears it). An omitted ``unit`` carries the stored one
+    forward. ``enabled`` travels alone freely, so a toggle never re-sends rates
+    it did not change.
     """
 
     # A toggle alone: an example carrying zero rates would, edited for the
@@ -502,6 +508,7 @@ class HostedModelUpdateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
+    unit: Literal["tokens", "requests", "images"] | None = None
     enabled: bool | None = None
 
     @model_validator(mode="after")
@@ -518,6 +525,7 @@ class HostedModelRates(SQLModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
+    unit: str = "tokens"
 
     @classmethod
     def from_version(cls, version: ModelPricing, source: PriceSource) -> HostedModelRates:
@@ -528,6 +536,7 @@ class HostedModelRates(SQLModel):
             output_price_per_million=float(version.output_price_per_million),
             cache_read_price_per_million=as_float(version.cache_read_price_per_million),
             cache_write_price_per_million=as_float(version.cache_write_price_per_million),
+            unit=version.unit or "tokens",
         )
 
 
@@ -537,8 +546,10 @@ class HostedModelPublic(SQLModel):
     ``price_source`` says which rung of the deployment's ladder answered:
     ``deployment`` for a rate an operator set, ``defaults`` for the
     community-maintained rate, whether this surface stored it or the fallback
-    supplies it, and None when nothing prices the model yet. ``enabled`` is the
-    serving switch; a model offered without a discoverable price starts off.
+    supplies it, and None when nothing prices the model yet. ``unit`` says what
+    the rates are per, so a per-request rate is not read as a per-token one.
+    ``enabled`` is the serving switch; a model offered without a discoverable
+    price starts off.
     """
 
     id: uuid.UUID
@@ -548,6 +559,7 @@ class HostedModelPublic(SQLModel):
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
+    unit: str | None = None
     price_source: PriceSource | None = None
     enabled: bool
     created_at: datetime
@@ -564,6 +576,7 @@ class HostedModelPublic(SQLModel):
             output_price_per_million=rates.output_price_per_million if rates else None,
             cache_read_price_per_million=rates.cache_read_price_per_million if rates else None,
             cache_write_price_per_million=rates.cache_write_price_per_million if rates else None,
+            unit=rates.unit if rates else None,
             price_source=rates.source if rates else None,
             enabled=row.enabled,
             created_at=row.created_at,

@@ -60,8 +60,25 @@ def test_a_cache_rate_needs_the_pair_beside_it(shape: type[SQLModel]) -> None:
     if shape is schemas.HostedModelUpdateRequest:
         body.pop("model")
 
-    with pytest.raises(ValidationError, match="cache rates need"):
+    with pytest.raises(ValidationError, match="cache rates and unit need"):
         shape.model_validate(body)
+
+
+@pytest.mark.parametrize("shape", [schemas.HostedModelCreateRequest, schemas.HostedModelUpdateRequest])
+def test_a_unit_needs_the_pair_beside_it(shape: type[SQLModel]) -> None:
+    body = {"model": "gpt-4o", "unit": "requests"}
+    if shape is schemas.HostedModelUpdateRequest:
+        body.pop("model")
+
+    with pytest.raises(ValidationError, match="cache rates and unit need"):
+        shape.model_validate(body)
+
+
+def test_an_unknown_unit_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        schemas.HostedModelCreateRequest.model_validate(
+            {"model": "gpt-4o", "input_price_per_million": 1, "output_price_per_million": 0, "unit": "seconds"}
+        )
 
 
 def test_a_toggle_travels_alone() -> None:
