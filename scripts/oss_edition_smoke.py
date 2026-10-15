@@ -18,7 +18,11 @@ self-hoster walks on day one:
 3. ``/api/v1/bootstrap`` answers with no credential and reports ``standalone``. It is
    the first request a browser makes, and a second statement of which edition
    booted.
-4. Create a user, then an API key for it (master-key admin surface).
+4. Create a budget that resets on the UTC calendar day, a user on it, then an
+   API key for it (master-key admin surface). The period puts a stored reset
+   time in front of the budget gate on every request, which SQLite reads back
+   without an offset; a gate that compared it to an aware clock refused every
+   request with a 500.
 5. Register a BYO provider credential at runtime, which is stored encrypted.
 6. Create a routing policy whose default candidate fails and whose ``on_failure``
    candidate is that BYO provider.
@@ -532,12 +536,23 @@ def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> 
 
 
 def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
-    """Create a user and an API key for it, and return the raw key."""
+    """Create a calendar-day budget, a user on it and an API key for it, and return the raw key."""
+    status, body = _request(
+        "POST",
+        f"{base_url}{API_ROOT}/budgets",
+        headers=admin,
+        payload={"name": "OSS edition smoke", "max_budget": 100, "reset_alignment": "calendar_day"},
+    )
+    _expect(status, 200, f"POST {API_ROOT}/budgets", body)
+    budget_id = body.get("budget_id") if isinstance(body, dict) else None
+    if not isinstance(budget_id, str) or not budget_id:
+        raise SmokeFailure(f"POST {API_ROOT}/budgets returned no budget_id: {body!r}")
+
     status, body = _request(
         "POST",
         f"{base_url}{API_ROOT}/users",
         headers=admin,
-        payload={"user_id": names.user_id, "alias": "OSS edition smoke"},
+        payload={"user_id": names.user_id, "alias": "OSS edition smoke", "budget_id": budget_id},
     )
     _expect(status, 200, f"POST {API_ROOT}/users", body)
 
@@ -551,7 +566,7 @@ def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
     key = body.get("key") if isinstance(body, dict) else None
     if not isinstance(key, str) or not key:
         raise SmokeFailure(f"POST {API_ROOT}/keys returned no key: {body!r}")
-    log("Created a user and an API key")
+    log("Created a calendar-day budget, a user on it and an API key")
     return key
 
 

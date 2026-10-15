@@ -175,8 +175,8 @@ class BudgetResetLog(Base):
     # a float snapshot of an exact ``users.spend`` would no longer equal the
     # spend it claims to have recorded.
     previous_spend: Mapped[Decimal] = mapped_column(UsdCost())
-    reset_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    next_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reset_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    next_reset_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
     user = relationship("User", back_populates="reset_logs")
     budget = relationship("Budget", back_populates="reset_logs")
@@ -286,8 +286,10 @@ class ScopedBudget(Base):
     reserved_tokens: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
     current_requests: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
     reserved_requests: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
-    period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # ``UtcDateTime`` for the reason ``User.next_budget_reset_at`` is: the gate
+    # compares ``period_end`` to an aware ``now``.
+    period_start: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    period_end: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -362,7 +364,7 @@ class BudgetReservation(Base):
     # Its values are ``RESERVATION_STATUSES``.
     status: Mapped[str] = mapped_column(default=RESERVATION_ACTIVE, server_default=RESERVATION_ACTIVE, nullable=False)
     # After this instant a still-active row is treated as leaked and reclaimed.
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

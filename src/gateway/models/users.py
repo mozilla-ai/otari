@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdCost
 
 
@@ -49,8 +49,10 @@ class User(Base):
     # canonical instance:model entries (see services/model_access.py). A key may
     # narrow this default but never broaden it (validated on key write).
     allowed_models: Mapped[list[str] | None] = mapped_column(JSON)
-    budget_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    next_budget_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ``UtcDateTime`` because the budget gate compares these to an aware ``now``,
+    # and a plain ``DateTime(timezone=True)`` reads back naive on SQLite.
+    budget_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    next_budget_reset_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
     blocked: Mapped[bool] = mapped_column(default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

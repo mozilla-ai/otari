@@ -78,8 +78,9 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 - The OSS-edition smoke gate (`scripts/oss_edition_smoke.py`, run by
   `otari-oss-edition.yml` on any PR touching the app, the migrations, or dependency
   resolution) boots the packaged CLI as a subprocess with no overlay
-  bootstrap and no platform token, then walks health, key creation, a stored BYO
-  provider credential, a fallback-routed completion against a mock provider, and
+  bootstrap and no platform token, then walks health, key creation for a user on a
+  calendar-day budget, a stored BYO provider credential, a fallback-routed
+  completion against a mock provider, and
   the usage row. Run it locally with
   `uv run --frozen --no-dev python scripts/oss_edition_smoke.py`; it defaults to a
   throwaway SQLite file, so it needs no Docker, and `--database-url` points it at
