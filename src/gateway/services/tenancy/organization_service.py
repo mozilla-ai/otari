@@ -149,26 +149,26 @@ def _single_line(text: str) -> str:
     return " ".join(spaced.split())
 
 
-def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
-    """What an invitee whose link may not set a password can do instead, on this deployment."""
-    ways: list[str] = []
-    if settings.sign_in_providers:
-        ways.append("sign in with " + " or ".join(settings.sign_in_providers))
-    if settings.can_send_links:
-        ways.append('choose a password with "Forgot your password?" on the sign-in screen')
-    if not ways:
-        return "ask whoever administers this gateway how to sign in"
-    return ", or ".join(ways)
-
-
 def _ways_in(settings: "InvitationClaimSettings") -> list[InvitationWayIn]:
-    """The ways in ``_way_in_without_the_link`` describes, for the accept page to offer."""
+    """What an invitee whose link may not set a password can do instead, on this deployment."""
     ways: list[InvitationWayIn] = []
     if settings.sign_in_providers:
         ways.append("provider")
     if settings.can_send_links:
         ways.append("password_reset")
     return ways
+
+
+def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
+    """The ways in ``_ways_in`` gives, in words for the refusal."""
+    phrases: dict[InvitationWayIn, str] = {
+        "provider": "sign in with " + " or ".join(settings.sign_in_providers),
+        "password_reset": 'choose a password with "Forgot your password?" on the sign-in screen',
+    }
+    ways = [phrases[way] for way in _ways_in(settings)]
+    if not ways:
+        return "ask whoever administers this gateway how to sign in"
+    return ", or ".join(ways)
 
 
 def _hash_invitation_token(token: str) -> str:
