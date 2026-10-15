@@ -17,6 +17,7 @@ completions, and tool payloads are rejected by the request schema, not stored.
 """
 
 import functools
+import re
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
@@ -177,6 +178,11 @@ def _claude_event(
 ) -> ExternalUsageEvent | None:
     provider = str(attrs.get("gen_ai.provider.name") or "anthropic")
     session = attrs.get("anthropic.session.id") or attrs.get("gen_ai.conversation.id")
+    # A caller names its own conversation id, so one that is not identifier-shaped
+    # loses the label rather than the usage.
+    label = str(session) if session else None
+    if label and (len(label) > 256 or not re.fullmatch(_IDENT_PATTERN, label)):
+        label = None
     if not (model and timestamp and (input_tokens or output_tokens)):
         return None
     try:
@@ -196,7 +202,7 @@ def _claude_event(
             # unlike Claude Code's additive counts.
             cache_tokens_in_prompt=True,
             duration_ms=int(duration_ms) if duration_ms is not None else None,
-            session_label=str(session) if session else None,
+            session_label=label,
         )
     except ValidationError:
         return None

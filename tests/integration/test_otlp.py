@@ -745,7 +745,7 @@ def _messages_create(
     span_id: str = "1" * 16,
     *,
     kind: int = 2,
-    compaction: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
     stream: bool = False,
 ) -> dict[str, Any]:
     attrs = {
@@ -757,7 +757,7 @@ def _messages_create(
         "gen_ai.response.id": "msg_claude_1",
         "anthropic.usage.cache_creation.ephemeral_5m_input_tokens": 60,
         "anthropic.usage.cache_creation.ephemeral_1h_input_tokens": 40,
-        **(compaction or {}),
+        **(extra or {}),
     }
     return _claude_span("anthropic.messages.create", span_id, attrs, kind=kind)
 
@@ -775,7 +775,7 @@ def test_otlp_claude_platform_request_is_booked_once(
     _seed_pricing(client, master_key_header)
     export = _claude_export(
         _messages_create(
-            compaction={"anthropic.usage.compaction.input_tokens": 300, "anthropic.usage.compaction.output_tokens": 20}
+            extra={"anthropic.usage.compaction.input_tokens": 300, "anthropic.usage.compaction.output_tokens": 20}
         ),
         _claude_span(
             "anthropic.model_request",
@@ -816,6 +816,22 @@ def test_otlp_claude_sdk_and_api_spans_of_one_request_are_one_row(
     client.post("/otlp/v1/traces", json=_claude_export(_messages_create()), headers=headers)
 
     assert list(_claude_rows(db_session)) == ["msg_claude_1"]
+
+
+def test_otlp_claude_free_text_conversation_id_drops_the_label_not_the_usage(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    sdk = _claude_export(
+        _messages_create("4" * 16, kind=3, extra={"gen_ai.conversation.id": "project alpha"}),
+        scope="com.anthropic.sdk.python",
+    )
+
+    resp = client.post("/otlp/v1/traces", json=sdk, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    [row] = _claude_rows(db_session).values()
+    assert row.source_label is None
 
 
 def test_otlp_claude_streamed_sdk_span_leaves_the_1h_split_unknown(
