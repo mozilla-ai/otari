@@ -427,10 +427,14 @@ async def create_user_for_signup(
                     await verify_absent_password_async(password)
                     raise _SignupRaceLostError
                 identity = registration.identity
-            elif not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup):
-                # Checked in the block that writes the claim, so the roster cannot drop the identity in between.
-                await verify_absent_password_async(password)
-                return None
+            else:
+                # The identity before the memberships the check below locks, the order an invitation
+                # accepted with a password takes them in; the reverse order deadlocks against it.
+                await UserRepository(db).lock(identity.id)
+                if not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup):
+                    # Checked in the block that writes the claim, so the roster cannot drop the identity in between.
+                    await verify_absent_password_async(password)
+                    return None
 
             token = generate_token()
             values: dict[str, str | datetime | None] = {
