@@ -160,7 +160,7 @@ def _ways_in(settings: "InvitationClaimSettings") -> list[InvitationWayIn]:
 
 
 def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
-    """The ways in ``_ways_in`` gives, in words for the refusal."""
+    """The refusal's wording, so it never names a way in the accept page does not offer."""
     phrases: dict[InvitationWayIn, str] = {
         "provider": "sign in with " + " or ".join(settings.sign_in_providers),
         "password_reset": 'choose a password with "Forgot your password?" on the sign-in screen',
@@ -445,6 +445,15 @@ class OrganizationService:
     async def lock_workspace(self, workspace_id: uuid.UUID) -> None:
         """Serialize this transaction against every other writer holding the workspace's row lock."""
         await self.workspace_rows.lock(workspace_id)
+
+    async def lock_identity(self, user_id: uuid.UUID) -> None:
+        """Serialize this transaction against every other writer holding the identity's row lock.
+
+        Take it before ``has_live_membership``: an invitation accepted with a
+        password writes the identity and then the membership, and locking them
+        in the other order deadlocks against it.
+        """
+        await self.users.lock(user_id)
 
     async def get_organization_id_for_organization_member(
         self,
