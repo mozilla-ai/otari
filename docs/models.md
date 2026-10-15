@@ -105,20 +105,20 @@ catalog indefinitely.
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
 caller's organization's own override, `configured` for the deployment's stored
-rate, `default` for the genai-prices fallback, `dynamic` for a routing policy
+rate, `default` for the models.dev fallback, `dynamic` for a routing policy
 that picks its model per request, and `none` for an unpriced model. An alias is
 priced from its target.
 
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 so a client does not have to guess them. Both come from models.dev's entry for
 the model under the provider serving it. Where that entry has no context window,
-the bundled genai-prices dataset supplies one; genai-prices lists no output
-limit, so a model models.dev does not describe reports `max_output_tokens` as
-`null`, as it does any limit neither dataset knows. An alias reports its target's
+the bundled or accepted models.dev pricing snapshot supplies one; the snapshot
+keeps no output limit, so a model the live catalog does not describe reports
+`max_output_tokens` as `null`, as it does any limit neither source knows. An alias reports its target's
 limits, and the grouped catalog reports the same values for each offering. An
 instance declared `openai-compatible` is looked up under OpenAI, so a model it
 serves under another name usually has no models.dev entry. With
-`models_dev_metadata: false`, the context window comes from genai-prices alone.
+`models_dev_metadata: false`, the context window comes from the pricing snapshot alone.
 
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's

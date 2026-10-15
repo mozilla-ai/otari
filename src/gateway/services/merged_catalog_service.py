@@ -936,7 +936,7 @@ async def apply_organization_pricing(
     """Price each of ``models`` at the organization's own rate where it holds one.
 
     Settlement charges an organization's override ahead of the deployment's
-    stored row and the genai-prices default, so a listing that stopped at those
+    stored row and the models.dev default, so a listing that stopped at those
     two would state a rate, and a ``pricing_source``, the request is not billed
     at. An alias is priced from its target, as everywhere else in the catalog;
     a dynamic policy has no single target and keeps no price.
