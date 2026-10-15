@@ -950,7 +950,7 @@ describe("RoutingPage for an organization admin", () => {
 
     const row = (await screen.findByText("Claude Sonnet 5.5")).closest("tr")!
     // The server's order, not the catalog's: Bedrock is tried first here.
-    const bedrock = within(row).getByText("Amazon Bedrock")
+    const bedrock = within(row).getByText("Bedrock")
     const anthropic = within(row).getByText("Anthropic")
     expect(
       bedrock.compareDocumentPosition(anthropic) &
