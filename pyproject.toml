@@ -91,6 +91,12 @@ dependencies = [
     "pypdfium2>=4.30.0",
     "psycopg2-binary>=2.9.9",
     "pydantic-settings>=2.14.2",
+    # Verifies the OpenID Connect identity tokens a workload may present in
+    # place of an API key's secret (services/api_keys/_federation.py). Already
+    # in the tree through mcp[crypto]; declared because the gateway calls it
+    # directly. The floor is the line that binds a JWK to its own algorithm,
+    # which the verifier's algorithm allow-list leans on.
+    "pyjwt[crypto]>=2.15.0,<3.0.0",
     "python-dotenv>=1.0.0",
     "python-multipart>=0.0.31",
     "pyyaml>=6.0",

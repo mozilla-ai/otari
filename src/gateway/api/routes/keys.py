@@ -10,6 +10,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
+    ApiKeyServiceDep,
     BudgetServiceDep,
     CallerOrganization,
     get_config,
@@ -26,6 +27,7 @@ from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
+from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
@@ -578,6 +580,52 @@ async def delete_key(
     except DATABASE_ERRORS as exc:
         await db.rollback()
         raise database_error("delete key", exc) from None
+
+
+@router.post("/{key_id}/federation-rules", status_code=status.HTTP_201_CREATED)
+async def create_federation_rule(
+    key_id: str,
+    request: FederationRuleCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
+) -> FederationRulePublic:
+    """Let an OpenID Connect identity token authenticate as this key, in place of its secret.
+
+    The issuer must be one of the deployment's ``federation_issuers``, else 400. A token authenticates when it is
+    signed by that issuer, its ``aud`` contains ``audience``, and it carries the rule's ``subject`` and verified
+    ``email``, whichever the rule sets. A rule naming exactly the identity of another rule, on any key, answers 409.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    allowed = [entry.issuer for entry in config.federation_issuers]
+    return await api_keys.add_federation_rule(key.id, request, allowed_issuers=allowed)
+
+
+@router.get("/{key_id}/federation-rules")
+async def list_federation_rules(
+    key_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
+) -> list[FederationRulePublic]:
+    """List the identities that may authenticate as this key, oldest first."""
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await api_keys.list_federation_rules(key.id)
+
+
+@router.delete("/{key_id}/federation-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_federation_rule(
+    key_id: str,
+    rule_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
+) -> Response:
+    """Remove a federation rule. Tokens it matched stop authenticating with the next request."""
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    await api_keys.delete_federation_rule(key.id, rule_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]

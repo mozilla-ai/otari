@@ -1,16 +1,18 @@
-"""ORM table for API keys."""
+"""ORM tables for API keys and the federation rules that let a workload authenticate as one."""
 
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Uuid, false, text
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 
 # How many budgets one key may list for its end users.
 MAX_END_USER_BUDGETS = 100
+# How many federation rules one key may hold.
+MAX_FEDERATION_RULES_PER_KEY = 20
 
 
 class APIKey(Base):
@@ -157,3 +159,33 @@ class APIKey(Base):
             "config_name": self.config_name,
             "metadata": self.metadata_,
         }
+
+
+class APIKeyFederationRule(Base):
+    """An OpenID Connect identity that authenticates as an API key in place of its secret.
+
+    A verified token whose issuer and audience equal the rule's, and whose
+    subject and verified email equal each of the rule's that is set, is that key.
+    Issuer and audience alone are never enough, since anyone can mint a token
+    for any audience at a public issuer, so a rule names a subject or an email.
+    """
+
+    __tablename__ = "api_key_federation_rules"
+    __table_args__ = (
+        CheckConstraint("subject IS NOT NULL OR email IS NOT NULL", name="ck_api_key_federation_rules_principal"),
+        # Authentication reads the rules by the token's issuer and audiences.
+        Index("ix_api_key_federation_rules_issuer_audience", "issuer", "audience"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    api_key_id: Mapped[str] = mapped_column(
+        String, ForeignKey("api_keys.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    issuer: Mapped[str] = mapped_column(String, nullable=False)
+    audience: Mapped[str] = mapped_column(String, nullable=False)
+    subject: Mapped[str | None] = mapped_column(String, default=None)
+    # Stored lower case; compared with the token's email only when the token says it is verified.
+    email: Mapped[str | None] = mapped_column(String, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )

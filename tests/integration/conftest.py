@@ -398,6 +398,8 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         else None
     )
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
+    # Built on first use and caching each issuer's signing keys, so a test's stub must not serve the next test.
+    app.state.federated_token_verifier = None
     app.state.container = build_container(
         config.bootstrap,
         config=config,

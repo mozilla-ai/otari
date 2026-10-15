@@ -1893,7 +1893,7 @@ class GatewayConfig(
             raise ValueError(msg) from exc
 
     def validate_declared_access(self) -> None:
-        """Refuse ``budgets`` and ``api_keys`` declarations on a hybrid gateway.
+        """Refuse ``budgets``, ``api_keys`` and ``federation_issuers`` on a hybrid gateway.
 
         A hybrid gateway holds no budgets or keys of its own, so it refuses both
         rather than ignoring them, the way it refuses ``rate_limits``.
@@ -1902,6 +1902,12 @@ class GatewayConfig(
             msg = (
                 "budgets and api_keys are declared in config, but a hybrid gateway holds neither; "
                 "declare them on the control plane instead"
+            )
+            raise ValueError(msg)
+        if self.is_hybrid_mode and self.federation_issuers:
+            msg = (
+                "federation_issuers is set, but a hybrid gateway verifies no API keys of its own; "
+                "workload identity needs standalone or hosted mode"
             )
             raise ValueError(msg)
 

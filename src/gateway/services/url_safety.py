@@ -1,6 +1,6 @@
 """URL safety checks for outbound HTTP fetches the gateway makes on behalf of a request.
 
-Four call sites with overlapping but not identical threat models:
+Five call sites with overlapping but not identical threat models:
 
 * **MCP server endpoints** (:func:`validate_mcp_url`) — URL comes from the
   request body. We block private/link-local/reserved IPs to prevent SSRF.
@@ -28,6 +28,11 @@ Four call sites with overlapping but not identical threat models:
   (``localhost``, RFC 1918), so the check is off unless an operator opts in via
   ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, at which point it blocks the
   same private/link-local/reserved ranges as the web-search path.
+
+* **Workload identity discovery and JWKS** (:func:`validate_federation_url`):
+  the issuer is operator-configured and its signing-key location comes from
+  its discovery document. https only, and private hosts are blocked unless
+  ``OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS`` is set.
 
 These checks are intentionally conservative: DNS rebinding can defeat host-based
 allowlists. Production deployments should also enforce egress policy at the
@@ -313,3 +318,27 @@ async def validate_provider_api_base(url: str) -> None:
         raise UnsafeURLError("provider api_base must include a hostname")
 
     await _reject_internal_host(host, host_label="provider api_base", override_var="OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS")
+
+
+def _allow_federation_private_hosts() -> bool:
+    return parse_bool_env(otari_env("FEDERATION_ALLOW_PRIVATE_HOSTS", "false"))
+
+
+async def validate_federation_url(url: str) -> None:
+    """Reject an OpenID discovery or JWKS URL that is not https or that reaches an internal address.
+
+    The issuer is operator-configured, but the JWKS location comes from the
+    issuer's discovery document, so it is checked like any URL the gateway did
+    not write itself. Private hosts are refused unless
+    ``OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS`` is set, for an issuer on the
+    deployment's own network. Raises :class:`UnsafeURLError` on rejection.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https":
+        raise UnsafeURLError("federation URL must use https")
+    host = parsed.hostname
+    if not host:
+        raise UnsafeURLError("federation URL must include a hostname")
+    if _allow_federation_private_hosts():
+        return
+    await _reject_internal_host(host, host_label="federation", override_var="OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS")

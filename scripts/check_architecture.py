@@ -1432,6 +1432,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/workspace_scope.py",
         ),
     },
+    "gateway.models.api_keys.APIKeyFederationRule": {
+        "repository": "gateway/repositories/api_keys/federation_rule_repository.py",
+        "baseline": (),
+    },
     "gateway.models.budgets.Budget": {
         "repository": "gateway/repositories/budgets/budget_repository.py",
         "baseline": (

@@ -1990,6 +1990,54 @@ export interface paths {
         patch: operations["keys-update_end_user"];
         trace?: never;
     };
+    "/api/v1/keys/{key_id}/federation-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Federation Rules
+         * @description List the identities that may authenticate as this key, oldest first.
+         */
+        get: operations["keys-list_federation_rules"];
+        put?: never;
+        /**
+         * Create Federation Rule
+         * @description Let an OpenID Connect identity token authenticate as this key, in place of its secret.
+         *
+         *     The issuer must be one of the deployment's ``federation_issuers``, else 400. A token authenticates when it is
+         *     signed by that issuer, its ``aud`` contains ``audience``, and it carries the rule's ``subject`` and verified
+         *     ``email``, whichever the rule sets. A rule naming exactly the identity of another rule, on any key, answers 409.
+         */
+        post: operations["keys-create_federation_rule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/federation-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Federation Rule
+         * @description Remove a federation rule. Tokens it matched stop authenticating with the next request.
+         */
+        delete: operations["keys-delete_federation_rule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/keys/{key_id}/rotate": {
         parameters: {
             query?: never;
@@ -10158,6 +10206,64 @@ export interface components {
              * @description The offering, in `instance:model` form.
              */
             selector: string;
+        };
+        /**
+         * FederationRuleCreate
+         * @description An OpenID Connect identity that may authenticate as the key, in place of its secret.
+         *
+         *     A token matches when it is signed by ``issuer``, names ``audience`` among its audiences, and carries each of
+         *     ``subject`` and ``email`` that the rule sets; an email matches only when the token marks it verified. At least
+         *     one of the two is required.
+         * @example {
+         *       "audience": "https://otari.example.com",
+         *       "email": "hackbot-api@my-project.iam.gserviceaccount.com",
+         *       "issuer": "https://accounts.google.com"
+         *     }
+         */
+        FederationRuleCreate: {
+            /**
+             * Audience
+             * @description A value the token's 'aud' must contain.
+             */
+            audience: string;
+            /**
+             * Email
+             * @description The token's verified 'email', when the rule names one. Compared without regard to case.
+             */
+            email?: string | null;
+            /**
+             * Issuer
+             * @description The token's 'iss', one of the deployment's federation_issuers.
+             */
+            issuer: string;
+            /**
+             * Subject
+             * @description The token's 'sub', when the rule names one.
+             */
+            subject?: string | null;
+        };
+        /**
+         * FederationRulePublic
+         * @description A federation rule of an API key.
+         */
+        FederationRulePublic: {
+            /** Api Key Id */
+            api_key_id: string;
+            /** Audience */
+            audience: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string | null;
+            /** Id */
+            id: string;
+            /** Issuer */
+            issuer: string;
+            /** Subject */
+            subject: string | null;
         };
         /** GateResultResponse */
         GateResultResponse: {
@@ -20905,6 +21011,102 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EndUserPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-list_federation_rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationRulePublic"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-create_federation_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FederationRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-delete_federation_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

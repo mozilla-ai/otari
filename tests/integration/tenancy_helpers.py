@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget
 from gateway.models.tenancy import Organization, User, Workspace
-from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -69,7 +69,7 @@ def budget_service(db: AsyncSession) -> BudgetService:
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
         WorkspaceAccess(db, organizations),
     )
 

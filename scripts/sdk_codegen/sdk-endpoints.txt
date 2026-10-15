@@ -185,6 +185,9 @@ PATCH /api/v1/keys/{key_id}/end-users               # not yet wrapped
 GET /api/v1/keys/{key_id}/end-users/{external_id}   # not yet wrapped
 PUT /api/v1/keys/{key_id}/end-users/{external_id}   # not yet wrapped
 PATCH /api/v1/keys/{key_id}/end-users/{external_id} # not yet wrapped
+POST /api/v1/keys/{key_id}/federation-rules         # not yet wrapped
+GET /api/v1/keys/{key_id}/federation-rules          # not yet wrapped
+DELETE /api/v1/keys/{key_id}/federation-rules/{rule_id}  # not yet wrapped
 # A service key managing its own end users, authenticated with that key
 GET /api/v1/end-users                               # not yet wrapped
 PUT /api/v1/end-users                               # not yet wrapped

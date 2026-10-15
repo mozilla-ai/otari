@@ -7173,6 +7173,124 @@
         "title": "FallbackOfferingPublic",
         "type": "object"
       },
+      "FederationRuleCreate": {
+        "additionalProperties": false,
+        "description": "An OpenID Connect identity that may authenticate as the key, in place of its secret.\n\nA token matches when it is signed by ``issuer``, names ``audience`` among its audiences, and carries each of\n``subject`` and ``email`` that the rule sets; an email matches only when the token marks it verified. At least\none of the two is required.",
+        "example": {
+          "audience": "https://otari.example.com",
+          "email": "hackbot-api@my-project.iam.gserviceaccount.com",
+          "issuer": "https://accounts.google.com"
+        },
+        "properties": {
+          "audience": {
+            "description": "A value the token's 'aud' must contain.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Audience",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token's verified 'email', when the rule names one. Compared without regard to case.",
+            "title": "Email"
+          },
+          "issuer": {
+            "description": "The token's 'iss', one of the deployment's federation_issuers.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token's 'sub', when the rule names one.",
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "issuer",
+          "audience"
+        ],
+        "title": "FederationRuleCreate",
+        "type": "object"
+      },
+      "FederationRulePublic": {
+        "description": "A federation rule of an API key.",
+        "properties": {
+          "api_key_id": {
+            "title": "Api Key Id",
+            "type": "string"
+          },
+          "audience": {
+            "title": "Audience",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "id",
+          "api_key_id",
+          "issuer",
+          "audience",
+          "subject",
+          "email",
+          "created_at"
+        ],
+        "title": "FederationRulePublic",
+        "type": "object"
+      },
       "GateResultResponse": {
         "properties": {
           "detail": {
@@ -29960,6 +30078,173 @@
           }
         ],
         "summary": "Put End User",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/federation-rules": {
+      "get": {
+        "description": "List the identities that may authenticate as this key, oldest first.",
+        "operationId": "keys-list_federation_rules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FederationRulePublic"
+                  },
+                  "title": "Response Keys-List Federation Rules",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Federation Rules",
+        "tags": [
+          "keys"
+        ]
+      },
+      "post": {
+        "description": "Let an OpenID Connect identity token authenticate as this key, in place of its secret.\n\nThe issuer must be one of the deployment's ``federation_issuers``, else 400. A token authenticates when it is\nsigned by that issuer, its ``aud`` contains ``audience``, and it carries the rule's ``subject`` and verified\n``email``, whichever the rule sets. A rule naming exactly the identity of another rule, on any key, answers 409.",
+        "operationId": "keys-create_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Federation Rule",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/federation-rules/{rule_id}": {
+      "delete": {
+        "description": "Remove a federation rule. Tokens it matched stop authenticating with the next request.",
+        "operationId": "keys-delete_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Federation Rule",
         "tags": [
           "keys"
         ]

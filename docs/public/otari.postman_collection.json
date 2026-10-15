@@ -3667,6 +3667,110 @@
           }
         },
         {
+          "name": "List Federation Rules",
+          "request": {
+            "description": "List the identities that may authenticate as this key, oldest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "federation-rules"
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/federation-rules",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Federation Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"audience\": \"https://otari.example.com\",\n  \"email\": \"hackbot-api@my-project.iam.gserviceaccount.com\",\n  \"issuer\": \"https://accounts.google.com\"\n}"
+            },
+            "description": "Let an OpenID Connect identity token authenticate as this key, in place of its secret.\n\nThe issuer must be one of the deployment's ``federation_issuers``, else 400. A token authenticates when it is\nsigned by that issuer, its ``aud`` contains ``audience``, and it carries the rule's ``subject`` and verified\n``email``, whichever the rule sets. A rule naming exactly the identity of another rule, on any key, answers 409.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "federation-rules"
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/federation-rules",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Federation Rule",
+          "request": {
+            "description": "Remove a federation rule. Tokens it matched stop authenticating with the next request.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "federation-rules",
+                ":rule_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/federation-rules/:rule_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "rule_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Rotate Key",
           "request": {
             "description": "Rotate an API key's secret in place, within the caller's organization.\n\nRequires master key authentication.\n\nGenerates a new secret for the same key row (id, user, name, expiry, and\nmetadata are preserved) and returns the new raw key once, using the same\nresponse shape as key creation. The previous secret stops authenticating\nimmediately; there is no grace window.",
