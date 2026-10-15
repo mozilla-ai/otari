@@ -11,11 +11,9 @@ export function formatTraceTimestamp(iso: string, withMs = false): string {
   return `${date} ${time}${withMs ? `.${pad(d.getMilliseconds(), 3)}` : ""}`
 }
 
-// `formatLatency` for under a minute; "2m 05s" from 60 s up; "22h 05m" from an
-// hour up.
 export function formatDuration(ms: number): string {
   if (ms < 60_000) return formatLatency(ms)
-  // Branched on the rounded value, so 59m 59.6s reads "1h 00m", not "60m 00s".
+  // The unit is picked on the rounded value, or 59m 59.6s would read "60m 00s".
   const seconds = Math.round(ms / 1000)
   if (seconds < 3600) {
     return `${Math.floor(seconds / 60)}m ${pad(seconds % 60)}s`
