@@ -52,7 +52,7 @@ pytestmark = pytest.mark.asyncio
 
 KEY = "sk-live-hosted-1234"
 DIAL = "gateway.services.providers._hosted_provider_service.test_provider_credentials"
-DATASET = "gateway.services.pricing._deployment_pricing_service.default_model_pricing"
+DATASET = "gateway.services.pricing_service.default_model_pricing"
 
 
 @pytest.fixture(autouse=True)

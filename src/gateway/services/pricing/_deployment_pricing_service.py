@@ -20,7 +20,7 @@ built on, so a caller already inside a block has this work join its own.
 import asyncio
 import uuid
 from collections.abc import Collection, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from gateway.core.metered_pricing import quantize_rate
@@ -28,7 +28,6 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
-from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 
 _CACHE_RATE_FIELDS = (
     "cache_read_price_per_million",
@@ -39,6 +38,9 @@ _RATE_FIELDS = ("input_price_per_million", "output_price_per_million", *_CACHE_R
 
 def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> dict[str, ModelPricing]:
     """Community default rates for several models. Synchronous; run off the loop."""
+    # Deferred: the flat pricing module imports this package, so a top-level import closes a cycle.
+    from gateway.services.pricing_service import default_model_pricing
+
     resolved: dict[str, ModelPricing] = {}
     for model in models:
         default = default_model_pricing(provider, model, as_of)
@@ -86,7 +88,7 @@ class DeploymentPricingService:
         wanted = sorted(set(models))
         if not wanted:
             return {}
-        return await asyncio.to_thread(_resolve_defaults, provider, wanted, normalize_effective_at(None))
+        return await asyncio.to_thread(_resolve_defaults, provider, wanted, datetime.now(UTC))
 
     async def store_defaults(self, defaults: Mapping[str, ModelPricing], effective_at: datetime) -> None:
         """Store community defaults as versions carrying ``SEED_ORIGIN``, one per ``model_key``.
@@ -145,7 +147,7 @@ class DeploymentPricingService:
         if unknown:
             msg = f"not a cache rate: {sorted(unknown)}"
             raise ValueError(msg)
-        effective_at = normalize_effective_at(None)
+        effective_at = datetime.now(UTC)
         async with self.uow:
             latest = (await self.pricing.latest_versions([model_key])).get(model_key)
 
