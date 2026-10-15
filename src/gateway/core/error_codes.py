@@ -37,6 +37,8 @@ CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
 # The model the request reached does not accept a kind of content the request carries, such as an image.
 UNSUPPORTED_CONTENT = "unsupported_content"
 PRICING_REQUIRED = "pricing_required"
+# The organization has no funds paid in to cover a request the deployment pays for.
+INSUFFICIENT_FUNDS = "insufficient_funds"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
 PROVIDER_NOT_CONFIGURED = "provider_not_configured"

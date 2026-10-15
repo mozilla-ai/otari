@@ -123,6 +123,15 @@ def test_describe_shows_the_key_and_base(capsys: pytest.CaptureFixture[str]) -> 
     assert "  maxAgeHours (integer)\n      Use a cached copy" in out
 
 
+def test_describe_shows_the_allowed_values_the_documented_defaults_and_the_base_variable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _describe("tabstack", capsys)
+    assert "API base: https://api.tabstack.ai/v1, or TABSTACK_BASE_URL when set" in out
+    assert '  effort (string), default "standard"\n      One of: min, standard, max.' in out
+    assert "Renders JavaScript: yes" in out
+
+
 def test_describe_shows_defaults_as_json_and_the_test_tier(capsys: pytest.CaptureFixture[str]) -> None:
     out = _describe("fake", capsys)
     assert "For tests:" in out

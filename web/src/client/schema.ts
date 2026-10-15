@@ -46,6 +46,7 @@ export interface paths {
          *     membership, while this one carries every identity at whatever standing,
          *     including one whose memberships are all suspended. Each row also reports when
          *     the account last signed in to the dashboard, and null there means never.
+         *     ``search`` narrows the page and the count together.
          */
         get: operations["admin-list_deployment_users"];
         put?: never;
@@ -241,7 +242,7 @@ export interface paths {
         };
         /**
          * List Aliases
-         * @description List every alias in force, from config.yml and from storage.
+         * @description List every alias in force in your organization, from config.yml and from storage.
          *
          *     Every scope at once, workspace-wide and user-scoped alike: this is the
          *     master-key management view, not what any one caller resolves.
@@ -993,7 +994,7 @@ export interface paths {
         };
         /**
          * List Budgets
-         * @description List all budgets with pagination.
+         * @description List the deployment's budgets and the caller's organization's, with pagination.
          */
         get: operations["budgets-list_budgets"];
         put?: never;
@@ -1090,7 +1091,7 @@ export interface paths {
          * @description The models this caller may use, one entry each however many providers serve it.
          *
          *     Prices are the caller's: an organization's override where one applies, else
-         *     the deployment's row, else the genai-prices default. Aliases and routing
+         *     the deployment's row, else the models.dev default. Aliases and routing
          *     policies are not models and are not listed; see Routing. A visitor, where
          *     the catalog is public, sees the configured instances and the hosted
          *     models at the deployment's rates, and nothing that belongs to a tenant.
@@ -1930,9 +1931,9 @@ export interface paths {
          *
          *     Returns models auto-discovered from configured providers, enriched with
          *     pricing data from the model_pricing table when available, and with each
-         *     model's token limits: the context window from models.dev, or from
-         *     genai-prices where models.dev has none, and the output limit from models.dev
-         *     alone. A limit neither knows is null. Models that only exist in the pricing
+         *     model's token limits: the context window from the live models.dev catalog,
+         *     or from the pricing snapshot where it has none, and the output limit from the
+         *     live catalog alone. A limit neither knows is null. Models that only exist in the pricing
          *     table are also included for backward compatibility.
          */
         get: operations["models-list_models"];
@@ -3390,6 +3391,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/traces/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trace Of Request
+         * @description The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.
+         *
+         *     The usage log's ``request_group_id`` is that id, so a request log row opens its
+         *     session here. A request outside the scope, or with no trace stored, is a 404.
+         */
+        get: operations["organization-traces-trace_of_request"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/traces/series": {
         parameters: {
             query?: never;
@@ -3471,7 +3495,7 @@ export interface paths {
          *     Serves the paginator's "N of M" beside the list above, and is scoped the
          *     same way, so the total can never describe more rows than the list will show.
          *
-         *     Unlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
+         *     Unlike the operator's ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
          *     is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
          *     this surface has none. So this total keeps matching the list beside it.
          */
@@ -4057,7 +4081,7 @@ export interface paths {
          * List Pricing Drift
          * @description Every stored deployment rate in force today, beside today's default for it.
          *
-         *     A stored row shadows the genai-prices default silently and forever, whether
+         *     A stored row shadows the models.dev default silently and forever, whether
          *     it was a deliberate override or a copy of a then-current default. This is
          *     what makes the difference visible: a row that matches the default is a row
          *     that could be deleted, and a row far from it is one worth a second look.
@@ -4409,7 +4433,7 @@ export interface paths {
          * @description List static metadata for every configured provider.
          *
          *     Operator-facing: reports each provider's capabilities, documentation and
-         *     pricing links, and display name from the bundled any-llm and genai-prices
+         *     pricing links, and display name from the bundled any-llm and models.dev
          *     datasets. No provider is contacted, so this is cheap and always available.
          */
         get: operations["providers-list_providers"];
@@ -4433,7 +4457,7 @@ export interface paths {
          * @description List every known provider for the add-provider picker: id and name only.
          *
          *     Lightweight by design so the picker never lags: provider ids come from the
-         *     any-llm registry and names from the bundled genai-prices dataset, so no
+         *     any-llm registry and names from the models.dev catalog, so no
          *     provider SDK is imported. The autofill hints for a chosen provider come from
          *     GET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.
          */
@@ -4623,7 +4647,7 @@ export interface paths {
         };
         /**
          * List Policies
-         * @description List every routing policy in force, from config.yml and from storage.
+         * @description List every routing policy in force in your organization, from config.yml and from storage.
          *
          *     Every scope at once, workspace-wide and user-scoped alike: this is the
          *     master-key management view, not what any one caller resolves.
@@ -4798,7 +4822,7 @@ export interface paths {
         };
         /**
          * List Scoped Budgets
-         * @description List scoped budgets, optionally filtered to one scope.
+         * @description List the scoped budgets in the caller's organization, optionally filtered to one scope.
          */
         get: operations["scoped-budgets-list_scoped_budgets"];
         put?: never;
@@ -5467,6 +5491,29 @@ export interface paths {
          * @description Count the agent sessions that match.
          */
         get: operations["traces-count_traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/traces/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trace Of Request
+         * @description The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.
+         *
+         *     The usage log's ``request_group_id`` is that id, so a request log row opens its
+         *     session here. A request outside the scope, or with no trace stored, is a 404.
+         */
+        get: operations["traces-trace_of_request"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6541,7 +6588,7 @@ export interface components {
         };
         /**
          * AcceptedSnapshotResponse
-         * @description One accepted genai-prices snapshot in the history.
+         * @description One accepted models.dev snapshot in the history.
          */
         AcceptedSnapshotResponse: {
             /**
@@ -7891,7 +7938,7 @@ export interface components {
             context_window?: number | null;
             /**
              * Default Pricing
-             * @description Whether an unpriced model is metered at the genai-prices default.
+             * @description Whether an unpriced model is metered at the models.dev default.
              */
             default_pricing: boolean;
             /**
@@ -8099,19 +8146,19 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Metadata Input Price Per Million
-             * @description What models.dev lists this provider charging, for a cross-check. Not billed from: two independent datasets disagreeing is the cheapest stale-price detector there is.
+             * @description What the live models.dev catalog lists this provider charging. The default is billed from the accepted models.dev snapshot, which can lag the live catalog, so a difference means a price update is waiting for review.
              */
             metadata_input_price_per_million?: number | null;
             /** Metadata Output Price Per Million */
             metadata_output_price_per_million?: number | null;
             /**
              * Price Reference
-             * @description For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.
+             * @description For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.
              */
             price_reference?: string | null;
             /**
              * Price Source
-             * @description Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the genai-prices defaults. Null when nothing prices it.
+             * @description Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the models.dev defaults. Null when nothing prices it.
              */
             price_source?: ("organization" | "deployment" | "defaults") | null;
             pricing?: components["schemas"]["ModelPricingInfo"] | null;
@@ -8154,12 +8201,12 @@ export interface components {
             count: number;
             /**
              * Default Pricing
-             * @description Whether an unpriced model is metered at the genai-prices default.
+             * @description Whether an unpriced model is metered at the models.dev default.
              */
             default_pricing: boolean;
             /**
              * Defaults As Of
-             * @description When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.
+             * @description When the accepted models.dev snapshot, which the defaults are billed from, was taken. Null while the bundled snapshot serves.
              */
             defaults_as_of: string | null;
             /** @description Present when include_facets is requested. */
@@ -10887,8 +10934,6 @@ export interface components {
         ModelPricingInfo: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /** Input Price Per Million */
@@ -11207,7 +11252,7 @@ export interface components {
          *
          *     ``price_source`` says which rung of ``services.pricing_service`` answered:
          *     ``organization`` for a rate an admin set, ``defaults`` for the
-         *     community-maintained rate this surface seeded or the genai-prices fallback,
+         *     community-maintained rate this surface seeded or the models.dev fallback,
          *     ``deployment`` for the deployment's own price list, and None when nothing
          *     prices the model yet. ``pricing_id`` names the organization's own row where
          *     there is one, so a client can edit that rate without re-deriving the key.
@@ -11217,8 +11262,6 @@ export interface components {
         OrgProviderKeyModelPublic: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /**
@@ -12149,11 +12192,6 @@ export interface components {
              */
             cache_read_price_per_million?: number | null;
             /**
-             * Cache Write 1H Price Per Million
-             * @description Price per 1M Anthropic 1-hour cache-write tokens
-             */
-            cache_write_1h_price_per_million?: number | null;
-            /**
              * Cache Write Price Per Million
              * @description Price per 1M cache-write (creation) tokens
              */
@@ -12203,8 +12241,6 @@ export interface components {
         OrganizationModelPricingPublic: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million: number | null;
             /**
@@ -12273,11 +12309,6 @@ export interface components {
              * @description Price per 1M cached-input tokens
              */
             cache_read_price_per_million?: number | null;
-            /**
-             * Cache Write 1H Price Per Million
-             * @description Price per 1M Anthropic 1-hour cache-write tokens
-             */
-            cache_write_1h_price_per_million?: number | null;
             /**
              * Cache Write Price Per Million
              * @description Price per 1M cache-write (creation) tokens
@@ -13060,14 +13091,14 @@ export interface components {
         PricingDriftRow: {
             /**
              * Default Input Price Per Million
-             * @description What genai-prices would meter this key at today. Null when the dataset does not know it.
+             * @description What models.dev would meter this key at today. Null when the dataset does not know it.
              */
             default_input_price_per_million: number | null;
             /** Default Output Price Per Million */
             default_output_price_per_million: number | null;
             /**
              * Default Reference
-             * @description The genai-prices entry the default came from.
+             * @description The models.dev entry the default came from.
              */
             default_reference: string | null;
             /** Effective At */
@@ -13102,7 +13133,7 @@ export interface components {
         };
         /**
          * PricingRefreshConfirmationResponse
-         * @description Result of activating a reviewed genai-prices refresh.
+         * @description Result of activating a reviewed models.dev refresh.
          */
         PricingRefreshConfirmationResponse: {
             /**
@@ -13113,7 +13144,7 @@ export interface components {
         };
         /**
          * PricingRefreshPreviewResponse
-         * @description Reviewable summary of a pending genai-prices refresh.
+         * @description Reviewable summary of a pending models.dev refresh.
          */
         PricingRefreshPreviewResponse: {
             /** Added Count */
@@ -13125,14 +13156,31 @@ export interface components {
             /** Changes Truncated */
             changes_truncated: boolean;
             /**
+             * Digest
+             * @description Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.
+             * @default
+             */
+            digest: string;
+            /**
              * Fetched At
              * Format: date-time
              */
             fetched_at: string;
+            /**
+             * Needs Review
+             * @description True when the update is implausibly large; the scheduled `auto` policy leaves it pending.
+             * @default false
+             */
+            needs_review: boolean;
             /** Protected Model Count */
             protected_model_count: number;
             /** Removed Count */
             removed_count: number;
+            /**
+             * Review Reason
+             * @description Why the update needs review.
+             */
+            review_reason?: string | null;
         };
         /**
          * PricingResponse
@@ -13141,8 +13189,6 @@ export interface components {
         PricingResponse: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million: number | null;
             /** Created At */
@@ -13177,8 +13223,6 @@ export interface components {
         PricingTier: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /** Input Price Per Million */
@@ -14701,11 +14745,6 @@ export interface components {
              * @description Price per 1M cached-input tokens
              */
             cache_read_price_per_million?: number | null;
-            /**
-             * Cache Write 1H Price Per Million
-             * @description Price per 1M Anthropic 1-hour cache-write tokens
-             */
-            cache_write_1h_price_per_million?: number | null;
             /**
              * Cache Write Price Per Million
              * @description Price per 1M cache-write (creation) tokens
@@ -16996,6 +17035,8 @@ export interface operations {
                 skip?: number;
                 /** @description Maximum number of records to return */
                 limit?: number;
+                /** @description Narrow to accounts whose name or email contains this text, case-insensitively. */
+                search?: string | null;
             };
             header?: never;
             path?: never;
@@ -17251,7 +17292,7 @@ export interface operations {
     "aliases-list_aliases": {
         parameters: {
             query?: {
-                /** @description Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace. */
+                /** @description Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace in your organization. */
                 workspace_id?: string | null;
             };
             header?: never;
@@ -22609,6 +22650,37 @@ export interface operations {
             };
         };
     };
+    "organization-traces-trace_of_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceSummaryPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-traces-trace_series": {
         parameters: {
             query?: {
@@ -23876,7 +23948,10 @@ export interface operations {
     };
     "pricing-confirm_pricing_refresh": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The `digest` of the previewed snapshot; 409 when the pending one differs. */
+                digest?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -23890,6 +23965,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PricingRefreshConfirmationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -23916,7 +24000,10 @@ export interface operations {
     };
     "pricing-reject_pricing_refresh": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The `digest` of the previewed snapshot; 409 when the pending one differs. */
+                digest?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -23929,6 +24016,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -24718,7 +24814,7 @@ export interface operations {
     "routing-list_policies": {
         parameters: {
             query?: {
-                /** @description Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace. */
+                /** @description Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace in your organization. */
                 workspace_id?: string | null;
             };
             header?: never;
@@ -25872,6 +25968,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TraceCountPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "traces-trace_of_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceSummaryPublic"];
                 };
             };
             /** @description Validation Error */

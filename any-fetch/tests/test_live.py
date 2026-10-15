@@ -25,6 +25,7 @@ PROVIDERS = [
     if provider != "builtin" and AnyFetch.get_provider_metadata(provider).tier == "production"
 ]
 URL = "https://www.python.org/downloads/"
+MISSING_URL = "https://www.python.org/no-such-page-any-fetch-live-test"
 
 
 @dataclass(frozen=True)
@@ -35,10 +36,14 @@ class Expected:
     reports_cost: bool
     # It returns the page's title.
     titles: bool
+    # It reports a page the site answered with an error as an error inside the
+    # answer; otherwise it returns the text of the site's own error page.
+    page_errors: bool
 
 
 EXPECTED: dict[str, Expected] = {
-    "exa": Expected(reports_cost=True, titles=True),
+    "exa": Expected(reports_cost=True, titles=True, page_errors=True),
+    "tabstack": Expected(reports_cost=False, titles=True, page_errors=False),
 }
 
 
@@ -73,11 +78,15 @@ async def test_a_live_fetch_returns_the_page_text(provider: str) -> None:
 @live
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", PROVIDERS)
-async def test_a_live_fetch_of_a_missing_page_is_an_error_inside_the_answer(provider: str) -> None:
+async def test_a_live_fetch_of_a_missing_page_is_an_error_or_the_sites_error_page(provider: str) -> None:
     _require_key(provider)
     async with AnyFetch.create(provider) as fetcher:
-        page = await fetcher.fetch("https://www.python.org/no-such-page-any-fetch-live-test", max_chars=500)
-    assert page.error is not None
-    assert page.text == ""
+        page = await fetcher.fetch(MISSING_URL, max_chars=500)
+    if EXPECTED[provider].page_errors:
+        assert page.error is not None
+        assert page.text == ""
+    else:
+        assert page.error is None
+        assert page.text
     if EXPECTED[provider].reports_cost:
         assert page.cost_source == "reported"

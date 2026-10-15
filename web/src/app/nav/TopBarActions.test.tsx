@@ -1,11 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { DeploymentBootstrap } from "@/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap } from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
 
@@ -27,10 +27,27 @@ function renderActions(
 const cluster = async () =>
   (await screen.findByRole("link", { name: "Documentation" })).parentElement
 
+// Playground waits on the membership read like every rail row, so a case that
+// counts the cluster waits for it first.
+const settledCluster = async () => {
+  await screen.findByRole("link", { name: "Playground" })
+  return cluster()
+}
+
 describe("TopBarActions", () => {
+  // A member, so Playground's membership gate has an answer to settle on.
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(organizationContext()),
+    )
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("places the local Playground immediately before Documentation", async () => {
     await renderActions()
-    const link = screen.getByRole("link", { name: "Playground" })
+    const link = await screen.findByRole("link", { name: "Playground" })
     expect(link).toHaveAttribute("href", "/playground")
     expect(link.nextElementSibling).toBe(
       screen.getByRole("link", { name: "Documentation" }),
@@ -67,7 +84,7 @@ describe("TopBarActions", () => {
     // none, so the seam is mounted and empty. Asserting the cluster's whole
     // membership rather than the absence of one chip is what would catch a
     // placeholder growing here later.
-    expect((await cluster())?.children).toHaveLength(2)
+    expect((await settledCluster())?.children).toHaveLength(2)
   })
 
   it("renders the slot module's own empty default", () => {
@@ -82,7 +99,7 @@ describe("TopBarActions", () => {
     await renderActions({ management_url: "https://otari.ai/" })
 
     // A management URL does not retarget the local Playground.
-    expect((await cluster())?.children).toHaveLength(2)
+    expect((await settledCluster())?.children).toHaveLength(2)
   })
 
   it("points Documentation at the bundled guide when no docs site is configured", async () => {

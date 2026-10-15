@@ -56,6 +56,8 @@ export function formatUnitRate(value: number): string {
 // `undefined` rather than a placeholder when the row recorded none, so a table
 // cell can render the em dash that keeps it aligned and a stat card can drop
 // the figure instead.
+export function formatLatency(ms: number): string
+export function formatLatency(ms: number | null | undefined): string | undefined
 export function formatLatency(
   ms: number | null | undefined,
 ): string | undefined {

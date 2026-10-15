@@ -174,10 +174,7 @@ class OverviewService:
             )
 
         return OverviewSummary(
-            active_keys=await self._repository.count_active_keys(
-                workspace_id=scope,
-                organization_id=None if is_deployment_operator else organization.id,
-            ),
+            active_keys=await self._repository.count_active_keys(workspace_id=scope, organization_id=organization.id),
             active_members=(await self._repository.count_active_workspace_members(scope)) if scope else 0,
             budgets=budgets,
             ceilings=ceilings,

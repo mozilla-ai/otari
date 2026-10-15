@@ -223,7 +223,7 @@ export function parseWeights(weights: string[]): number[] {
 export function poolShares(pool: PoolDraft): number[] {
   return computeShares(
     parseWeights(pool.weights).map((value) =>
-      Number.isFinite(value) ? Math.max(0, value) : 0,
+      Number.isFinite(value) ? value : 0,
     ),
   )
 }

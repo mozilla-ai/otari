@@ -11,7 +11,9 @@ from typing import Protocol
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, create_log_session
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter, Gauge, Histogram
-from gateway.models.usage import UsageLog
+from gateway.models.money import to_usd_or_none
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
+from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.services.traces import LlmCall, RequestTraces
 
 QUEUE_DEPTH = Gauge(
@@ -43,7 +45,13 @@ ROWS = Counter(
 
 
 class LogWriter(Protocol):
-    async def put(self, log: UsageLog) -> None: ...
+    async def put(self, log: UsageLog) -> bool:
+        """Hand the writer a row, returning whether it accepted it.
+
+        Accepted means committed for an inline writer and queued for a batching one,
+        which can still drop a queued row when a flush fails.
+        """
+        ...
 
     async def start(self) -> None: ...
 
@@ -53,17 +61,19 @@ class LogWriter(Protocol):
 class SingleLogWriter:
     """Write each usage log inline, one transaction per event."""
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         async with create_log_session() as db:
             try:
                 # The writer only logs, because the reservation reconcile path owns spend.
                 db.add(log)
                 await db.commit()
                 ROWS.labels(writer="single", result="written").inc()
+                return True
             except DATABASE_ERRORS as e:  # pragma: no cover - defensive logging
                 await db.rollback()
                 logger.error("SingleLogWriter failed: %s", e)
                 ROWS.labels(writer="single", result="dropped").inc()
+                return False
 
     async def start(self) -> None:
         pass
@@ -105,13 +115,16 @@ class BatchLogWriter:
         self._taken = 0
         self._task: asyncio.Task[None] | None = None
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         try:
             self._queue.put_nowait(log)
         except asyncio.QueueFull:
             logger.error("BatchLogWriter queue is full; dropping a usage row")
             ROWS.labels(writer="batch", result="dropped").inc()
-        QUEUE_DEPTH.set(self._queue.qsize())
+            return False
+        finally:
+            QUEUE_DEPTH.set(self._queue.qsize())
+        return True
 
     async def start(self) -> None:
         self._stopping.clear()
@@ -234,17 +247,17 @@ class BatchLogWriter:
             self._taken -= len(chunk)
 
 
-def create_log_writer(strategy: str) -> LogWriter:
-    if strategy == "batch":
-        return BatchLogWriter()
-    return SingleLogWriter()
+def create_log_writer(strategy: str, signal: UsageSignalPort) -> LogWriter:
+    """Build the deployment's usage log writer, telling ``signal`` about each row it accepts."""
+    inner: LogWriter = BatchLogWriter() if strategy == "batch" else SingleLogWriter()
+    return SignalingLogWriter(inner, signal)
 
 
 class NoopLogWriter:
     """LogWriter implementation that discards all writes (used when DB is unavailable)."""
 
-    async def put(self, log: UsageLog) -> None:  # noqa: D401,B027 - trivial no-op
-        return None
+    async def put(self, log: UsageLog) -> bool:  # noqa: D401,B027 - trivial no-op
+        return False
 
     async def start(self) -> None:  # noqa: D401,B027
         return None
@@ -266,7 +279,7 @@ class TracingLogWriter:
         self._inner = inner
         self._traces = traces
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         trace = self._traces.get(log.request_group_id)
         if trace is not None:
             # The row is the billing record: tracing it must never be why it is not written.
@@ -274,7 +287,7 @@ class TracingLogWriter:
                 trace.record_llm_call(_llm_call(log))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Usage row not traced (%s)", type(exc).__name__)
-        await self._inner.put(log)
+        return await self._inner.put(log)
 
     async def start(self) -> None:
         await self._inner.start()
@@ -299,3 +312,81 @@ def _llm_call(log: UsageLog) -> LlmCall:
         selection_reason=log.selection_reason,
         attempt_position=log.attempt_position,
     )
+
+
+class SignalingLogWriter:
+    """A usage log writer that also tells ``UsageSignalPort`` about each row the wrapped writer accepts.
+
+    Changes nothing about how a row is written: the row goes to the wrapped
+    writer first, and the port is told only once it was accepted, so a port that
+    fails or is slow never decides whether the row is kept, and a dropped row is
+    never reported.
+    """
+
+    def __init__(self, inner: LogWriter, signal: UsageSignalPort) -> None:
+        self._inner = inner
+        self._signal = signal
+
+    async def put(self, log: UsageLog) -> bool:
+        # The row is the billing record and the port is an overlay's: neither
+        # building the facts nor whatever the adapter raises may reach settlement.
+        # Built before the row is handed over, because a batch writer flushes it
+        # from another task and the facts should not depend on how far it got.
+        usage: RecordedUsage | None = None
+        try:
+            usage = _recorded_usage(log)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+        accepted = await self._inner.put(log)
+        if not accepted or usage is None:
+            return accepted
+        try:
+            await self._signal.usage_recorded(usage)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+        return accepted
+
+    async def start(self) -> None:
+        await self._inner.start()
+
+    async def stop(self) -> None:
+        await self._inner.stop()
+
+
+def _recorded_usage(log: UsageLog) -> RecordedUsage:
+    # Unset on a row the request path built, until the column default fills it at flush.
+    source = log.source if log.source is not None else SERVED_HERE_SLUG
+    return RecordedUsage(
+        usage_id=log.id,
+        request_group_id=log.request_group_id,
+        timestamp=log.timestamp,
+        workspace_id=log.workspace_id,
+        user_id=log.user_id,
+        api_key_id=log.api_key_id,
+        provider=log.provider,
+        model=log.model,
+        endpoint=log.endpoint,
+        source=source,
+        status=log.status,
+        status_code=log.status_code,
+        prompt_tokens=log.prompt_tokens,
+        completion_tokens=log.completion_tokens,
+        total_tokens=log.total_tokens,
+        cost=to_usd_or_none(log.cost),
+        latency_ms=log.latency_ms,
+        integration_traffic=_integration_traffic(source, log.endpoint),
+        # Unset, like ``source``, on a row built without it; the column default is false.
+        deployment_paid=bool(log.deployment_paid),
+    )
+
+
+def _integration_traffic(source: str, endpoint: str) -> bool:
+    """Whether a row was served here from somebody's own code rather than from the Playground.
+
+    The setup guide's test, ``_integration_traffic`` in
+    ``services/tenancy/workspace_activation_service``, applied to one row. That
+    one also excludes rows billed to the credential a hosted control plane
+    forwards its Playground under, but those rows are written from a data-plane
+    gateway's usage report and never pass through this writer.
+    """
+    return source == SERVED_HERE_SLUG and endpoint != PLAYGROUND_USAGE_ENDPOINT

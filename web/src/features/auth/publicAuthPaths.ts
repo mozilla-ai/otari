@@ -106,6 +106,21 @@ export function rendersAheadOfRouter(pathname: string): boolean {
 }
 
 /**
+ * Where a sign-in begun on `hash` lands once it succeeds: that page when the
+ * router serves it, else the home page.
+ *
+ * A page rendered ahead of the router is never one to come back to: sign-up
+ * and the callbacks have nothing left to do for a session, and the verify,
+ * reset and invitation links carry a single-use token. Only a hash path is
+ * accepted, and the caller assigns it to `location.hash`, so the result cannot
+ * leave this document; `#//` and `#/\` are refused too, since either reads as
+ * another origin to anything that later treats the path as a URL.
+ */
+export function resolveSignInReturnHash(hash: string): string {
+  return /^#\/(?![/\\])/.test(hash) && !rendersAheadOfRouter(hash) ? hash : "#/"
+}
+
+/**
  * Whether a hash or a pathname names the accept-invitation page, matched on
  * the path alone as `publicAuthPath` matches, so its `?token=…` is ignored.
  */

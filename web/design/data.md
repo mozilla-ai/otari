@@ -99,8 +99,8 @@ Forty-eight copies of one decision, because there was nowhere to say it once.
 The base is now those terms and the copies are gone.
 
 **So a per-table class is for what is genuinely that table's:** its row height,
-its lane widths (keyed on `[data-key="…"]`, so a lane is named rather than
-counted), its sticky first column, and its own outer rules where it has them.
+its lane widths (keyed on the header's `[data-key="…"]`, so a lane is named rather
+than counted), its sticky columns, and its own outer rules where it has them.
 If you find yourself writing one of the three above, the base already says it and
 `src/styles/foundation.test.ts` will reject the copy.
 
@@ -120,13 +120,18 @@ tracks horizontal scroll so a first column can pin, and the per-page class is wh
 `otari-routing-table`, `otari-domains-table`, `otari-members-table`,
 `otari-provider-keys-table`, `otari-offered-models-table`,
 `otari-workspaces-table`, `otari-accounts-table`, `otari-activity-table`,
-`otari-budgets-table`, `otari-mcp-table`, `otari-offerings-table`. Inventing one
+`otari-budgets-table`, `otari-mcp-table`, `otari-offerings-table`,
+`otari-sessions-table`. Inventing one
 at the call site compiles and styles nothing.
 
 A new page adds its class to `src/styles/globals.css`, beside the others, and the
 block is small: the per-page rules there set column widths on
-`.otari-<page>-table .table__column[data-key="…"]` and, where a first column pins,
-its sticky treatment. Copy the nearest existing block; do not invent properties. If
+`.otari-<page>-table .table__column[data-key="…"]` and, where a column pins, its
+sticky treatment on that header and on
+`.otari-<page>-table .table__cell[data-column="…"]`. A body cell's `data-key` is a
+generated react-aria key, not the column id, so a rule on it matches nothing: the
+header pins and its cells scroll away underneath. Copy the nearest existing block;
+do not invent properties. If
 your table needs no column widths, you still need the class for the scroll tracking,
 and an empty selector is not enough: add it to the shared group at the top of that
 section instead.

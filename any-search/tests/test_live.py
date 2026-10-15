@@ -35,10 +35,14 @@ class Expected:
     reports_cost: bool
     # The native options under which a search returns dated hits; None for a provider that dates none.
     dated: dict[str, Any] | None = None
+    # Its hits carry a snippet by default.
+    snippets: bool = False
 
 
 EXPECTED: dict[str, Expected] = {
     "exa": Expected(reports_cost=True, dated={"category": "news"}),
+    # Mojeek returns no page text, so the snippet is all a hit says; it dates hits by default (date=1).
+    "mojeek": Expected(reports_cost=False, dated={}, snippets=True),
 }
 
 
@@ -65,6 +69,8 @@ async def test_a_live_search_returns_hits(provider: str) -> None:
     assert (result.cost is None) == (result.cost_source == "none")
     if EXPECTED[provider].reports_cost:
         assert result.cost_source == "reported"
+    if EXPECTED[provider].snippets:
+        assert any(hit.snippet for hit in result.hits)
 
 
 @live

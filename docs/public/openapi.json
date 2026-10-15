@@ -96,7 +96,7 @@
         "type": "object"
       },
       "AcceptedSnapshotResponse": {
-        "description": "One accepted genai-prices snapshot in the history.",
+        "description": "One accepted models.dev snapshot in the history.",
         "properties": {
           "accepted_at": {
             "format": "date-time",
@@ -2872,7 +2872,7 @@
             "title": "Context Window"
           },
           "default_pricing": {
-            "description": "Whether an unpriced model is metered at the genai-prices default.",
+            "description": "Whether an unpriced model is metered at the models.dev default.",
             "title": "Default Pricing",
             "type": "boolean"
           },
@@ -3377,7 +3377,7 @@
                 "type": "null"
               }
             ],
-            "description": "What models.dev lists this provider charging, for a cross-check. Not billed from: two independent datasets disagreeing is the cheapest stale-price detector there is.",
+            "description": "What the live models.dev catalog lists this provider charging. The default is billed from the accepted models.dev snapshot, which can lag the live catalog, so a difference means a price update is waiting for review.",
             "title": "Metadata Input Price Per Million"
           },
           "metadata_output_price_per_million": {
@@ -3400,7 +3400,7 @@
                 "type": "null"
               }
             ],
-            "description": "For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.",
+            "description": "For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.",
             "title": "Price Reference"
           },
           "price_source": {
@@ -3417,7 +3417,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the genai-prices defaults. Null when nothing prices it.",
+            "description": "Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the models.dev defaults. Null when nothing prices it.",
             "title": "Price Source"
           },
           "pricing": {
@@ -3499,7 +3499,7 @@
             "type": "integer"
           },
           "default_pricing": {
-            "description": "Whether an unpriced model is metered at the genai-prices default.",
+            "description": "Whether an unpriced model is metered at the models.dev default.",
             "title": "Default Pricing",
             "type": "boolean"
           },
@@ -3513,7 +3513,7 @@
                 "type": "null"
               }
             ],
-            "description": "When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.",
+            "description": "When the accepted models.dev snapshot, which the defaults are billed from, was taken. Null while the bundled snapshot serves.",
             "title": "Defaults As Of"
           },
           "facets": {
@@ -9358,17 +9358,6 @@
             ],
             "title": "Cache Read Price Per Million"
           },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
-          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -10012,7 +10001,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelPublic": {
-        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the genai-prices fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: tokens, requests\nor images, so a per-request rate is not read as a per-token one.",
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: tokens, requests\nor images, so a per-request rate is not read as a per-token one.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -10024,17 +10013,6 @@
               }
             ],
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -11847,19 +11825,6 @@
             "description": "Price per 1M cached-input tokens",
             "title": "Cache Read Price Per Million"
           },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
-            "title": "Cache Write 1H Price Per Million"
-          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -11968,17 +11933,6 @@
             ],
             "title": "Cache Read Price Per Million"
           },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
-          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -12059,7 +12013,6 @@
           "output_price_per_million",
           "cache_read_price_per_million",
           "cache_write_price_per_million",
-          "cache_write_1h_price_per_million",
           "pricing_tiers",
           "unit",
           "effective_from",
@@ -12085,19 +12038,6 @@
             ],
             "description": "Price per 1M cached-input tokens",
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -13626,7 +13566,7 @@
                 "type": "null"
               }
             ],
-            "description": "What genai-prices would meter this key at today. Null when the dataset does not know it.",
+            "description": "What models.dev would meter this key at today. Null when the dataset does not know it.",
             "title": "Default Input Price Per Million"
           },
           "default_output_price_per_million": {
@@ -13649,7 +13589,7 @@
                 "type": "null"
               }
             ],
-            "description": "The genai-prices entry the default came from.",
+            "description": "The models.dev entry the default came from.",
             "title": "Default Reference"
           },
           "effective_at": {
@@ -13743,7 +13683,7 @@
         "type": "object"
       },
       "PricingRefreshConfirmationResponse": {
-        "description": "Result of activating a reviewed genai-prices refresh.",
+        "description": "Result of activating a reviewed models.dev refresh.",
         "properties": {
           "applied": {
             "default": true,
@@ -13755,7 +13695,7 @@
         "type": "object"
       },
       "PricingRefreshPreviewResponse": {
-        "description": "Reviewable summary of a pending genai-prices refresh.",
+        "description": "Reviewable summary of a pending models.dev refresh.",
         "properties": {
           "added_count": {
             "title": "Added Count",
@@ -13776,10 +13716,22 @@
             "title": "Changes Truncated",
             "type": "boolean"
           },
+          "digest": {
+            "default": "",
+            "description": "Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+            "title": "Digest",
+            "type": "string"
+          },
           "fetched_at": {
             "format": "date-time",
             "title": "Fetched At",
             "type": "string"
+          },
+          "needs_review": {
+            "default": false,
+            "description": "True when the update is implausibly large; the scheduled `auto` policy leaves it pending.",
+            "title": "Needs Review",
+            "type": "boolean"
           },
           "protected_model_count": {
             "title": "Protected Model Count",
@@ -13788,6 +13740,18 @@
           "removed_count": {
             "title": "Removed Count",
             "type": "integer"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the update needs review.",
+            "title": "Review Reason"
           }
         },
         "required": [
@@ -13815,17 +13779,6 @@
               }
             ],
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -13894,7 +13847,6 @@
           "output_price_per_million",
           "cache_read_price_per_million",
           "cache_write_price_per_million",
-          "cache_write_1h_price_per_million",
           "pricing_tiers",
           "unit",
           "origin",
@@ -13918,18 +13870,6 @@
               }
             ],
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -17172,19 +17112,6 @@
             ],
             "description": "Price per 1M cached-input tokens",
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -23153,7 +23080,7 @@
     },
     "/api/v1/admin/users": {
       "get": {
-        "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.",
+        "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.\n``search`` narrows the page and the count together.",
         "operationId": "admin-list_deployment_users",
         "parameters": [
           {
@@ -23181,6 +23108,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Narrow to accounts whose name or email contains this text, case-insensitively.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Narrow to accounts whose name or email contains this text, case-insensitively.",
+              "title": "Search"
             }
           }
         ],
@@ -23859,11 +23805,11 @@
     },
     "/api/v1/aliases": {
       "get": {
-        "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
+        "description": "List every alias in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
         "operationId": "aliases-list_aliases",
         "parameters": [
           {
-            "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
+            "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace in your organization.",
             "in": "query",
             "name": "workspace_id",
             "required": false,
@@ -23877,7 +23823,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
+              "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace in your organization.",
               "title": "Workspace Id"
             }
           }
@@ -25381,7 +25327,7 @@
     },
     "/api/v1/budgets": {
       "get": {
-        "description": "List all budgets with pagination.",
+        "description": "List the deployment's budgets and the caller's organization's, with pagination.",
         "operationId": "budgets-list_budgets",
         "parameters": [
           {
@@ -25800,7 +25746,7 @@
     },
     "/api/v1/catalog/models": {
       "get": {
-        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
+        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the models.dev default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
         "operationId": "catalog-list_catalog",
         "parameters": [
           {
@@ -28887,7 +28833,7 @@
     },
     "/api/v1/models": {
       "get": {
-        "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's token limits: the context window from models.dev, or from\ngenai-prices where models.dev has none, and the output limit from models.dev\nalone. A limit neither knows is null. Models that only exist in the pricing\ntable are also included for backward compatibility.",
+        "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's token limits: the context window from the live models.dev catalog,\nor from the pricing snapshot where it has none, and the output limit from the\nlive catalog alone. A limit neither knows is null. Models that only exist in the pricing\ntable are also included for backward compatibility.",
         "operationId": "models-list_models",
         "parameters": [
           {
@@ -33529,6 +33475,57 @@
         ]
       }
     },
+    "/api/v1/organizations/me/traces/requests/{request_id}": {
+      "get": {
+        "description": "The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.\n\nThe usage log's ``request_group_id`` is that id, so a request log row opens its\nsession here. A request outside the scope, or with no trace stored, is a 404.",
+        "operationId": "organization-traces-trace_of_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSummaryPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Trace Of Request",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
     "/api/v1/organizations/me/traces/series": {
       "get": {
         "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
@@ -34249,7 +34246,7 @@
     },
     "/api/v1/organizations/me/usage/count": {
       "get": {
-        "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
+        "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the operator's ``GET /api/v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
         "operationId": "organization-usage-count_organization_usage",
         "parameters": [
           {
@@ -36997,7 +36994,7 @@
     },
     "/api/v1/pricing/drift": {
       "get": {
-        "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the genai-prices default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
+        "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the models.dev default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
         "operationId": "pricing-list_pricing_drift",
         "parameters": [
           {
@@ -37087,6 +37084,26 @@
       "post": {
         "description": "Activate the latest reviewed default-price snapshot.",
         "operationId": "pricing-confirm_pricing_refresh",
+        "parameters": [
+          {
+            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+            "in": "query",
+            "name": "digest",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+              "title": "Digest"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -37097,6 +37114,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -37147,9 +37174,39 @@
       "post": {
         "description": "Discard a reviewed default-price snapshot without applying it.",
         "operationId": "pricing-reject_pricing_refresh",
+        "parameters": [
+          {
+            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+            "in": "query",
+            "name": "digest",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+              "title": "Digest"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -38037,7 +38094,7 @@
     },
     "/api/v1/providers": {
       "get": {
-        "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.",
+        "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and models.dev\ndatasets. No provider is contacted, so this is cheap and always available.",
         "operationId": "providers-list_providers",
         "responses": {
           "200": {
@@ -38067,7 +38124,7 @@
     },
     "/api/v1/providers/catalog": {
       "get": {
-        "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
+        "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the models.dev catalog, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
         "operationId": "providers-provider_catalog",
         "responses": {
           "200": {
@@ -38503,11 +38560,11 @@
     },
     "/api/v1/routing/policies": {
       "get": {
-        "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
+        "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
         "operationId": "routing-list_policies",
         "parameters": [
           {
-            "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
+            "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace in your organization.",
             "in": "query",
             "name": "workspace_id",
             "required": false,
@@ -38521,7 +38578,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
+              "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace in your organization.",
               "title": "Workspace Id"
             }
           }
@@ -38919,7 +38976,7 @@
     },
     "/api/v1/scoped-budgets": {
       "get": {
-        "description": "List scoped budgets, optionally filtered to one scope.",
+        "description": "List the scoped budgets in the caller's organization, optionally filtered to one scope.",
         "operationId": "scoped-budgets-list_scoped_budgets",
         "parameters": [
           {
@@ -40774,6 +40831,57 @@
           }
         ],
         "summary": "Count Traces",
+        "tags": [
+          "traces"
+        ]
+      }
+    },
+    "/api/v1/traces/requests/{request_id}": {
+      "get": {
+        "description": "The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.\n\nThe usage log's ``request_group_id`` is that id, so a request log row opens its\nsession here. A request outside the scope, or with no trace stored, is a 404.",
+        "operationId": "traces-trace_of_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSummaryPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Trace Of Request",
         "tags": [
           "traces"
         ]

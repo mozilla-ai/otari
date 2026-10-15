@@ -21,8 +21,13 @@ export class ApiError extends Error {
   /** The refusal's `Otari-Error-Code`, or `""` where it carries none. */
   code: string
 
-  constructor(status: number, message: string, code = "") {
-    super(message)
+  constructor(
+    status: number,
+    message: string,
+    code = "",
+    options?: { cause?: unknown },
+  ) {
+    super(message, options)
     this.name = "ApiError"
     this.status = status
     this.code = code
@@ -522,6 +527,10 @@ async function readJson<T>(
       throw new ApiError(
         response.status,
         `The gateway's reply was not JSON (HTTP ${response.status}). Something between this page and the gateway answered in its place, so whether the request was carried out is unknown.`,
+        "",
+        // The message deliberately leaves out what the intermediary returned;
+        // this keeps it for whoever is debugging.
+        { cause: error },
       )
     }
     throw error

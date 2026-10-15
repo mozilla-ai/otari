@@ -46,7 +46,9 @@ Completion requests follow this order:
 5. Apply organization, policy, and request guardrails.
 6. Resolve MCP and gateway-run tool policy.
 7. Dispatch through any-llm.
-8. Record usage and reconcile or refund reservations.
+8. Record usage and reconcile or refund reservations. Each usage row the
+   writer accepts is also reported to `UsageSignalPort` (`SignalingLogWriter` in
+   `services/log_writer.py`), a Null Object unless an overlay binds one.
 
 Chat, Messages, and Responses share the pipeline in
 `api/routes/_pipeline.py`; hybrid attempt reporting lives in `_platform.py`,
@@ -131,6 +133,14 @@ metrics.
 
 Price lookup order belongs to `services/pricing_service.py`. Do not duplicate
 it in a route or tool backend.
+
+A completion served on a `ModelProviderPort` credential is deployment-paid
+(`ResolvedProvider.deployment_paid`). The funding rule is the inference
+domain's (`services/inference/_deployment_funding.py`): `_pipeline.py` admits
+the request through it before dispatch, and charges its settled cost on
+`ctx.db` just before the reservation settles, so the charge lands in that commit.
+Every usage row such a request writes once admitted carries
+`deployment_paid=True` (from `ctx.deployment_charge`); every other row is false.
 
 ## Budget enforcement
 

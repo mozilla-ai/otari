@@ -64,8 +64,9 @@ library accepts it from anyone, and enforcing that is the host's job).
 
 The query is the user's content, and some providers put it, or the key, in the request URL, which
 httpx logs at INFO. Every provider call runs with a context variable set, and a filter on the
-`httpx` logger replaces the URL with `<redacted>` in records emitted during one. Requests made by
-other code in the process are left alone.
+`httpx` logger replaces the URL with `<redacted>` in records emitted during one. Over HTTP/2, hpack
+logs each request header at DEBUG, the path with its query included, so the filter also redacts
+the headers in hpack's records. Requests made by other code in the process are left alone.
 
 Importing the package does not install the filter, so it never changes a process's logging on its
 own. A host calls `install_log_filter()` once at startup; the command line installs it itself.
@@ -133,6 +134,42 @@ of these, `text`, `highlights`, `publishedDate` or `costDollars.total` of the wr
 that does not parse, raises `ProviderError` with the tag `unexpected_response`. Exa documents its
 cost as optional, so an answer without one reports none; the live tests check that it reports
 one. Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.
+
+## Mojeek
+
+`mojeek` calls Mojeek's [Web Search API](https://www.mojeek.com/support/api/search/request_parameters.html),
+`GET /search`, with the key read from `MOJEEK_API_KEY` when not passed. Mojeek takes everything in
+the URL, the key and the query included, so the adapter never hands the URL to a logger, and the
+log filter above keeps it out of httpx's log.
+
+It always sends `fmt=json`, since Mojeek answers in XML otherwise, and `date=1`, unless you pass
+`date=False`, so each hit is dated by the page's last-modified time.
+
+| `SearchHit` | From Mojeek |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | `desc`; Mojeek returns no page text, so `text` is always `None` |
+| `published` | `pdate`, else `timestamp`, both Unix times; 0, which Mojeek sends for a time it does not know, counts as none |
+
+Mojeek reports no cost. `max_results` becomes `t`, at most 10, the most Mojeek's entry plan
+returns; its higher plans return up to 40 or 100, but the adapter asks for no more than 10.
+`time_range` becomes `since`: Mojeek's own `day`, `month` or `year`, and for a week the date it
+starts on, as `YYYYMMDD`. It wins over the `since` option. The other native options are Mojeek's
+request parameters under their own names, except those of its OrgSearch product; `--describe
+mojeek` lists them. Booleans are sent as Mojeek's 0 and 1, and an option set to `None` is not sent.
+
+Mojeek signals a refused key or a spent daily quota inside a 200, in `response.status`, so any
+status but `OK` is returned as `SearchResult.error`, tagged `access_denied`, `daily_limit_reached`
+or, for any other, `error`. A malformed parameter gets an HTTP 503 with a plain body; any status
+from 400 raises `ProviderError` with the tag `http_error`.
+
+Every field read from a successful answer is checked: an answer without `response` or its
+`status`, or, when the status is `OK`, without `results` or an item's `url`, `title` or `desc`, or
+with any of these of the wrong type, raises `ProviderError` with the tag `unexpected_response`.
+Mojeek's documentation lists `pdate` and `timestamp` on every result, but they come only on
+request (`timestamp` with `date=1`), so neither is required: the date is read from `pdate` when it
+is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
+behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
 
 ## The fake provider
 

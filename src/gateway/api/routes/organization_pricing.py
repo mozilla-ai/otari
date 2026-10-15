@@ -14,7 +14,7 @@ administration is the overlay's to contribute.
 
 These rates sit *above* ``/api/v1/pricing``, which stays the deployment price list.
 A model with no override here prices exactly as it did before, and the resolution
-order (override, deployment row, genai-prices dataset) is
+order (override, deployment row, models.dev catalog) is
 `services.pricing_service.find_model_pricing`.
 """
 
@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, RequestSessionModelProviderPortDep, get_config, get_db, verify_master_key
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -92,9 +92,6 @@ class OrganizationModelPricingRates(BaseModel):
     )
     cache_write_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cache-write (creation) tokens"
-    )
-    cache_write_1h_price_per_million: float | None = Field(
-        default=None, ge=0, description="Price per 1M Anthropic 1-hour cache-write tokens"
     )
     pricing_tiers: list[PricingTier] | None = Field(
         default=None,
@@ -175,7 +172,6 @@ class OrganizationModelPricingPublic(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
-    cache_write_1h_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str
     effective_from: datetime
@@ -196,7 +192,6 @@ class OrganizationModelPricingPublic(BaseModel):
             output_price_per_million=float(override.output_price_per_million),
             cache_read_price_per_million=as_float(override.cache_read_price_per_million),
             cache_write_price_per_million=as_float(override.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(override.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
             unit=override.unit or "tokens",
             effective_from=override.effective_from,
@@ -222,7 +217,7 @@ class OrganizationModelPricingsPublic(BaseModel):
 def get_organization_pricing_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> OrganizationPricingService:
     """Build the pricing service on the request's session, provider map, and hosted-credential port."""
     return OrganizationPricingService(db, config, model_provider=model_provider)
@@ -243,7 +238,6 @@ def _to_input(body: OrganizationModelPricingRates) -> PricingOverrideInput:
         output_price_per_million=body.output_price_per_million,
         cache_read_price_per_million=body.cache_read_price_per_million,
         cache_write_price_per_million=body.cache_write_price_per_million,
-        cache_write_1h_price_per_million=body.cache_write_1h_price_per_million,
         pricing_tiers=[tier.model_dump(exclude_none=True) for tier in body.pricing_tiers or []],
         effective_from=body.effective_from or datetime.now(tz=UTC),
         effective_to=body.effective_to,

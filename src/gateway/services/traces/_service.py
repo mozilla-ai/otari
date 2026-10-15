@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Any
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.traces_exceptions import TraceAmbiguousError, TraceNotFoundError
+from gateway.exceptions.traces_exceptions import RequestTraceNotFoundError, TraceAmbiguousError, TraceNotFoundError
 from gateway.models.traces import Trace, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
@@ -154,6 +154,20 @@ class TraceService:
         if stored is None:
             raise TraceNotFoundError(trace_id)
         return trace_view(stored, now=datetime.now(UTC))
+
+    async def for_request(self, scope: TraceScope, request_id: str) -> TraceSummary:
+        """The session a gateway request was traced into, found by its ``Otari-Request-ID``.
+
+        Raises:
+            RequestTraceNotFoundError: the scope holds no trace of the request.
+        """
+        async with self._uow:
+            workspace_ids = _workspace_ids(scope)
+            key = await self._spans.trace_of_request(workspace_ids, request_id)
+            rows = [] if key is None else await self._traces.find(workspace_ids, key[1], workspace_id=key[0])
+            if not rows:
+                raise RequestTraceNotFoundError(request_id)
+            return _summary(rows[0])
 
     async def purge_user(self, user_id: str) -> int:
         """Delete every trace a user owns, in every workspace, for erasure."""

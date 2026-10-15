@@ -98,11 +98,12 @@ class DeploymentUserService:
         actor: User,
         skip: int = 0,
         limit: int = 100,
+        search: str | None = None,
     ) -> DeploymentUsersPublic:
         """List every identity on the deployment, with the organizations it belongs to."""
         await self._require_administration_access(actor)
 
-        rows, count = await self.users.list_all(skip=skip, limit=limit)
+        rows, count = await self.users.list_all(skip=skip, limit=limit, search=search)
         # One query for the page's memberships rather than one per row, the same
         # shape the organization roster uses to resolve its own joins.
         organizations = await self.members.get_by_users_with_organizations(user.id for user in rows)

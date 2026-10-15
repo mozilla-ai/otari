@@ -74,7 +74,7 @@ def client(alias_config: GatewayConfig) -> Generator[TestClient]:
 
 @pytest.fixture
 def default_priced_client(alias_config: GatewayConfig) -> Generator[TestClient]:
-    """A gateway that meters unpriced models off the genai-prices fallback."""
+    """A gateway that meters unpriced models off the models.dev fallback."""
     yield from build_test_client(alias_config.model_copy(update={"default_pricing": True}))
 
 
@@ -206,7 +206,6 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
         "output_price_per_million": 2.0,
         "cache_read_price_per_million": None,
         "cache_write_price_per_million": None,
-        "cache_write_1h_price_per_million": None,
         "pricing_tiers": [],
         "unit": "tokens",
     }

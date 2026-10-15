@@ -38,12 +38,20 @@ _USER_FIELD = frozenset(
         LLMProvider.XAI,
     }
 )
+# Chat APIs that document ``safety_identifier`` and deprecate ``user``.
+_SAFETY_IDENTIFIER_FIELD = frozenset({LLMProvider.META})
 # Anthropic's API reads ``metadata.user_id`` and rejects ``user``.
 _METADATA_USER_ID = frozenset({LLMProvider.ANTHROPIC, LLMProvider.AZUREANTHROPIC, LLMProvider.VERTEXAIANTHROPIC})
 # Bedrock's abuse detection reads no end-user id, but ``requestMetadata`` reaches the
 # operator's invocation logs, which is where an AWS abuse report's prompt ids are
 # traced back to a user.
 _BEDROCK_METADATA_KEY = "otari_user"
+# The Gemini API reads an aggregator's end-user id from the ``safety_identifier``
+# label, whose value is at most 63 characters: one short of the digest. google-genai
+# refuses a ``labels`` config field outside Vertex AI, so it goes in the request body.
+# Vertex AI documents the same ``labels`` for billing only, so it is left out.
+_GEMINI_LABEL_KEY = "safety_identifier"
+_GEMINI_LABEL_VALUE_MAX = 63
 
 
 def upstream_user_identifier(workspace_id: str, subject: str, key: str | None) -> str:
@@ -116,10 +124,15 @@ def chat_user_fields(provider: LLMProvider | str | None, identifier: str) -> dic
         return {}
     if resolved in _USER_FIELD:
         return {"user": identifier}
+    if resolved in _SAFETY_IDENTIFIER_FIELD:
+        return {"safety_identifier": identifier}
     if resolved in _METADATA_USER_ID:
         return {"metadata": {"user_id": identifier}}
     if resolved == LLMProvider.BEDROCK:
         return {"requestMetadata": {_BEDROCK_METADATA_KEY: identifier}}
+    if resolved == LLMProvider.GEMINI:
+        label = {_GEMINI_LABEL_KEY: identifier[:_GEMINI_LABEL_VALUE_MAX]}
+        return {"http_options": {"extra_body": {"labels": label}}}
     return {}
 
 

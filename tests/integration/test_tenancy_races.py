@@ -1096,6 +1096,79 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         assert membership.status == "active"
 
 
+async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ordering the race above hits only sometimes: the signup holds its locks while it hashes.
+
+    The accept writes the identity and then the membership. A signup that locked
+    the membership before the identity held what the accept needed next while
+    waiting on what the accept already held, and PostgreSQL aborted one of them.
+    """
+    _, owner = await _seed_owner(async_db)
+    owner_row = await UserRepository(async_db).get(owner.id)
+    assert owner_row is not None
+    invited = await OrganizationService(
+        async_db, **membership_writes(async_db)
+    ).invite_active_organization_member_for_user(
+        user=owner_row,
+        request=InviteOrganizationMemberRequest(email="iris@example.com"),
+        config=GatewayConfig(),
+        mail_limit=NO_MAIL_LIMIT,
+    )
+    assert invited.accept_link is not None
+    token = invited.accept_link.split("token=")[1]
+
+    hashing = asyncio.Event()
+    may_finish = asyncio.Event()
+
+    async def hold_then_hash(password: str) -> str:
+        hashing.set()
+        await may_finish.wait()
+        return await hash_password_async(password)
+
+    # Signup's own reference only, so the accept still hashes without waiting.
+    monkeypatch.setattr(user_service, "hash_password_async", hold_then_hash)
+
+    async def signup() -> object:
+        async with sessions() as session:
+            try:
+                return await user_service.create_user_for_signup(
+                    session,
+                    GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com"),
+                    background_tasks=BackgroundTasks(),
+                    email="iris@example.com",
+                    password="signup-password",
+                    **claim_writes(session),
+                )
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    async def accept() -> object:
+        async with sessions() as session:
+            try:
+                return await claim_writes(session)["organizations"].accept_invitation(
+                    token, claims=NO_TERMS, password="accepted-password"
+                )
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    signing_up = asyncio.create_task(signup())
+    await asyncio.wait_for(hashing.wait(), timeout=_CHECKPOINT_TIMEOUT)
+    accepting = asyncio.create_task(accept())
+    try:
+        blocked, _ = await asyncio.wait({accepting}, timeout=_WRITER_WINDOW)
+        assert not blocked, "the accept must wait on the identity the signup holds"
+    finally:
+        may_finish.set()
+    signed_up, accepted = await signing_up, await accepting
+
+    assert isinstance(signed_up, User), signed_up
+    assert isinstance(accepted, InvitationPasswordNotAcceptedError), accepted
+
+
 async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_admitted(
     async_db: AsyncSession,
     sessions: async_sessionmaker[AsyncSession],

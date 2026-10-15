@@ -100,7 +100,6 @@ class ModelPricing(Base):
     # (see log_usage in _pipeline.py).
     cache_read_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     cache_write_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
-    cache_write_1h_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     # Ordered threshold rules. Each rule applies its supplied rates to the
     # entire request once ``total_input_tokens`` reaches ``min_input_tokens``.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
@@ -130,7 +129,6 @@ class ModelPricing(Base):
             "output_price_per_million": self.output_price_per_million,
             "cache_read_price_per_million": self.cache_read_price_per_million,
             "cache_write_price_per_million": self.cache_write_price_per_million,
-            "cache_write_1h_price_per_million": self.cache_write_1h_price_per_million,
             "pricing_tiers": self.pricing_tiers,
             "unit": self.unit,
             "origin": self.origin,
@@ -147,7 +145,7 @@ class OrganizationModelPricing(Base):
     price the models it uses at its own negotiated rates while every other
     organization, and every model it has not overridden, keeps resolving exactly
     as before. Resolution order is override, then deployment row, then the
-    genai-prices dataset (`services.pricing_service.find_model_pricing`).
+    models.dev catalog (`services.pricing_service.find_model_pricing`).
 
     **Keyed on ``model_key``, not a split provider and model.** The platform's
     equivalent table (`otari-ai` ``organization_model_pricing``) carries
@@ -229,10 +227,6 @@ class OrganizationModelPricing(Base):
             "cache_write_price_per_million IS NULL OR cache_write_price_per_million >= 0",
             name="ck_organization_model_pricing_cache_write_non_negative",
         ),
-        CheckConstraint(
-            "cache_write_1h_price_per_million IS NULL OR cache_write_1h_price_per_million >= 0",
-            name="ck_organization_model_pricing_cache_write_1h_non_negative",
-        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -252,7 +246,6 @@ class OrganizationModelPricing(Base):
     # and the cost calculation falls back the way it already does.
     cache_read_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     cache_write_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
-    cache_write_1h_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     # Same shape and same ``min_input_tokens`` key as ``ModelPricing``, so the
     # transient row an override resolves into needs no tier translation.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)

@@ -1,9 +1,9 @@
 """Agent traces as a core feature: the session list, one session with its turns, the per-hour counts, and retention.
 
-Two routers serve the same four reads over different scopes. ``/traces`` is
-deployment-wide and operator-only, like ``/usage``. ``/organizations/me/traces``
-reads the caller's own organization, by the rule the organization's usage reads
-use. The scope is derived from the caller, never
+Two routers serve the same reads over different scopes. ``/traces`` is
+operator-only, like ``/usage``, and reads every workspace of the operator's active
+organization. ``/organizations/me/traces`` reads the caller's own organization, by
+the rule the organization's usage reads use. The scope is derived from the caller, never
 taken from the request; a filter narrows inside it and cannot widen it.
 """
 
@@ -30,9 +30,11 @@ from gateway.schemas.traces import (
     TraceDetailPublic,
     TraceListPublic,
     TraceSeriesPublic,
+    TraceSummaryPublic,
     detail_public,
     list_public,
     series_public,
+    summary_public,
 )
 from gateway.services.traces import run_trace_retention
 from gateway.types.traces import TraceFilter, TraceScope
@@ -79,7 +81,7 @@ FiltersDep = Annotated[TraceFilter, Depends(_filters)]
 
 
 def build_trace_router(router: APIRouter, scope_dependency: Callable[..., Any]) -> APIRouter:
-    """Declare the four trace reads on ``router``, each confined to the scope ``scope_dependency`` derives."""
+    """Declare the trace reads on ``router``, each confined to the scope ``scope_dependency`` derives."""
     ScopeDep = Annotated[TraceScope, Depends(scope_dependency)]
 
     @router.get("", response_model=TraceListPublic)
@@ -107,6 +109,15 @@ def build_trace_router(router: APIRouter, scope_dependency: Callable[..., Any]) 
     ) -> TraceSeriesPublic:
         """Count sessions per bucket of their start, split by whether any span failed unrecovered."""
         return series_public(bucket, await traces.series(scope, filters, bucket=bucket))
+
+    @router.get("/requests/{request_id}", response_model=TraceSummaryPublic)
+    async def trace_of_request(traces: TraceServiceDep, scope: ScopeDep, request_id: str) -> TraceSummaryPublic:
+        """The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.
+
+        The usage log's ``request_group_id`` is that id, so a request log row opens its
+        session here. A request outside the scope, or with no trace stored, is a 404.
+        """
+        return summary_public(await traces.for_request(scope, request_id))
 
     @router.get("/{trace_id}", response_model=TraceDetailPublic)
     async def get_trace(

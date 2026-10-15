@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 import yaml
@@ -20,6 +21,7 @@ from gateway.core.config import (
 )
 from gateway.log_config import logger as gateway_logger
 from gateway.services import provider_kwargs
+from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _AMBIENT_CREDENTIAL_PROVIDERS,
@@ -118,6 +120,25 @@ def test_validate_rejects_non_list_models() -> None:
     config = GatewayConfig(providers={"home_lab": {"provider_type": "openai", "models": "deepseek"}})
     with pytest.raises(ValueError, match="must be a list"):
         config.validate_provider_instances()
+
+
+@pytest.mark.parametrize(
+    ("providers", "match"),
+    [
+        ({"bedrock": {"client_args": {"config": {"read_timeot": 120}}}}, "not a valid botocore Config"),
+        ({"aws": {"provider_type": "bedrock", "client_args": {"config": 120}}}, "must be a mapping"),
+    ],
+)
+def test_validate_rejects_a_bedrock_config_botocore_cannot_build(providers: dict[str, Any], match: str) -> None:
+    """Every Bedrock client merges this config in, so a typo would fail each request instead."""
+    with pytest.raises(ValueError, match=match):
+        GatewayConfig(providers=providers).validate_provider_instances()
+
+
+def test_validate_accepts_a_bedrock_config_botocore_can_build() -> None:
+    GatewayConfig(
+        providers={"bedrock": {"client_args": {"config": {"read_timeout": 120}}}}
+    ).validate_provider_instances()  # no raise
 
 
 def test_validate_allows_instance_without_provider_type() -> None:
@@ -419,7 +440,7 @@ def test_bedrock_uses_aws_region_when_default_region_is_unset(monkeypatch: pytes
 
     kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.BEDROCK)
 
-    assert kwargs["client_args"] == {"region_name": "us-east-1"}
+    assert _without_read_timeout(kwargs["client_args"]) == {"region_name": "us-east-1"}
 
 
 def test_bedrock_region_fallback_preserves_other_client_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -429,7 +450,7 @@ def test_bedrock_region_fallback_preserves_other_client_args(monkeypatch: pytest
 
     kwargs = get_provider_kwargs(config, LLMProvider.BEDROCK)
 
-    assert kwargs["client_args"] == {
+    assert _without_read_timeout(kwargs["client_args"]) == {
         "retries": {"max_attempts": 2},
         "region_name": "us-east-1",
     }
@@ -446,8 +467,27 @@ def test_bedrock_preserves_explicit_region_and_aws_default_region(monkeypatch: p
     default_config = GatewayConfig(providers={"bedrock": {"client_args": {"retries": {"max_attempts": 2}}}})
     default_kwargs = get_provider_kwargs(default_config, LLMProvider.BEDROCK)
 
-    assert explicit_kwargs["client_args"] == {"region_name": "ap-southeast-2"}
-    assert default_kwargs["client_args"] == {"retries": {"max_attempts": 2}}
+    assert _without_read_timeout(explicit_kwargs["client_args"]) == {"region_name": "ap-southeast-2"}
+    assert _without_read_timeout(default_kwargs["client_args"]) == {"retries": {"max_attempts": 2}}
+
+
+def _without_read_timeout(client_args: dict[str, Any]) -> dict[str, Any]:
+    """``client_args`` less the read-timeout ``config`` every Bedrock client gets."""
+    rest = dict(client_args)
+    assert rest.pop("config").read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+    return rest
+
+
+def test_bedrock_outlasts_botocores_default_read_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """botocore's 60s default fails a stream whose model goes quiet for a minute."""
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    config = GatewayConfig(providers={"bedrock": {"client_args": {"config": {"connect_timeout": 5}}}})
+
+    client_config = get_provider_kwargs(config, LLMProvider.BEDROCK)["client_args"]["config"]
+
+    assert client_config.read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+    assert client_config.connect_timeout == 5
+    assert config.providers["bedrock"]["client_args"]["config"] == {"connect_timeout": 5}
 
 
 def test_aws_region_fallback_is_limited_to_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:

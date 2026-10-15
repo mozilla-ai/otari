@@ -63,5 +63,18 @@ async def test_a_transport_failure_becomes_a_provider_error_without_its_text(fai
         with pytest.raises(ProviderError) as raised:
             await ProviderHttp("p", client, 7.5).request("GET", SENTINEL_URL)
     assert raised.value.tag == tag
-    assert raised.value.__suppress_context__
+    # Raised after the handler, so the failure, whose text carries the URL, is not even its context.
+    assert (raised.value.__cause__, raised.value.__context__) == (None, None)
     assert "sentinel" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_a_header_that_is_not_ascii_becomes_a_provider_error_without_the_header() -> None:
+    # httpx's own error for it quotes the whole header, so a key pasted with a stray character would leak.
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as client:
+        with pytest.raises(ProviderError) as raised:
+            await ProviderHttp("p", client, 7.5).request(
+                "GET", "https://api.example/", headers={"x-api-key": "sentinel-key\u00a0"}
+            )
+    assert (raised.value.tag, raised.value.__context__) == ("invalid_header", None)
+    assert "sentinel" not in str(raised.value) and "sentinel" not in repr(raised.value)

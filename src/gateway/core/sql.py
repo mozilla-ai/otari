@@ -42,6 +42,23 @@ def match_any(column: Any, value: str | list[str]) -> ColumnElement[bool]:
     return cast("ColumnElement[bool]", condition)
 
 
+LIKE_ESCAPE = "\\"
+
+
+def contains_pattern(term: str) -> str:
+    """A case-folded ``LIKE`` pattern matching ``term`` anywhere, for use with ``escape=LIKE_ESCAPE``.
+
+    The wildcards are escaped, so searching for ``100%`` finds the rows that
+    contain that text rather than every row: a search box takes whatever
+    somebody types, and an unescaped ``%`` or ``_`` there is a wildcard nobody
+    asked for.
+    """
+    escaped = term.lower()
+    for character in (LIKE_ESCAPE, "%", "_"):
+        escaped = escaped.replace(character, LIKE_ESCAPE + character)
+    return f"%{escaped}%"
+
+
 def utc_bound(value: datetime | None) -> datetime | None:
     """Pin an offset-less window bound to UTC.
 

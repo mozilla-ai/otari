@@ -19,9 +19,12 @@ import { TermsAcceptanceField } from "./TermsAcceptanceField"
 export function OAuthTermsStep({
   provider,
   termsUrl,
+  returnHash,
 }: {
   provider: string
   termsUrl: string
+  /** The page the refused sign-in started from, which the second attempt keeps. */
+  returnHash: string
 }) {
   const [isAccepted, setIsAccepted] = useState(false)
   const label = oauthProviderLabel(provider)
@@ -30,7 +33,7 @@ export function OAuthTermsStep({
     <PublicAuthLayout
       title="Accept the terms to continue"
       description={`Signing in with ${label} sets up your account on this gateway, which needs its terms of service accepted first.`}
-      footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+      footer={<PublicAuthLink to={returnHash}>Back to sign in</PublicAuthLink>}
     >
       <div className="flex flex-col gap-3">
         <TermsAcceptanceField
@@ -42,6 +45,7 @@ export function OAuthTermsStep({
           <OAuthContinueRows
             providers={[provider]}
             termsAccepted
+            returnHash={returnHash}
             isDisabled={!isAccepted}
           />
         ) : null}

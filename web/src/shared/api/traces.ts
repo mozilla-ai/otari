@@ -1,6 +1,16 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import type { TraceCount, TraceDetail, TraceList, TraceSeries } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
+import type {
+  TraceCount,
+  TraceDetail,
+  TraceList,
+  TraceSeries,
+  TraceSummary,
+} from "@/client"
+import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { TRACES, workspaceMeta } from "@/shared/api/queryKeys"
 
@@ -11,6 +21,8 @@ import { TRACES, workspaceMeta } from "@/shared/api/queryKeys"
 export interface TraceFilters {
   workspaceId: string
   start: string
+  // Optional, so a filter that names only a start reads to now.
+  end?: string
   q: string
   failedOnly: boolean
   harness: string[]
@@ -31,6 +43,7 @@ export function traceParams(filters: TraceFilters): URLSearchParams {
   const params = new URLSearchParams()
   if (filters.workspaceId) params.set("workspace_id", filters.workspaceId)
   if (filters.start) params.set("start", filters.start)
+  if (filters.end) params.set("end", filters.end)
   if (filters.q) params.set("q", filters.q)
   if (filters.failedOnly) params.set("has_error", "true")
   for (const harness of filters.harness) params.append("harness", harness)
@@ -113,5 +126,22 @@ export function useTrace(traceId: string, workspaceId = "") {
     staleTime: 5_000,
     refetchInterval: (query) =>
       query.state.data?.state === "active" ? 5_000 : false,
+  })
+}
+
+// The session a request from the usage log was traced into, by the
+// `request_group_id` its rows carry. A request with no trace stored (served
+// before traces were on, or expired since) answers 404, which is not retried.
+export function useRequestTrace(requestId: string, enabled = true) {
+  const scope = useTraceScope()
+  return useQuery({
+    queryKey: [TRACES, "request", scope.base, requestId],
+    queryFn: () =>
+      apiFetch<TraceSummary>(
+        `${scope.base}/requests/${encodeURIComponent(requestId)}`,
+      ),
+    enabled: enabled && scope.isReady && requestId !== "",
+    staleTime: 60_000,
+    retry: retryUnlessNotFound(useQueryClient()),
   })
 }

@@ -1,7 +1,7 @@
 """Data access for ``trace_spans``. Flushes, never commits; a span once stored is never updated."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any, Never
 
 from sqlalchemy import func, select
@@ -12,6 +12,7 @@ from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceSpan
 from gateway.repositories.base_repository import BaseRepository
+from gateway.repositories.traces.trace_repository import TraceKey
 
 
 class SpanRepository(BaseRepository[TraceSpan, Never, Never]):
@@ -55,3 +56,17 @@ class SpanRepository(BaseRepository[TraceSpan, Never, Never]):
             .limit(limit)
         )
         return result.scalars().all()
+
+    async def trace_of_request(self, workspace_ids: Collection[uuid.UUID] | None, request_id: str) -> TraceKey | None:
+        """Return the key of the trace holding a gateway request's spans, or None when none is stored.
+
+        ``workspace_ids`` is the read's scope: None is every workspace, an empty set none.
+        """
+        conditions = [TraceSpan.request_id == request_id]
+        if workspace_ids is not None:
+            if not workspace_ids:
+                return None
+            conditions.append(TraceSpan.workspace_id.in_(list(workspace_ids)))
+        result = await self.db.execute(select(TraceSpan.workspace_id, TraceSpan.trace_id).where(*conditions).limit(1))
+        row = result.first()
+        return (row[0], row[1]) if row is not None else None

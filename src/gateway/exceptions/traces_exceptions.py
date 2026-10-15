@@ -13,6 +13,13 @@ class TraceNotFoundError(TenancyNotFoundError):
         super().__init__(f"Trace '{trace_id}' not found")
 
 
+class RequestTraceNotFoundError(TenancyNotFoundError):
+    """No trace in the caller's scope holds this request: one outside it, never traced, or expired, reads the same."""
+
+    def __init__(self, request_id: str):
+        super().__init__(f"No trace holds request '{request_id}'")
+
+
 class TraceAmbiguousError(TenancyConflictError):
     """A trace id that is in more than one workspace of the caller's scope, read without naming one."""
 

@@ -43,7 +43,7 @@ import asyncio
 import time
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -67,6 +67,16 @@ _user_cache: dict[uuid.UUID, dict[str, dict[str, str]]] = {}
 # all, where there are no stored aliases to resolve anyway.
 _default_workspace: uuid.UUID | None = None
 _cached_at: float | None = None
+
+
+async def list_stored_aliases(
+    db: AsyncSession, *, workspaces: Select[tuple[uuid.UUID]], workspace_id: uuid.UUID | None
+) -> list[ModelAlias]:
+    """Return the stored aliases in these workspaces, by name, narrowed to ``workspace_id`` when given."""
+    statement = select(ModelAlias).where(ModelAlias.workspace_id.in_(workspaces))
+    if workspace_id is not None:
+        statement = statement.where(ModelAlias.workspace_id == workspace_id)
+    return list((await db.execute(statement.order_by(ModelAlias.name))).scalars().all())
 
 
 def _scope(workspace_id: uuid.UUID | None) -> uuid.UUID | None:

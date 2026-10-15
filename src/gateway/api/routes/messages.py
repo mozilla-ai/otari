@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    BillingPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
     ToolPortsDep,
@@ -482,6 +483,7 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
 
 
 _ERR_OVERLOADED = "overloaded_error"
+_ERR_TIMEOUT = "timeout_error"
 
 # A failure after the stream committed can only be reported in the SSE error
 # event, so its type is what tells a client whether retrying makes sense. Only
@@ -491,6 +493,7 @@ _ERR_OVERLOADED = "overloaded_error"
 _STREAM_ERROR_MESSAGES = {
     _ERR_OVERLOADED: "The upstream provider is overloaded. Retry the request.",
     _ERR_RATE_LIMIT: "The upstream provider rate limited the request. Retry the request later.",
+    _ERR_TIMEOUT: "The upstream provider stopped responding before completing the message. Retry the request.",
 }
 _INCOMPLETE_STREAM_MESSAGE = "The upstream provider ended the stream before completing the message."
 
@@ -509,6 +512,7 @@ def _reached_message_stop() -> Callable[[Any], bool]:
 
 _STREAM_ERROR_STATUS_TYPES = {
     status.HTTP_429_TOO_MANY_REQUESTS: _ERR_RATE_LIMIT,
+    status.HTTP_504_GATEWAY_TIMEOUT: _ERR_TIMEOUT,
     529: _ERR_OVERLOADED,
 }
 
@@ -520,6 +524,8 @@ def _upstream_stream_error_type(exc: BaseException) -> str | None:
     which its SDK raises as an ``APIStatusError`` whose status is the stream's
     original 200 and whose ``body`` holds the event. The body's type is the
     signal; the status is read only for a provider that failed with a real one.
+    A provider whose SDK reads the stream itself (Bedrock's botocore, for one)
+    reports a stalled stream as a read timeout, with neither a body nor a status.
     """
     for candidate in upstream_exception_chain(exc):
         body = getattr(candidate, "body", None)
@@ -527,7 +533,9 @@ def _upstream_stream_error_type(exc: BaseException) -> str | None:
         error_type = error.get("type") if isinstance(error, dict) else None
         if error_type in _STREAM_ERROR_MESSAGES:
             return str(error_type)
-    _kind, status_code = upstream_exception_shape(exc)
+    kind, status_code = upstream_exception_shape(exc)
+    if kind == "timeout":
+        return _ERR_TIMEOUT
     return _STREAM_ERROR_STATUS_TYPES.get(status_code) if status_code is not None else None
 
 
@@ -820,6 +828,7 @@ async def create_message(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
 ) -> dict[str, Any] | Response:
@@ -1069,7 +1078,7 @@ async def create_message(
 
         # Standalone: single attempt streaming.
         resolved = await resolve_dispatch_provider(
-            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
         )
         call_kwargs = apply_endpoint_defaults(
             {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
@@ -1118,7 +1127,7 @@ async def create_message(
 
     # Standalone non-stream path
     resolved = await resolve_dispatch_provider(
-        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
     )
     call_kwargs = apply_endpoint_defaults(
         {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved

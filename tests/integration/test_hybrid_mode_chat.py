@@ -25,6 +25,7 @@ from gateway.api.routes._platform import all_attempts_rejected_detail
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
+from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 
 from .conftest import app_for
 
@@ -302,7 +303,9 @@ def test_hybrid_mode_forwards_bedrock_classic_key_pair_via_client_args(
         assert kwargs["api_key"] == "secret-access-key"
         assert "region_name" not in kwargs
         assert "aws_access_key_id" not in kwargs
-        assert kwargs["client_args"] == {
+        client_args = dict(kwargs["client_args"])
+        assert client_args.pop("config").read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+        assert client_args == {
             "region_name": "us-east-1",
             "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
             "aws_secret_access_key": "secret-access-key",

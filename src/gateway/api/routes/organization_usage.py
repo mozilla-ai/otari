@@ -1,7 +1,7 @@
 """The caller's own organization's usage, for a tenant who does not operate the deployment.
 
-``/api/v1/usage`` is deployment-wide and has been operator-only since #821, which
-was right: it reads every tenant's rows and its ``workspace_id`` parameter is a
+``/api/v1/usage`` has been operator-only since #821, which
+was right: it read every tenant's rows and its ``workspace_id`` parameter is a
 filter the client supplies, so nothing but the operator gate stands between a
 signed-in member and another organization's traffic. On a deployment serving
 mutually-untrusting tenants that left "show me my organization's usage", the
@@ -30,7 +30,7 @@ reading of the same rows:
   workspace-scoped read uses, so a workspace outside the caller's scope answers
   404 exactly as a workspace that does not exist does.
 
-Reads only. Deleting rows and repricing them stay deployment-wide, as does
+Reads only. Deleting rows and repricing them stay operator-only, as does
 ``/api/v1/usage/in-flight``: its registry entries carry no workspace at all
 (see ``usage.list_in_flight``), so there is nothing there to scope yet.
 
@@ -265,7 +265,7 @@ async def count_organization_usage(
     Serves the paginator's "N of M" beside the list above, and is scoped the
     same way, so the total can never describe more rows than the list will show.
 
-    Unlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
+    Unlike the operator's ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
     is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
     this surface has none. So this total keeps matching the list beside it.
     """

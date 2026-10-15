@@ -8,7 +8,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
@@ -50,6 +50,7 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrgProviderKeyRepository,
     WorkspaceRepository,
+    ids_in_organization,
 )
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
@@ -102,6 +103,7 @@ from gateway.services.tools import (
     WorkspaceSearchKeys,
 )
 from gateway.services.traces import TraceService
+from gateway.services.usage_admin_service import usage_in
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.types.traces import TraceScope
 
@@ -1138,6 +1140,17 @@ def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort
     return container.resolve(BillingPort, db)
 
 
+# ``get_db`` rather than ``PortSessionDep``, for a route whose own session is
+# ``get_db`` (the Playground): a deployment-paid charge is written on the port's
+# session and lands only in the commit that settles the request on that one.
+def get_request_session_billing_port(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> BillingPort:
+    """Resolve the billing adapter on the request's ``get_db`` session."""
+    return container.resolve(BillingPort, db)
+
+
 def get_entitlement_port(db: PortSessionDep, container: ContainerDep) -> EntitlementPort:
     """Resolve the entitlement adapter this build bound at startup."""
     return container.resolve(EntitlementPort, db)
@@ -1181,6 +1194,17 @@ def get_mcp_server_port(db: PortSessionDep, container: ContainerDep) -> McpServe
 
 def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> ModelProviderPort:
     """Resolve the model-provider adapter this build bound at startup."""
+    return container.resolve(ModelProviderPort, db)
+
+
+# ``get_db`` rather than ``PortSessionDep``, for a route or builder whose own
+# session is ``get_db``: FastAPI caches a dependency per callable, so naming the
+# same one hands the adapter that session instead of opening a second one.
+def get_request_session_model_provider_port(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> ModelProviderPort:
+    """Resolve the model-provider adapter on the request's ``get_db`` session."""
     return container.resolve(ModelProviderPort, db)
 
 
@@ -1341,12 +1365,14 @@ OrganizationGuardrailDefinitionServiceDep = Annotated[
 
 ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
+RequestSessionBillingPortDep = Annotated[BillingPort, Depends(get_request_session_billing_port)]
 CodeExecutionPolicyPortDep = Annotated[CodeExecutionPolicyPort, Depends(get_code_execution_policy_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 McpServerPortDep = Annotated[McpServerPort, Depends(get_mcp_server_port)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
+RequestSessionModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_request_session_model_provider_port)]
 
 
 def get_identity_service(
@@ -1377,7 +1403,7 @@ def get_org_provider_model_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> OrgProviderModelService:
     """Build the offered-models service on the request's session and unit of work.
 
@@ -1476,11 +1502,6 @@ def get_trace_service(uow: UnitOfWorkDep) -> TraceService:
 
 
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
-
-
-def get_deployment_trace_scope() -> TraceScope:
-    """Every workspace: the scope of the deployment-operator trace routes, which their router gates."""
-    return TraceScope.deployment()
 
 
 async def get_organization_trace_scope(
@@ -1631,6 +1652,42 @@ async def _caller_organization_id(
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
 
 
+async def _caller_workspace_ids(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+) -> frozenset[uuid.UUID]:
+    """Every workspace in the organization this request acts in.
+
+    What a deployment-wide read of workspace-owned rows is confined to, so an
+    operator sees their active organization's rows rather than every tenant's.
+    """
+    return frozenset(await WorkspaceRepository(db).get_ids_by_organization(organization_id))
+
+
+CallerWorkspaces = Annotated[frozenset[uuid.UUID], Depends(_caller_workspace_ids)]
+
+
+def _caller_workspace_query(organization_id: CallerOrganization) -> Select[tuple[uuid.UUID]]:
+    """The same workspaces as a subquery, so a read of a growing table filters in the database."""
+    return ids_in_organization(organization_id)
+
+
+CallerWorkspaceQuery = Annotated[Select[tuple[uuid.UUID]], Depends(_caller_workspace_query)]
+
+
+def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]:
+    """The usage rows an operator's usage reads cover: those of the caller's organization."""
+    return usage_in(workspaces)
+
+
+CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
+
+
+def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
+    """The scope of the deployment-operator trace routes: every workspace in the caller's organization."""
+    return TraceScope.workspaces(workspace_ids)
+
+
 async def get_feedback_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     _authenticated: Annotated[str | None, Depends(verify_master_key)],
@@ -1643,9 +1700,13 @@ async def get_feedback_service(
 __all__ = [
     "AgentModelRecommenderPortDep",
     "BillingPortDep",
+    "RequestSessionBillingPortDep",
     "CodeExecutionPolicyPortDep",
     "ContainerDep",
     "CallerOrganization",
+    "CallerUsageScope",
+    "CallerWorkspaceQuery",
+    "CallerWorkspaces",
     "CurrentIdentity",
     "EntitlementPortDep",
     "FileServiceDep",
@@ -1658,6 +1719,7 @@ __all__ = [
     "ModelProviderPortDep",
     "OrgProviderModelServiceDep",
     "RateLimitServiceDep",
+    "RequestSessionModelProviderPortDep",
     "TelemetryStoragePortDep",
     "ToolPorts",
     "ToolPortsDep",

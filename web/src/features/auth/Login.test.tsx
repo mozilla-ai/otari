@@ -1296,20 +1296,25 @@ describe("Login with a passkey", () => {
   })
 
   describe("OAuth sign-in", () => {
+    const realLocation = window.location
     // `window.location.assign` is not implemented in jsdom, and the whole point
     // of the success path is that it leaves the page, so it is stubbed and
     // asserted on rather than allowed to run.
-    function stubNavigation() {
+    function stubNavigation(hash = "") {
       const assign = vi.fn()
       Object.defineProperty(window, "location", {
         configurable: true,
-        value: { ...window.location, assign, hash: "" },
+        value: { ...window.location, assign, hash },
       })
       return assign
     }
 
     afterEach(() => {
       window.sessionStorage.clear()
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: realLocation,
+      })
     })
 
     it("offers one button per provider the gateway publishes, and none otherwise", () => {
@@ -1395,6 +1400,33 @@ describe("Login with a passkey", () => {
       )
     })
 
+    it("remembers the link the sign-in screen stood in for, to return to it", async () => {
+      // `DeploymentRoot` renders this screen in place of the page a signed-out
+      // visitor asked for, so the hash here is that page.
+      const assign = stubNavigation("#/organization/billing")
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        jsonResponse({
+          authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1",
+          state: "the-state",
+        }),
+      )
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with Google" }),
+      )
+
+      await waitFor(() => expect(assign).toHaveBeenCalled())
+      expect(window.sessionStorage.getItem("otari.oauth.return-hash")).toBe(
+        "#/organization/billing",
+      )
+    })
+
     it("does not let a password submit while an OAuth redirect is still in flight", async () => {
       // The same hazard the passkey guard exists for (#557, from the other
       // direction), and worse here: an OAuth attempt ends by leaving the page,
@@ -1470,6 +1502,9 @@ describe("Login with a passkey", () => {
       ).toBeInTheDocument()
       expect(assign).not.toHaveBeenCalled()
       expect(window.sessionStorage.getItem("otari.oauth.state")).toBeNull()
+      expect(
+        window.sessionStorage.getItem("otari.oauth.return-hash"),
+      ).toBeNull()
       await waitFor(() =>
         expect(recordEvent).toHaveBeenCalledWith(
           TELEMETRY_EVENTS.LOGIN_FAILED,

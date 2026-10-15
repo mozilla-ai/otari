@@ -84,18 +84,21 @@ function visibility(
   )
 }
 
-function predicate(
-  surfaces: string[],
-  entitlements: Partial<Entitlements> = {},
-) {
-  return visibility(surfaces, entitlements).result.current.isVisible
-}
-
 /** Resolve once the membership read has landed, either way. */
 async function settled(rendered: ReturnType<typeof visibility>) {
   await waitFor(() =>
     expect(rendered.result.current.context.isPending).toBe(false),
   )
+}
+
+/** The predicate once the membership read has answered. */
+async function predicate(
+  surfaces: string[],
+  entitlements: Partial<Entitlements> = {},
+) {
+  const rendered = visibility(surfaces, entitlements)
+  await settled(rendered)
+  return rendered.result.current.isVisible
 }
 
 afterEach(() => {
@@ -129,35 +132,39 @@ describe("useNavVisibility", () => {
     expect(rendered.result.current.isVisible(item({}))).toBe(true)
   })
 
-  it("shows an entry that declares no gate at all", () => {
+  it("shows an entry that declares no gate at all", async () => {
     mockCaller(false)
-    expect(predicate([])(item({}))).toBe(true)
+    expect((await predicate([]))(item({}))).toBe(true)
   })
 
-  it("gates on the surface the deployment hosts", () => {
+  it("gates on the surface the deployment hosts", async () => {
     mockCaller(false)
-    const isVisible = predicate(["usage"])
+    const isVisible = await predicate(["usage"])
     expect(isVisible(item({ surface: "usage" }))).toBe(true)
     expect(isVisible(item({ surface: "keys" }))).toBe(false)
   })
 
-  it("gates on the capability the deployment is entitled to", () => {
+  it("gates on the capability the deployment is entitled to", async () => {
     mockCaller(false)
-    const isVisible = predicate([], { capabilities: ["routing"] })
+    const isVisible = await predicate([], { capabilities: ["routing"] })
     expect(isVisible(item({ capability: "routing" }))).toBe(true)
     expect(isVisible(item({ capability: "billing" }))).toBe(false)
   })
 
-  it("composes the axes as AND, so any one of them hides the entry", () => {
+  it("composes the axes as AND, so any one of them hides the entry", async () => {
     // The point of keeping them separate: an entitlement does not stand in for
     // a surface, nor a surface for an entitlement.
     mockCaller(false)
     const all = { surface: "routing", capability: "routing" }
     expect(
-      predicate(["routing"], { capabilities: ["routing"] })(item(all)),
+      (await predicate(["routing"], { capabilities: ["routing"] }))(item(all)),
     ).toBe(true)
-    expect(predicate([], { capabilities: ["routing"] })(item(all))).toBe(false)
-    expect(predicate(["routing"], { capabilities: [] })(item(all))).toBe(false)
+    expect(
+      (await predicate([], { capabilities: ["routing"] }))(item(all)),
+    ).toBe(false)
+    expect(
+      (await predicate(["routing"], { capabilities: [] }))(item(all)),
+    ).toBe(false)
   })
 
   it("hides both kinds of operator-only entry while the answer is in flight", async () => {
@@ -177,9 +184,15 @@ describe("useNavVisibility", () => {
         inFlight.result.current.isVisible(item({ operatorOnly: value })),
       ).toBe(false)
     }
-    // And it gates only the rows that declare it: the rest of the rail is drawn
-    // now rather than waiting on a question they do not ask.
-    expect(inFlight.result.current.isVisible(item({}))).toBe(true)
+    // The rest of the rail waits too, all but the rows a caller with no
+    // organization keeps: drawing them now would take them back from an
+    // invitee whose answer is the 404.
+    expect(inFlight.result.current.isVisible(item({}))).toBe(false)
+    expect(
+      inFlight.result.current.isVisible(
+        item({ reachableWithoutOrganization: true }),
+      ),
+    ).toBe(true)
 
     // Then the yes lands and both appear. A row that appears late never told
     // anyone it was missing, which is the trade #836 settled.

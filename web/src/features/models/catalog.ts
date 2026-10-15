@@ -21,12 +21,33 @@ export const MODALITY_LABELS: Record<string, string> = {
 export const CAPABILITY_LABELS: {
   key: keyof CatalogCapabilities
   label: string
+  description: string
 }[] = [
-  { key: "reasoning", label: "Reasoning" },
-  { key: "tool_call", label: "Tool calling" },
-  { key: "structured_output", label: "Structured output" },
-  { key: "attachment", label: "Attachments" },
-  { key: "temperature", label: "Temperature" },
+  {
+    key: "reasoning",
+    label: "Reasoning",
+    description: "Thinks step by step before it answers.",
+  },
+  {
+    key: "tool_call",
+    label: "Tool calling",
+    description: "Can call the functions you pass in the request.",
+  },
+  {
+    key: "structured_output",
+    label: "Structured output",
+    description: "Can be held to a JSON schema you provide.",
+  },
+  {
+    key: "attachment",
+    label: "Attachments",
+    description: "Accepts files and images in the request.",
+  },
+  {
+    key: "temperature",
+    label: "Temperature",
+    description: "Accepts a temperature, to tune how varied answers are.",
+  },
 ]
 
 // The server evaluates these flags against each model, independently of its providers.
@@ -68,7 +89,7 @@ export const CONTEXT_OPTIONS = [
 ]
 
 // Which price list a model's offerings draw on. "custom" is a rate somebody
-// here set, the deployment's or the organization's; "default" is genai-prices.
+// here set, the deployment's or the organization's; "default" is models.dev.
 export const PRICING_OPTIONS = [
   { value: "all", label: "Any pricing" },
   { value: "custom", label: "Custom price" },

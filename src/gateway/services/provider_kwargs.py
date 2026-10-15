@@ -60,6 +60,7 @@ from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
+from gateway.services.bedrock_gateway_auth import with_bedrock_read_timeout
 from gateway.services.catalog import resolve_catalog_offerings, resolve_catalog_selector, resolve_undated_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
@@ -446,6 +447,9 @@ def get_provider_kwargs(
                 kwargs["client_args"] = {"region_name": region}
             elif isinstance(client_args, dict) and "region_name" not in client_args:
                 kwargs["client_args"] = {**client_args, "region_name": region}
+        client_args = kwargs.get("client_args")
+        if client_args is None or isinstance(client_args, Mapping):
+            kwargs["client_args"] = with_bedrock_read_timeout(client_args)
 
     max_retries = raw_config.get("max_retries") if raw_config is not None else None
     if max_retries is None:
@@ -589,6 +593,13 @@ class ResolvedProvider:
     """The caller's own endpoint when the selector named one, else ``None``.
 
     Its owner pays the upstream, so such a request never counts toward a budget.
+    """
+    deployment_paid: bool = False
+    """Whether ``kwargs`` carry a credential ``ModelProviderPort`` served.
+
+    The deployment owes the upstream bill for such a request, so it is gated on
+    and charged to its organization's funds through ``BillingPort``. Only the
+    hosted rung of the credential ladder sets it.
     """
 
     @property

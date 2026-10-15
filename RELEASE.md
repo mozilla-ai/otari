@@ -42,7 +42,7 @@ so the event can arrive before or after the image is pushed.
 For a local preview of what the next release notes will look like, run
 `make changelog` (set `GITHUB_TOKEN` to resolve PR and author links).
 
-Four workflows react to the published Release:
+Five workflows react to the published Release:
 
 - **`otari-docker.yml`** builds and pushes the multi-arch image to Docker Hub,
   tagged `{{version}}` (e.g. `0.4.0`), `{{major}}.{{minor}}` (e.g. `0.4`), and the
@@ -59,6 +59,11 @@ Four workflows react to the published Release:
   uploads the sdist, the pinned requirements and the formula to the Release,
   installs and `brew test`s the formula on a macOS runner, then commits it to
   the tap, so `brew install mozilla-ai/tap/otari` follows every release.
+- **`otari-release-labels.yml`** labels every PR merged since the previous
+  release with the release tag (for example `v0.4.0`), creating the label, so
+  each PR shows the release it shipped in. A final release counts from the
+  previous final release, so a PR that first shipped in a pre-release also gets
+  the final version's label. Dispatch it with a tag to label an earlier release.
 - **`otari-docs.yml`** builds the GitBook site from `docs/` at the release tag
   (`scripts/prepare_gitbook_site.py`) and commits it to the `gitbook-docs`
   branch, which GitBook syncs from. A pre-release does not publish. The site

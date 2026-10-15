@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from any_search import AnySearch, SearchResult, TimeRange
-from any_search._logging import REDACTED, RedactProviderUrls, install, provider_call
+from any_search._logging import LOGGERS, REDACTED, RedactProviderUrls, install, provider_call
 from any_search.providers.fake import FakeProvider
 
 URL = "https://api.example/search?q=sentinel-query"
@@ -71,8 +71,8 @@ async def test_search_runs_inside_a_provider_call(caplog: pytest.LogCaptureFixtu
 def test_importing_the_package_installs_no_filter() -> None:
     code = (
         "import logging, any_search, any_search.cli; "
-        "from any_search._logging import RedactProviderUrls; "
-        "print(any(isinstance(f, RedactProviderUrls) for f in logging.getLogger('httpx').filters))"
+        "from any_search._logging import LOGGERS, RedactProviderUrls; "
+        "print(any(isinstance(f, RedactProviderUrls) for n in LOGGERS for f in logging.getLogger(n).filters))"
     )
     answer = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert answer.stdout.strip() == "False"
@@ -90,5 +90,30 @@ async def test_without_the_filter_a_provider_call_keeps_its_url(caplog: pytest.L
 @pytest.mark.usefixtures("log_filter")
 def test_the_filter_is_installed_once() -> None:
     install()
-    filters = logging.getLogger("httpx").filters
-    assert len([existing for existing in filters if isinstance(existing, RedactProviderUrls)]) == 1
+    for name in LOGGERS:
+        filters = logging.getLogger(name).filters
+        assert len([existing for existing in filters if isinstance(existing, RedactProviderUrls)]) == 1
+
+
+def _encode_a_path_over_http2() -> None:
+    """Encode a request's headers as an HTTP/2 client does, which hpack logs at DEBUG."""
+    hpack = pytest.importorskip("hpack")
+    hpack.Encoder().encode([(b":method", b"GET"), (b":path", b"/search?q=sentinel-query&api_key=sentinel-key")])
+
+
+@pytest.mark.usefixtures("log_filter")
+def test_hpack_records_during_a_provider_call_carry_no_path(caplog: pytest.LogCaptureFixture) -> None:
+    """Over HTTP/2, hpack logs each header it encodes, the path with its query included."""
+    caplog.set_level(logging.DEBUG)
+    with provider_call("p"):
+        _encode_a_path_over_http2()
+    messages = [record.getMessage() for record in caplog.records if record.name.startswith("hpack")]
+    assert messages
+    assert [message for message in messages if "sentinel" in message] == []
+
+
+@pytest.mark.usefixtures("log_filter")
+def test_hpack_records_outside_one_are_left_alone(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    _encode_a_path_over_http2()
+    assert any("sentinel-query" in record.getMessage() for record in caplog.records if record.name.startswith("hpack"))

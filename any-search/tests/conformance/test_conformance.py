@@ -66,6 +66,12 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario({"error": "rate_limit", "error_status": 429}),
         "in_body_error": Scenario({"in_body_error": "engine_unavailable"}),
     },
+    "mojeek": {
+        "normal": Scenario(handler=_replay("mojeek", "normal")),
+        "empty": Scenario(handler=_replay("mojeek", "empty")),
+        "error": Scenario(handler=_replay("mojeek", "error")),
+        "in_body_error": Scenario(handler=_replay("mojeek", "in_body_error")),
+    },
 }
 
 PROVIDERS = AnySearch.get_supported_providers()

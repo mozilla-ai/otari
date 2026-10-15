@@ -44,6 +44,7 @@ from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapt
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
+from gateway.adapters.usage_signal_adapter import NullUsageSignalAdapter
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.core.config import GatewayConfig
 from gateway.core.deployment import Plane, deployment_for
@@ -63,6 +64,7 @@ from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.tenancy import forget_unproven_access
@@ -260,6 +262,11 @@ def _telemetry_storage_adapter(session: AsyncSession | None) -> TelemetryStorage
 def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
     """Build the core ``GrowthSignalPort`` adapter for one request."""
     return NullGrowthSignalAdapter(session)
+
+
+def _usage_signal_adapter(session: AsyncSession | None) -> UsageSignalPort:
+    """Build the core ``UsageSignalPort`` adapter, which holds no state of its own."""
+    return NullUsageSignalAdapter()
 
 
 def _identity_provider_adapter_factory(
@@ -573,6 +580,9 @@ def build_container(
     # Growth and support-messenger notifications: the base has no vendor of its
     # own, so every lifecycle event is a no-op.
     container.bind(GrowthSignalPort, _growth_signal_adapter)
+    # Settled usage rows: the base reports them to nobody, its usage table
+    # being the whole record. Resolved once, when the usage log writer is built.
+    container.bind(UsageSignalPort, _usage_signal_adapter)
     # Telemetry storage: the base keeps what the OTLP receiver captures in
     # this deployment's own database, which is where it has always gone. An
     # overlay binds a scale-out store behind the same port.
@@ -652,6 +662,7 @@ def build_container(
         raise BootstrapError(msg)
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     _verify_port_shape(container, ModelProviderPort)
+    _verify_port_shape(container, UsageSignalPort)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:

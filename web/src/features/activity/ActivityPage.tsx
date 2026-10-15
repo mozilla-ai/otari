@@ -1,12 +1,5 @@
 import { Button } from "@heroui/react"
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   SummaryDimension,
   UsageEntry,
@@ -93,6 +86,7 @@ import {
 } from "./activityModel"
 import { InFlightControl } from "./InFlightControl"
 import { RequestDetail } from "./RequestDetail"
+import { RequestTraceLink } from "./RequestTraceLink"
 import { RoutingCell } from "./RoutingCell"
 import { StatusMark } from "./StatusMark"
 import { TokenBar } from "./TokenBar"
@@ -135,7 +129,7 @@ const URL_DEFAULTS = {
   size: String(DEFAULT_PAGE_SIZE),
 } as const
 
-export function ActivityPage({ viewSwitch }: { viewSwitch?: ReactNode } = {}) {
+export function ActivityPage() {
   // Who the people behind the owner ids are. The log already carries the alias
   // the gateway was told; the roster is who the person is, so it wins.
   const memberLabels = useMemberAttributionLabels()
@@ -808,7 +802,12 @@ export function ActivityPage({ viewSwitch }: { viewSwitch?: ReactNode } = {}) {
     (entry: UsageEntry) => (
       <div>
         <div className="flex items-center justify-between border-b border-border px-4 py-2">
-          <span className="text-body">Request detail</span>
+          {/* Left, by the title: the header spans the table's scroll width,
+              so its right end can sit off screen. */}
+          <div className="flex items-center gap-3">
+            <span className="text-body">Request detail</span>
+            <RequestTraceLink entry={entry} />
+          </div>
           <Button
             size="sm"
             variant="ghost"
@@ -1077,7 +1076,7 @@ export function ActivityPage({ viewSwitch }: { viewSwitch?: ReactNode } = {}) {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Activity" action={viewSwitch}>
+      <PageIntro title="Activity">
         A per-request log of what the gateway served: tokens, cost, latency, and
         failures. No request or response content is stored.
       </PageIntro>

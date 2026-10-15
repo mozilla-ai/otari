@@ -28,7 +28,7 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
 
     When community-maintained default pricing is enabled (opt-in), the dire "all
     requests rejected" warning no longer applies; a softer note is logged instead,
-    since models outside genai-prices coverage are still rejected.
+    since models outside models.dev coverage are still rejected.
     """
     if not config.require_pricing:
         return
@@ -52,7 +52,7 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     else:
         logger.warning(
             "require_pricing is enabled with no configured pricing; relying on default_pricing "
-            "(genai-prices) for billing. Models outside its coverage are still rejected with HTTP 402."
+            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402."
         )
 
 
@@ -201,7 +201,6 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         output_price = pricing_config.output_price_per_million
         cache_read_price = pricing_config.cache_read_price_per_million
         cache_write_price = pricing_config.cache_write_price_per_million
-        cache_write_1h_price = pricing_config.cache_write_1h_price_per_million
         pricing_tiers = [tier.model_dump(exclude_none=True) for tier in pricing_config.pricing_tiers]
         effective_at = normalize_effective_at(pricing_config.effective_at)
 
@@ -230,7 +229,6 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             output_price_per_million=output_price,
             cache_read_price_per_million=cache_read_price,
             cache_write_price_per_million=cache_write_price,
-            cache_write_1h_price_per_million=cache_write_1h_price,
             pricing_tiers=pricing_tiers,
             unit=pricing_config.unit,
             origin="config",

@@ -10,6 +10,7 @@ import {
   deleteSession,
   retryUnlessNotFound,
   siteFetch,
+  startOAuthSignIn,
 } from "./client"
 
 // The seam this build answers "same origin" through, made mutable so the
@@ -171,6 +172,7 @@ describe("apiFetch", () => {
     await expect(failure).rejects.toMatchObject({
       status: 200,
       message: expect.stringContaining("not JSON"),
+      cause: expect.any(SyntaxError),
     })
     await expect(failure).rejects.not.toMatchObject({
       message: expect.stringContaining("DOCTYPE"),
@@ -271,12 +273,54 @@ describe("siteFetch", () => {
     )
   })
 
+  it("explains a reply that is not JSON rather than throwing a raw SyntaxError", async () => {
+    // The build poll runs against the gateway's own root, so an edge proxy's
+    // HTML page answering in its place reaches this read first (#993).
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>otari</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    )
+
+    const failure = siteFetch(DASHBOARD_BUILD_PATH)
+
+    await expect(failure).rejects.toBeInstanceOf(ApiError)
+    await expect(failure).rejects.toMatchObject({
+      status: 200,
+      message: expect.stringContaining("not JSON"),
+      cause: expect.any(SyntaxError),
+    })
+  })
+
   it("reports an unreachable gateway rather than throwing a raw fetch failure", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("nope"))
 
     await expect(siteFetch(DASHBOARD_BUILD_PATH)).rejects.toThrow(
       "Network error: could not reach the gateway.",
     )
+  })
+})
+
+describe("startOAuthSignIn", () => {
+  it("explains a reply that is not JSON rather than throwing a raw SyntaxError", async () => {
+    // Reached from the sign-in screen, before anything else has shown the
+    // gateway is the one answering (#993).
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>otari</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    )
+
+    const failure = startOAuthSignIn("github")
+
+    await expect(failure).rejects.toBeInstanceOf(ApiError)
+    await expect(failure).rejects.toMatchObject({
+      status: 200,
+      message: expect.stringContaining("not JSON"),
+      cause: expect.any(SyntaxError),
+    })
   })
 })
 

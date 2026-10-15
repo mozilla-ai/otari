@@ -146,6 +146,9 @@ def _integration_traffic(endpoint: Any, api_key_id: Any) -> ColumnElement[bool]:
     cannot carry the surface; the credential does, because the one the control
     plane forwards under is minted by this deployment for exactly this purpose and
     is marked as such.
+
+    ``UsageSignalPort`` reports the same test for each row it is told about
+    (``_integration_traffic`` in ``services/log_writer``), so change the two together.
     """
     return and_(
         endpoint != PLAYGROUND_USAGE_ENDPOINT,

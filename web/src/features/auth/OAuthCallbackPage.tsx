@@ -12,7 +12,7 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { OAuthTermsStep } from "./OAuthTermsStep"
 import { oauthProviderLabel } from "./oauthProviders"
-import { takeOAuthState } from "./oauthRoundTrip"
+import { takeOAuthReturnHash, takeOAuthState } from "./oauthRoundTrip"
 import {
   PublicAuthLayout,
   PublicAuthLink,
@@ -70,9 +70,18 @@ export function OAuthCallbackPage({
   const { isAuthenticated, login } = useAuth()
   const { recordEvent } = useTelemetry()
   const { terms_url } = useDeployment()
-  const [failure, setFailure] = useState<string>()
+  // A failure keeps the page the sign-in started from, so trying again from
+  // the sign-in screen still ends there.
+  const [failure, setFailure] = useState<{
+    message: string
+    returnHash: string
+  }>()
   const [needsTerms, setNeedsTerms] = useState(false)
-  const [passwordRemoved, setPasswordRemoved] = useState(false)
+  // Set when the sign-in removed the account's earlier password, holding the
+  // page the notice continues to.
+  const [passwordRemoved, setPasswordRemoved] = useState<{
+    returnHash: string
+  }>()
   // The effect below signs somebody in, so it must run once and not once per
   // render. React's development StrictMode mounts an effect twice on purpose,
   // and the second run would post a code the first already spent, turning every
@@ -88,16 +97,18 @@ export function OAuthCallbackPage({
     const label = oauthProviderLabel(provider)
     const params = new URLSearchParams(hash.split("?")[1] ?? "")
     const remembered = takeOAuthState()
+    const returnHash = takeOAuthReturnHash()
     const providerError = params.get("error")
     const state = params.get("state")
     const code = params.get("code")
 
+    const fail = (message: string) => setFailure({ message, returnHash })
     const refuse = (message: string, errorCode: string) => {
       recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: provider,
         error_code: errorCode,
       })
-      setFailure(message)
+      fail(message)
     }
 
     if (providerError) {
@@ -149,24 +160,23 @@ export function OAuthCallbackPage({
           })
           login()
           if (result.passwordRemoved) {
-            setPasswordRemoved(true)
+            setPasswordRemoved({ returnHash })
             return
           }
           // Signing in is not enough to stop this page rendering, and leaving
           // the hash alone strands the person here. `DeploymentRoot` matches a
           // public auth path *before* the auth gate, so an unchanged hash keeps
-          // re-selecting this page, whose effect has already run: the pending
-          // panel would sit there with no way out, and a reload would report a
-          // state mismatch because the stored state is spent. Replaced rather
-          // than pushed, so Back from the dashboard skips this page.
-          replacePublicAuthPage("#/")
+          // re-selecting this page, whose effect has already run. So this hands
+          // the tab on to the page the sign-in started from, replacing this
+          // entry so Back from there skips this page.
+          replacePublicAuthPage(returnHash)
           return
         }
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
           authentication_method: provider,
           error_code: analyticsStatusCode(result.status),
         })
-        setFailure(result.message ?? `${label} did not sign you in.`)
+        fail(result.message ?? `${label} did not sign you in.`)
       } catch (caught) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
           authentication_method: provider,
@@ -176,7 +186,7 @@ export function OAuthCallbackPage({
         setNeedsTerms(
           caught instanceof ApiError && caught.code === "terms_not_accepted",
         )
-        setFailure(errorMessage(caught))
+        fail(errorMessage(caught))
       }
     })()
   }, [provider, hash, isAuthenticated, login, recordEvent])
@@ -188,7 +198,9 @@ export function OAuthCallbackPage({
         footer={
           <>
             <PublicAuthLink to="#/account">Set a new password</PublicAuthLink>
-            <PublicAuthLink to="#/">Continue</PublicAuthLink>
+            <PublicAuthLink to={passwordRemoved.returnHash}>
+              Continue
+            </PublicAuthLink>
           </>
         }
       >
@@ -220,15 +232,23 @@ export function OAuthCallbackPage({
   // Only where this tab knows which terms to show; a bootstrap that names none
   // falls back to the gateway's own wording below.
   if (needsTerms && terms_url !== null) {
-    return <OAuthTermsStep provider={provider} termsUrl={terms_url} />
+    return (
+      <OAuthTermsStep
+        provider={provider}
+        termsUrl={terms_url}
+        returnHash={failure.returnHash}
+      />
+    )
   }
 
   return (
     <PublicAuthLayout
       title="That sign-in did not complete"
-      footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+      footer={
+        <PublicAuthLink to={failure.returnHash}>Back to sign in</PublicAuthLink>
+      }
     >
-      <p className="text-center text-body">{failure}</p>
+      <p className="text-center text-body">{failure.message}</p>
     </PublicAuthLayout>
   )
 }

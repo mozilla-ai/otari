@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "body": {
+    "url": "https://raw.githubusercontent.com/pydantic/pydantic/main/pydantic/py.typed",
+    "content": "",
+    "metadata": {
+      "url": "https://raw.githubusercontent.com/pydantic/pydantic/main/pydantic/py.typed"
+    }
+  }
+}

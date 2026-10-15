@@ -27,7 +27,8 @@ class ProviderHttp:
         """Send one request.
 
         Transport failures become a ``ProviderError`` without the exception's
-        text, which can carry the URL and with it a query or a key.
+        text, which can carry the URL and with it a query or a key. It is
+        raised after the handler, so the original is not even its context.
         """
         client = self._client
         if client is None:
@@ -37,9 +38,13 @@ class ProviderHttp:
         try:
             return await client.request(method, url, timeout=self._timeout, **kwargs)
         except httpx.TimeoutException:
-            raise ProviderError(self._provider, None, "timeout") from None
+            tag = "timeout"
         except (httpx.HTTPError, httpx.InvalidURL):
-            raise ProviderError(self._provider, None, "network") from None
+            tag = "network"
+        except UnicodeEncodeError:
+            # A header httpx cannot send, in practice a key pasted with a character that is not ASCII.
+            tag = "invalid_header"
+        raise ProviderError(self._provider, None, tag)
 
     async def aclose(self) -> None:
         """Close the client this object opened, if it opened one."""

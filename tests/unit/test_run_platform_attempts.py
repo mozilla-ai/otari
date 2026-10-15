@@ -29,6 +29,7 @@ from gateway.api.routes._platform import (
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, error_code_of
 from gateway.metrics import REGISTRY
+from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -253,7 +254,9 @@ def test_default_attempt_kwargs_forwards_bedrock_extra_params_via_client_args() 
 
     kwargs = default_attempt_kwargs(attempt, {})
 
-    assert kwargs["client_args"] == {
+    client_args = dict(kwargs["client_args"])
+    assert client_args.pop("config").read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+    assert client_args == {
         "region_name": "us-east-1",
         "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
         "aws_secret_access_key": "secret-access-key",

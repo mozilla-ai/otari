@@ -282,21 +282,21 @@ async def _execute_mcp_calls(
     return results
 
 
-def _tool_calls_chunk(first: ChatCompletionChunk, entries: list[dict[str, Any]]) -> ChatCompletionChunk:
-    """A chunk carrying ``entries`` beside its ``choices``, with the round's ``id``, ``model`` and ``created``.
+def _gateway_chunk(template: ChatCompletionChunk, field_name: str, value: Any) -> ChatCompletionChunk:
+    """A content-free chunk carrying ``value`` in ``field_name``, with ``template``'s ``id``, ``model`` and ``created``.
 
     One choice with an empty ``delta`` keeps the chunk ordinary to a client that reads
-    only ``choices``; the entries sit at the top level for the reason
+    only ``choices``; the field sits at the top level for the reason
     ``services/tools/_chat_tool_calls.py`` gives.
     """
     chunk = ChatCompletionChunk(
-        id=first.id,
+        id=template.id,
         object="chat.completion.chunk",
-        created=first.created,
-        model=first.model,
+        created=template.created,
+        model=template.model,
         choices=[ChunkChoice(index=0, delta=ChoiceDelta(), finish_reason=None)],
     )
-    setattr(chunk, OTARI_TOOL_CALLS_FIELD, entries)
+    setattr(chunk, field_name, value)
     return chunk
 
 
@@ -359,25 +359,11 @@ TOOL_ACTIVITY_FIELD = "otari_tool_activity"
 
 # A tool result can be a whole fetched page; the transcript shows a preview.
 _ACTIVITY_RESULT_LIMIT = 8_000
-_TOOL_ERROR_PREFIX = "[tool error]"
 
 
 def reports_tool_activity(endpoint: str) -> bool:
     """Whether a completion served at ``endpoint`` streams gateway-run tool activity: the Playground's does."""
     return endpoint == PLAYGROUND_USAGE_ENDPOINT
-
-
-def _activity_chunk(template: ChatCompletionChunk, payload: dict[str, Any]) -> ChatCompletionChunk:
-    """A content-free chunk carrying one tool activity record, with ``template``'s ``id``, ``model`` and ``created``."""
-    chunk = ChatCompletionChunk(
-        id=template.id,
-        object="chat.completion.chunk",
-        created=template.created,
-        model=template.model,
-        choices=[ChunkChoice(index=0, delta=ChoiceDelta(), finish_reason=None)],
-    )
-    setattr(chunk, TOOL_ACTIVITY_FIELD, payload)
-    return chunk
 
 
 def _call_activity(call: dict[str, Any]) -> dict[str, Any]:
@@ -398,7 +384,7 @@ def _result_activity(call: dict[str, Any], message: dict[str, Any]) -> dict[str,
         "name": call.get("function", {}).get("name", ""),
         "content": content[:_ACTIVITY_RESULT_LIMIT],
         "truncated": len(content) > _ACTIVITY_RESULT_LIMIT,
-        "is_error": content.startswith(_TOOL_ERROR_PREFIX),
+        "is_error": is_tool_error(content),
     }
 
 
@@ -733,12 +719,12 @@ class _ChatToolLoopStrategy:
         # One call at a time, so each result is reported as soon as it exists
         # instead of after the slowest call in the batch.
         for call in state.mcp_calls:
-            yield _activity_chunk(template, _call_activity(call))
+            yield _gateway_chunk(template, TOOL_ACTIVITY_FIELD, _call_activity(call))
             ran: list[dict[str, Any]] = []
             async for chunk in self._run_calls(state, pool, [call], ran):
                 yield chunk
             results.extend(ran)
-            yield _activity_chunk(template, _result_activity(call, ran[0]))
+            yield _gateway_chunk(template, TOOL_ACTIVITY_FIELD, _result_activity(call, ran[0]))
 
     async def _run_calls(
         self, state: _ChatStreamState, pool: ToolBackend, calls: list[dict[str, Any]], results: list[dict[str, Any]]
@@ -748,7 +734,7 @@ class _ChatToolLoopStrategy:
         async with aclosing(reports):
             async for _ended, entries in reports:
                 if entries and state.first is not None:
-                    yield _tool_calls_chunk(state.first, entries)
+                    yield _gateway_chunk(state.first, OTARI_TOOL_CALLS_FIELD, entries)
 
 
 _CHAT_STRATEGY = _ChatToolLoopStrategy()

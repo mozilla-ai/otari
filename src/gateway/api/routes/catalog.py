@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.api.deps import (
-    ModelProviderPortDep,
+    RequestSessionModelProviderPortDep,
     get_config,
     get_db,
     get_session_identity,
@@ -78,7 +78,7 @@ from gateway.services.model_identity import (
     group_offerings,
     identity_key,
 )
-from gateway.services.pricing_refresh_service import GENAI_PRICES_SOURCE
+from gateway.services.pricing_refresh_service import MODELS_DEV_SOURCE
 from gateway.services.pricing_service import (
     default_pricing_enabled,
     load_organization_override_index,
@@ -176,18 +176,19 @@ class CatalogOffering(BaseModel):
         default=None,
         description=(
             "Which price list `pricing` came from, for this viewer: the organization's own override, the "
-            "deployment's stored row, or the genai-prices defaults. Null when nothing prices it."
+            "deployment's stored row, or the models.dev defaults. Null when nothing prices it."
         ),
     )
     price_reference: str | None = Field(
         default=None,
-        description="For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.",
+        description="For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.",
     )
     metadata_input_price_per_million: float | None = Field(
         default=None,
         description=(
-            "What models.dev lists this provider charging, for a cross-check. Not billed from: two "
-            "independent datasets disagreeing is the cheapest stale-price detector there is."
+            "What the live models.dev catalog lists this provider charging. The default is billed from the "
+            "accepted models.dev snapshot, which can lag the live catalog, so a difference means a price "
+            "update is waiting for review."
         ),
     )
     metadata_output_price_per_million: float | None = None
@@ -205,7 +206,7 @@ class CatalogModelDetail(CatalogModelSummary):
     """One model with everything the detail page shows."""
 
     default_pricing: bool = Field(
-        description="Whether an unpriced model is metered at the genai-prices default.",
+        description="Whether an unpriced model is metered at the models.dev default.",
     )
     offerings: list[CatalogOffering]
     also_available_from: list[CatalogElsewhere]
@@ -214,9 +215,10 @@ class CatalogModelDetail(CatalogModelSummary):
 class CatalogResponse(BaseModel):
     """The grouped catalog, and the facts a reader needs to interpret its prices."""
 
-    default_pricing: bool = Field(description="Whether an unpriced model is metered at the genai-prices default.")
+    default_pricing: bool = Field(description="Whether an unpriced model is metered at the models.dev default.")
     defaults_as_of: datetime | None = Field(
-        description="When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.",
+        description="When the accepted models.dev snapshot, which the defaults are billed from, was taken. "
+        "Null while the bundled snapshot serves.",
     )
     metadata_available: bool = Field(
         description="False when models.dev could not be read; descriptions are then absent."
@@ -304,7 +306,7 @@ async def _usage_by_selector(
 
 
 async def _defaults_as_of(db: AsyncSession) -> datetime | None:
-    stmt = select(PricingSnapshot.updated_at).where(PricingSnapshot.source == GENAI_PRICES_SOURCE)
+    stmt = select(PricingSnapshot.updated_at).where(PricingSnapshot.source == MODELS_DEV_SOURCE)
     taken = (await db.execute(stmt)).scalar_one_or_none()
     return normalize_effective_at(taken) if taken is not None else None
 
@@ -332,7 +334,7 @@ class SelectorIndexResponse(BaseModel):
 async def refresh_selector_index(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> SelectorIndexResponse:
     """Re-index the short spellings now, rather than on the refresher's next tick."""
     await rebuild_selector_index(db, config, model_provider=model_provider, fetch=True)
@@ -569,13 +571,13 @@ async def list_catalog(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
     query: Annotated[CatalogQuery, Query()],
 ) -> CatalogResponse:
     """The models this caller may use, one entry each however many providers serve it.
 
     Prices are the caller's: an organization's override where one applies, else
-    the deployment's row, else the genai-prices default. Aliases and routing
+    the deployment's row, else the models.dev default. Aliases and routing
     policies are not models and are not listed; see Routing. A visitor, where
     the catalog is public, sees the configured instances and the hosted
     models at the deployment's rates, and nothing that belongs to a tenant.
@@ -609,7 +611,7 @@ async def get_catalog_model(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 

@@ -69,7 +69,6 @@ const GLM_DETAIL: CatalogModelDetail = {
         output_price_per_million: 2,
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
-        cache_write_1h_price_per_million: null,
         pricing_tiers: [],
         unit: "tokens",
       },

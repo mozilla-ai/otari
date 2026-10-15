@@ -1,4 +1,4 @@
-"""A catalog model's token limits: models.dev first, then genai-prices for the context window."""
+"""A catalog model's token limits: the live models.dev catalog first, then the pricing snapshot's context window."""
 
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -20,10 +20,10 @@ class ModelLimits(NamedTuple):
 def model_limits(config: GatewayConfig, models_dev: dict[str, Any] | None, model_key: str) -> ModelLimits:
     """The token limits of a ``provider:model`` (or bare) key.
 
-    models.dev first, because it describes the model as that provider serves
-    it, then genai-prices for the context window. genai-prices lists no output
-    limit, so without a models.dev entry there is none. A bare key names no
-    provider to look models.dev up under.
+    The live models.dev catalog first, because it describes the model as that
+    provider serves it, then the pricing snapshot for the context window. The
+    snapshot keeps no output limit, so without a live entry there is none. A bare
+    key names no provider to look either up under, so it has no limits.
     """
     instance, separator, model_id = model_key.partition(":")
     if not separator:

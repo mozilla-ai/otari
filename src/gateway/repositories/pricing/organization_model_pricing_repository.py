@@ -3,7 +3,7 @@
 Serves the surface that offers models on an organization's provider key, which
 needs to say what each offered model currently costs and to move the rates it
 seeded itself. Reads only the two lower rungs of
-`services.pricing_service.find_model_pricing`'s ladder; the genai-prices
+`services.pricing_service.find_model_pricing`'s ladder; the models.dev
 fallback is not a table and is resolved by that module.
 
 Built on the Unit of Work. Flushes, never commits.

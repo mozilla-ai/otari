@@ -31,6 +31,12 @@ def _replica(redis_url: str) -> RedisRateLimitStore:
     return RedisRateLimitStore(Redis.from_url(redis_url))
 
 
+async def _redis_now_ms(client: Redis) -> int:
+    """Redis's clock in milliseconds, the one the store's scripts read."""
+    seconds, microseconds = await client.time()
+    return seconds * 1000 + microseconds // 1000
+
+
 @pytest.mark.asyncio
 async def test_two_replicas_share_one_limit(redis_url: str) -> None:
     key = f"user:{uuid.uuid4()}"
@@ -65,16 +71,22 @@ async def test_concurrent_requests_never_overshoot(redis_url: str) -> None:
 
 @pytest.mark.asyncio
 async def test_a_request_leaves_the_window_once_it_has_passed(redis_url: str) -> None:
+    """The entry is held under a minute's window, then judged against one it has outlived.
+
+    A window short enough to outlive would race the refusal against a stalled runner.
+    """
     key = f"user:{uuid.uuid4()}"
     store = _replica(redis_url)
     try:
-        assert (await store.hit(key, 1, 0.3)).allowed
-        assert not (await store.hit(key, 1, 0.3)).allowed
+        assert (await store.hit(key, 1, 60)).allowed
+        refused = await store.hit(key, 1, 60)
         await asyncio.sleep(0.4)
         admitted = await store.hit(key, 1, 0.3)
     finally:
         await store.aclose()
 
+    assert not refused.allowed
+    assert refused.reset_after > 30
     assert admitted.allowed
 
 
@@ -155,8 +167,8 @@ async def test_an_entry_leaving_the_window_frees_what_it_cost(redis_url: str) ->
     key = f"tpm:{uuid.uuid4()}"
     store = _replica(redis_url)
     try:
-        assert (await store.hit(key, 100, 0.3, cost=100)).allowed
-        assert not (await store.hit(key, 100, 0.3, cost=1)).allowed
+        assert (await store.hit(key, 100, 60, cost=100)).allowed
+        assert not (await store.hit(key, 100, 60, cost=1)).allowed
         await asyncio.sleep(0.4)
         admitted = await store.hit(key, 100, 0.3, cost=100)
     finally:
@@ -183,14 +195,26 @@ async def test_concurrent_acquires_across_replicas_never_overshoot(redis_url: st
 
 @pytest.mark.asyncio
 async def test_an_unreleased_slot_returns_when_its_lease_runs_out(redis_url: str) -> None:
+    """The lease runs out 300 ms after Redis's own clock took it, read rather than raced.
+
+    Refusing a second acquire inside so short a lease fails whenever the runner stalls
+    past it; that a held slot refuses is covered under a 30-second lease above.
+    """
     key = f"conc:{uuid.uuid4()}"
     store = _replica(redis_url)
+    client = Redis.from_url(redis_url)
     try:
-        assert await store.acquire(key, 1, 0.3) is not None
-        assert await store.acquire(key, 1, 0.3) is None
+        before = await _redis_now_ms(client)
+        lease = await store.acquire(key, 1, 0.3)
+        after = await _redis_now_ms(client)
+        assert lease is not None
+        runs_out_at = await client.zscore(f"otari:rl:{{{key}}}:leases", lease)
         await asyncio.sleep(0.4)
         reacquired = await store.acquire(key, 1, 0.3)
     finally:
         await store.aclose()
+        await client.aclose()
 
+    assert runs_out_at is not None
+    assert before + 300 <= runs_out_at <= after + 300
     assert reacquired is not None

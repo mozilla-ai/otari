@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
+from gateway.api.deps import CallerWorkspaceQuery, get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -37,6 +37,7 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names
 from gateway.services.policy_store import (
     all_policy_names,
+    list_stored_policies,
     refresh_policy_cache,
     resolve_effective_policy,
 )
@@ -384,28 +385,26 @@ async def _refresh_quietly(db: AsyncSession, name: str) -> None:
 async def list_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_ids: CallerWorkspaceQuery,
     workspace_id: Annotated[
         uuid.UUID | None,
         Query(
             description=(
                 "Only stored policies in this workspace. Config-file policies are always included, "
-                "being deployment-wide. Omit to list the stored policies of every workspace."
+                "being deployment-wide. Omit to list the stored policies of every workspace in your organization."
             )
         ),
     ] = None,
 ) -> list[PolicyResponse]:
-    """List every routing policy in force, from config.yml and from storage.
+    """List every routing policy in force in your organization, from config.yml and from storage.
 
     Every scope at once, workspace-wide and user-scoped alike: this is the
     master-key management view, not what any one caller resolves.
     """
-    statement = select(RoutingPolicy)
-    if workspace_id is not None:
-        # Stored rows only. A config.yml entry has no workspace: it is
-        # deployment-wide and in force in every one of them, so filtering
-        # it out would misreport what actually resolves.
-        statement = statement.where(RoutingPolicy.workspace_id == workspace_id)
-    rows = (await db.execute(statement.order_by(RoutingPolicy.name))).scalars().all()
+    # Stored rows only when a workspace is named. A config.yml entry has no
+    # workspace: it is deployment-wide and in force in every one of them, so
+    # filtering it out would misreport what actually resolves.
+    rows = await list_stored_policies(db, workspaces=workspace_ids, workspace_id=workspace_id)
     merged: dict[tuple[uuid.UUID | None, str, str | None], PolicyResponse] = {}
     for row in rows:
         key = (row.workspace_id, row.name, row.user_id)

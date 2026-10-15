@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -95,7 +95,6 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
       output_price_per_million: 2,
       cache_read_price_per_million: 0.05,
       cache_write_price_per_million: null,
-      cache_write_1h_price_per_million: null,
       pricing_tiers: [],
       unit: "tokens",
     },
@@ -122,7 +121,6 @@ const GLM_DETAIL: CatalogModelDetail = {
         output_price_per_million: 2.5,
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
-        cache_write_1h_price_per_million: null,
         pricing_tiers: [],
         unit: "tokens",
       },
@@ -229,8 +227,35 @@ describe("ModelDetailPage", () => {
     ).toBeInTheDocument()
     // The selector is not a lane; it opens under the row a reader picks.
     expect(within(offerings).queryByText("nebius:zai-org/GLM-5.3")).toBeNull()
-    // The provider models.dev knows and this deployment does not.
-    expect(screen.getByText(/Also served by Groq/)).toBeInTheDocument()
+    // Providers this deployment has not configured are not listed.
+    expect(screen.queryByText(/Also served by/)).toBeNull()
+  })
+
+  it("lists every capability under a heading, saying which the model has", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const section = await screen.findByRole("region", { name: "Capabilities" })
+    const items = within(section).getAllByRole("listitem")
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Reasoning: supported"),
+      expect.stringContaining("Tool calling: supported"),
+      expect.stringContaining("Structured output: not supported"),
+      expect.stringContaining("Attachments: not supported"),
+      expect.stringContaining("Temperature: supported"),
+    ])
+    // What each one means is a hover away, not printed on the page.
+    expect(
+      screen.queryByText("Can be held to a JSON schema you provide."),
+    ).toBeNull()
+    // Focus rather than hover: react-aria's hover never fires under jsdom.
+    const trigger = within(section)
+      .getByText("Structured output")
+      .closest<HTMLElement>("[data-slot='tooltip-trigger']")
+    act(() => trigger?.focus())
+    expect(
+      await screen.findByText("Can be held to a JSON schema you provide."),
+    ).toBeInTheDocument()
   })
 
   it("marks each offering's provider", async () => {
