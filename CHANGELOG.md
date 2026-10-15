@@ -4,6 +4,51 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.26.0](https://github.com/mozilla-ai/otari/releases/tag/v0.26.0) - 2026-10-15
+
+
+
+### Bug Fixes
+
+- **catalog:** Fall back across a catalog ID spelled like a legacy provider/model selector in [#2311](https://github.com/mozilla-ai/otari/pull/2311) by [@hasangzl](https://github.com/hasangzl) ([`fe51209`](https://github.com/mozilla-ai/otari/commit/fe512090df240165a514102a7edc6ec0fd52b1a0))
+- **tenancy:** Scope operator reads of budgets, usage, routing and traces to the active organization in [#2316](https://github.com/mozilla-ai/otari/pull/2316) by [@tbille](https://github.com/tbille) ([`4f78a9a`](https://github.com/mozilla-ai/otari/commit/4f78a9a728558fb175e4443cdf646e2d34fd6ece))
+- **web:** Pin table body cells, not only their headers in [#2324](https://github.com/mozilla-ai/otari/pull/2324) by [@jigjigjig](https://github.com/jigjigjig) ([`c7c3d86`](https://github.com/mozilla-ai/otari/commit/c7c3d86b6676d58d442a12f99fc3d79dd10f2c23))
+- **web:** Return to the linked page after Google or GitHub sign-in in [#2295](https://github.com/mozilla-ai/otari/pull/2295) by [@jigjigjig](https://github.com/jigjigjig) ([`b1db48c`](https://github.com/mozilla-ai/otari/commit/b1db48c1e6b1212d24afad5ea25036e1bd17705f))
+- **dashboard:** Keep the parse failure as the cause of a non-JSON ApiError in [#2328](https://github.com/mozilla-ai/otari/pull/2328) by [@tbille](https://github.com/tbille) ([`3519633`](https://github.com/mozilla-ai/otari/commit/35196337894da697d7b6cad796752ff0029f63ee))
+- **messages:** Name an upstream timeout in the mid-stream error event in [#2330](https://github.com/mozilla-ai/otari/pull/2330) by [@daavoo](https://github.com/daavoo) ([`402ad44`](https://github.com/mozilla-ai/otari/commit/402ad44b5f1ddad2b7c9d820fbb6dfe51b59c02a))
+- **dashboard:** Hold the member rail until the organization context answers in [#2333](https://github.com/mozilla-ai/otari/pull/2333) by [@tbille](https://github.com/tbille) ([`b042f2a`](https://github.com/mozilla-ai/otari/commit/b042f2a94b1d379c6ee1d871e409dd73cc6ead58))
+- **bedrock:** Wait 600s for a response instead of botocore's 60s in [#2331](https://github.com/mozilla-ai/otari/pull/2331) by [@daavoo](https://github.com/daavoo) ([`3ac2583`](https://github.com/mozilla-ai/otari/commit/3ac258324a4e294fc7108ef9179cad7b6f437ee6))
+- **providers:** Share the caller's own session with the model-provider port in [#1410](https://github.com/mozilla-ai/otari/pull/1410) by [@AmirF194](https://github.com/AmirF194) ([`6b34b02`](https://github.com/mozilla-ai/otari/commit/6b34b02cc8240376ee838e30d562bfe9b86d03d7))
+
+
+### Features
+
+- **dashboard:** Simplify creating and reading routing policies in [#2312](https://github.com/mozilla-ai/otari/pull/2312) by [@hasangzl](https://github.com/hasangzl) ([`e8f045b`](https://github.com/mozilla-ai/otari/commit/e8f045b3720d3ed837d99522989d9f7e7f7e586d))
+- **tools:** Report the gateway's web tool calls on Chat Completions in [#2313](https://github.com/mozilla-ai/otari/pull/2313) by [@aittalam](https://github.com/aittalam) ([`67c8a5f`](https://github.com/mozilla-ai/otari/commit/67c8a5f82d2e5b66e20235c042ed5c10bcee7a09))
+- **web:** Show tool calls and allow several tools in playground chat in [#2314](https://github.com/mozilla-ai/otari/pull/2314) by [@hasangzl](https://github.com/hasangzl) ([`b0f250c`](https://github.com/mozilla-ai/otari/commit/b0f250c81e81dfbd23e60ddad6884043e3be34b0))
+- **any-search:** Add the Mojeek adapter in [#2315](https://github.com/mozilla-ai/otari/pull/2315) by [@aittalam](https://github.com/aittalam) ([`a947b88`](https://github.com/mozilla-ai/otari/commit/a947b886c7293b37589044336490f5b9a6cd2bff))
+- **any-fetch:** Add the Tabstack extract adapter in [#2317](https://github.com/mozilla-ai/otari/pull/2317) by [@aittalam](https://github.com/aittalam) ([`ed4e8c8`](https://github.com/mozilla-ai/otari/commit/ed4e8c863f70fe504573c3077b2640d9324df37d))
+- **web:** A Sessions page under Observe for agent traces in [#2219](https://github.com/mozilla-ai/otari/pull/2219) by [@jigjigjig](https://github.com/jigjigjig) ([`c8077a8`](https://github.com/mozilla-ai/otari/commit/c8077a80aff9cff0f1fd5585d74e750ee28eefad))
+- **admin:** Paginate the deployment Accounts page and search it by name or email in [#2323](https://github.com/mozilla-ai/otari/pull/2323) by [@tbille](https://github.com/tbille) ([`e5f4f62`](https://github.com/mozilla-ai/otari/commit/e5f4f6233502372d42e495c9f458a4e82eedc606))
+- **web:** Show model capabilities as a labeled row with explanations in [#2325](https://github.com/mozilla-ai/otari/pull/2325) by [@tbille](https://github.com/tbille) ([`648670c`](https://github.com/mozilla-ai/otari/commit/648670c216979779c15d72bf15cb6f26f46a7722))
+- **pricing:** Add a models.dev price index in [#2131](https://github.com/mozilla-ai/otari/pull/2131) by [@tbille](https://github.com/tbille) ([`6b21602`](https://github.com/mozilla-ai/otari/commit/6b21602044e9ba5a8c712e79e3964b740dec1f36))
+- **pricing:** Run the pricing snapshot lifecycle on models.dev in [#2132](https://github.com/mozilla-ai/otari/pull/2132) by [@tbille](https://github.com/tbille) ([`a60fd01`](https://github.com/mozilla-ai/otari/commit/a60fd0171221693328c8bbecdbe7f01610a1a2d0))
+- **BREAKING:** **pricing:** Price from models.dev instead of genai-prices in [#2133](https://github.com/mozilla-ai/otari/pull/2133) by [@tbille](https://github.com/tbille) ([`82a4289`](https://github.com/mozilla-ai/otari/commit/82a4289874922b5c8cc480b097e6d676905dcda0))
+- **billing:** Charge deployment-paid inference to the organization's funds in [#2305](https://github.com/mozilla-ai/otari/pull/2305) by [@daavoo](https://github.com/daavoo) ([`90b3754`](https://github.com/mozilla-ai/otari/commit/90b3754c394c103ea322a7e1d886df340850ab20))
+- **traces:** Open an Activity request's LLM call in its session in [#2335](https://github.com/mozilla-ai/otari/pull/2335) by [@jigjigjig](https://github.com/jigjigjig) ([`a39bd46`](https://github.com/mozilla-ai/otari/commit/a39bd46fecc90cb129dcffa9c052958f7d25e4ef))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/pydantic-ai-otari-v0.1.0...v0.26.0
+## [pydantic-ai-otari-v0.1.0](https://github.com/mozilla-ai/otari/releases/tag/pydantic-ai-otari-v0.1.0) - 2026-10-14
+
+
+
+### Features
+
+- **integrations:** Add pydantic-ai-otari and langchain-otari in [#2294](https://github.com/mozilla-ai/otari/pull/2294) by [@daavoo](https://github.com/daavoo) ([`4970f33`](https://github.com/mozilla-ai/otari/commit/4970f33591b5cd57c2ae9cc122fa32bae7c4f33d))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.25.0...pydantic-ai-otari-v0.1.0
 ## [0.25.0](https://github.com/mozilla-ai/otari/releases/tag/v0.25.0) - 2026-10-14
 
 
@@ -314,7 +359,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
 - **dashboard:** Suggest organization-key models in the policy form in [#1860](https://github.com/mozilla-ai/otari/pull/1860) by [@tbille](https://github.com/tbille) ([`1af73d5`](https://github.com/mozilla-ai/otari/commit/1af73d5ad73da7190f5fd668a2f59506e12a12d2))
 - **railway:** Set PORT so the healthcheck probes port 8000 by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`91622b2`](https://github.com/mozilla-ai/otari/commit/91622b24120354c6af4e1d8ebb81c870382f8363))
-- **hybrid:** Envelope a control-plane tool-resolve refusal in the route's format by [@AloysJehwin](https://github.com/AloysJehwin) ([`ed09e4c`](https://github.com/mozilla-ai/otari/commit/ed09e4c807569efbc691a98f3086195731ae7569))
+- **hybrid:** Envelope a control-plane tool-resolve refusal in the route's format in [#1770](https://github.com/mozilla-ai/otari/pull/1770) by [@AloysJehwin](https://github.com/AloysJehwin) ([`ed09e4c`](https://github.com/mozilla-ai/otari/commit/ed09e4c807569efbc691a98f3086195731ae7569))
 - **tools:** Close an MCP client pool in the task that opened its sessions in [#1825](https://github.com/mozilla-ai/otari/pull/1825) by [@peteski22](https://github.com/peteski22) ([`8e327f9`](https://github.com/mozilla-ai/otari/commit/8e327f951846a7e6d72bbd871aaf65a0c199c61d))
 - **inference:** Keep a failed tool backend close out of a finished stream in [#1826](https://github.com/mozilla-ai/otari/pull/1826) by [@peteski22](https://github.com/peteski22) ([`3ae88b4`](https://github.com/mozilla-ai/otari/commit/3ae88b419cd2e6e22a7b0aab0d4f83c3bffc386f))
 - **hybrid:** Give a workspace's code execution policy one meaning on both planes in [#1841](https://github.com/mozilla-ai/otari/pull/1841) by [@peteski22](https://github.com/peteski22) ([`20c00ab`](https://github.com/mozilla-ai/otari/commit/20c00ab4ad1e612ba843b3c4de5a75f9f23c7656))
@@ -329,7 +374,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **gateway:** Let the overlay refresh repopulate what it loads by [@L4XB](https://github.com/L4XB) ([`a9cc046`](https://github.com/mozilla-ai/otari/commit/a9cc0467ef0302c55f7465f9f60652c0f3718b67))
 - **gateway:** Bring the re-encryption version check up to date with main by [@daavoo](https://github.com/daavoo) ([`f0e7f7f`](https://github.com/mozilla-ai/otari/commit/f0e7f7fa00f236d6dd6a98769f8b9760c91a29da))
 - **cli:** Redact database URL password in migrate and init-db output by [@AloysJehwin](https://github.com/AloysJehwin) ([`7274d2d`](https://github.com/mozilla-ai/otari/commit/7274d2d88d04f1df6beb9cc5358c247b03e2e049))
-- **cli:** Mask query-string credentials and survive malformed database URLs by [@daavoo](https://github.com/daavoo) ([`5907e89`](https://github.com/mozilla-ai/otari/commit/5907e89c1cb52630c671284f7c87635db9eaa7b2))
+- **cli:** Mask query-string credentials and survive malformed database URLs in [#942](https://github.com/mozilla-ai/otari/pull/942) by [@daavoo](https://github.com/daavoo) ([`5907e89`](https://github.com/mozilla-ai/otari/commit/5907e89c1cb52630c671284f7c87635db9eaa7b2))
 - **otel:** Adapt context propagation to current main in [#629](https://github.com/mozilla-ai/otari/pull/629) by [@daavoo](https://github.com/daavoo) ([`acf1367`](https://github.com/mozilla-ai/otari/commit/acf1367f33c5ac96951e487bc9e98013299ebac8))
 - **dashboard:** Treat a failed operator read the same everywhere in [#1901](https://github.com/mozilla-ai/otari/pull/1901) by [@daavoo](https://github.com/daavoo) ([`b85b941`](https://github.com/mozilla-ai/otari/commit/b85b9415bd5f734d17bbc0d317d1b6ebebdd0065))
 - **decisions:** Log budget refusals, reject negative provider cost, refuse redirects by [@daavoo](https://github.com/daavoo) ([`ff79738`](https://github.com/mozilla-ai/otari/commit/ff797382f052beb157013d2e7e440ff8ceb6f6ea))
@@ -356,7 +401,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **config:** Treat a blank master key as unset and forward OTARI_MASTER_KEY in Compose in [#1958](https://github.com/mozilla-ai/otari/pull/1958) by [@themattharris](https://github.com/themattharris) ([`0443ae8`](https://github.com/mozilla-ai/otari/commit/0443ae82af5d4afffa3679ab6a5308ed33e3a1a3))
 - **files:** Start with files off when the backend cannot be built in [#1970](https://github.com/mozilla-ai/otari/pull/1970) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`febccc7`](https://github.com/mozilla-ai/otari/commit/febccc7b5ac5c5a0bd6e41f8b3e09525091b20e3))
 - **files:** Extract uploaded non-pdf documents for pdf-capable models in [#1972](https://github.com/mozilla-ai/otari/pull/1972) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`bdc3187`](https://github.com/mozilla-ai/otari/commit/bdc318708025cd7bac1e07b6a1a6bdbed23e871e))
-- **pipeline:** Map status-less InvalidRequestError to HTTP 400 by [@AloysJehwin](https://github.com/AloysJehwin) ([`b0fb9f4`](https://github.com/mozilla-ai/otari/commit/b0fb9f4b6f431225ac3346ff1bec1f253b13ec8d))
+- **pipeline:** Map status-less InvalidRequestError to HTTP 400 in [#1006](https://github.com/mozilla-ai/otari/pull/1006) by [@AloysJehwin](https://github.com/AloysJehwin) ([`b0fb9f4`](https://github.com/mozilla-ai/otari/commit/b0fb9f4b6f431225ac3346ff1bec1f253b13ec8d))
 - **auth:** Background verification and reset mail sends off the request path in [#999](https://github.com/mozilla-ai/otari/pull/999) by [@AmirF194](https://github.com/AmirF194) ([`111024c`](https://github.com/mozilla-ai/otari/commit/111024c732fed6df0e4ae238b9ff8f1ed871a340))
 - **cli:** Report a real --version, and drop the hook's unused gateway path in [#1873](https://github.com/mozilla-ai/otari/pull/1873) by [@agpituk](https://github.com/agpituk) ([`eb50379`](https://github.com/mozilla-ai/otari/commit/eb5037921c47c0f8de1c912b02cfc47d350cec1b))
 - **tools:** Release the reservation when a tools domain error escapes admission in [#1962](https://github.com/mozilla-ai/otari/pull/1962) by [@daavoo](https://github.com/daavoo) ([`1e93877`](https://github.com/mozilla-ai/otari/commit/1e9387768d6e1fd6f3387300bbab0f034d6a5907))
@@ -494,7 +539,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
 - **dashboard:** List every provider in the add-provider picker in [#1784](https://github.com/mozilla-ai/otari/pull/1784) by [@tbille](https://github.com/tbille) ([`adf42c2`](https://github.com/mozilla-ai/otari/commit/adf42c21ced030ac03196f070cd34fb96f7c8bcf))
 - **mcp:** Carry the MCP resolution cause on the error in [#1738](https://github.com/mozilla-ai/otari/pull/1738) by [@peteski22](https://github.com/peteski22) ([`6a8bd8d`](https://github.com/mozilla-ai/otari/commit/6a8bd8d15fa359cd441c2c4a73244478c9a5d6b7))
-- **tools:** Accumulate streaming tool-loop usage across rounds by [@AloysJehwin](https://github.com/AloysJehwin) ([`e266798`](https://github.com/mozilla-ai/otari/commit/e26679887afd1334f83d9b286b6ab5e0dc970790))
+- **tools:** Accumulate streaming tool-loop usage across rounds in [#1789](https://github.com/mozilla-ai/otari/pull/1789) by [@AloysJehwin](https://github.com/AloysJehwin) ([`e266798`](https://github.com/mozilla-ai/otari/commit/e26679887afd1334f83d9b286b6ab5e0dc970790))
 - **catalog:** Label hosted offerings hosted and BYO keys "org key" in [#1698](https://github.com/mozilla-ai/otari/pull/1698) by [@tbille](https://github.com/tbille) ([`246fee1`](https://github.com/mozilla-ai/otari/commit/246fee10c2e941ca13a4c5a625e244bd20c0ab90))
 
 
@@ -728,7 +773,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **release:** Mark breaking changes in the release notes in [#1317](https://github.com/mozilla-ai/otari/pull/1317) by [@peteski22](https://github.com/peteski22) ([`3b9a8a7`](https://github.com/mozilla-ai/otari/commit/3b9a8a7984207cc34a2aa4be27f5d6ce86c340f3))
 - **dashboard:** Offer a fresh verification link on the unverified sign-in refusal in [#1324](https://github.com/mozilla-ai/otari/pull/1324) by [@tbille](https://github.com/tbille) ([`c02933b`](https://github.com/mozilla-ai/otari/commit/c02933b7d71d0ff5bb26c9b1425bcb0cbe261421))
 - **clipboard:** Restore cleanup when legacyCopy's select() throws in [#1186](https://github.com/mozilla-ai/otari/pull/1186) by [@AmirF194](https://github.com/AmirF194) ([`c2bd608`](https://github.com/mozilla-ai/otari/commit/c2bd608b5dc8c5e98227a7954fff63befe2f4bed))
-- **dashboard:** Preserve add-provider dialog state across tab switches by [@AloysJehwin](https://github.com/AloysJehwin) ([`854d9d7`](https://github.com/mozilla-ai/otari/commit/854d9d7cc3672aa126c5077002967654d59aa26a))
+- **dashboard:** Preserve add-provider dialog state across tab switches in [#1105](https://github.com/mozilla-ai/otari/pull/1105) by [@AloysJehwin](https://github.com/AloysJehwin) ([`854d9d7`](https://github.com/mozilla-ai/otari/commit/854d9d7cc3672aa126c5077002967654d59aa26a))
 - **dashboard:** Keep an API base typed before the provider's hints land in [#1333](https://github.com/mozilla-ai/otari/pull/1333) by [@khaledosman](https://github.com/khaledosman) ([`2215cc4`](https://github.com/mozilla-ai/otari/commit/2215cc48584a2c5f87d3cfaf906068c0aaeaf43a))
 - **dashboard:** Let the pricing review and share frames be dismissed in [#936](https://github.com/mozilla-ai/otari/pull/936) by [@mikemikimike](https://github.com/mikemikimike) ([`8d80407`](https://github.com/mozilla-ai/otari/commit/8d80407541db9448793b51ab92c4e9bcf492767a))
 - **gateway:** Forward ttft_ms in hybrid-mode usage reports in [#1210](https://github.com/mozilla-ai/otari/pull/1210) by [@AmirF194](https://github.com/AmirF194) ([`0e3a38b`](https://github.com/mozilla-ai/otari/commit/0e3a38b37036ca9f6433781593990e1bb18c17f3))
@@ -857,7 +902,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
 - **dashboard:** Offer the activation setup guide to tenants, not only deployment operators in [#980](https://github.com/mozilla-ai/otari/pull/980) by [@khaledosman](https://github.com/khaledosman) ([`bb925a8`](https://github.com/mozilla-ai/otari/commit/bb925a8fac81e0067f16ab01e82669a2b7b1294f))
 - **gateway:** Read a provider's real status when its response carries none in [#975](https://github.com/mozilla-ai/otari/pull/975) by [@daavoo](https://github.com/daavoo) ([`22f7c88`](https://github.com/mozilla-ai/otari/commit/22f7c88d942eee94e3c6b410907db4ed4093ee2e))
-- **hybrid:** Forward Anthropic 1h cache-write tokens in usage reports by [@AloysJehwin](https://github.com/AloysJehwin) ([`fd7b574`](https://github.com/mozilla-ai/otari/commit/fd7b574e2738cff7ed0158b23ffd97e9ef966ff0))
+- **hybrid:** Forward Anthropic 1h cache-write tokens in usage reports in [#859](https://github.com/mozilla-ai/otari/pull/859) by [@AloysJehwin](https://github.com/AloysJehwin) ([`fd7b574`](https://github.com/mozilla-ai/otari/commit/fd7b574e2738cff7ed0158b23ffd97e9ef966ff0))
 - **dashboard:** Remove bulk price editing from the models page in [#995](https://github.com/mozilla-ai/otari/pull/995) by [@jigjigjig](https://github.com/jigjigjig) ([`5ed641c`](https://github.com/mozilla-ai/otari/commit/5ed641ca4410ded5b717655585555d9a7c26a214))
 - **dashboard:** Survive a bootstrap from an older gateway in [#962](https://github.com/mozilla-ai/otari/pull/962) by [@njbrake](https://github.com/njbrake) ([`1d3c8db`](https://github.com/mozilla-ai/otari/commit/1d3c8db6ef3a0668f13e14826b5b73c257e68ba1))
 - **dashboard:** Align trailing actions to the input line in routing control rows in [#1003](https://github.com/mozilla-ai/otari/pull/1003) by [@jigjigjig](https://github.com/jigjigjig) ([`4ff5678`](https://github.com/mozilla-ai/otari/commit/4ff567841a3422dd7c468c52e99245196ef79fe3))
@@ -958,9 +1003,9 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Bug Fixes
 
-- **a11y:** Stop sidebar nav disclosures from emitting document headings by [@AloysJehwin](https://github.com/AloysJehwin) ([`8722739`](https://github.com/mozilla-ai/otari/commit/87227391fb2b1114611dcdfe6319aa5e02d143a6))
-- **lint:** Strip block comments before matching arbitrary font-size rule by [@AloysJehwin](https://github.com/AloysJehwin) ([`3146bea`](https://github.com/mozilla-ai/otari/commit/3146bea94de73004d5facca3f82d15359783870c))
-- **settings:** Prevent database_url value from overflowing Settings card by [@AloysJehwin](https://github.com/AloysJehwin) ([`83d4c24`](https://github.com/mozilla-ai/otari/commit/83d4c2410ef5068835e396224b9cd794028ecb0d))
+- **a11y:** Stop sidebar nav disclosures from emitting document headings in [#951](https://github.com/mozilla-ai/otari/pull/951) by [@AloysJehwin](https://github.com/AloysJehwin) ([`8722739`](https://github.com/mozilla-ai/otari/commit/87227391fb2b1114611dcdfe6319aa5e02d143a6))
+- **lint:** Strip block comments before matching arbitrary font-size rule in [#941](https://github.com/mozilla-ai/otari/pull/941) by [@AloysJehwin](https://github.com/AloysJehwin) ([`3146bea`](https://github.com/mozilla-ai/otari/commit/3146bea94de73004d5facca3f82d15359783870c))
+- **settings:** Prevent database_url value from overflowing Settings card in [#943](https://github.com/mozilla-ai/otari/pull/943) by [@AloysJehwin](https://github.com/AloysJehwin) ([`83d4c24`](https://github.com/mozilla-ai/otari/commit/83d4c2410ef5068835e396224b9cd794028ecb0d))
 - **gateway:** Let the platform health probe reach a route outside base_url's own path in [#964](https://github.com/mozilla-ai/otari/pull/964) by [@macaab26](https://github.com/macaab26) ([`2e0f885`](https://github.com/mozilla-ai/otari/commit/2e0f88501011c48de112b576d0c09dd44c1b8e12))
 
 
@@ -1068,7 +1113,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **migrations:** Run otari's chain only against otari's own database in [#919](https://github.com/mozilla-ai/otari/pull/919) by [@khaledosman](https://github.com/khaledosman) ([`5018b64`](https://github.com/mozilla-ai/otari/commit/5018b6465269ffa72d71ef7590acbc5fc7cc5598))
 - **api:** Refuse a blank provider narrowing on POST /v1/scoped-budgets in [#912](https://github.com/mozilla-ai/otari/pull/912) by [@champ18ion](https://github.com/champ18ion) ([`4d767d1`](https://github.com/mozilla-ai/otari/commit/4d767d1e3dc720253d9070c97911569a6944d62c))
 - **messages:** Preserve Anthropic container field in [#916](https://github.com/mozilla-ai/otari/pull/916) by [@HareeshBahuleyan](https://github.com/HareeshBahuleyan) ([`1ca6ac4`](https://github.com/mozilla-ai/otari/commit/1ca6ac4951decdbbd5f2eced5227d36981e0bb7b))
-- **usage:** Scope /v1/usage/count to imported rows for the select-all affordance by [@AloysJehwin](https://github.com/AloysJehwin) ([`3a8500b`](https://github.com/mozilla-ai/otari/commit/3a8500b241c458d3617cc214b41fb768972d6ef4))
+- **usage:** Scope /v1/usage/count to imported rows for the select-all affordance in [#840](https://github.com/mozilla-ai/otari/pull/840) by [@AloysJehwin](https://github.com/AloysJehwin) ([`3a8500b`](https://github.com/mozilla-ai/otari/commit/3a8500b241c458d3617cc214b41fb768972d6ef4))
 - **messages:** Adopt any-llm container support in [#938](https://github.com/mozilla-ai/otari/pull/938) by [@HareeshBahuleyan](https://github.com/HareeshBahuleyan) ([`70e3544`](https://github.com/mozilla-ai/otari/commit/70e35441c13141d9ea905e16afa0d4543786c3d0))
 - **streaming:** Relax final forwarded-tool timeout in [#827](https://github.com/mozilla-ai/otari/pull/827) by [@HareeshBahuleyan](https://github.com/HareeshBahuleyan) ([`0edd6ab`](https://github.com/mozilla-ai/otari/commit/0edd6ab62fd1979d1774c4fd6eccb5d9d903e82b))
 - **mcp:** Stop managed transport redirects in [#948](https://github.com/mozilla-ai/otari/pull/948) by [@HareeshBahuleyan](https://github.com/HareeshBahuleyan) ([`d894843`](https://github.com/mozilla-ai/otari/commit/d894843f72bc2b24c57575d80caa32d03572950c))
@@ -1282,7 +1327,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **usage:** Bill vision side-call before top-up and track usage report tasks in [#277](https://github.com/mozilla-ai/otari/pull/277) by [@njbrake](https://github.com/njbrake) ([`81b0677`](https://github.com/mozilla-ai/otari/commit/81b06774d27aab25107ced9de6f0cf15f3cee4c2))
 - **api:** Unify error handling and hybrid streaming fallback across completion routes in [#281](https://github.com/mozilla-ai/otari/pull/281) by [@njbrake](https://github.com/njbrake) ([`ff6acb1`](https://github.com/mozilla-ai/otari/commit/ff6acb1486aa1a2f68a081fa1fd34bbb8aa8d1a5))
 - **deps:** Bump any-llm to 1.21.0 to meter streaming /v1/messages usage in [#292](https://github.com/mozilla-ai/otari/pull/292) by [@njbrake](https://github.com/njbrake) ([`01335b2`](https://github.com/mozilla-ai/otari/commit/01335b29c43cad5acdea7375c5564e38d633db29))
-- Return 400 for unresolvable model selectors by [@AloysJehwin](https://github.com/AloysJehwin) ([`b07a37c`](https://github.com/mozilla-ai/otari/commit/b07a37c8b9208b409b4b3a9411c4f96812024fb7))
+- Return 400 for unresolvable model selectors in [#254](https://github.com/mozilla-ai/otari/pull/254) by [@AloysJehwin](https://github.com/AloysJehwin) ([`b07a37c`](https://github.com/mozilla-ai/otari/commit/b07a37c8b9208b409b4b3a9411c4f96812024fb7))
 - **config:** Reject invalid OTARI_SECRET_KEY at startup in [#325](https://github.com/mozilla-ai/otari/pull/325) by [@njbrake](https://github.com/njbrake) ([`e2a8cbb`](https://github.com/mozilla-ai/otari/commit/e2a8cbb687060e82bbe443a1dbc48aa724a637ff))
 - **observability:** Don't count locked-in tool-loop failures as abandoned in [#326](https://github.com/mozilla-ai/otari/pull/326) by [@njbrake](https://github.com/njbrake) ([`48e3e1d`](https://github.com/mozilla-ai/otari/commit/48e3e1df9132793564c89315bda3fda608b6ea6e))
 - **auth:** Accept a raw token on the Otari-Key header, not just Bearer in [#323](https://github.com/mozilla-ai/otari/pull/323) by [@njbrake](https://github.com/njbrake) ([`794eeef`](https://github.com/mozilla-ai/otari/commit/794eeef14bc5e5f6bcc90a4f0dd9e03ed4e220fa))
@@ -1305,7 +1350,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **ui:** Add a standalone admin dashboard for models, pricing, and settings in [#227](https://github.com/mozilla-ai/otari/pull/227) by [@njbrake](https://github.com/njbrake) ([`fc02390`](https://github.com/mozilla-ai/otari/commit/fc02390f147dda3ad0cc175740b26b5b7bef3130))
 - Add agent skills and scoped review instructions in [#296](https://github.com/mozilla-ai/otari/pull/296) by [@njbrake](https://github.com/njbrake) ([`0c3542b`](https://github.com/mozilla-ai/otari/commit/0c3542bab49318e827a337d895b52de667a9106c))
 - **ui:** Manage providers, pricing, and aliases at runtime from the dashboard in [#297](https://github.com/mozilla-ai/otari/pull/297) by [@njbrake](https://github.com/njbrake) ([`7d09276`](https://github.com/mozilla-ai/otari/commit/7d09276ff357a81c15f8e2643eab266808e65a74))
-- **auth:** Accept x-api-key header so Anthropic-native clients work (fixes #253) by [@AloysJehwin](https://github.com/AloysJehwin) ([`4b4bd96`](https://github.com/mozilla-ai/otari/commit/4b4bd96691586ba6a1c2af9f44fe179d30412281))
+- **auth:** Accept x-api-key header so Anthropic-native clients work (fixes #253) in [#315](https://github.com/mozilla-ai/otari/pull/315) by [@AloysJehwin](https://github.com/AloysJehwin) ([`4b4bd96`](https://github.com/mozilla-ai/otari/commit/4b4bd96691586ba6a1c2af9f44fe179d30412281))
 - **dashboard:** API key management and per-key model access control in [#318](https://github.com/mozilla-ai/otari/pull/318) by [@njbrake](https://github.com/njbrake) ([`f49d70f`](https://github.com/mozilla-ai/otari/commit/f49d70f82cb100e7d4f368998512cf8e7b7cd287))
 - **observability:** Count upstream attempts abandoned before first chunk in [#324](https://github.com/mozilla-ai/otari/pull/324) by [@njbrake](https://github.com/njbrake) ([`b65e669`](https://github.com/mozilla-ai/otari/commit/b65e6690158db1a14454c51aa085175cef3273c2))
 - **dashboard:** Budget and user management with two-layer model access in [#322](https://github.com/mozilla-ai/otari/pull/322) by [@njbrake](https://github.com/njbrake) ([`eac679e`](https://github.com/mozilla-ai/otari/commit/eac679e81f6e610b94730f65a05ac5de8c1021d5))
@@ -1338,6 +1383,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 ### New Contributors
 
 - [@Shaurya2k06](https://github.com/Shaurya2k06) made their first contribution in [#334](https://github.com/mozilla-ai/otari/pull/334)
+- [@AloysJehwin](https://github.com/AloysJehwin) made their first contribution in [#315](https://github.com/mozilla-ai/otari/pull/315)
 - [@Sourav-Tripathy](https://github.com/Sourav-Tripathy) made their first contribution in [#289](https://github.com/mozilla-ai/otari/pull/289)
 - [@ojusave](https://github.com/ojusave) made their first contribution in [#257](https://github.com/mozilla-ai/otari/pull/257)
 - [@MooseTheRebel](https://github.com/MooseTheRebel) made their first contribution in [#245](https://github.com/mozilla-ai/otari/pull/245)
