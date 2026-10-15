@@ -86,7 +86,7 @@ export function UseModelDrawer({
             aria-label="Use this model"
             className="flex h-full w-[36rem] max-w-[85vw] flex-col"
           >
-            <Drawer.Header className="border-b border-border px-6 py-4">
+            <Drawer.Header className="shrink-0 border-b border-border px-6 py-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 flex-col gap-1">
                   <Drawer.Heading className="text-heading">
@@ -106,7 +106,7 @@ export function UseModelDrawer({
                 </Button>
               </div>
             </Drawer.Header>
-            <Drawer.Body className="flex flex-col gap-6 overflow-y-auto px-6 py-5">
+            <Drawer.Body className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-5">
               <section className="flex flex-col gap-2">
                 <h3 className="text-title">1. Which provider answers</h3>
                 <p className="text-sm text-muted">
