@@ -217,3 +217,30 @@ def test_the_catalog_lists_what_the_hosted_provider_advertises(
     ids = {model["id"] for model in listed.json()["data"]}
     assert "openai:gpt-4o" in ids
     assert "openai:gpt-4o-mini" not in ids
+
+
+def test_a_model_switched_off_is_refused_as_not_offered_rather_than_unconfigured(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The refusal neither points at an environment variable nor names anything of the deployment's."""
+    _create_user(client, master_key_header)
+    _hosted_openai(client, master_key_header)
+    models = client.get(f"{API_ROOT}/hosted-providers/openai/models", headers=master_key_header).json()["data"]
+    [mini] = [row for row in models if row["model"] == "gpt-4o-mini"]
+    client.patch(
+        f"{API_ROOT}/hosted-providers/openai/models/{mini['id']}", json={"enabled": False}, headers=master_key_header
+    )
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_MockCompletionError)) as called:
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+            headers=master_key_header,
+        )
+
+    assert response.status_code == 424, response.text
+    assert response.headers["Otari-Error-Code"] == "provider_not_configured"
+    assert response.json()["detail"] == "Model 'openai:gpt-4o-mini' is not offered on this deployment."
+    assert "OPENAI_API_KEY" not in response.text
+    assert KEY not in response.text
+    called.assert_not_called()

@@ -132,6 +132,7 @@ from gateway.core.error_codes import (
     PRICING_REQUIRED,
     PROVIDER_CREDENTIAL_REJECTED,
     PROVIDER_ERROR,
+    PROVIDER_NOT_CONFIGURED,
     PROVIDER_STREAM_INTERRUPTED,
     UNSUPPORTED_CONTENT,
     UPSTREAM_RATE_LIMITED,
@@ -1533,6 +1534,56 @@ async def _prepare_for_dispatch(
     return served
 
 
+def hosted_model_not_offered_detail(selector: str) -> str:
+    """Why a model a hosted provider serves the organization, with the model switched off, is refused."""
+    return f"Model '{selector}' is not offered on this deployment."
+
+
+async def _refuse_if_hosted_model_switched_off(
+    ctx: RequestContext, resolved: ResolvedProvider, *, adapter: FormatAdapter[Any, Any], port: ModelProviderPort
+) -> None:
+    """Refuse a model the port declined although it serves the organization the provider.
+
+    That is a model the operator switched off, and what dispatch would say
+    instead names the provider's environment variable, which no caller can set
+    and which would not serve the model either. A provider the port does not
+    serve the organization at all, restricted to another one included, keeps
+    the ordinary missing-credential answer, so nothing here says whether such a
+    provider exists.
+    """
+    assert ctx.organization_id is not None
+    try:
+        served = await port.get_hosted_models(organization_id=ctx.organization_id)
+    except Exception:
+        # Best effort: the request then fails as it would have without this check.
+        logger.warning("Could not list hosted models for %s:%s", resolved.instance, resolved.model)
+        return
+    if resolved.instance not in served:
+        return
+    detail = hosted_model_not_offered_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=resolved.model,
+        provider=resolved.instance,
+        endpoint=adapter.endpoint,
+        detail=detail,
+        status_code=status.HTTP_424_FAILED_DEPENDENCY,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+    )
+    raise adapter.error(
+        status.HTTP_424_FAILED_DEPENDENCY,
+        detail,
+        ErrorKind.API,
+        headers=error_headers(PROVIDER_NOT_CONFIGURED),
+    )
+
+
 async def _hold_at_deployment_paid_rate(
     ctx: RequestContext, served: ResolvedProvider, *, adapter: FormatAdapter[Any, Any]
 ) -> None:
@@ -1853,6 +1904,7 @@ async def _serve_from_hosted_credential(
         raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
 
     if credential is None:
+        await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
         # This build has no hosted path for the candidate. The candidate is
         # genuinely unserved, which is what it already was, so it goes to
         # any-llm uncredentialed and fails there exactly as it does today.
