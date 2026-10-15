@@ -50,7 +50,9 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
 
         ``provider`` is the caller's *instance* name, which equals the any-llm
         implementation for a bare selector. A ``config.yml`` instance of its own
-        name is credentialed upstream of this port and never reaches it.
+        name is credentialed upstream of this port and never reaches it. An
+        accepted alias (``openai-compatible``) is served by the provider it
+        folds to, and is answered under that provider's name.
         """
         del workspace_id
         if self._service is None:
@@ -61,9 +63,10 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         return HostedCredential(
             api_key=resolved.api_key,
             api_base=resolved.api_base,
-            # Echoed back unchanged, so what serves a candidate is what was
-            # asked for and the pricing key settlement reprices on does not move.
-            response_provider=provider,
+            # The stored name, so an alias settles under the key the provider is
+            # priced and switched under rather than under the alias, which
+            # nothing prices. Equal to ``provider`` for anything but an alias.
+            response_provider=resolved.provider or provider,
             client_args=resolved.client_args,
         )
 

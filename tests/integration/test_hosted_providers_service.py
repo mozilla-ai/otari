@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
@@ -1033,6 +1034,24 @@ async def test_the_runtime_resolves_the_row_the_surface_wrote(
     assert (resolved.api_key, resolved.api_base, resolved.client_args) == (KEY, "http://a/v1", {"x": 1})
     assert await service.resolve("openai-compatible", "gpt-4o", organization_id=None) is not None
     assert await service.resolve("anthropic", organization_id=None) is None
+
+
+async def test_the_adapter_answers_an_alias_under_the_provider_it_folds_to(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An alias served on the openai key settles as openai, the key its rates and model switches are under."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    service = _service(async_db)
+    _discovery(monkeypatch, "gpt-4o")
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
+    adapter = HostedProviderModelProviderAdapter(service)
+
+    for asked in ("openai", "openai-compatible"):
+        credential = await adapter.resolve_hosted_credential(
+            organization_id=uuid.uuid4(), workspace_id=None, provider=asked, model="gpt-4o"
+        )
+        assert credential is not None, asked
+        assert credential.response_provider == "openai", asked
 
 
 async def test_only_a_model_switched_on_under_the_provider_serves(
