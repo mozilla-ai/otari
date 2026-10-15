@@ -16,10 +16,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
     op.create_index("ix_trace_spans_request_id", "trace_spans", ["request_id"])
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
     op.drop_index("ix_trace_spans_request_id", table_name="trace_spans")

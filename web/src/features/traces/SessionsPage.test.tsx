@@ -49,7 +49,6 @@ const keyCeiling = (overrides: Partial<ScopedBudget> = {}) =>
     ...overrides,
   })
 
-// The `span` the URL now holds.
 function SpanProbe() {
   const { searchStr } = useLocation()
   return (
