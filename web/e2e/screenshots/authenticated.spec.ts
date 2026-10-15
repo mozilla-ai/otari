@@ -91,6 +91,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   },
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
+  { route: "/sessions", name: "sessions", heading: /sessions/i },
   { route: "/tools", name: "tools", heading: /tools/i },
   // A narrowed Tools child is no longer the page above with two services
   // hidden: it heads with the tool's own status row, and its group titles drop

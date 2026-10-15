@@ -10,6 +10,7 @@ from gateway.exceptions import TenancyError
 from gateway.exceptions.budget_exceptions import DeclaredAccessError, DeploymentBudgetIsEndUserDefaultError
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
+from gateway.models.budgets import Budget, ScopedBudget, ScopeType
 from gateway.models.tenancy import User
 from gateway.rate_limit import BudgetMinuteLimits
 from gateway.repositories.budgets import BudgetRepositories
@@ -69,11 +70,44 @@ class BudgetService:
         self._budgets = repositories.budgets
         self._api_keys = api_keys
         self._organizations = organizations
-        self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
+        self._scopes = ScopeOwnership(organizations, api_keys)
+        self._organization = _OrganizationSurface(repositories, self._scopes, organizations)
         self._end_users = _EndUsers(repositories)
         self._deployment = _DeploymentSurface(repositories)
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
         self._moves = _ReservationMoves(repositories)
+
+    async def list_deployment_budgets(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
+        """A page of the budgets the deployment owns and the operator's organization owns."""
+        async with self._uow:
+            return await self._budgets.list_in_reach_of(organization_id, skip=skip, limit=limit)
+
+    async def get_deployment_budget(self, budget_id: str, organization_id: uuid.UUID) -> Budget | None:
+        """The budget with this ID when the deployment or the operator's organization owns it."""
+        async with self._uow:
+            return await self._budgets.get_in_reach_of(budget_id, organization_id)
+
+    async def list_deployment_ceilings(
+        self,
+        organization_id: uuid.UUID,
+        *,
+        scope_type: ScopeType | None,
+        scope_id: str | None,
+        skip: int,
+        limit: int,
+    ) -> list[tuple[ScopedBudget, Budget]]:
+        """A page of the ceilings on scopes inside the operator's organization, each with the budget it names."""
+        async with self._uow:
+            scopes = await self._scopes.get_scope_ids_in(organization_id)
+            return await self._repositories.ceilings.list_in_scopes(
+                scopes, skip=skip, limit=limit, scope_type=scope_type, scope_id=scope_id
+            )
+
+    async def get_deployment_ceiling(self, ceiling_id: str, organization_id: uuid.UUID) -> ScopedBudget | None:
+        """The ceiling with this ID when its scope is inside the operator's organization."""
+        async with self._uow:
+            scopes = await self._scopes.get_scope_ids_in(organization_id)
+            return await self._repositories.ceilings.get_in_scopes(ceiling_id, scopes)
 
     async def apply_declared_access(
         self,

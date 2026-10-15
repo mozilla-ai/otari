@@ -10,11 +10,16 @@ import {
 import type { DeploymentUser } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import {
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+} from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -24,6 +29,8 @@ import {
   useUpdateDeploymentUser,
 } from "@/shared/api/deployment"
 import { formatRelative } from "@/shared/helpers/format"
+import { useUrlState } from "@/shared/helpers/urlState"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 import {
   accountLabel,
@@ -46,6 +53,12 @@ import { PasswordLinkDialog } from "./PasswordLinkDialog"
 // membership can do nothing and memberships are the organization surface's; nor
 // is deleting one, because historical attribution resolves through rows that
 // hang off it.
+
+const URL_DEFAULTS = { q: "", page: "0", size: String(PAGE_SIZE_OPTIONS[0]) }
+
+// The route's `max_length` on `search`: a longer term from a hand-edited URL
+// would be refused with a 422 rather than searched.
+const MAX_SEARCH_LENGTH = 200
 
 /**
  * The access mark, affirmative: an account that reaches more than the ordinary
@@ -72,12 +85,20 @@ export function DeploymentAccountsPage() {
   // the console on every non-operator load to learn what `access` is about to
   // say, and the query would be discarded either way.
   const isGranted = access.data === true
-  const accounts = useDeploymentUsers(isGranted)
+  const url = useUrlState(URL_DEFAULTS)
+  // Clamped, because the URL is editable and the route refuses a negative
+  // `skip` or a `limit` of zero.
+  const page = Math.max(0, url.getNumber("page"))
+  const pageSize =
+    PAGE_SIZE_OPTIONS.find((size) => size === url.getNumber("size")) ??
+    PAGE_SIZE_OPTIONS[0]
+  const search = useDebounced(url.get("q").trim().slice(0, MAX_SEARCH_LENGTH))
+  const accounts = useDeploymentUsers({ page, pageSize, search }, isGranted)
   const update = useUpdateDeploymentUser()
   const [deactivating, setDeactivating] = useState<DeploymentUser>()
   const [linkFor, setLinkFor] = useState<DeploymentUser>()
 
-  const rows = accounts.data ?? []
+  const rows = accounts.data?.data ?? []
 
   const columns = useMemo<DataTableColumn<DeploymentUser>[]>(
     () => [
@@ -278,6 +299,14 @@ export function DeploymentAccountsPage() {
         access here. Everything else on this page applies to them normally.
       </InfoBanner>
 
+      <SearchField
+        label="Search accounts"
+        placeholder="Search by name or email"
+        value={url.get("q")}
+        onChange={(value) => url.patch({ q: value, page: 0 })}
+        className="mb-3 md:w-80"
+      />
+
       <TableScrollFrame className="otari-accounts-table">
         <DataTable
           mobileLayout="cards"
@@ -286,9 +315,21 @@ export function DeploymentAccountsPage() {
           rows={rows}
           getRowKey={(account) => account.id}
           isLoading={accounts.isLoading}
-          emptyContent="No accounts yet."
+          emptyContent={
+            search ? "No accounts match this search." : "No accounts yet."
+          }
         />
       </TableScrollFrame>
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={accounts.data?.count ?? null}
+        rowsOnPage={rows.length}
+        onPageChange={(next) => url.patch({ page: next })}
+        onPageSizeChange={(size) => url.patch({ size, page: 0 })}
+        isFetching={accounts.isFetching}
+        label="accounts"
+      />
 
       <ConfirmDialog
         isOpen={deactivating !== undefined}

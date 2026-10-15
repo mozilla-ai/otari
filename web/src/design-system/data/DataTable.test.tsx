@@ -59,6 +59,20 @@ describe("DataTable", () => {
     expect(screen.getByText("Charlie")).toBeInTheDocument()
   })
 
+  it("names each body cell's column the way its header is named", () => {
+    // The pair a stylesheet pins a lane with: `.table__column[data-key]` and
+    // `.table__cell[data-column]`. The selection cell belongs to no column.
+    render(<DataTable {...base({ selectionMode: "multiple" })} />)
+    expect(screen.getByRole("columnheader", { name: "Name" })).toHaveAttribute(
+      "data-key",
+      "name",
+    )
+    const row = screen.getByRole("row", { name: /Alpha/ })
+    expect(
+      Array.from(row.children, (cell) => cell.getAttribute("data-column")),
+    ).toEqual([null, "name", "cost"])
+  })
+
   it("shows a loading state with no rows", () => {
     render(<DataTable {...base({ rows: [], isLoading: true })} />)
     expect(screen.getByText("Loading…")).toBeInTheDocument()

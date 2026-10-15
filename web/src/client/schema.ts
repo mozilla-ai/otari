@@ -46,6 +46,7 @@ export interface paths {
          *     membership, while this one carries every identity at whatever standing,
          *     including one whose memberships are all suspended. Each row also reports when
          *     the account last signed in to the dashboard, and null there means never.
+         *     ``search`` narrows the page and the count together.
          */
         get: operations["admin-list_deployment_users"];
         put?: never;
@@ -241,7 +242,7 @@ export interface paths {
         };
         /**
          * List Aliases
-         * @description List every alias in force, from config.yml and from storage.
+         * @description List every alias in force in your organization, from config.yml and from storage.
          *
          *     Every scope at once, workspace-wide and user-scoped alike: this is the
          *     master-key management view, not what any one caller resolves.
@@ -993,7 +994,7 @@ export interface paths {
         };
         /**
          * List Budgets
-         * @description List all budgets with pagination.
+         * @description List the deployment's budgets and the caller's organization's, with pagination.
          */
         get: operations["budgets-list_budgets"];
         put?: never;
@@ -3471,7 +3472,7 @@ export interface paths {
          *     Serves the paginator's "N of M" beside the list above, and is scoped the
          *     same way, so the total can never describe more rows than the list will show.
          *
-         *     Unlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
+         *     Unlike the operator's ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
          *     is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
          *     this surface has none. So this total keeps matching the list beside it.
          */
@@ -4623,7 +4624,7 @@ export interface paths {
         };
         /**
          * List Policies
-         * @description List every routing policy in force, from config.yml and from storage.
+         * @description List every routing policy in force in your organization, from config.yml and from storage.
          *
          *     Every scope at once, workspace-wide and user-scoped alike: this is the
          *     master-key management view, not what any one caller resolves.
@@ -4798,7 +4799,7 @@ export interface paths {
         };
         /**
          * List Scoped Budgets
-         * @description List scoped budgets, optionally filtered to one scope.
+         * @description List the scoped budgets in the caller's organization, optionally filtered to one scope.
          */
         get: operations["scoped-budgets-list_scoped_budgets"];
         put?: never;
@@ -16996,6 +16997,8 @@ export interface operations {
                 skip?: number;
                 /** @description Maximum number of records to return */
                 limit?: number;
+                /** @description Narrow to accounts whose name or email contains this text, case-insensitively. */
+                search?: string | null;
             };
             header?: never;
             path?: never;
@@ -17251,7 +17254,7 @@ export interface operations {
     "aliases-list_aliases": {
         parameters: {
             query?: {
-                /** @description Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace. */
+                /** @description Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace in your organization. */
                 workspace_id?: string | null;
             };
             header?: never;
@@ -24718,7 +24721,7 @@ export interface operations {
     "routing-list_policies": {
         parameters: {
             query?: {
-                /** @description Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace. */
+                /** @description Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace in your organization. */
                 workspace_id?: string | null;
             };
             header?: never;

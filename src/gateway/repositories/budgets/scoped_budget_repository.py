@@ -355,17 +355,39 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
             ) in result.tuples().all()
         ]
 
-    async def list_in_scopes(self, scopes: ScopeIdSets, *, skip: int, limit: int) -> list[tuple[ScopedBudget, Budget]]:
-        """Return a page of the ceilings on these scopes, each with the budget it names, oldest first."""
-        result = await self.db.execute(
+    async def list_in_scopes(
+        self,
+        scopes: ScopeIdSets,
+        *,
+        skip: int,
+        limit: int,
+        scope_type: ScopeType | None = None,
+        scope_id: str | None = None,
+    ) -> list[tuple[ScopedBudget, Budget]]:
+        """Return a page of the ceilings on these scopes, each with the budget it names, oldest first.
+
+        ``scope_type`` and ``scope_id`` narrow the page to one scope kind or one scope.
+        """
+        statement = (
             select(ScopedBudget, Budget)
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
             .where(_in_scopes(scopes))
-            .order_by(ScopedBudget.created_at, ScopedBudget.id)
-            .offset(skip)
-            .limit(limit)
+        )
+        if scope_type is not None:
+            statement = statement.where(ScopedBudget.scope_type == scope_type)
+        if scope_id is not None:
+            statement = statement.where(ScopedBudget.scope_id == scope_id)
+        result = await self.db.execute(
+            statement.order_by(ScopedBudget.created_at, ScopedBudget.id).offset(skip).limit(limit)
         )
         return list(result.tuples().all())
+
+    async def get_in_scopes(self, scoped_budget_id: str, scopes: ScopeIdSets) -> ScopedBudget | None:
+        """Return the ceiling with this ID when it is on one of these scopes, otherwise None."""
+        result = await self.db.execute(
+            select(ScopedBudget).where(ScopedBudget.id == scoped_budget_id, _in_scopes(scopes))
+        )
+        return result.scalar_one_or_none()
 
     async def lock(self, scoped_budget_ids: Sequence[str]) -> None:
         """Lock these ceilings until the transaction ends, in the order of their IDs."""

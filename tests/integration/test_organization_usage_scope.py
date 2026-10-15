@@ -358,7 +358,7 @@ def test_a_suspended_workspace_membership_stops_granting_the_workspace(
 
 
 def test_a_superuser_reads_their_active_organization_and_not_every_tenant(client: TestClient, world: _World) -> None:
-    """This router is scoped even for an operator; ``/api/v1/usage`` is where they read across tenants."""
+    """This router is scoped even for an operator, and so is ``/api/v1/usage``."""
     listed = _models_listed(client, world, "superuser")
     assert listed == set(_BETA_MODELS)
     assert listed.isdisjoint(_ALPHA_ONE_MODELS)
@@ -469,11 +469,18 @@ def test_an_organization_owner_is_still_refused_by_the_deployment_wide_usage_rou
     assert code == status.HTTP_403_FORBIDDEN
 
 
-def test_the_master_key_still_reads_every_tenant_through_the_deployment_wide_route(
+def test_the_operator_route_reads_the_operators_active_organization(
     client: TestClient, world: _World, master_key_header: dict[str, str]
 ) -> None:
+    """``/api/v1/usage`` follows the rule ``/api/v1/keys`` does: a session reads its active
+    organization, and the header master key the default one, which holds neither tenant here."""
+    code, body = _as(client, world, "superuser", f"{API_ROOT}/usage")
+    assert code == status.HTTP_200_OK, body
+    assert isinstance(body, list)
+    assert {row["model"] for row in body} == set(_BETA_MODELS)
+
     listed = {row["model"] for row in client.get(f"{API_ROOT}/usage", headers=master_key_header).json()}
-    assert set(_ALPHA_ONE_MODELS) | set(_BETA_MODELS) <= listed
+    assert listed.isdisjoint(set(_ALPHA_ONE_MODELS) | set(_BETA_MODELS))
 
 
 @pytest.mark.parametrize("path", _SCOPED_PATHS)

@@ -11,6 +11,8 @@ import { TRACES, workspaceMeta } from "@/shared/api/queryKeys"
 export interface TraceFilters {
   workspaceId: string
   start: string
+  // Optional, so a filter that names only a start reads to now.
+  end?: string
   q: string
   failedOnly: boolean
   harness: string[]
@@ -31,6 +33,7 @@ export function traceParams(filters: TraceFilters): URLSearchParams {
   const params = new URLSearchParams()
   if (filters.workspaceId) params.set("workspace_id", filters.workspaceId)
   if (filters.start) params.set("start", filters.start)
+  if (filters.end) params.set("end", filters.end)
   if (filters.q) params.set("q", filters.q)
   if (filters.failedOnly) params.set("has_error", "true")
   for (const harness of filters.harness) params.append("harness", harness)

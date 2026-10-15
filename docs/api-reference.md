@@ -504,7 +504,7 @@ never a body, a URL or the query:
 |---|---|
 | `Otari-Error-Provider` | The provider that failed, such as `exa`. |
 | `Otari-Error-Status` | The provider's own HTTP error status; absent when it gave none, as for a timeout, an error inside a successful answer, or an answer that could not be read. |
-| `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
+| `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `invalid_header` (a key holding a character that is not ASCII), `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
 | `Otari-Error-Retryable` | `true` for a timeout, a 429 or a 5xx from the provider, when a retry may help; otherwise `false`. |
 
 On a search the workspace's organization key serves, they name the key's

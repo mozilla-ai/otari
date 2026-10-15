@@ -40,7 +40,7 @@
         {
           "name": "List Deployment Users",
           "request": {
-            "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.",
+            "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.\n``search`` narrows the page and the count together.",
             "header": [],
             "method": "GET",
             "url": {
@@ -65,9 +65,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Narrow to accounts whose name or email contains this text, case-insensitively.",
+                  "disabled": true,
+                  "key": "search",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/admin/users?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/admin/users?skip=&limit=&search="
             }
           }
         },
@@ -348,7 +354,7 @@
         {
           "name": "List Aliases",
           "request": {
-            "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
+            "description": "List every alias in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
             "header": [],
             "method": "GET",
             "url": {
@@ -362,7 +368,7 @@
               ],
               "query": [
                 {
-                  "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
+                  "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace in your organization.",
                   "disabled": true,
                   "key": "workspace_id",
                   "value": ""
@@ -1498,7 +1504,7 @@
         {
           "name": "List Budgets",
           "request": {
-            "description": "List all budgets with pagination.",
+            "description": "List the deployment's budgets and the caller's organization's, with pagination.",
             "header": [],
             "method": "GET",
             "url": {
@@ -6137,7 +6143,7 @@
         {
           "name": "List Policies",
           "request": {
-            "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
+            "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
             "header": [],
             "method": "GET",
             "url": {
@@ -6152,7 +6158,7 @@
               ],
               "query": [
                 {
-                  "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
+                  "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace in your organization.",
                   "disabled": true,
                   "key": "workspace_id",
                   "value": ""
@@ -6814,7 +6820,7 @@
         {
           "name": "Count Organization Usage",
           "request": {
-            "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
+            "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the operator's ``GET /api/v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
             "header": [],
             "method": "GET",
             "url": {
@@ -9150,7 +9156,7 @@
         {
           "name": "List Scoped Budgets",
           "request": {
-            "description": "List scoped budgets, optionally filtered to one scope.",
+            "description": "List the scoped budgets in the caller's organization, optionally filtered to one scope.",
             "header": [],
             "method": "GET",
             "url": {

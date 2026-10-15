@@ -7,6 +7,7 @@ import type {
   DeploymentBootstrap,
   InFlightResponse,
   OrganizationMember,
+  ScopedBudget,
   TraceDetail,
   TraceSummary,
   UsageEntry,
@@ -102,6 +103,8 @@ export function mockApi(
     // The trace explorer's reads: one page of sessions, and the one that opens.
     traces?: TraceSummary[]
     traceDetail?: TraceDetail
+    // The deployment's spend ceilings, which the session panel reads per key.
+    ceilings?: ScopedBudget[]
   } = {},
 ) {
   const rows = opts.rows ?? []
@@ -214,6 +217,18 @@ export function mockApi(
           )
         }
         return jsonResponse(rows)
+      }
+      if (url.includes(`${API_ROOT}/scoped-budgets`)) {
+        const query = new URL(url, "http://localhost").searchParams
+        return jsonResponse(
+          (opts.ceilings ?? []).filter(
+            (ceiling) =>
+              (!query.has("scope_type") ||
+                ceiling.scope_type === query.get("scope_type")) &&
+              (!query.has("scope_id") ||
+                ceiling.scope_id === query.get("scope_id")),
+          ),
+        )
       }
       if (url.includes(`${API_ROOT}/organizations/me/members`)) {
         const members = opts.members ?? []

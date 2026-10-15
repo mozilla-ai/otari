@@ -499,6 +499,8 @@ export type WorkspaceMemberRole = NonNullable<
 export type DeploymentAdminAccess = Schemas["DeploymentAdminAccessPublic"]
 /** One account on the deployment, with every organization it belongs to. */
 export type DeploymentUser = Schemas["DeploymentUserPublic"]
+/** One page of the deployment's accounts, with the total the search matched. */
+export type DeploymentUsers = Schemas["DeploymentUsersPublic"]
 export type UpdateDeploymentUserRequest = Schemas["DeploymentUserUpdateRequest"]
 /** A link that sets an account's password: mailed, or returned to pass on. */
 export type PasswordLink = Schemas["PasswordLinkPublic"]

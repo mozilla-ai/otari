@@ -1,6 +1,7 @@
 """The trace read API answers inside the caller's scope and nowhere else.
 
-The operator routes read every workspace. The organization routes follow the
+The operator routes read every workspace of the operator's active organization,
+the rule ``/api/v1/keys`` follows. The organization routes follow the
 rule organization usage follows: an owner or admin reads every workspace in
 their active organization, a member the workspaces they belong to, and nobody
 reads another organization's traces, whose ids answer 404 like ones that do
@@ -29,9 +30,15 @@ _T0 = datetime(2026, 10, 7, 12, tzinfo=UTC)
 
 
 def _identity(
-    session: Session, *, email: str, organization_id: uuid.UUID, role: str, workspace_ids: tuple[uuid.UUID, ...] = ()
+    session: Session,
+    *,
+    email: str,
+    organization_id: uuid.UUID,
+    role: str,
+    workspace_ids: tuple[uuid.UUID, ...] = (),
+    operator: bool = False,
 ) -> str:
-    user = User(email=email, full_name="X", active_organization_id=organization_id)
+    user = User(email=email, full_name="X", active_organization_id=organization_id, is_superuser=operator)
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -141,7 +148,16 @@ def world(
             ),
             "admin": _identity(session, email="a@a.test", organization_id=alpha.id, role="admin"),
             "outsider": _identity(session, email="o@b.test", organization_id=beta.id, role="owner"),
+            "operator": _identity(session, email="op@a.test", organization_id=alpha.id, role="owner", operator=True),
         }
+
+
+def _operator_get(client: TestClient, world: dict[str, str], path: str, params: dict[str, str] | None = None) -> Any:
+    client.cookies.set(SESSION_COOKIE_NAME, world["operator"])
+    try:
+        return client.get(f"{API_ROOT}{path}", params=params)
+    finally:
+        client.cookies.clear()
 
 
 def _listed(client: TestClient, cookie: str) -> list[str]:
@@ -172,13 +188,14 @@ def test_another_organizations_trace_is_not_found(client: TestClient, world: dic
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
-def test_the_operator_reads_every_workspace_and_the_detail_has_turns(
-    client: TestClient, master_key_header: dict[str, str], world: dict[str, str]
+def test_the_operator_reads_every_workspace_of_their_organization_and_the_detail_has_turns(
+    client: TestClient, world: dict[str, str]
 ) -> None:
-    listed = client.get(f"{API_ROOT}/traces", headers=master_key_header).json()
-    assert sorted(item["trace_id"] for item in listed["items"]) == ["s-one", "s-theirs", "s-two"]
+    listed = _operator_get(client, world, "/traces").json()
+    assert sorted(item["trace_id"] for item in listed["items"]) == ["s-one", "s-two"]
+    assert _operator_get(client, world, "/traces/s-theirs").status_code == status.HTTP_404_NOT_FOUND
 
-    detail = client.get(f"{API_ROOT}/traces/s-two", headers=master_key_header).json()
+    detail = _operator_get(client, world, "/traces/s-two").json()
 
     [turn] = detail["turns"]
     assert (turn["state"], turn["llm_calls"], turn["tool_calls"], turn["step_ids"]) == (
@@ -193,12 +210,17 @@ def test_the_operator_reads_every_workspace_and_the_detail_has_turns(
     assert tool["start_time"].startswith("2026-10-07T12:00:10")
 
 
-def test_the_series_counts_sessions_by_whether_they_failed(
+def test_the_series_counts_sessions_by_whether_they_failed(client: TestClient, world: dict[str, str]) -> None:
+    series = _operator_get(client, world, "/traces/series", {"bucket": "hour"}).json()
+
+    assert series["points"] == [{"bucket": "2026-10-07T12:00:00Z", "succeeded": 1, "failed": 1}]
+
+
+def test_the_header_master_key_reads_the_default_organization(
     client: TestClient, master_key_header: dict[str, str], world: dict[str, str]
 ) -> None:
-    series = client.get(f"{API_ROOT}/traces/series?bucket=hour", headers=master_key_header).json()
-
-    assert series["points"] == [{"bucket": "2026-10-07T12:00:00Z", "succeeded": 2, "failed": 1}]
+    listed = client.get(f"{API_ROOT}/traces", headers=master_key_header).json()
+    assert listed["items"] == []
 
 
 def test_the_operator_routes_refuse_a_member(client: TestClient, world: dict[str, str]) -> None:
@@ -213,7 +235,6 @@ def test_the_operator_routes_refuse_a_member(client: TestClient, world: dict[str
 
 def test_a_workspace_filter_narrows_the_scope_and_never_widens_it(
     client: TestClient,
-    master_key_header: dict[str, str],
     world: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
@@ -221,21 +242,16 @@ def test_a_workspace_filter_narrows_the_scope_and_never_widens_it(
         ids = {workspace.name: str(workspace.id) for workspace in session.scalars(select(Workspace))}
 
     def read(path: str, workspace: str, cookie: str | None = None) -> dict[str, Any]:
-        if cookie is not None:
-            client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie or world["operator"])
         try:
-            response = client.get(
-                f"{API_ROOT}{path}",
-                params={"workspace_id": ids[workspace]},
-                headers=master_key_header if cookie is None else {},
-            )
+            response = client.get(f"{API_ROOT}{path}", params={"workspace_id": ids[workspace]})
         finally:
             client.cookies.clear()
         assert response.status_code == status.HTTP_200_OK, response.text
         return dict(response.json())
 
     assert [item["trace_id"] for item in read("/traces", "Two")["items"]] == ["s-two"]
-    assert read("/traces/count", "Theirs")["count"] == 1
+    assert read("/traces/count", "Theirs")["count"] == 0
     assert read("/traces/series", "Two")["points"] == [{"bucket": "2026-10-07T12:00:00Z", "succeeded": 0, "failed": 1}]
 
     admin = "/organizations/me/traces"
@@ -248,7 +264,6 @@ def test_a_workspace_filter_narrows_the_scope_and_never_widens_it(
 
 def test_the_detail_reads_the_workspace_it_names(
     client: TestClient,
-    master_key_header: dict[str, str],
     world: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
@@ -256,10 +271,7 @@ def test_the_detail_reads_the_workspace_it_names(
         ids = {workspace.name: str(workspace.id) for workspace in session.scalars(select(Workspace))}
 
     def status_of(workspace: str) -> int:
-        response = client.get(
-            f"{API_ROOT}/traces/s-two", params={"workspace_id": ids[workspace]}, headers=master_key_header
-        )
-        return response.status_code
+        return int(_operator_get(client, world, "/traces/s-two", {"workspace_id": ids[workspace]}).status_code)
 
     assert status_of("Two") == status.HTTP_200_OK
     assert status_of("One") == status.HTTP_404_NOT_FOUND
@@ -267,7 +279,6 @@ def test_the_detail_reads_the_workspace_it_names(
 
 def test_an_id_in_two_workspaces_read_without_naming_one_is_a_conflict(
     client: TestClient,
-    master_key_header: dict[str, str],
     world: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
@@ -276,6 +287,6 @@ def test_an_id_in_two_workspaces_read_without_naming_one_is_a_conflict(
         _trace(session, one.id, "s-two")
         session.commit()
 
-    response = client.get(f"{API_ROOT}/traces/s-two", headers=master_key_header)
+    response = _operator_get(client, world, "/traces/s-two")
 
     assert response.status_code == status.HTTP_409_CONFLICT

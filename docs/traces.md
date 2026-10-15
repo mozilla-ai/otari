@@ -57,7 +57,7 @@ identifier-shaped.
 
 | Endpoint | Who |
 | --- | --- |
-| `GET /api/v1/traces`, `/count`, `/series`, `/{trace_id}` | the deployment operator, every workspace |
+| `GET /api/v1/traces`, `/count`, `/series`, `/{trace_id}` | the deployment operator, every workspace of their active organization |
 | `GET /api/v1/organizations/me/traces`, and the same three | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to |
 
 A list read narrows to one workspace with `workspace_id`, inside the caller's

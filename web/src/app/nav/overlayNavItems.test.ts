@@ -69,7 +69,7 @@ describe("a build that replaces the nav-item module", () => {
   it("appends into the workspace rail from that same list", () => {
     expect(
       section(NAV_SECTIONS, "observe")?.items.map((item) => item.label),
-    ).toEqual(["Activity", "Usage", "Reports"])
+    ).toEqual(["Activity", "Sessions", "Usage", "Reports"])
   })
 
   it("appends into the deployment rail from that same list", () => {

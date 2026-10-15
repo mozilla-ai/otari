@@ -512,6 +512,23 @@ conversation or tool data into a later Fetch URL on an attacker-controlled
 domain. Disable Fetch or restrict allowed domains when that residual egress risk
 is unacceptable.
 
+### Fetch providers
+
+A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
+names a provider for `otari_web_fetch` and for enriching search results. Neither
+runs on fetch instances yet, so the built-in fetcher above still does both;
+`POST /api/v1/search-tools/{name}/test` with a `url` tries one.
+
+- **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
+  reports what each fetch costs (`costDollars.total`).
+- **Tabstack** (`tabstack`) needs an API key, read from the instance's
+  `api_key`, such as `${TABSTACK_API_KEY}`, and reports no cost. Tabstack's
+  [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
+  page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
+  whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
+  Tabstack documents up to 15 seconds a page at its default `effort` and up to
+  60 at `effort: max`, so give the instance a `timeout` to match.
+
 ### Web search
 
 Otari reaches a licensed search API directly. Set `web_search_provider` to

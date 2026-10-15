@@ -268,7 +268,9 @@ else is dispatched. See
 Config-file policies apply to every workspace. Standalone operators can also
 manage stored policies through the Routing page or `/api/v1/routing/policies`.
 Stored policies belong to one workspace and can optionally be scoped to one
-user.
+user. The operator's list, like `/api/v1/aliases`, shows the stored entries of
+the workspaces in the operator's active organization, and the master key acts in
+the default organization.
 
 An organization's owners and admins manage their own workspaces' policies and
 aliases through `/api/v1/organizations/me/routing-policies` and

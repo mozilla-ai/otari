@@ -8,7 +8,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
@@ -50,6 +50,7 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrgProviderKeyRepository,
     WorkspaceRepository,
+    ids_in_organization,
 )
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
@@ -102,6 +103,7 @@ from gateway.services.tools import (
     WorkspaceSearchKeys,
 )
 from gateway.services.traces import TraceService
+from gateway.services.usage_admin_service import usage_in
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.types.traces import TraceScope
 
@@ -1478,11 +1480,6 @@ def get_trace_service(uow: UnitOfWorkDep) -> TraceService:
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
 
 
-def get_deployment_trace_scope() -> TraceScope:
-    """Every workspace: the scope of the deployment-operator trace routes, which their router gates."""
-    return TraceScope.deployment()
-
-
 async def get_organization_trace_scope(
     identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> TraceScope:
@@ -1631,6 +1628,42 @@ async def _caller_organization_id(
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
 
 
+async def _caller_workspace_ids(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+) -> frozenset[uuid.UUID]:
+    """Every workspace in the organization this request acts in.
+
+    What a deployment-wide read of workspace-owned rows is confined to, so an
+    operator sees their active organization's rows rather than every tenant's.
+    """
+    return frozenset(await WorkspaceRepository(db).get_ids_by_organization(organization_id))
+
+
+CallerWorkspaces = Annotated[frozenset[uuid.UUID], Depends(_caller_workspace_ids)]
+
+
+def _caller_workspace_query(organization_id: CallerOrganization) -> Select[tuple[uuid.UUID]]:
+    """The same workspaces as a subquery, so a read of a growing table filters in the database."""
+    return ids_in_organization(organization_id)
+
+
+CallerWorkspaceQuery = Annotated[Select[tuple[uuid.UUID]], Depends(_caller_workspace_query)]
+
+
+def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]:
+    """The usage rows an operator's usage reads cover: those of the caller's organization."""
+    return usage_in(workspaces)
+
+
+CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
+
+
+def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
+    """The scope of the deployment-operator trace routes: every workspace in the caller's organization."""
+    return TraceScope.workspaces(workspace_ids)
+
+
 async def get_feedback_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     _authenticated: Annotated[str | None, Depends(verify_master_key)],
@@ -1646,6 +1679,9 @@ __all__ = [
     "CodeExecutionPolicyPortDep",
     "ContainerDep",
     "CallerOrganization",
+    "CallerUsageScope",
+    "CallerWorkspaceQuery",
+    "CallerWorkspaces",
     "CurrentIdentity",
     "EntitlementPortDep",
     "FileServiceDep",

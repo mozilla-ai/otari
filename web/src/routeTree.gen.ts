@@ -24,6 +24,7 @@ import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RoutingRouteImport } from './routes/routing'
+import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
@@ -119,6 +120,11 @@ const ProvidersRoute = ProvidersRouteImport.update({
 const RoutingRoute = RoutingRouteImport.update({
   id: '/routing',
   path: '/routing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionsRoute = SessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -244,6 +250,7 @@ export interface FileRoutesByFullPath {
   '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRouteWithChildren
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
@@ -279,6 +286,7 @@ export interface FileRoutesByTo {
   '/members': typeof MembersRoute
   '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
@@ -317,6 +325,7 @@ export interface FileRoutesById {
   '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRouteWithChildren
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
@@ -357,6 +366,7 @@ export interface FileRouteTypes {
     | '/playground'
     | '/providers'
     | '/routing'
+    | '/sessions'
     | '/settings'
     | '/tools'
     | '/usage'
@@ -392,6 +402,7 @@ export interface FileRouteTypes {
     | '/members'
     | '/playground'
     | '/providers'
+    | '/sessions'
     | '/settings'
     | '/usage'
     | '/workspaces'
@@ -429,6 +440,7 @@ export interface FileRouteTypes {
     | '/playground'
     | '/providers'
     | '/routing'
+    | '/sessions'
     | '/settings'
     | '/tools'
     | '/usage'
@@ -468,6 +480,7 @@ export interface RootRouteChildren {
   PlaygroundRoute: typeof PlaygroundRoute
   ProvidersRoute: typeof ProvidersRoute
   RoutingRoute: typeof RoutingRouteWithChildren
+  SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
   UsageRoute: typeof UsageRoute
@@ -580,6 +593,13 @@ declare module '@tanstack/react-router' {
       path: '/routing'
       fullPath: '/routing'
       preLoaderRoute: typeof RoutingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sessions': {
+      id: '/sessions'
+      path: '/sessions'
+      fullPath: '/sessions'
+      preLoaderRoute: typeof SessionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -816,6 +836,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlaygroundRoute: PlaygroundRoute,
   ProvidersRoute: ProvidersRoute,
   RoutingRoute: RoutingRouteWithChildren,
+  SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,
   UsageRoute: UsageRoute,

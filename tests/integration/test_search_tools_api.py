@@ -334,7 +334,7 @@ def test_searxng_keeps_its_entry_without_a_schema(
 def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
     catalog = _catalog(catalog_client, "fetch", headers=master_key_header)
     # builtin serves only the implicit builtin_fetch tool, and fake exists for tests.
-    assert list(catalog) == ["exa"]
+    assert list(catalog) == ["exa", "tabstack"]
     exa = catalog["exa"]
     metadata = any_fetch.AnyFetch.get_provider_metadata("exa")
     assert exa["kind"] == "fetch"

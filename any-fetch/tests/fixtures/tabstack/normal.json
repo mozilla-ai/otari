@@ -1,0 +1,12 @@
+{
+  "status": 200,
+  "body": {
+    "url": "https://example.com/",
+    "content": "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.",
+    "metadata": {
+      "title": "Example Domain",
+      "url": "https://example.com/",
+      "favicon": "data:,"
+    }
+  }
+}

@@ -24,19 +24,24 @@ export function CopyableValue({
   value,
   label,
   className,
+  isTruncated = false,
   children,
 }: {
   /** The exact text a copy yields, which is not always what is rendered. */
   value: string
   label: string
   className?: string
+  /** Ellipsizes the value, keeping the copy control, when space runs out. */
+  isTruncated?: boolean
   /** Defaults to `value`; pass children when the display form differs. */
   children?: ReactNode
 }) {
   const keepPressFromRow = (event: { stopPropagation: () => void }) =>
     event.stopPropagation()
   return (
-    <span className="inline-flex items-center gap-1">
+    <span
+      className={`inline-flex items-center gap-1 ${isTruncated ? "min-w-0" : ""}`}
+    >
       {/* biome-ignore lint/a11y/noStaticElementInteractions: the handlers only stop propagation so a text drag survives; there is no action to expose */}
       <span
         // Focusable, but not tabbable: pressing here focuses the value itself
@@ -45,7 +50,7 @@ export function CopyableValue({
         // this, the first drag in a freshly loaded table selected nothing and only
         // subsequent ones worked.
         tabIndex={-1}
-        className={`select-text outline-none ${className ?? ""}`}
+        className={`select-text outline-none ${isTruncated ? "min-w-0 truncate" : ""} ${className ?? ""}`}
         onPointerDown={keepPressFromRow}
         onMouseDown={keepPressFromRow}
       >

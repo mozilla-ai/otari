@@ -3,8 +3,9 @@ import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
+import { FiCheck, FiMinus } from "react-icons/fi"
 
-import type { CatalogModelDetail, CatalogOffering } from "@/client"
+import type { CatalogOffering } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -14,6 +15,7 @@ import { Badge } from "@/design-system/indicators/Badge"
 import { Dot } from "@/design-system/indicators/Dot"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Tooltip } from "@/design-system/overlays/Tooltip"
 import {
   CAPABILITY_LABELS,
   credentialLabel,
@@ -93,19 +95,6 @@ function SourceMark({ source }: { source: CatalogOffering["price_source"] }) {
       {word.toUpperCase()}
     </span>
   )
-}
-
-// A popular open model is resold by dozens of providers models.dev lists, and
-// the sentence exists to say "you could add one", not to be the list.
-const ELSEWHERE_SHOWN = 6
-
-function elsewhere(
-  providers: CatalogModelDetail["also_available_from"],
-): string {
-  const names = providers.map((provider) => provider.name)
-  if (names.length <= ELSEWHERE_SHOWN) return names.join(", ")
-  const rest = names.length - ELSEWHERE_SHOWN
-  return `${names.slice(0, ELSEWHERE_SHOWN).join(", ")} and ${rest} more`
 }
 
 function rate(value: number | null | undefined): string {
@@ -428,7 +417,9 @@ export function ModelDetailView({
     (model) => model.pricing === null,
   ).length
   const defaultPricing = model.default_pricing
-  const capabilities = CAPABILITY_LABELS.filter(
+  // A model models.dev does not describe has every flag false, so all false
+  // reads as unknown rather than as five refusals.
+  const hasCapabilities = CAPABILITY_LABELS.some(
     ({ key }) => model.capabilities[key],
   )
   const listPriceDiffers = model.offerings.some(
@@ -479,21 +470,6 @@ export function ModelDetailView({
               <CopyableValue value={model.id} label="model id">
                 <code className="text-mono-caption">{model.id}</code>
               </CopyableValue>
-              {model.selector ? (
-                <span className="text-caption">
-                  send it as <code className="text-mono-caption">model</code>
-                  {model.resolves_to ? (
-                    <>
-                      {" "}
-                      and{" "}
-                      <code className="text-mono-caption">
-                        {model.resolves_to}
-                      </code>{" "}
-                      answers
-                    </>
-                  ) : null}
-                </span>
-              ) : null}
               {model.open_weights ? (
                 <Badge tone="muted">Open weights</Badge>
               ) : null}
@@ -566,16 +542,50 @@ export function ModelDetailView({
           />
           <Stat label="Knowledge" value={model.knowledge_cutoff ?? "—"} />
         </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-mono-overline text-muted">
-          {capabilities.map(({ key, label }) => (
-            <span key={key}>{label}</span>
-          ))}
-          {capabilities.length === 0 ? (
-            <span className="normal-case tracking-normal text-subtle">
+        <section
+          aria-labelledby="model-capabilities"
+          className="flex flex-wrap items-center gap-x-5 gap-y-2"
+        >
+          <h2 id="model-capabilities" className="text-overline">
+            Capabilities
+          </h2>
+          {hasCapabilities ? (
+            <ul className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              {CAPABILITY_LABELS.map(({ key, label, description }) => {
+                const supported = model.capabilities[key]
+                return (
+                  <li key={key}>
+                    <Tooltip
+                      content={
+                        // HeroUI's tooltip breaks anywhere, which splits a
+                        // sentence mid-word.
+                        <span className="break-normal">{description}</span>
+                      }
+                    >
+                      <span
+                        className={`inline-flex cursor-default items-center gap-1.5 text-sm ${supported ? "text-foreground" : "text-subtle"}`}
+                      >
+                        {supported ? (
+                          <FiCheck aria-hidden className="shrink-0" />
+                        ) : (
+                          <FiMinus aria-hidden className="shrink-0" />
+                        )}
+                        {label}
+                        <span className="sr-only">
+                          {supported ? ": supported" : ": not supported"}
+                        </span>
+                      </span>
+                    </Tooltip>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <span className="text-caption text-subtle">
               No capability metadata for this model.
             </span>
-          ) : null}
-        </div>
+          )}
+        </section>
       </header>
 
       <div className="border-t border-border" />
@@ -653,25 +663,6 @@ export function ModelDetailView({
               publishes on models.dev. What is metered here is the rate shown;
               the list price is what the provider would charge you directly.
             </InfoBanner>
-          ) : null}
-          {model.also_available_from.length > 0 ? (
-            <p className="text-caption">
-              Also served by {elsewhere(model.also_available_from)}, which{" "}
-              {model.also_available_from.length === 1 ? "is" : "are"} not
-              configured here.
-              {isOperator ? (
-                <>
-                  {" "}
-                  <Link
-                    to="/providers"
-                    className="text-link hover:text-link-hover"
-                  >
-                    Add a provider
-                  </Link>
-                  .
-                </>
-              ) : null}
-            </p>
           ) : null}
         </section>
       </div>

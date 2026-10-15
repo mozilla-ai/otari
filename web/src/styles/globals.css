@@ -103,6 +103,17 @@
 :root,
 .light,
 [data-theme="light"] {
+  /* Trace timeline bar fills (features/traces only): each type's chart slot hue
+     at one lightness, light enough for the one dark ink of the in-bar duration. */
+  --color-trace-bar-tool: #c67f4d;
+  --color-trace-bar-agent: #a280c8;
+  --color-trace-bar-generation: #20a3bc;
+  --color-trace-bar-span: #899499;
+  --color-trace-bar-guardrail: #65a467;
+  --color-trace-bar-mcp: #c77595;
+  --color-trace-bar-ink: #08090a;
+  --trace-switch-track: var(--color-surface-subtle);
+  --trace-switch-thumb: var(--color-surface);
   /* ── Surfaces — four levels, two families, staggered ──────────────────
      Four neutral levels, with the surface family sitting one rung ABOVE
      the background family rather than sharing rungs with it. Two pairs
@@ -472,6 +483,19 @@
 
 .dark,
 [data-theme="dark"] {
+  --color-trace-bar-tool: #e89960;
+  --color-trace-bar-agent: #c09aeb;
+  --color-trace-bar-generation: #37c1de;
+  --color-trace-bar-span: #a5b0b5;
+  --color-trace-bar-guardrail: #7ec27c;
+  --color-trace-bar-mcp: #ea8db2;
+  --color-trace-bar-ink: #08090a;
+  --trace-switch-track: var(--color-surface-alt);
+  --trace-switch-thumb: color-mix(
+    in oklab,
+    var(--color-foreground) 20%,
+    var(--color-surface)
+  );
   /* ── Surfaces — the light block's stagger, mirrored ─────────────────────
      The same four levels and the same one-rung offset between the two
      families, read the other way up:
@@ -802,6 +826,14 @@
   --color-chart-ramp-2: var(--color-chart-ramp-2);
   --color-chart-ramp-3: var(--color-chart-ramp-3);
   --color-chart-ramp-4: var(--color-chart-ramp-4);
+  /* The trace timeline's bar fills, one per span type, and the ink drawn on them. */
+  --color-trace-bar-tool: var(--color-trace-bar-tool);
+  --color-trace-bar-agent: var(--color-trace-bar-agent);
+  --color-trace-bar-generation: var(--color-trace-bar-generation);
+  --color-trace-bar-span: var(--color-trace-bar-span);
+  --color-trace-bar-guardrail: var(--color-trace-bar-guardrail);
+  --color-trace-bar-mcp: var(--color-trace-bar-mcp);
+  --color-trace-bar-ink: var(--color-trace-bar-ink);
   /* Registered so a status dot can be `bg-text-subtle`. Same latent shape as
      the tier above: it has been a plain `:root` variable, reachable from this
      stylesheet and from the `text-subtle` utility, and from nowhere else. A dot
@@ -2528,21 +2560,21 @@ main {
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="time"],
-.otari-activity-table .table__cell[data-key="time"] {
+.otari-activity-table .table__cell[data-column="time"] {
   position: sticky;
   left: var(--activity-pin-start);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="user"],
-.otari-activity-table .table__cell[data-key="user"] {
+.otari-activity-table .table__cell[data-column="user"] {
   position: sticky;
   left: calc(var(--activity-pin-start) + 7.5rem);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="model"],
-.otari-activity-table .table__cell[data-key="model"] {
+.otari-activity-table .table__cell[data-column="model"] {
   position: sticky;
   left: calc(var(--activity-pin-start) + 16.875rem);
   z-index: 1;
@@ -2551,8 +2583,87 @@ main {
 /* One boundary, at the edge of the held region, and only while it is holding
    something back. */
 .otari-activity-table[data-scrolled="true"] .table__column[data-key="model"],
-.otari-activity-table[data-scrolled="true"] .table__cell[data-key="model"] {
+.otari-activity-table[data-scrolled="true"] .table__cell[data-column="model"] {
   border-right: 1px solid var(--color-control-border);
+}
+/* Sessions: one row per agent session, dense on a desk. Last activity and Name
+   are held while the measures scroll, from md up; below md the table is cards.
+   Body cells are matched by index because react-aria gives each cell a
+   generated `data-key`, not its column's. */
+.otari-sessions-table .otari-table.table-root {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-sessions-table .table__row .table__cell {
+  height: 2.75rem;
+  padding-block: 0;
+}
+.otari-sessions-table .table__column[data-key="last_activity"] {
+  width: 11.375rem;
+  min-width: 11.375rem;
+}
+.otari-sessions-table .table__column[data-key="name"] {
+  min-width: 10rem;
+}
+.otari-sessions-table .table__column[data-key="levels"] {
+  width: 6rem;
+  min-width: 6rem;
+}
+.otari-sessions-table .table__column[data-key="latency"] {
+  width: 6rem;
+  min-width: 6rem;
+}
+.otari-sessions-table .table__column[data-key="tokens"] {
+  width: 11rem;
+  min-width: 11rem;
+}
+.otari-sessions-table .table__column[data-key="cost"] {
+  width: 6.5rem;
+  min-width: 6.5rem;
+}
+.otari-sessions-table .table__column[data-key="tags"] {
+  width: 6rem;
+  min-width: 6rem;
+}
+@media (min-width: 48rem) {
+  .otari-sessions-table .table__row .table__cell {
+    height: 1.75rem;
+  }
+  .otari-sessions-table .table__column[data-key="last_activity"],
+  .otari-sessions-table .table__cell[data-column-index="0"] {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: var(--color-background);
+  }
+  .otari-sessions-table .table__column[data-key="name"],
+  .otari-sessions-table .table__cell[data-column-index="1"] {
+    position: sticky;
+    left: 11.375rem;
+    z-index: 1;
+    background-color: var(--color-background);
+  }
+  .otari-sessions-table[data-scrolled="true"] .table__column[data-key="name"],
+  .otari-sessions-table[data-scrolled="true"]
+    .table__cell[data-column-index="1"] {
+    border-right: 1px solid var(--color-control-border);
+  }
+}
+/* The row open in the panel. On the cells, pinned ones included: every cell
+   paints its own background over the row's. */
+.otari-sessions-table .table__row.is-peeked .table__cell {
+  background-color: var(--color-surface-subtle);
+}
+/* The session panel's rows and resize handles sit flush with a scrolling
+   pane, which would clip the base ring's outward 2px, so theirs is drawn
+   inside. */
+.otari-trace-ring:focus-visible {
+  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
+  outline-offset: -2px;
+}
+/* The timeline bar of the span open in the panel. */
+.otari-trace-mark--selected {
+  outline: 1px solid var(--color-text);
 }
 .otari-mcp-table .table__row .table__cell {
   height: 3.25rem;
@@ -2654,7 +2765,7 @@ main {
   min-width: 12.5rem;
 }
 .otari-accounts-table .table__column[data-key="account"],
-.otari-accounts-table .table__cell[data-key="account"] {
+.otari-accounts-table .table__cell[data-column="account"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2663,7 +2774,8 @@ main {
   min-width: 18.75rem;
 }
 .otari-accounts-table[data-scrolled="true"] .table__column[data-key="account"],
-.otari-accounts-table[data-scrolled="true"] .table__cell[data-key="account"] {
+.otari-accounts-table[data-scrolled="true"]
+  .table__cell[data-column="account"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-workspaces-table .table__row .table__cell {
@@ -2685,7 +2797,7 @@ main {
   min-width: 6rem;
 }
 .otari-workspaces-table .table__column[data-key="name"],
-.otari-workspaces-table .table__cell[data-key="name"] {
+.otari-workspaces-table .table__cell[data-column="name"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2694,7 +2806,7 @@ main {
   min-width: 27.5rem;
 }
 .otari-workspaces-table[data-scrolled="true"] .table__column[data-key="name"],
-.otari-workspaces-table[data-scrolled="true"] .table__cell[data-key="name"] {
+.otari-workspaces-table[data-scrolled="true"] .table__cell[data-column="name"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-provider-keys-table .table__row .table__cell {
@@ -2731,7 +2843,7 @@ main {
   min-width: 18rem;
 }
 .otari-provider-keys-table .table__column[data-key="name"],
-.otari-provider-keys-table .table__cell[data-key="name"] {
+.otari-provider-keys-table .table__cell[data-column="name"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2739,7 +2851,8 @@ main {
 }
 .otari-provider-keys-table[data-scrolled="true"]
   .table__column[data-key="name"],
-.otari-provider-keys-table[data-scrolled="true"] .table__cell[data-key="name"] {
+.otari-provider-keys-table[data-scrolled="true"]
+  .table__cell[data-column="name"] {
   border-right: 1px solid var(--color-control-border);
 }
 /* The organization's guardrail definitions. Name, guardrail and checks absorb
@@ -2793,7 +2906,7 @@ main {
   width: 12rem;
   min-width: 12rem;
 }
-.otari-guardrail-mandates-table .table__cell[data-key="on_unavailable"] {
+.otari-guardrail-mandates-table .table__cell[data-column="on_unavailable"] {
   white-space: nowrap;
 }
 .otari-guardrail-mandates-table .table__column[data-key="actions"] {
@@ -2858,7 +2971,7 @@ main {
   min-width: 9rem;
 }
 .otari-members-table .table__column[data-key="member"],
-.otari-members-table .table__cell[data-key="member"] {
+.otari-members-table .table__cell[data-column="member"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2867,7 +2980,7 @@ main {
 /* One boundary, at the edge of the held lane, and only while it is holding
    something back. */
 .otari-members-table[data-scrolled="true"] .table__column[data-key="member"],
-.otari-members-table[data-scrolled="true"] .table__cell[data-key="member"] {
+.otari-members-table[data-scrolled="true"] .table__cell[data-column="member"] {
   border-right: 1px solid var(--color-control-border);
 }
 /* Key lanes stay fixed while the name absorbs the available width. */
@@ -2985,8 +3098,7 @@ main {
 /* A relative time is short but wraps at this lane width ("4 minutes ago" is
    three words), and a wrapped cell is the one thing that can break the row
    pitch below. */
-.otari-overview-activity .table__cell[data-key="time"],
-.otari-overview-activity .table__row .table__cell:first-child {
+.otari-overview-activity .table__cell[data-column="time"] {
   white-space: nowrap;
 }
 .otari-overview-activity .table__column[data-key="key"] {

@@ -18,8 +18,11 @@ def _providers() -> dict[str, type["AnyFetch"]]:
     from any_fetch.providers.builtin import BuiltinProvider
     from any_fetch.providers.exa import ExaProvider
     from any_fetch.providers.fake import FakeProvider
+    from any_fetch.providers.tabstack import TabstackProvider
 
-    return {provider.METADATA.name: provider for provider in (BuiltinProvider, ExaProvider, FakeProvider)}
+    return {
+        provider.METADATA.name: provider for provider in (BuiltinProvider, ExaProvider, FakeProvider, TabstackProvider)
+    }
 
 
 def get_supported_providers() -> list[str]:

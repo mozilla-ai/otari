@@ -82,6 +82,13 @@ async def list_deployment_users(
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description="Narrow to accounts whose name or email contains this text, case-insensitively.",
+        ),
+    ] = None,
 ) -> DeploymentUsersPublic:
     """List every account on this deployment, with the organizations each belongs to.
 
@@ -90,8 +97,9 @@ async def list_deployment_users(
     membership, while this one carries every identity at whatever standing,
     including one whose memberships are all suspended. Each row also reports when
     the account last signed in to the dashboard, and null there means never.
+    ``search`` narrows the page and the count together.
     """
-    return await service.list_users(actor=current_identity, skip=skip, limit=limit)
+    return await service.list_users(actor=current_identity, skip=skip, limit=limit, search=search)
 
 
 @router.patch("/users/{user_id}")
