@@ -215,12 +215,13 @@ not offer the page at all.
 
 ## Observability
 
-Activity opens on [agent sessions](traces.md) where the deployment records
-traces (`trace_capture_enabled`, on by default; a hybrid gateway records none),
-with the per-request log one switch away (Sessions | Requests). A session opens
-in a side panel showing its turns, requests, and the spans under each. Where no
-traces are recorded, Activity is the per-request log alone. Usage provides
-aggregates and time series. Routed requests share a request-group ID, so the
+Activity is the per-request log. Sessions lists [agent sessions](traces.md)
+where the deployment records traces (`trace_capture_enabled`, on by default; a
+hybrid gateway records none), and has no entry where it does not. A session
+opens in a side panel as a tree of its turns, LLM calls and tool calls, a
+timeline of the same spans, or a flat log; before a span is picked, the panel
+shows what the session cost against its key's own spend ceiling and where the
+gateway stepped in. Usage provides aggregates and time series. Routed requests share a request-group ID, so the
 request log can show the attempted models and the model that served the
 response. Imported usage is labeled by
 source and does not consume a budget.
