@@ -14,6 +14,7 @@ describe("formatDuration", () => {
 
   it("counts hours and minutes from an hour up, so a long session stays short", () => {
     expect(formatDuration(3_600_000)).toBe("1h 00m")
+    expect(formatDuration(3_599_600)).toBe("1h 00m")
     expect(formatDuration((1325 * 60 + 40) * 1000)).toBe("22h 06m")
   })
 })
