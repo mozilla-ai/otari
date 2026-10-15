@@ -11,8 +11,13 @@ export function formatTraceTimestamp(iso: string, withMs = false): string {
   return `${date} ${time}${withMs ? `.${pad(d.getMilliseconds(), 3)}` : ""}`
 }
 
-// `formatLatency` for under a minute; "2m 05s" from 60 s up.
+// `formatLatency` for under a minute; "2m 05s" from 60 s up; "22h 05m" from an
+// hour up.
 export function formatDuration(ms: number): string {
+  if (ms >= 3_600_000) {
+    const total = Math.round(ms / 60_000)
+    return `${Math.floor(total / 60)}h ${pad(total % 60)}m`
+  }
   if (ms >= 60_000) {
     const total = Math.round(ms / 1000)
     return `${Math.floor(total / 60)}m ${pad(total % 60)}s`

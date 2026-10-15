@@ -2598,6 +2598,13 @@ main {
   height: 2.75rem;
   padding-block: 0;
 }
+/* Every row is one line high. A cell's height is only a floor, so a wrapped
+   chip, duration or header would grow its row; the scroll frame takes the
+   width instead. */
+.otari-sessions-table .table__column,
+.otari-sessions-table .table__cell[data-column] {
+  white-space: nowrap;
+}
 .otari-sessions-table .table__column[data-key="last_activity"] {
   width: 11.375rem;
   min-width: 11.375rem;
