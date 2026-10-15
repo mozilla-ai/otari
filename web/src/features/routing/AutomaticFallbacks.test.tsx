@@ -75,12 +75,12 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).getAllByLabelText("then")).toHaveLength(1)
   })
 
-  it("labels Gemini's tools as its own", async () => {
+  it("labels a provider's tools as its own where the server says it runs them", async () => {
     const gemini: AutomaticFallback = {
       ...SONNET,
       id: "google/gemini-x",
       name: "Gemini X",
-      offerings: [offering("gemini:models/gemini-x", [], ["web_search"])],
+      offerings: [offering("gemini:models/gemini-x", ["web_search"])],
     }
     await renderWithRouter(<AutomaticFallbacks fallbacks={[gemini]} />)
 

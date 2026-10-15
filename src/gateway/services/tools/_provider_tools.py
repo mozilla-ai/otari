@@ -33,6 +33,12 @@ _PROVIDER_WORDS: tuple[tuple[Dialect, dict[str, Any]], ...] = (
 )
 
 
+# Providers whose callers declare tools in the provider's own format, which the
+# gateway forwards untouched (Gemini's ``google_search``, ``url_context`` and
+# ``code_execution``): the provider runs every one of them itself.
+_OWN_TOOL_FORMATS = frozenset({"gemini", "vertexai"})
+
+
 def _deployment_preference(config: GatewayConfig, tool: BuiltinTool) -> CodeExecutor:
     if tool is _code_execution_tool.TOOL:
         return config.effective_code_executor()
@@ -48,6 +54,8 @@ def provider_tools(config: GatewayConfig, provider: str) -> CandidateTools:
     under none of the declarations above is decided in a dialect where nothing is
     native, so Otari runs it wherever its preference and a backend allow.
     """
+    if provider in _OWN_TOOL_FORMATS:
+        return CandidateTools(native=frozenset(tool.name for tool in BUILTIN_TOOLS))
     answer = CandidateTools()
     for tool in BUILTIN_TOOLS:
         dialect, entry = next(

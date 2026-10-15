@@ -4,6 +4,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.services.tools import provider_tools
+from gateway.services.tools._registry import BUILTIN_TOOLS
 
 _SEARCH = "web_search"
 _FETCH = "web_fetch"
@@ -43,3 +44,10 @@ def test_the_deployment_executor_claims_code_from_a_provider_that_runs_it() -> N
     assert _CODE in anthropic.claimed
     assert _CODE not in anthropic.native
     assert _SEARCH in anthropic.native
+
+
+def test_gemini_runs_every_tool_in_its_own_format() -> None:
+    answer = provider_tools(GatewayConfig(), "gemini")
+
+    assert answer.native == frozenset(tool.name for tool in BUILTIN_TOOLS)
+    assert answer.claimed == frozenset()
