@@ -57,14 +57,17 @@ identifier-shaped.
 
 | Endpoint | Who |
 | --- | --- |
-| `GET /api/v1/traces`, `/count`, `/series`, `/{trace_id}` | the deployment operator, every workspace of their active organization |
-| `GET /api/v1/organizations/me/traces`, and the same three | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to |
+| `GET /api/v1/traces`, `/count`, `/series`, `/{trace_id}`, `/requests/{request_id}` | the deployment operator, every workspace of their active organization |
+| `GET /api/v1/organizations/me/traces`, and the same four | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to |
 
 A list read narrows to one workspace with `workspace_id`, inside the caller's
 scope and never beyond it. A trace is keyed by its workspace and its id, so a
 detail read takes the `workspace_id` its list entry names; without it, an id in
-more than one of the caller's workspaces answers 409 rather than a guess. A
-trace outside the caller's scope answers 404.
+more than one of the caller's workspaces answers 409 rather than a guess.
+`/requests/{request_id}` answers the session a gateway request was traced into,
+by the `Otari-Request-ID` it was sent (a usage row's `request_group_id`), and 404
+where the scope holds no trace of it. A trace outside the caller's scope answers
+404.
 
 Deleting a user erases their traces, as it erases their telemetry.
 

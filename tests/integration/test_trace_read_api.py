@@ -85,6 +85,7 @@ def _trace(session: Session, workspace_id: uuid.UUID, trace_id: str, *, failed: 
                 kind="step",
                 origin="gateway",
                 name="step",
+                request_id=f"{trace_id}-{span_id}",
                 outcome="error" if failed and span_id == "req-2" else "ok",
                 opens_turn=opens,
                 start_time=start,
@@ -100,6 +101,7 @@ def _trace(session: Session, workspace_id: uuid.UUID, trace_id: str, *, failed: 
                 kind="llm",
                 origin="gateway",
                 name="chat",
+                request_id=f"{trace_id}-{span_id}",
                 outcome="ok",
                 input_tokens=10,
                 output_tokens=2,
@@ -208,6 +210,29 @@ def test_the_operator_reads_every_workspace_of_their_organization_and_the_detail
     assert tool["approximate"] is True
     assert tool["parent_span_id"] == "req-1"
     assert tool["start_time"].startswith("2026-10-07T12:00:10")
+
+
+def test_a_request_opens_the_session_it_was_traced_into_inside_the_scope_only(
+    client: TestClient, world: dict[str, str]
+) -> None:
+    def status_and_trace(cookie: str, request_id: str) -> tuple[int, str | None]:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        try:
+            response = client.get(f"{API_ROOT}/organizations/me/traces/requests/{request_id}")
+        finally:
+            client.cookies.clear()
+        return response.status_code, response.json().get("trace_id")
+
+    assert status_and_trace(world["member"], "s-one-req-2") == (status.HTTP_200_OK, "s-one")
+    # Another workspace of the organization, another organization, and an id never traced read alike.
+    assert status_and_trace(world["member"], "s-two-req-1")[0] == status.HTTP_404_NOT_FOUND
+    assert status_and_trace(world["outsider"], "s-one-req-1")[0] == status.HTTP_404_NOT_FOUND
+    assert status_and_trace(world["admin"], "never-traced")[0] == status.HTTP_404_NOT_FOUND
+    assert status_and_trace(world["admin"], "s-two-req-1") == (status.HTTP_200_OK, "s-two")
+
+    found = _operator_get(client, world, "/traces/requests/s-two-req-2").json()
+    assert (found["trace_id"], found["error_count"]) == ("s-two", 1)
+    assert _operator_get(client, world, "/traces/requests/s-theirs-req-1").status_code == status.HTTP_404_NOT_FOUND
 
 
 def test_the_series_counts_sessions_by_whether_they_failed(client: TestClient, world: dict[str, str]) -> None:

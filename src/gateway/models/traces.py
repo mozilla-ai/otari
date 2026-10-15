@@ -80,6 +80,8 @@ class TraceSpan(Base):
         Index("ix_trace_spans_trace_start", "workspace_id", "trace_id", "start_time"),
         # Closes a client-run tool when a later request in the session answers it.
         Index("ix_trace_spans_trace_tool_call", "workspace_id", "trace_id", "tool_call_id"),
+        # Finds the session a request from the usage log was traced into.
+        Index("ix_trace_spans_request_id", "request_id"),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(

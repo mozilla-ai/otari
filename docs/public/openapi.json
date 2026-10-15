@@ -33475,6 +33475,57 @@
         ]
       }
     },
+    "/api/v1/organizations/me/traces/requests/{request_id}": {
+      "get": {
+        "description": "The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.\n\nThe usage log's ``request_group_id`` is that id, so a request log row opens its\nsession here. A request outside the scope, or with no trace stored, is a 404.",
+        "operationId": "organization-traces-trace_of_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSummaryPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Trace Of Request",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
     "/api/v1/organizations/me/traces/series": {
       "get": {
         "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
@@ -40780,6 +40831,57 @@
           }
         ],
         "summary": "Count Traces",
+        "tags": [
+          "traces"
+        ]
+      }
+    },
+    "/api/v1/traces/requests/{request_id}": {
+      "get": {
+        "description": "The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.\n\nThe usage log's ``request_group_id`` is that id, so a request log row opens its\nsession here. A request outside the scope, or with no trace stored, is a 404.",
+        "operationId": "traces-trace_of_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSummaryPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Trace Of Request",
         "tags": [
           "traces"
         ]

@@ -3391,6 +3391,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/traces/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trace Of Request
+         * @description The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.
+         *
+         *     The usage log's ``request_group_id`` is that id, so a request log row opens its
+         *     session here. A request outside the scope, or with no trace stored, is a 404.
+         */
+        get: operations["organization-traces-trace_of_request"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/traces/series": {
         parameters: {
             query?: never;
@@ -5468,6 +5491,29 @@ export interface paths {
          * @description Count the agent sessions that match.
          */
         get: operations["traces-count_traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/traces/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trace Of Request
+         * @description The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.
+         *
+         *     The usage log's ``request_group_id`` is that id, so a request log row opens its
+         *     session here. A request outside the scope, or with no trace stored, is a 404.
+         */
+        get: operations["traces-trace_of_request"];
         put?: never;
         post?: never;
         delete?: never;
@@ -22604,6 +22650,37 @@ export interface operations {
             };
         };
     };
+    "organization-traces-trace_of_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceSummaryPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-traces-trace_series": {
         parameters: {
             query?: {
@@ -25891,6 +25968,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TraceCountPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "traces-trace_of_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceSummaryPublic"];
                 };
             };
             /** @description Validation Error */

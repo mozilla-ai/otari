@@ -103,6 +103,8 @@ export function mockApi(
     // The trace explorer's reads: one page of sessions, and the one that opens.
     traces?: TraceSummary[]
     traceDetail?: TraceDetail
+    // The session a request was traced into; without one, the lookup is a 404.
+    requestTrace?: TraceSummary
     // The deployment's spend ceilings, which the session panel reads per key.
     ceilings?: ScopedBudget[]
   } = {},
@@ -192,6 +194,11 @@ export function mockApi(
       }
       if (url.includes("/traces/series")) {
         return jsonResponse({ bucket: "hour", points: [] })
+      }
+      if (url.includes("/traces/requests/")) {
+        return opts.requestTrace
+          ? jsonResponse(opts.requestTrace)
+          : jsonResponse({ detail: "No trace holds the request" }, 404)
       }
       if (/\/traces\/[^?]+/.test(url)) {
         return opts.traceDetail

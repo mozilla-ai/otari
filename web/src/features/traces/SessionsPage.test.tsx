@@ -1,3 +1,4 @@
+import { useLocation } from "@tanstack/react-router"
 import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent, { type UserEvent } from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -48,6 +49,16 @@ const keyCeiling = (overrides: Partial<ScopedBudget> = {}) =>
     ...overrides,
   })
 
+// The page's own query string, so a test can read what the URL now holds.
+function SearchProbe() {
+  const { searchStr } = useLocation()
+  return (
+    <output aria-label="Current search">
+      {new URLSearchParams(searchStr).get("span") ?? ""}
+    </output>
+  )
+}
+
 async function openFirstSession(user: Pick<UserEvent, "click"> = userEvent) {
   const sessions = await screen.findByRole("grid", { name: "Sessions" })
   await user.click(
@@ -57,6 +68,54 @@ async function openFirstSession(user: Pick<UserEvent, "click"> = userEvent) {
 }
 
 describe("SessionsPage", () => {
+  it("opens on the span a link names, and the URL follows the span picked", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      // Off the list, as a link from Activity to an older session is.
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "llm-2"
+            ? { ...span, model: "claude-sonnet-5" }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <>
+        <SessionsPage />
+        <SearchProbe />
+      </>,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-2`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByRole("heading", { name: "claude-sonnet-5" }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("button", { current: true }),
+    ).toHaveAccessibleName(/claude-sonnet-5/)
+
+    await user.click(within(peek).getByRole("button", { name: /Bash/ }))
+
+    expect(
+      screen.getByRole("status", { name: "Current search" }),
+    ).toHaveTextContent("call-toolu_1")
+    await user.click(within(peek).getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status", { name: "Current search" }),
+      ).toHaveTextContent(/^$/),
+    )
+  })
+
   it("lists sessions from the trace API and opens one into its spans", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 

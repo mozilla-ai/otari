@@ -46,8 +46,9 @@ import {
 
 const DEFAULT_PAGE_SIZE = 50
 
-// The list's filters, window and page live in the URL beside the open session,
-// so a shared link or Back returns to the list the panel was opened from.
+// The list's filters, window and page live in the URL beside the open session
+// and its picked span, so a shared link or Back returns to the list the panel
+// was opened from, and a link from Activity opens on one LLM call.
 const URL_DEFAULTS = {
   range: ACTIVITY_DEFAULT_KEY,
   start_date: "",
@@ -58,6 +59,7 @@ const URL_DEFAULTS = {
   size: String(DEFAULT_PAGE_SIZE),
   peek: "",
   peek_workspace: "",
+  span: "",
 } as const
 const LEVEL_OPTIONS = [
   { value: "", label: "All levels" },
@@ -271,6 +273,7 @@ export function SessionsPage() {
       peek: id,
       peek_workspace:
         rows.find((session) => session.trace_id === id)?.workspace_id ?? "",
+      span: "",
     })
   const previous = openIndex > 0 ? rows[openIndex - 1].trace_id : null
   const next =
@@ -388,7 +391,9 @@ export function SessionsPage() {
         <TracePeek
           trace={open}
           error={detail.isError ? detail.error : undefined}
-          onClose={() => url.patch({ peek: "", peek_workspace: "" })}
+          initialSpanId={url.get("span") || undefined}
+          onSpanChange={(spanId) => url.patch({ span: spanId ?? "" })}
+          onClose={() => url.patch({ peek: "", peek_workspace: "", span: "" })}
           onPrevious={previous ? () => openPeek(previous) : undefined}
           onNext={next ? () => openPeek(next) : undefined}
         />

@@ -6555,6 +6555,36 @@
           }
         },
         {
+          "name": "Trace Of Request",
+          "request": {
+            "description": "The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.\n\nThe usage log's ``request_group_id`` is that id, so a request log row opens its\nsession here. A request outside the scope, or with no trace stored, is a 404.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                "requests",
+                ":request_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/requests/:request_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "request_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Trace Series",
           "request": {
             "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
@@ -10195,6 +10225,34 @@
                 }
               ],
               "raw": "{{baseUrl}}/api/v1/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "Trace Of Request",
+          "request": {
+            "description": "The session a gateway request was traced into, by the ``Otari-Request-ID`` it was sent.\n\nThe usage log's ``request_group_id`` is that id, so a request log row opens its\nsession here. A request outside the scope, or with no trace stored, is a 404.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                "requests",
+                ":request_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/requests/:request_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "request_id",
+                  "value": ""
+                }
+              ]
             }
           }
         },

@@ -257,6 +257,8 @@ function Attributes({
 export function TracePeek({
   trace,
   error,
+  initialSpanId,
+  onSpanChange,
   onClose,
   onPrevious,
   onNext,
@@ -264,6 +266,10 @@ export function TracePeek({
   trace: Trace
   /** Why the session's spans could not be read, when they could not. */
   error?: unknown
+  /** The span to open on, as a link names it. Read once, when the panel opens. */
+  initialSpanId?: string
+  /** Reports each span picked in the panel, so the URL can follow it. */
+  onSpanChange?: (spanId: string | null) => void
   onClose: () => void
   onPrevious?: () => void
   onNext?: () => void
@@ -302,13 +308,19 @@ export function TracePeek({
     traceId: string
     id: string | null
     isDetailShown: boolean
-  } | null>(null)
-  // Cleared whenever the peeked trace changes, so every trace opens on its root.
+  } | null>(() =>
+    initialSpanId
+      ? { traceId: trace.id, id: initialSpanId, isDetailShown: true }
+      : null,
+  )
+  // Cleared whenever the peeked trace changes, so every other trace opens on its root.
   if (selection && selection.traceId !== trace.id) setSelection(null)
   const selectedId = selection?.id ?? null
   const isDetailShown = selection?.isDetailShown ?? false
-  const setSelectedId = (id: string | null) =>
+  const setSelectedId = (id: string | null) => {
     setSelection({ traceId: trace.id, id, isDetailShown: true })
+    onSpanChange?.(id)
+  }
   const showTree = () =>
     setSelection({ traceId: trace.id, id: selectedId, isDetailShown: false })
   const observation =
@@ -382,6 +394,16 @@ export function TracePeek({
       if (opener?.isConnected) opener.focus()
     }
   }, [])
+
+  // A panel opened on a span brings it into view once the spans arrive.
+  const isSpanUnseen = useRef(initialSpanId !== undefined)
+  useEffect(() => {
+    if (!loaded || !isSpanUnseen.current) return
+    isSpanUnseen.current = false
+    navRef.current
+      ?.querySelector('[aria-current="true"]')
+      ?.scrollIntoView({ block: "nearest" })
+  }, [loaded])
 
   // The pane swap below md moves focus with it, as ListDetail does. Only on a
   // change, and a no-op from md up, where the Back control is not displayed.

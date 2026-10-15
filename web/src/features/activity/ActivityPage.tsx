@@ -86,6 +86,7 @@ import {
 } from "./activityModel"
 import { InFlightControl } from "./InFlightControl"
 import { RequestDetail } from "./RequestDetail"
+import { RequestTraceLink } from "./RequestTraceLink"
 import { RoutingCell } from "./RoutingCell"
 import { StatusMark } from "./StatusMark"
 import { TokenBar } from "./TokenBar"
@@ -801,7 +802,12 @@ export function ActivityPage() {
     (entry: UsageEntry) => (
       <div>
         <div className="flex items-center justify-between border-b border-border px-4 py-2">
-          <span className="text-body">Request detail</span>
+          {/* Left, by the title: the header spans the table's scroll width,
+              so its right end can sit off screen. */}
+          <div className="flex items-center gap-3">
+            <span className="text-body">Request detail</span>
+            <RequestTraceLink entry={entry} />
+          </div>
           <Button
             size="sm"
             variant="ghost"
