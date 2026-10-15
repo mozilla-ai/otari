@@ -144,6 +144,17 @@ def cache_tokens_in_prompt_of(usage: CompletionUsage) -> bool:
     return True
 
 
+# Providers that report cache reads/writes *additively* (outside ``input_tokens``),
+# the Anthropic shape. Everything else is assumed OpenAI-shaped, where cached
+# tokens are a subset of ``input_tokens``.
+_ADDITIVE_CACHE_PROVIDERS = frozenset({"anthropic"})
+
+
+def cache_tokens_in_prompt_for(provider: str) -> bool:
+    """Whether a provider named in telemetry counts its cache tokens inside ``input_tokens``."""
+    return provider.strip().lower() not in _ADDITIVE_CACHE_PROVIDERS
+
+
 def reasoning_tokens_of(usage: CompletionUsage) -> int:
     """Return the reasoning-token count carried by ``usage``.
 
