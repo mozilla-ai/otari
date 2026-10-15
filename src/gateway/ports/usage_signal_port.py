@@ -24,7 +24,10 @@ plane instead.
 
 The facts carry no organization, which the row does not record (an adapter
 resolves it from ``workspace_id``), and no caller content: no error message,
-no request tags, nothing a request or a response said.
+no request tags, nothing a request or a response said. They do say whether
+the deployment paid for the credential the row was served on
+(``deployment_paid``), which is what tells managed usage from an
+organization's own.
 
 Stability: this interface is not frozen while Otari is pre-1.0.
 """
@@ -70,6 +73,9 @@ class RecordedUsage:
     # Served here from somebody's own code rather than from the dashboard's
     # Playground: the traffic the setup guide counts as integrating Otari.
     integration_traffic: bool
+    # Served on a credential ``ModelProviderPort`` handed out, which the
+    # deployment pays for (``UsageLog.deployment_paid``).
+    deployment_paid: bool
 
 
 class UsageSignalPort(Protocol):

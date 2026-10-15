@@ -129,6 +129,8 @@ def test_a_chat_completion_tells_the_port_about_its_row(
     assert usage.cost == row.cost == EXPECTED_COST
     assert usage.status == "success"
     assert usage.integration_traffic is True
+    # Served on the deployment's configured key, which no ``ModelProviderPort`` handed out.
+    assert usage.deployment_paid is row.deployment_paid is False
 
 
 def test_a_playground_completion_is_not_integration_traffic(

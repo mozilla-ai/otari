@@ -107,6 +107,7 @@ def test_a_row_maps_to_the_facts_the_port_reports() -> None:
         cost=Decimal("0.0049"),
         latency_ms=2900,
         integration_traffic=True,
+        deployment_paid=False,
     )
 
 
@@ -122,6 +123,14 @@ def test_no_error_text_tags_or_content_cross_the_seam() -> None:
 def test_a_float_cost_is_reported_as_an_exact_amount() -> None:
     assert _recorded_usage(_usage_row(cost=0.25)).cost == Decimal("0.25")
     assert _recorded_usage(_usage_row(cost=None)).cost is None
+
+
+@pytest.mark.parametrize(
+    ("overrides", "paid"), [({}, False), ({"deployment_paid": False}, False), ({"deployment_paid": True}, True)]
+)
+def test_deployment_paid_is_reported_and_false_when_unset(overrides: dict[str, Any], paid: bool) -> None:
+    """A row built without the flag reads as the column default, false."""
+    assert _recorded_usage(_usage_row(**overrides)).deployment_paid is paid
 
 
 @pytest.mark.parametrize(

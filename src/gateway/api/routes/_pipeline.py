@@ -4305,6 +4305,7 @@ async def record_usage(
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
     prices: RequestPrices | None = None,
+    deployment_paid: bool = False,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -4365,6 +4366,8 @@ async def record_usage(
             row's ``request_group_id`` when ``attribution`` carries none, so every
             row a request writes is findable by the id the caller holds.
         tags: The caller's request tags (``RequestContext.tags``), stored as-is.
+        deployment_paid: The request was admitted as deployment-paid
+            (``RequestContext.deployment_charge`` is set), stored as-is.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -4393,6 +4396,7 @@ async def record_usage(
         attempt_count=attribution.attempt_count if attribution else None,
         request_group_id=attribution.request_group_id if attribution else request_id,
         tags=tags,
+        deployment_paid=deployment_paid,
     )
 
     usage_data = usage_override
@@ -4848,6 +4852,7 @@ async def _log_failure_and_refund(
         workspace_id=ctx.workspace_id,
         request_id=ctx.request_id,
         tags=ctx.tags,
+        deployment_paid=ctx.deployment_charge is not None,
     )
     if ctx.reservation is not None:
         if cost:
@@ -5252,9 +5257,11 @@ def build_streaming_response(
     a cost look it up by ``Otari-Request-ID`` afterwards.
 
     ``deployment_charge`` charges a deployment-paid request's settled cost to
-    its organization wherever a callback reconciles the reservation.
+    its organization wherever a callback reconciles the reservation, and marks
+    every row a callback writes ``deployment_paid``.
     """
     platform_active = platform_correlation_id is not None
+    deployment_paid = deployment_charge is not None
 
     async def _charge(cost: Decimal | None, *, expects_cost: bool) -> None:
         assert db is not None
@@ -5323,6 +5330,7 @@ def build_streaming_response(
             request_id=request_id,
             tags=tags,
             prices=prices,
+            deployment_paid=deployment_paid,
         )
         if reservation is not None:
             await _charge(logged.cost, expects_cost=True)
@@ -5378,6 +5386,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
                 prices=prices,
+                deployment_paid=deployment_paid,
             )
             await _charge(logged.cost, expects_cost=True)
             await reconcile_reservation(db, reservation, logged.cost or Decimal(0), actual_tokens=0)
@@ -5400,6 +5409,7 @@ def build_streaming_response(
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
+                deployment_paid=deployment_paid,
             )
             # "Free" is about the tokens the provider never reported, not about
             # tool calls the gateway definitely ran and owes for.
@@ -5431,6 +5441,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            deployment_paid=deployment_paid,
         )
         # The estimate covers the unreported tokens; log_usage adds any tool cost on
         # top of it, so reconcile against the row's total rather than the estimate.
@@ -5498,6 +5509,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            deployment_paid=deployment_paid,
         )
         if reservation is not None:
             # A stream that died after reporting tokens or running searches still
@@ -5542,6 +5554,7 @@ def build_streaming_response(
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
+                deployment_paid=deployment_paid,
             )
             await _charge(abandoned_cost, expects_cost=reported_usage is not None)
             if abandoned_cost:
@@ -6721,6 +6734,7 @@ async def run_standalone_non_stream(
                     request_id=ctx.request_id,
                     tags=ctx.tags,
                     prices=ctx.prices,
+                    deployment_paid=ctx.deployment_charge is not None,
                 )
             if ctx.reservation is not None:
                 await charge_deployment_paid(

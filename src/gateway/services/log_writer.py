@@ -375,6 +375,8 @@ def _recorded_usage(log: UsageLog) -> RecordedUsage:
         cost=to_usd_or_none(log.cost),
         latency_ms=log.latency_ms,
         integration_traffic=_integration_traffic(source, log.endpoint),
+        # Unset, like ``source``, on a row built without it; the column default is false.
+        deployment_paid=bool(log.deployment_paid),
     )
 
 

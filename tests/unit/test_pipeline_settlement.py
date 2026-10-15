@@ -906,6 +906,27 @@ async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row(
     assert row.policy_name is None
 
 
+@pytest.mark.parametrize("paid", [False, True])
+@pytest.mark.asyncio
+async def test_log_usage_stores_whether_the_deployment_paid(monkeypatch: pytest.MonkeyPatch, paid: bool) -> None:
+    _no_pricing(monkeypatch)
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        deployment_paid=paid,
+    )
+
+    (row,) = writer.put_rows
+    assert row.deployment_paid is paid
+
+
 @pytest.mark.asyncio
 async def test_log_usage_still_resolves_the_workspace_when_not_given_one(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fallback stays intact for the callers that have no context to draw
@@ -3284,3 +3305,86 @@ async def test_a_failed_deployment_paid_completion_is_not_charged(monkeypatch: p
 
     assert recorder.charges == []
     assert settlement.refunded == 1
+
+
+async def _abandon(response: Any) -> None:
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    await iterator.aclose()
+
+
+async def _completed_stream() -> AsyncIterator[ChatCompletionChunk]:
+    yield _chunk(CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+
+
+async def _failed_stream() -> AsyncIterator[ChatCompletionChunk]:
+    yield _chunk(_PARTIAL_USAGE)
+    raise RuntimeError("upstream broke")
+
+
+async def _abandoned_stream() -> AsyncIterator[ChatCompletionChunk]:
+    yield _chunk(_PARTIAL_USAGE)
+    yield _chunk()
+
+
+async def _stream_without_usage() -> AsyncIterator[ChatCompletionChunk]:
+    yield _chunk()
+
+
+@pytest.mark.parametrize(
+    ("stream", "config", "abandoned"),
+    [
+        (_completed_stream, GatewayConfig(), False),
+        (_failed_stream, GatewayConfig(), False),
+        (_abandoned_stream, GatewayConfig(), True),
+        (_stream_without_usage, GatewayConfig(stream_missing_usage_policy="estimate"), False),
+        (_stream_without_usage, GatewayConfig(stream_missing_usage_policy="allow_free"), False),
+    ],
+    ids=["completed", "failed", "abandoned", "estimate", "allow_free"],
+)
+@pytest.mark.parametrize("paid", [False, True], ids=["byo", "deployment_paid"])
+@pytest.mark.asyncio
+async def test_every_row_a_stream_writes_says_whether_the_deployment_paid(
+    monkeypatch: pytest.MonkeyPatch,
+    stream: Callable[[], AsyncIterator[ChatCompletionChunk]],
+    config: GatewayConfig,
+    abandoned: bool,
+    paid: bool,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    charge = _deployment_charge(_ChargeRecorder(settlement)) if paid else None
+
+    response = _build(stream(), config, deployment_charge=charge, db=_SavepointDb())
+    if abandoned:
+        await _abandon(response)
+    else:
+        await _drain(response)
+
+    assert settlement.logged
+    assert [row["deployment_paid"] for row in settlement.logged] == [paid] * len(settlement.logged)
+
+
+@pytest.mark.parametrize("paid", [False, True], ids=["byo", "deployment_paid"])
+@pytest.mark.parametrize("fails", [False, True], ids=["served", "failed"])
+@pytest.mark.asyncio
+async def test_a_completions_row_says_whether_the_deployment_paid(
+    monkeypatch: pytest.MonkeyPatch, paid: bool, fails: bool
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    charge = _deployment_charge(_ChargeRecorder(settlement)) if paid else None
+
+    with contextlib.suppress(HTTPException):
+        await _run_standalone(
+            monkeypatch,
+            result=_completion(usage=_usage()),
+            error=RuntimeError("upstream broke") if fails else None,
+            reservation=_reservation(),
+            db=_SavepointDb(),
+            deployment_charge=charge,
+        )
+
+    (row,) = settlement.logged
+    assert row["deployment_paid"] is paid
+    assert (row.get("error") is not None) is fails

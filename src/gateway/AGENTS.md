@@ -139,6 +139,8 @@ A completion served on a `ModelProviderPort` credential is deployment-paid
 domain's (`services/inference/_deployment_funding.py`): `_pipeline.py` admits
 the request through it before dispatch, and charges its settled cost on
 `ctx.db` just before the reservation settles, so the charge lands in that commit.
+Every usage row such a request writes once admitted carries
+`deployment_paid=True` (from `ctx.deployment_charge`); every other row is false.
 
 ## Budget enforcement
 

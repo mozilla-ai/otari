@@ -13,7 +13,7 @@ own provider key never reaches the probe at all.
 import itertools
 import logging
 import sys
-from collections.abc import AsyncIterator, Generator, Iterator
+from collections.abc import AsyncIterator, Callable, Generator, Iterator
 from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -33,11 +33,14 @@ from any_llm.types.completion import (
 )
 from fastapi import status
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
 from gateway.log_config import logger as gateway_logger
+from gateway.models.usage import UsageLog
 
 from .conftest import build_test_client
 
@@ -213,6 +216,11 @@ def _user(client: TestClient) -> dict[str, Any]:
     return user
 
 
+def _deployment_paid_flags(make_session: Callable[[], Session]) -> list[bool]:
+    with make_session() as db:
+        return list(db.scalars(select(UsageLog.deployment_paid).where(UsageLog.user_id == "billed")))
+
+
 def _completion(model: str) -> ChatCompletion:
     return ChatCompletion(
         id="chatcmpl-billed",
@@ -260,7 +268,7 @@ def _chat(client: TestClient, key: dict[str, Any], model: str, *, stream: bool =
 
 
 def test_a_deployment_paid_completion_is_gated_then_charged_its_settled_cost(
-    billed: tuple[TestClient, ModuleType],
+    billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:
     client, probe = billed
     _price(client, "openai:gpt-4o")
@@ -277,9 +285,12 @@ def test_a_deployment_paid_completion_is_gated_then_charged_its_settled_cost(
     user = _user(client)
     assert user["spend"] == pytest.approx(float(COST))
     assert user["reserved"] == pytest.approx(0.0)
+    assert _deployment_paid_flags(db_session_factory) == [True]
 
 
-def test_a_deployment_paid_stream_is_charged_once_after_it_ends(billed: tuple[TestClient, ModuleType]) -> None:
+def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
+    billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
     client, probe = billed
     _price(client, "openai:gpt-4o")
     key = _key(client)
@@ -290,6 +301,7 @@ def test_a_deployment_paid_stream_is_charged_once_after_it_ends(billed: tuple[Te
     assert "[DONE]" in response.text
     assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [("charge", COST, "openai:gpt-4o")]
     assert _user(client)["reserved"] == pytest.approx(0.0)
+    assert _deployment_paid_flags(db_session_factory) == [True]
 
 
 @pytest.mark.parametrize(
@@ -310,7 +322,11 @@ def test_a_deployment_paid_stream_is_charged_once_after_it_ends(billed: tuple[Te
     ids=["chat", "messages", "responses"],
 )
 def test_an_organization_without_funds_is_refused_before_dispatch(
-    billed: tuple[TestClient, ModuleType], path: str, body: dict[str, Any], error_body: Any
+    billed: tuple[TestClient, ModuleType],
+    db_session_factory: Callable[[], Session],
+    path: str,
+    body: dict[str, Any],
+    error_body: Any,
 ) -> None:
     client, probe = billed
     _price(client, "openai:gpt-4o")
@@ -336,9 +352,13 @@ def test_an_organization_without_funds_is_refused_before_dispatch(
     assert _user(client)["reserved"] == pytest.approx(0.0)
     rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
     assert [(row["status"], row["status_code"], row["provider"]) for row in rows] == [("error", 402, "openai")]
+    # Refused before it was served, so nothing the deployment paid for.
+    assert _deployment_paid_flags(db_session_factory) == [False]
 
 
-def test_a_request_on_the_gateways_own_key_never_reaches_billing(billed: tuple[TestClient, ModuleType]) -> None:
+def test_a_request_on_the_gateways_own_key_never_reaches_billing(
+    billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
     client, probe = billed
     _price(client, "anthropic:claude-opus-4")
     key = _key(client)
@@ -350,6 +370,7 @@ def test_a_request_on_the_gateways_own_key_never_reaches_billing(billed: tuple[T
     assert probe.GATES == []
     assert probe.LEDGER == []
     assert _user(client)["spend"] == pytest.approx(float(COST))
+    assert _deployment_paid_flags(db_session_factory) == [False]
 
 
 def test_an_unpriced_deployment_paid_completion_is_not_charged_and_says_so(
