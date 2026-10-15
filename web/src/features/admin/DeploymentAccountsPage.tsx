@@ -10,7 +10,10 @@ import {
 import type { DeploymentUser } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
-import { TablePagination } from "@/design-system/data/TablePagination"
+import {
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+} from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -51,7 +54,11 @@ import { PasswordLinkDialog } from "./PasswordLinkDialog"
 // is deleting one, because historical attribution resolves through rows that
 // hang off it.
 
-const URL_DEFAULTS = { q: "", page: "0", size: "25" }
+const URL_DEFAULTS = { q: "", page: "0", size: String(PAGE_SIZE_OPTIONS[0]) }
+
+// The route's `max_length` on `search`: a longer term from a hand-edited URL
+// would be refused with a 422 rather than searched.
+const MAX_SEARCH_LENGTH = 200
 
 /**
  * The access mark, affirmative: an account that reaches more than the ordinary
@@ -79,9 +86,13 @@ export function DeploymentAccountsPage() {
   // say, and the query would be discarded either way.
   const isGranted = access.data === true
   const url = useUrlState(URL_DEFAULTS)
-  const page = url.getNumber("page")
-  const pageSize = url.getNumber("size")
-  const search = useDebounced(url.get("q").trim())
+  // Clamped, because the URL is editable and the route refuses a negative
+  // `skip` or a `limit` of zero.
+  const page = Math.max(0, url.getNumber("page"))
+  const pageSize =
+    PAGE_SIZE_OPTIONS.find((size) => size === url.getNumber("size")) ??
+    PAGE_SIZE_OPTIONS[0]
+  const search = useDebounced(url.get("q").trim().slice(0, MAX_SEARCH_LENGTH))
   const accounts = useDeploymentUsers({ page, pageSize, search }, isGranted)
   const update = useUpdateDeploymentUser()
   const [deactivating, setDeactivating] = useState<DeploymentUser>()

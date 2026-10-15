@@ -381,6 +381,24 @@ describe("DeploymentAccountsPage", () => {
     ).toBe(true)
   })
 
+  it("falls back to a valid page and size when the URL carries neither", async () => {
+    const requests = mockApi({ accounts: [OPERATOR, ANALYST] })
+    await renderPage(
+      <DeploymentAccountsPage />,
+      "/admin/accounts?page=-3&size=0",
+    )
+    await screen.findByText("Analyst")
+
+    const listed = requests.filter(
+      (request) =>
+        request.method === "GET" && request.url.includes("/admin/users?"),
+    )
+    expect(listed.length).toBeGreaterThan(0)
+    for (const request of listed) {
+      expect(request.url).toContain("skip=0&limit=25")
+    }
+  })
+
   it("says the surface is not for you when the gate refuses", async () => {
     mockApi({ granted: false })
     await renderPage(<DeploymentAccountsPage />)
