@@ -23,7 +23,7 @@ async def test_a_model_is_resolved_once_per_request(monkeypatch: pytest.MonkeyPa
     assert await prices.resolve(db, "openai", "gpt-5") is resolved
     assert await prices.resolve(db, "openai", "gpt-5") is resolved
 
-    lookup.assert_awaited_once_with(db, "openai", "gpt-5", organization_id=organization)
+    lookup.assert_awaited_once_with(db, "openai", "gpt-5", organization_id=organization, deployment_paid=False)
 
 
 @pytest.mark.asyncio
