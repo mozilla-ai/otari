@@ -3,7 +3,7 @@
 Nullable, so spans written before this revision read as unknown rather than zero.
 
 Revision ID: f0f9d05dafc6
-Revises: c4e8a2d6f0b3
+Revises: a3c5e7f9b1d2
 Create Date: 2026-10-15
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f0f9d05dafc6"
-down_revision: str | Sequence[str] | None = "c4e8a2d6f0b3"
+down_revision: str | Sequence[str] | None = "a3c5e7f9b1d2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

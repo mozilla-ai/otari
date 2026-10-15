@@ -67,7 +67,6 @@ from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
-from gateway.core.usage import cache_tokens_in_prompt_for
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.ports.telemetry_storage_port import TelemetryRecord
@@ -114,6 +113,11 @@ _MAX_METRIC_DATA_POINTS = 10 * MAX_EVENTS_PER_BATCH
 # with the ``gen_ai.usage.*`` names. Both carry a bare ``model`` (not
 # ``gen_ai.request.model``), so the generic GenAI mapping would skip them.
 _CODEX_USAGE_EVENTS = ("codex.api_request", "codex.sse_event")
+
+# Providers that report cache reads/writes *additively* (outside ``input_tokens``),
+# the Anthropic shape. Everything else is assumed OpenAI-shaped, where cached
+# tokens are a subset of ``input_tokens`` and must be de-included before pricing.
+_ADDITIVE_CACHE_PROVIDERS = {"anthropic"}
 
 # ``Status.code`` of a span that ended in error (``STATUS_CODE_ERROR`` in the OTLP schema).
 _STATUS_CODE_ERROR = 2
@@ -362,7 +366,7 @@ def _build_event(
         source = _sanitize_source(str(client)) if client else _DEFAULT_SOURCE
         session = attrs.get("otari.user_session_label") or attrs.get("otari.session_label")
         duration = duration_ms
-        cache_tokens_in_prompt = cache_tokens_in_prompt_for(str(provider))
+        cache_tokens_in_prompt = str(provider).strip().lower() not in _ADDITIVE_CACHE_PROVIDERS
 
     timestamp = _resolve_timestamp(attrs, default_timestamp)
     if not (event_id and model and provider and timestamp):
