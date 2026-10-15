@@ -14,6 +14,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from any_llm import LLMProvider
 
 from gateway.api.routes.settings import _current_settings
 from gateway.core.config import GatewayConfig, load_config
@@ -98,11 +99,37 @@ def test_a_bare_keyed_entry_is_refused() -> None:
         _validated({"anthropic": None})
 
 
-@pytest.mark.parametrize("provider", ["ollama", "vllm"])
+# The providers docs/configuration.md lists as taking no ``api_key``; keep the two in step.
+DOCUMENTED_KEYLESS = {
+    "cascadia",
+    "llamacpp",
+    "llamafile",
+    "lmstudio",
+    "ollama",
+    "otari",
+    "vertexai",
+    "vertexaianthropic",
+    "vllm",
+}
+
+
+@pytest.mark.parametrize("provider", sorted(DOCUMENTED_KEYLESS))
 def test_a_keyless_backend_may_leave_the_key_out(provider: str) -> None:
     entry = _validated({provider: {"api_base": "http://localhost:8000/v1"}}).hosted_provider_entries()[provider]
 
     assert entry.api_key is None
+
+
+def test_the_documented_keyless_providers_are_exactly_those_accepted_without_a_key() -> None:
+    accepted = set()
+    for provider in LLMProvider:
+        try:
+            _validated({provider.value: {}})
+        except ValueError:
+            continue
+        accepted.add(provider.value)
+
+    assert accepted == DOCUMENTED_KEYLESS
 
 
 def test_a_restriction_must_name_an_organization_by_id() -> None:

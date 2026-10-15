@@ -472,12 +472,21 @@ hosted_providers:
 
 | Field | Meaning |
 |---|---|
-| `api_key` | The key the provider is served on. Required unless the provider is a keyless self-hosted backend (vLLM, Ollama, llama.cpp, LM Studio). |
+| `api_key` | The key the provider is served on. Required unless the provider needs none (listed below). |
 | `api_base` | An endpoint other than the provider's default. |
 | `client_args` | What the provider's SDK client needs beyond the key, such as Bedrock's region. |
 | `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids offered when the provider cannot list its own. |
+
+A key may be left out for these providers only: the self-hosted backends
+`vllm`, `ollama`, `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`,
+which are called with a placeholder key when they have an `api_base`, and
+`vertexai` and `vertexaianthropic`, which authenticate through the Google Cloud
+credentials in the gateway's own environment. Every other provider, Bedrock
+included, needs `api_key`. As for any hosted provider, a request is served on one
+only when no organization key, `providers:` instance or provider environment
+variable (such as `VLLM_API_KEY`) answers for it first.
 
 Reference the key as `${VAR}` rather than writing it into the file: it is
 resolved from the environment as every `${VAR}` in the file is, so the key stays
