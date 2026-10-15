@@ -37,3 +37,27 @@ def test_only_an_unadvertised_hosted_model_is_withheld(
     model_key: str, byo_providers: frozenset[str], withheld: bool
 ) -> None:
     assert withheld_as_unadvertised(_CONFIG, _scope(byo_providers), model_key) is withheld
+
+
+@pytest.mark.parametrize(
+    ("model_key", "byo_providers", "withheld"),
+    [
+        pytest.param("bedrock:claude-x", frozenset(), True, id="restricted-to-another-organization"),
+        pytest.param("bedrock:claude-x", frozenset({"bedrock"}), False, id="reached-on-the-callers-own-key"),
+        pytest.param("openai:gpt-4o-mini", frozenset(), False, id="another-provider-unaffected"),
+    ],
+)
+def test_a_provider_withheld_from_the_callers_organization_lists_none_of_its_priced_models(
+    model_key: str, byo_providers: frozenset[str], withheld: bool
+) -> None:
+    scope = CatalogScope(
+        allowlist=None,
+        reads_workspace_layer=True,
+        deployment_supplied_providers=frozenset(),
+        offered_keys=frozenset(),
+        hosted_models=_ADVERTISED,
+        byo_providers=byo_providers,
+        withheld_providers=frozenset({"bedrock"}),
+    )
+
+    assert withheld_as_unadvertised(_CONFIG, scope, model_key) is withheld

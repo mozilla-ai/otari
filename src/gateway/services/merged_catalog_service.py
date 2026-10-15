@@ -414,6 +414,14 @@ class CatalogScope:
     and for the master key, which dispatch from one workspace.
     """
 
+    withheld_providers: frozenset[str] = frozenset()
+    """Hosted providers the deployment serves that the caller's organization may not reach.
+
+    A provider restricted to another organization is absent from this caller's
+    hosted view, which phase 2 would otherwise read as "says nothing" and list
+    its priced models anyway.
+    """
+
     deployment_key_models: HostedModels = field(default_factory=dict)
     """What the caller reaches on a deployment-owned key, by provider, for the credential label.
 
@@ -460,8 +468,12 @@ def withheld_as_unadvertised(config: GatewayConfig, scope: CatalogScope, model_k
     if split is None:
         return False
     provider, model = split
+    if is_deployment_instance_key(config, model_key) or provider in scope.byo_providers:
+        return False
+    if provider in scope.withheld_providers:
+        return True
     advertised = scope.hosted_models.get(provider)
-    if advertised is None or is_deployment_instance_key(config, model_key) or provider in scope.byo_providers:
+    if advertised is None:
         return False
     return model not in advertised
 
@@ -562,6 +574,9 @@ async def catalog_scope(
     workspace_id = api_key.workspace_id if api_key is not None else None
     organization_id = None if workspace_id is None else await organization_for_workspace_id(db, workspace_id)
     hosted_models = await resolve_hosted_models(model_provider, None if is_master_key else organization_id)
+    withheld_providers: frozenset[str] = frozenset()
+    if not is_master_key and organization_id is not None:
+        withheld_providers = frozenset(await resolve_hosted_models(model_provider, None)) - frozenset(hosted_models)
     # The key active where this caller dispatches from, which for the master key
     # is the deployment's default workspace, exactly as pricing resolves it. Read
     # only once something is advertised, and never for the selector index's
@@ -587,6 +602,7 @@ async def catalog_scope(
         ),
         hosted_models=hosted_models,
         byo_providers=byo_providers,
+        withheld_providers=withheld_providers,
         deployment_key_models=_without(hosted_models, byo_providers),
     )
 
