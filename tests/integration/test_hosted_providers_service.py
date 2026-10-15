@@ -581,6 +581,36 @@ async def test_a_toggle_travels_alone_and_repricing_makes_the_rate_the_operators
     assert [version.origin for version in await _versions(async_db, "openai:gpt-4o")] == [SEED_ORIGIN, API_ORIGIN]
 
 
+async def test_repricing_keeps_the_cache_rates_it_does_not_name(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reprice that sends input and output only carries the stored cache rates onto the new version."""
+    service = _service(async_db)
+    await _provider(service, monkeypatch)
+    added = await service.add_model(
+        "openai",
+        HostedModelCreateRequest(
+            model="gpt-5",
+            input_price_per_million=3,
+            output_price_per_million=12,
+            cache_read_price_per_million=0.3,
+            cache_write_price_per_million=3.75,
+        ),
+    )
+
+    repriced = await service.update_model(
+        "openai", added.id, HostedModelUpdateRequest(input_price_per_million=4, output_price_per_million=16)
+    )
+
+    assert (repriced.cache_read_price_per_million, repriced.cache_write_price_per_million) == (0.3, 3.75)
+    first, second = await _versions(async_db, "openai:gpt-5")
+    assert (first.input_price_per_million, second.input_price_per_million) == (Decimal("3"), Decimal("4"))
+    assert (second.cache_read_price_per_million, second.cache_write_price_per_million) == (
+        Decimal("0.3"),
+        Decimal("3.75"),
+    )
+
+
 async def test_a_model_under_another_provider_is_not_found(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -814,6 +844,33 @@ async def test_a_sweep_takes_a_rate_an_organizations_own_key_reaches_and_spares_
     assert await _versions(async_db, "openai:gpt-3.5-turbo-0613") == []
     remaining = (await async_db.execute(select(OrganizationModelPricing))).scalars().all()
     assert [row.organization_id for row in remaining] == [with_key.id]
+
+
+async def test_a_sweep_takes_the_overrides_above_what_it_removes_whatever_the_rates_spelling(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An override is keyed ``provider:model`` even when the rate it sits above was written ``provider/model``."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _price(async_db, "nebius:llama", "1", "2")
+    await _price(async_db, "mistral/mistral-tiny", "1", "2")
+    organization = await _organization(async_db)
+    await _override(async_db, organization, "nebius:llama")
+    await _override(async_db, organization, "mistral:mistral-tiny")
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+
+    preview = await service.refresh_catalog(apply=False)
+    assert preview.removed == ["mistral/mistral-tiny", "nebius:llama"]
+    assert (preview.removed_price_rows, preview.removed_override_rows) == (2, 2)
+    assert len((await async_db.execute(select(OrganizationModelPricing))).scalars().all()) == 2
+
+    applied = await service.refresh_catalog(apply=True)
+    assert (applied.removed_price_rows, applied.removed_override_rows) == (2, 2)
+    assert await _versions(async_db, "mistral/mistral-tiny") == []
+    assert (await async_db.execute(select(OrganizationModelPricing))).scalars().all() == []
+
+    again = await service.refresh_catalog(apply=True)
+    assert (again.removed, again.removed_price_rows, again.removed_override_rows) == ([], 0, 0)
 
 
 async def test_a_sweep_keeps_the_rates_an_owned_endpoint_settles_at(
