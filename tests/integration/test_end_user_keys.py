@@ -106,8 +106,8 @@ def _end_user(db_session: Session, external_id: str, owner: str = "agent") -> Us
     return db_session.query(User).filter(User.parent_user_id == owner, User.external_id == external_id).one()
 
 
-def _set_key(db_session: Session, key_id: str, **values: Any) -> None:
-    db_session.query(APIKey).filter(APIKey.id == key_id).update(values)
+def _set_key(db_session: Session, key_id: str, *, expires_at: datetime | None) -> None:
+    db_session.query(APIKey).filter(APIKey.id == key_id).update({APIKey.expires_at: expires_at})
     db_session.commit()
 
 
