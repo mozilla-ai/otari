@@ -308,3 +308,37 @@ def test_an_organization_key_still_lists_a_model_it_reaches_on_its_own_key(
     _ok(client.patch(f"{API_ROOT}/hosted-providers/openai", json={"enabled": False}, headers=MASTER))
 
     assert OPEN_MODEL in _models(client, _api_key(client, world, "beta_owner"))
+
+
+_ALPHA = ("alpha_owner", "alpha_member")
+_BETA = ("beta_owner", "beta_member")
+
+
+@pytest.mark.parametrize("who", [*_ALPHA, *_BETA])
+def test_each_member_of_each_organization_is_shown_what_its_organization_reaches(
+    client: TestClient, world: _World, who: str
+) -> None:
+    """An owner and a workspace member of both organizations, on the flat list, the grouped one and a single read."""
+    listed = {model["id"] for model in _ok(_as(client, world, who, "/models"))["data"]}
+    grouped = _catalog_selectors(_as(client, world, who, "/catalog/models"))
+    single = _as(client, world, who, f"/models/{RESTRICTED_MODEL}").status_code
+
+    for shown in (listed, grouped):
+        assert OPEN_MODEL in shown
+        assert OFF_MODEL not in shown, "switched off for everyone"
+        assert (RESTRICTED_MODEL in shown) is (who in _ALPHA)
+    assert single == (status.HTTP_200_OK if who in _ALPHA else status.HTTP_404_NOT_FOUND)
+
+
+@pytest.mark.parametrize("owner", ["alpha_owner", "beta_owner"])
+def test_each_organizations_api_key_is_shown_what_its_organization_reaches(
+    client: TestClient, world: _World, owner: str
+) -> None:
+    headers = _api_key(client, world, owner)
+    listed = _models(client, headers)
+    grouped = _catalog_selectors(client.get(f"{API_ROOT}/catalog/models", headers=headers))
+
+    for shown in (listed, grouped):
+        assert OPEN_MODEL in shown
+        assert OFF_MODEL not in shown
+        assert (RESTRICTED_MODEL in shown) is (owner == "alpha_owner")
