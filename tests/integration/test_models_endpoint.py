@@ -291,7 +291,7 @@ _MODELS_DEV: dict[str, Any] = {
 
 @pytest.fixture
 def limits_config(postgres_url: str) -> GatewayConfig:
-    """Nebius, which genai-prices does not know; Gemini, whose ids carry ``models/``; and an alias to Gemini."""
+    """Nebius, with a models.dev-only output limit; Gemini, whose ids carry ``models/``; and an alias to Gemini."""
     return GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",
@@ -325,7 +325,7 @@ def _limits(model: dict[str, Any]) -> tuple[int | None, int | None]:
 
 
 def test_the_listing_carries_each_models_token_limits(limits_client: TestClient) -> None:
-    """The issue's reproduction: a model genai-prices does not know reports both limits."""
+    """The issue's reproduction: a Nebius model reports both limits."""
     listed = {model["id"]: _limits(model) for model in _read(limits_client, f"{API_ROOT}/models")["data"]}
 
     assert listed[_QWEN] == (262144, 8192)
@@ -353,18 +353,19 @@ def test_the_listing_and_the_catalog_report_the_same_limits(limits_client: TestC
     assert {selector: listed[selector] for selector in shared} == {selector: offered[selector] for selector in shared}
 
 
-def test_without_models_dev_the_window_comes_from_genai_prices(limits_client: TestClient) -> None:
-    """models.dev unreachable: genai-prices still answers the window, and nothing lists an output limit."""
+def test_without_models_dev_the_window_comes_from_the_snapshot(limits_client: TestClient) -> None:
+    """models.dev unreachable: the pricing snapshot still answers the window, and nothing lists an output limit."""
     response = limits_client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: "Bearer test-master-key"})
     assert response.status_code == 200, response.text
     listed = {model["id"]: _limits(model) for model in response.json()["data"]}
 
     assert listed["openai:gpt-4o"] == (128000, None)
-    assert listed[_QWEN] == (None, None)
+    assert listed[_QWEN] == (262144, None)
+    assert listed[_UNKNOWN] == (None, None)
 
 
 def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, clean_database: None) -> None:
-    """Switched off, models.dev is not fetched at all, so a model only it describes has no limits."""
+    """Switched off, models.dev is not fetched at all, so only the snapshot's window is listed."""
     config = GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",
@@ -380,7 +381,7 @@ def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, 
         with patch.object(mcs, "_fetch", new=fetch):
             response = client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: "Bearer test-master-key"})
         assert response.status_code == 200, response.text
-        assert {model["id"]: _limits(model) for model in response.json()["data"]}[_QWEN] == (None, None)
+        assert {model["id"]: _limits(model) for model in response.json()["data"]}[_QWEN] == (262144, None)
     fetch.assert_not_called()
 
 

@@ -3439,7 +3439,7 @@
         {
           "name": "List Models",
           "request": {
-            "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's token limits: the context window from models.dev, or from\ngenai-prices where models.dev has none, and the output limit from models.dev\nalone. A limit neither knows is null. Models that only exist in the pricing\ntable are also included for backward compatibility.",
+            "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's token limits: the context window from the live models.dev catalog,\nor from the pricing snapshot where it has none, and the output limit from the\nlive catalog alone. A limit neither knows is null. Models that only exist in the pricing\ntable are also included for backward compatibility.",
             "header": [],
             "method": "GET",
             "url": {

@@ -23,7 +23,7 @@ def model_limits(config: GatewayConfig, models_dev: dict[str, Any] | None, model
     The live models.dev catalog first, because it describes the model as that
     provider serves it, then the pricing snapshot for the context window. The
     snapshot keeps no output limit, so without a live entry there is none. A bare
-    key names no provider to look the live catalog up under.
+    key names no provider to look either up under, so it has no limits.
     """
     instance, separator, model_id = model_key.partition(":")
     if not separator:
