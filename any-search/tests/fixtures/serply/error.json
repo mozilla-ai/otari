@@ -1,0 +1,6 @@
+{
+  "status": 401,
+  "body": {
+    "detail": "Invalid API key"
+  }
+}
