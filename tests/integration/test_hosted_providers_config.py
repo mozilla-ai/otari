@@ -47,8 +47,6 @@ from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client
 
-pytestmark = pytest.mark.asyncio
-
 CONFIG_KEY = "sk-live-config-9876"
 STORED_KEY = "sk-live-stored-1234"
 PATH = f"{API_ROOT}/hosted-providers"
@@ -109,6 +107,7 @@ async def _store(service: HostedProviderService) -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.asyncio
 async def test_a_configured_provider_is_listed_read_only_with_no_key(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -128,6 +127,7 @@ async def test_a_configured_provider_is_listed_read_only_with_no_key(
     assert CONFIG_KEY not in public.model_dump_json()
 
 
+@pytest.mark.asyncio
 async def test_a_configured_provider_is_never_written_to_the_database(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -140,6 +140,7 @@ async def test_a_configured_provider_is_never_written_to_the_database(
     assert (await async_db.execute(select(HostedProvider))).scalars().all() == []
 
 
+@pytest.mark.asyncio
 async def test_a_configured_provider_serves_on_its_configured_credential(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -155,6 +156,7 @@ async def test_a_configured_provider_serves_on_its_configured_credential(
     assert "openai" in await service.serveable_models(organization_id=None)
 
 
+@pytest.mark.asyncio
 async def test_a_configured_provider_switched_off_is_not_served(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -166,6 +168,7 @@ async def test_a_configured_provider_switched_off_is_not_served(
     assert await service.discovery_dials() == {}
 
 
+@pytest.mark.asyncio
 async def test_a_configured_restriction_withholds_the_provider_from_every_other_organization(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -178,6 +181,7 @@ async def test_a_configured_restriction_withholds_the_provider_from_every_other_
     assert await service.serveable_models(organization_id=uuid.uuid4()) == {}
 
 
+@pytest.mark.asyncio
 async def test_a_configured_provider_is_discovered_and_falls_back_to_its_declared_models(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -197,6 +201,7 @@ async def test_a_configured_provider_is_discovered_and_falls_back_to_its_declare
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.asyncio
 async def test_a_configured_provider_cannot_be_changed_or_deleted_through_the_api(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -209,6 +214,7 @@ async def test_a_configured_provider_cannot_be_changed_or_deleted_through_the_ap
         await service.delete_provider("openai")
 
 
+@pytest.mark.asyncio
 async def test_a_configured_provider_gets_a_roster_toggles_and_prices(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -236,6 +242,7 @@ async def test_a_configured_provider_gets_a_roster_toggles_and_prices(
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.asyncio
 async def test_a_stored_row_wins_over_the_configured_entry(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -255,6 +262,7 @@ async def test_a_stored_row_wins_over_the_configured_entry(
     assert audit.shadowed == ["openai"]
 
 
+@pytest.mark.asyncio
 async def test_deleting_the_shadowing_row_keeps_the_roster_and_restores_the_entry(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -270,6 +278,7 @@ async def test_deleting_the_shadowing_row_keeps_the_roster_and_restores_the_entr
     assert roster == ["gpt-4o"]
 
 
+@pytest.mark.asyncio
 async def test_a_roster_outliving_its_entry_serves_nothing_and_the_sweep_removes_it(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -304,6 +313,7 @@ async def test_a_roster_outliving_its_entry_serves_nothing_and_the_sweep_removes
     assert (await after.refresh_catalog(apply=False)).orphaned_rosters == []
 
 
+@pytest.mark.asyncio
 async def test_an_unknown_configured_restriction_is_audited(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
