@@ -53,7 +53,7 @@ from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.providers import HostedProviderService
-from gateway.services.providers._hosted_catalog import KEEP_ORGANIZATION_KEY, KEEP_OWNED_ENDPOINT
+from gateway.services.providers._hosted_catalog import KEEP_OWNED_ENDPOINT
 from gateway.services.secret_box import generate_secret_key
 
 pytestmark = pytest.mark.asyncio
@@ -785,25 +785,35 @@ async def test_a_sweep_takes_unoffered_prices_off_the_list_and_the_preview_names
     assert len(await _versions(async_db, "openai:gpt-4o")) == 1
 
 
-async def test_a_sweep_keeps_the_rates_an_organizations_own_key_settles_at(
+async def test_a_sweep_takes_a_rate_an_organizations_own_key_reaches_and_spares_only_that_organizations_override(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A BYO request with no override settles at the deployment's rate, so taking it would leave it unpriced."""
+    """A rate the deployment no longer offers goes even under a provider some organization holds a key for.
+
+    Kept, it would let every organization be served on the deployment's own
+    key for a model the operator never offered. The organization with a key of
+    its own keeps its override, which is where its requests settle; an
+    organization without one loses its override with the rate.
+    """
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
-    await _price(async_db, "nebius:llama", "1", "2")
+    await _price(async_db, "openai:gpt-3.5-turbo-0613", "1", "2")
     with_key = await _organization(async_db, "with-key")
-    await _own_key(async_db, with_key, "nebius")
-    await _override(async_db, with_key, "nebius:llama")
+    without_key = await _organization(async_db, "without-key")
+    await _own_key(async_db, with_key, "openai")
+    await _override(async_db, with_key, "openai:gpt-3.5-turbo-0613")
+    await _override(async_db, without_key, "openai:gpt-3.5-turbo-0613")
     service = _service(async_db)
     await _provider(service, monkeypatch, "gpt-4o")
 
     preview = await service.refresh_catalog(apply=False)
     applied = await service.refresh_catalog(apply=True)
 
-    assert preview.removed == applied.removed == []
-    assert [(group.reason, group.models) for group in applied.kept] == [(KEEP_ORGANIZATION_KEY, ["nebius:llama"])]
-    assert len(await _versions(async_db, "nebius:llama")) == 1
-    assert len((await async_db.execute(select(OrganizationModelPricing))).scalars().all()) == 1
+    assert preview.removed == applied.removed == ["openai:gpt-3.5-turbo-0613"]
+    assert preview.removed_override_rows == applied.removed_override_rows == 1
+    assert preview.kept == applied.kept == []
+    assert await _versions(async_db, "openai:gpt-3.5-turbo-0613") == []
+    remaining = (await async_db.execute(select(OrganizationModelPricing))).scalars().all()
+    assert [row.organization_id for row in remaining] == [with_key.id]
 
 
 async def test_a_sweep_keeps_the_rates_an_owned_endpoint_settles_at(

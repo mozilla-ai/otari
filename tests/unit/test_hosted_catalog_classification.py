@@ -7,7 +7,6 @@ keeps, which it removes, and why it keeps the ones it does not offer.
 from gateway.services.providers._hosted_catalog import (
     KEEP_DEPLOYMENT_INSTANCE,
     KEEP_GATEWAY_TOOL,
-    KEEP_ORGANIZATION_KEY,
     KEEP_OWNED_ENDPOINT,
     KEEP_SEARCH_TOOL,
     KEEP_UNATTRIBUTABLE,
@@ -21,7 +20,6 @@ def _verdicts(
     offered: set[str] = set(),  # noqa: B006
     deployment_instances: set[str] = set(),  # noqa: B006
     search_providers: set[str] = set(),  # noqa: B006
-    organization_key_providers: set[str] = set(),  # noqa: B006
     owned_endpoints: set[str] = set(),  # noqa: B006
 ) -> dict[str, tuple[str, str | None]]:
     results = classify_priced_keys(
@@ -29,7 +27,6 @@ def _verdicts(
         offered=frozenset(offered),
         deployment_instances=frozenset(deployment_instances),
         search_providers=frozenset(search_providers),
-        organization_key_providers=frozenset(organization_key_providers),
         owned_endpoints=frozenset(owned_endpoints),
     )
     return {verdict.model_key: (verdict.verdict, verdict.reason) for verdict in results}
@@ -45,12 +42,6 @@ def test_a_model_nothing_offers_is_removed() -> None:
     verdicts = _verdicts(priced=[("nebius:llama", 1)], offered={"openai:gpt-4o"})
 
     assert verdicts == {"nebius:llama": ("removed", None)}
-
-
-def test_a_model_an_organization_key_settles_at_is_kept() -> None:
-    verdicts = _verdicts(priced=[("nebius:llama", 1)], organization_key_providers={"nebius"})
-
-    assert verdicts == {"nebius:llama": ("kept", KEEP_ORGANIZATION_KEY)}
 
 
 def test_a_model_an_owned_endpoint_serves_is_kept() -> None:

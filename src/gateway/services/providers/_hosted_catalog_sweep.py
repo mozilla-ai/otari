@@ -121,15 +121,11 @@ class HostedCatalogSweep:
             if not offered_keys:
                 raise HostedCatalogEmptyError
 
-            priced = await self.pricing.all_keys()
-            prefixes = {prefix for key, _ in priced if (prefix := _prefix(key)) is not None}
-            organization_key_providers = {provider for _, provider in await self.live_byo_pairs(prefixes)}
             verdicts = classify_priced_keys(
-                priced,
+                await self.pricing.all_keys(),
                 offered=frozenset(offered_keys),
                 deployment_instances=frozenset(self.config.providers),
                 search_providers=frozenset(self.config.search_tool_providers()),
-                organization_key_providers=frozenset(organization_key_providers),
                 owned_endpoints=frozenset(row.name for row in await self.endpoints.list_all()),
             )
             doomed = [verdict for verdict in verdicts if verdict.verdict == "removed"]
@@ -154,12 +150,22 @@ class HostedCatalogSweep:
     async def _doomed_override_ids(self, canonical_keys: list[str]) -> list[uuid.UUID]:
         """The overrides above ``canonical_keys`` a sweep takes with them.
 
-        All of them: a key is only doomed when no organization holds a live key
-        for its provider, so no override above it prices a request any more.
+        An override is spared when its own organization holds a live key for
+        the provider: the deployment's rate is going because nothing here
+        offers the model, but that organization reaches it on its own key and
+        this is its rate on it. An override of an organization without one goes,
+        or it would keep pricing a model only the deployment's key could serve.
         """
         if not canonical_keys:
             return []
-        return [override_id for override_id, _, _ in await self.pricing.doomed_overrides(canonical_keys)]
+        overrides = await self.pricing.doomed_overrides(canonical_keys)
+        providers = {prefix for _, _, key in overrides if (prefix := _prefix(key)) is not None}
+        spared = await self.live_byo_pairs(providers) if providers else set()
+        return [
+            override_id
+            for override_id, organization_id, key in overrides
+            if (organization_id, _prefix(key)) not in spared
+        ]
 
     async def _dial_one(
         self, provider: str, credential: ResolvedHostedProvider | None, offered: set[str]

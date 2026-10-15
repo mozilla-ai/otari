@@ -22,7 +22,6 @@ from gateway.services.provider_kwargs import split_selector
 KEEP_GATEWAY_TOOL = "prices a gateway-run tool, not a model"
 KEEP_SEARCH_TOOL = "prices a configured search tool, not a model"
 KEEP_DEPLOYMENT_INSTANCE = "served by a provider instance configured on this deployment"
-KEEP_ORGANIZATION_KEY = "priced for an organization's own key on this provider"
 KEEP_OWNED_ENDPOINT = "served by a provider endpoint a workspace or user owns"
 KEEP_UNATTRIBUTABLE = "no provider prefix to attribute it to"
 
@@ -61,7 +60,6 @@ def _keep_reason(
     *,
     deployment_instances: frozenset[str],
     search_providers: frozenset[str],
-    organization_key_providers: frozenset[str],
     owned_endpoints: frozenset[str],
 ) -> str | None:
     """What keeps an unoffered key on the catalog, or None when nothing does."""
@@ -73,8 +71,6 @@ def _keep_reason(
         return KEEP_SEARCH_TOOL
     if prefix in deployment_instances:
         return KEEP_DEPLOYMENT_INSTANCE
-    if prefix in organization_key_providers:
-        return KEEP_ORGANIZATION_KEY
     if prefix in owned_endpoints:
         return KEEP_OWNED_ENDPOINT
     return None
@@ -86,7 +82,6 @@ def classify_priced_keys(
     offered: frozenset[str],
     deployment_instances: frozenset[str],
     search_providers: frozenset[str] = frozenset(),
-    organization_key_providers: frozenset[str] = frozenset(),
     owned_endpoints: frozenset[str] = frozenset(),
 ) -> list[CatalogVerdict]:
     """Decide, for each priced key, whether the hosted-providers surface is what lists it.
@@ -94,11 +89,16 @@ def classify_priced_keys(
     Order is the safety rule rather than a style choice. A key the surface
     offers is kept whatever else also serves it. Only what is left over goes: a
     model under a provider the surface does not offer it on, or under a
-    provider nothing on this deployment serves at all. A provider some
-    organization holds a live key for, and the name of an endpoint a workspace
-    or user owns, keep their rates: the deployment price list is the rung such
-    a request settles at when its organization holds no override, so taking it
-    would leave those requests unpriced.
+    provider nothing on this deployment serves at all. The name of an endpoint
+    a workspace or user owns keeps its rates: such a request settles at the
+    deployment price list when its organization holds no override, and an
+    endpoint's name can never be a provider's, so nothing hosted serves under it.
+
+    An organization holding its own key for a provider keeps nothing here. A
+    deployment rate under a hosted provider is what lets any organization be
+    served on the deployment's key, so keeping one for a model the deployment
+    no longer offers would serve it hosted. That organization's own override is
+    spared by the sweep instead, and its requests settle there.
 
     NOTE: not every rate on the list prices a model. A gateway-run tool is keyed
     under the reserved ``otari`` provider, and a configured search tool is keyed
@@ -129,7 +129,6 @@ def classify_priced_keys(
             prefix,
             deployment_instances=deployment_instances,
             search_providers=search_providers,
-            organization_key_providers=organization_key_providers,
             owned_endpoints=owned_endpoints,
         )
         verdict: Verdict = "removed" if reason is None else "kept"
@@ -157,7 +156,6 @@ __all__ = [
     "CATALOG_SAMPLE",
     "KEEP_DEPLOYMENT_INSTANCE",
     "KEEP_GATEWAY_TOOL",
-    "KEEP_ORGANIZATION_KEY",
     "KEEP_OWNED_ENDPOINT",
     "KEEP_SEARCH_TOOL",
     "KEEP_UNATTRIBUTABLE",
