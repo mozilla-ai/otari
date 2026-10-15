@@ -9,6 +9,11 @@ answers what an agent run did and cost, not only what one call did.
 No prompt, model output or tool content is recorded. A trace holds names, ids,
 timings, token counts, outcomes and costs.
 
+An LLM call's input tokens are its whole prompt, cached tokens included,
+whichever way its provider reports them. Beside them the call keeps how many
+input tokens were read from or written to the prompt cache, and how many output
+tokens went to reasoning.
+
 ## What makes a session
 
 Requests are grouped into one session only when the client names the session.
