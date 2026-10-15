@@ -35,9 +35,13 @@ STORED = "hosted provider credentials"
 
 @dataclass(frozen=True)
 class ResolvedHostedProvider:
-    """A decrypted, usable upstream connection."""
+    """A decrypted, usable upstream connection.
 
-    api_key: str = field(repr=False)
+    ``api_key`` is None only for a keyless backend declared in configuration;
+    a stored row always holds a key.
+    """
+
+    api_key: str | None = field(repr=False)
     api_base: str | None
     client_args: dict[str, Any] | None
     provider: str | None = None

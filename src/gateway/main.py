@@ -43,6 +43,7 @@ from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.settings.tools import warn_about_tool_instances
+from gateway.core.unit_of_work import create_unit_of_work
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError
@@ -288,6 +289,32 @@ def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Co
     if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
         return None
     return run_sandbox_container_sweeper()
+
+
+async def _report_hosted_providers_config(config: GatewayConfig) -> None:
+    """Log the ``hosted_providers:`` entries a stored row shadows, and those restricted to no organization here.
+
+    Read at boot rather than at config load, because both answers are in the
+    database. Names only, never a key.
+    """
+    if not config.hosted_providers:
+        return
+    async with create_unit_of_work() as uow:
+        audit = await build_hosted_provider_service(uow, config=config).audit_config()
+    for provider in audit.shadowed:
+        logger.warning(
+            "hosted_providers.%s in the configuration is shadowed by a stored hosted provider of the same name, "
+            "which serves instead. Delete the stored provider on the Hosted providers page to serve the "
+            "configured one.",
+            provider,
+        )
+    for provider, organization_id in audit.unknown_restrictions.items():
+        logger.warning(
+            "hosted_providers.%s is restricted to organization %s, which does not exist here, so no "
+            "organization is served on it.",
+            provider,
+            organization_id,
+        )
 
 
 # The periodic background workers a standalone deployment runs.
@@ -808,6 +835,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # vendor handshake.
             await load_guardrail_runner_at_startup()
             await load_provider_endpoints_at_startup()
+            # On a Unit of Work of its own, after the session above has closed.
+            await _report_hosted_providers_config(config)
             container: Container = app.state.container
             # Only here: a hybrid gateway writes no usage rows, so it has none to report.
             log_writer = create_log_writer(config.log_writer_strategy, container.resolve(UsageSignalPort, None))

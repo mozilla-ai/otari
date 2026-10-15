@@ -63,7 +63,11 @@ async def list_hosted_providers(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> HostedProvidersPublic:
-    """List the providers this deployment serves hosted inference on."""
+    """List the providers this deployment serves hosted inference on.
+
+    Stored providers and those defined in the configuration's
+    ``hosted_providers:`` block alike, each marked with its ``source``.
+    """
     return await service.list_providers(skip=skip, limit=limit)
 
 
@@ -74,7 +78,9 @@ async def create_hosted_provider(
     """Configure a provider with the key this deployment will serve it on.
 
     Everything the provider lists on that key is offered at once; a provider
-    that will not say yields a provider with no models, not an error.
+    that will not say yields a provider with no models, not an error. A
+    provider the configuration defines may be created too, and the stored one
+    then serves instead.
     """
     return await service.create_provider(body)
 
@@ -107,13 +113,21 @@ async def refresh_catalog(service: HostedProviderServiceDep) -> HostedCatalogRef
 async def update_hosted_provider(
     service: HostedProviderServiceDep, provider: str, body: HostedProviderUpdateRequest
 ) -> HostedProviderPublic:
-    """Rotate the key, repoint the base, or turn a provider off."""
+    """Rotate the key, repoint the base, or turn a provider off.
+
+    A provider defined in configuration answers 409: it is changed there.
+    """
     return await service.update_provider(provider, body)
 
 
 @router.delete("/{provider}")
 async def delete_hosted_provider(service: HostedProviderServiceDep, provider: str) -> Message:
-    """Remove a provider and its roster, leaving the runtime with no hosted path for it."""
+    """Remove a provider and its roster, leaving the runtime with no hosted path for it.
+
+    A provider defined in configuration answers 409. A stored provider that
+    overrides a configured one keeps the roster, which the configured one
+    serves again.
+    """
     await service.delete_provider(provider)
     return Message(message="Hosted provider deleted")
 
@@ -153,7 +167,7 @@ async def refresh_hosted_models(service: HostedProviderServiceDep, provider: str
 
 @router.get("/{provider}/available-models")
 async def list_available_models(service: HostedProviderServiceDep, provider: str) -> HostedAvailableModelsPublic:
-    """Ask the provider what it serves on the stored credential.
+    """Ask the provider what it serves on its credential.
 
     Dials the upstream on every call rather than caching: the caller is the
     admin form's model picker, opened rarely and entitled to a current answer.

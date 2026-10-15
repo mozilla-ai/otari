@@ -396,21 +396,35 @@ class HostedProviderPublic(SQLModel):
     known by its last four characters and nothing else, ``client_args`` goes
     out with credential-shaped values masked, and ``api_base`` with the
     password in its userinfo and its query values masked.
+
+    ``source`` says where the provider is defined. A ``config`` provider comes
+    from the ``hosted_providers:`` block, has no row and so no ``id`` or
+    timestamps, and is changed by editing the configuration rather than through
+    this API; its models are administered as a stored provider's are.
+    ``shadows_config`` marks a stored provider that wins over a configuration
+    entry of the same provider, which serves again once the row is deleted.
     """
 
-    id: uuid.UUID
+    id: uuid.UUID | None = None
     provider: str
+    source: Literal["database", "config"] = "database"
     api_key_last4: str | None = None
     api_base: str | None = None
     client_args: dict[str, Any] | None = None
     enabled: bool
     restricted_to_organization_id: uuid.UUID | None = None
-    created_at: datetime
+    shadows_config: bool = False
+    created_at: datetime | None = None
     updated_at: datetime | None = None
 
     @classmethod
     def from_row(
-        cls, row: HostedProvider, *, client_args: dict[str, Any] | None, api_base: str | None
+        cls,
+        row: HostedProvider,
+        *,
+        client_args: dict[str, Any] | None,
+        api_base: str | None,
+        shadows_config: bool = False,
     ) -> HostedProviderPublic:
         """Read one row for the API: no key, and the extras with credential-shaped values masked.
 
@@ -422,13 +436,40 @@ class HostedProviderPublic(SQLModel):
         return cls(
             id=row.id,
             provider=row.provider,
+            source="database",
             api_key_last4=row.api_key_last4,
             api_base=api_base,
             client_args=redact_secret_like_values(client_args),
             enabled=row.enabled,
             restricted_to_organization_id=row.restricted_to_organization_id,
+            shadows_config=shadows_config,
             created_at=row.created_at,
             updated_at=row.updated_at,
+        )
+
+    @classmethod
+    def from_config(
+        cls,
+        *,
+        provider: str,
+        api_key_last4: str | None,
+        api_base: str | None,
+        client_args: dict[str, Any] | None,
+        enabled: bool,
+        restricted_to_organization_id: uuid.UUID | None,
+    ) -> HostedProviderPublic:
+        """Read one configuration entry for the API, masked as a row is.
+
+        ``api_base`` is passed in already masked, as for a row.
+        """
+        return cls(
+            provider=provider,
+            source="config",
+            api_key_last4=api_key_last4,
+            api_base=api_base,
+            client_args=redact_secret_like_values(client_args),
+            enabled=enabled,
+            restricted_to_organization_id=restricted_to_organization_id,
         )
 
 

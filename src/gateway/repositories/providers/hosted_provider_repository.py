@@ -55,16 +55,6 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         result = await self.db.execute(select(HostedProvider).where(HostedProvider.provider == provider))
         return result.scalar_one_or_none()
 
-    async def list_page(self, *, skip: int = 0, limit: int = 100) -> tuple[Sequence[HostedProvider], int]:
-        """One page of hosted providers by name, and how many there are in total."""
-        rows = (
-            (await self.db.execute(select(HostedProvider).order_by(HostedProvider.provider).offset(skip).limit(limit)))
-            .scalars()
-            .all()
-        )
-        total = (await self.db.execute(select(func.count()).select_from(HostedProvider))).scalar_one()
-        return rows, total
-
     async def list_all(self) -> Sequence[HostedProvider]:
         """Every hosted provider, bounded by the number of providers any-llm knows."""
         result = await self.db.execute(select(HostedProvider).order_by(HostedProvider.provider).limit(_ALL_PROVIDERS))

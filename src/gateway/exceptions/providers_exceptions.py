@@ -293,6 +293,21 @@ class HostedProviderNotFoundError(TenancyNotFoundError):
         super().__init__(f"Hosted provider '{provider}' not found")
 
 
+class HostedProviderReadOnlyError(TenancyConflictError):
+    """A change asked of a hosted provider defined in configuration, which has no row to change.
+
+    Its key, base, extras and switch are the configuration's to change. Its
+    models are not, and are administered as a stored provider's are. Creating
+    a stored provider of the same name is allowed, and that row wins.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"Hosted provider '{provider}' is defined in config.yml; change it there, "
+            "or create a stored provider of the same name to override it"
+        )
+
+
 class HostedProviderUnknownProviderError(TenancyValidationError):
     """A ``provider`` that is blank, or names no any-llm implementation this build can dispatch to.
 

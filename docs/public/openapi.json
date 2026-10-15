@@ -8136,7 +8136,7 @@
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, named by its provider and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.",
+        "description": "One hosted provider, named by its provider and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``source`` says where the provider is defined. A ``config`` provider comes\nfrom the ``hosted_providers:`` block, has no row and so no ``id`` or\ntimestamps, and is changed by editing the configuration rather than through\nthis API; its models are administered as a stored provider's are.\n``shadows_config`` marks a stored provider that wins over a configuration\nentry of the same provider, which serves again once the row is deleted.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -8173,18 +8173,32 @@
             "title": "Client Args"
           },
           "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
           },
           "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
           },
           "provider": {
             "title": "Provider",
@@ -8202,6 +8216,20 @@
             ],
             "title": "Restricted To Organization Id"
           },
+          "shadows_config": {
+            "default": false,
+            "title": "Shadows Config",
+            "type": "boolean"
+          },
+          "source": {
+            "default": "database",
+            "enum": [
+              "database",
+              "config"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -8216,10 +8244,8 @@
           }
         },
         "required": [
-          "id",
           "provider",
-          "enabled",
-          "created_at"
+          "enabled"
         ],
         "title": "HostedProviderPublic",
         "type": "object"
@@ -28331,7 +28357,7 @@
     },
     "/api/v1/hosted-providers": {
       "get": {
-        "description": "List the providers this deployment serves hosted inference on.",
+        "description": "List the providers this deployment serves hosted inference on.\n\nStored providers and those defined in the configuration's\n``hosted_providers:`` block alike, each marked with its ``source``.",
         "operationId": "hosted-providers-list_hosted_providers",
         "parameters": [
           {
@@ -28394,7 +28420,7 @@
         ]
       },
       "post": {
-        "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error.",
+        "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error. A\nprovider the configuration defines may be created too, and the stored one\nthen serves instead.",
         "operationId": "hosted-providers-create_hosted_provider",
         "requestBody": {
           "content": {
@@ -28504,7 +28530,7 @@
     },
     "/api/v1/hosted-providers/{provider}": {
       "delete": {
-        "description": "Remove a provider and its roster, leaving the runtime with no hosted path for it.",
+        "description": "Remove a provider and its roster, leaving the runtime with no hosted path for it.\n\nA provider defined in configuration answers 409. A stored provider that\noverrides a configured one keeps the roster, which the configured one\nserves again.",
         "operationId": "hosted-providers-delete_hosted_provider",
         "parameters": [
           {
@@ -28553,7 +28579,7 @@
         ]
       },
       "patch": {
-        "description": "Rotate the key, repoint the base, or turn a provider off.",
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\nA provider defined in configuration answers 409: it is changed there.",
         "operationId": "hosted-providers-update_hosted_provider",
         "parameters": [
           {
@@ -28614,7 +28640,7 @@
     },
     "/api/v1/hosted-providers/{provider}/available-models": {
       "get": {
-        "description": "Ask the provider what it serves on the stored credential.\n\nDials the upstream on every call rather than caching: the caller is the\nadmin form's model picker, opened rarely and entitled to a current answer.\nFailure comes back in the body, so the picker can fall back to a text box.",
+        "description": "Ask the provider what it serves on its credential.\n\nDials the upstream on every call rather than caching: the caller is the\nadmin form's model picker, opened rarely and entitled to a current answer.\nFailure comes back in the body, so the picker can fall back to a text box.",
         "operationId": "hosted-providers-list_available_models",
         "parameters": [
           {

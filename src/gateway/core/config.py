@@ -25,6 +25,7 @@ from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
+from gateway.core.settings.providers import ProviderSettings
 from gateway.core.settings.tools import ToolSettings
 from gateway.core.settings.traces import TraceSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
@@ -294,6 +295,11 @@ def _get_platform_token_from_env() -> str | None:
 KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"cascadia", "llamacpp", "lmstudio", "otari", "vllm"})
 
 
+def _is_keyless(provider_type: str) -> bool:
+    """Whether a provider is served without a key: a keyless local or self-hosted backend."""
+    return provider_type in KEYLESS_SELF_HOSTED_PROVIDERS or provider_credential_env_names(provider_type) == ()
+
+
 def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     """Environment variables any-llm reads for a provider's credential.
 
@@ -488,7 +494,7 @@ class RelyingParty(NamedTuple):
 
 # Gotcha: fields are ordered last base first, then this class's own.
 # The settings view keeps that order, so moving a base reorders it.
-def _validate_bedrock_client_config(instance: str, client_args: Any) -> None:
+def _validate_bedrock_client_config(instance: str, client_args: Any, *, block: str = "providers") -> None:
     """Fail at startup on a Bedrock ``client_args.config`` botocore cannot build.
 
     The gateway merges it into every Bedrock client it builds, so a typo in an
@@ -498,12 +504,12 @@ def _validate_bedrock_client_config(instance: str, client_args: Any) -> None:
     if config is None or isinstance(config, BotocoreConfig):
         return
     if not isinstance(config, dict):
-        msg = f"providers.{instance}.client_args.config must be a mapping of botocore Config options."
+        msg = f"{block}.{instance}.client_args.config must be a mapping of botocore Config options."
         raise ValueError(msg)
     try:
         BotocoreConfig(**config)
     except TypeError as exc:
-        msg = f"providers.{instance}.client_args.config is not a valid botocore Config: {exc}"
+        msg = f"{block}.{instance}.client_args.config is not a valid botocore Config: {exc}"
         raise ValueError(msg) from exc
 
 
@@ -512,6 +518,7 @@ class GatewayConfig(
     BudgetSettings,
     ApiKeySettings,
     PricingSettings,
+    ProviderSettings,
     FeedbackSettings,
     OrganizationSettings,
     ToolSettings,
@@ -2035,6 +2042,33 @@ class GatewayConfig(
             if not entry:
                 self._warn_on_uncredentialed_bare_entry(instance)
 
+    def validate_hosted_providers(self) -> None:
+        """Validate the ``hosted_providers:`` block at startup so a misconfigured entry fails fast.
+
+        On top of the shape ``hosted_provider_entries`` checks, an entry for a
+        provider that needs a key must carry one: unlike a ``providers:``
+        instance, a hosted provider is served on its own credential and never
+        on the provider's environment variable. A keyless self-hosted backend
+        may leave it out. The restriction's organization cannot be checked
+        here, before the database is reachable; boot logs one that names
+        nothing.
+        """
+        entries = self.hosted_provider_entries()
+        if entries and self.is_hybrid_mode:
+            logger.warning(
+                "hosted_providers is ignored in hybrid mode: a hybrid gateway is served the credentials otari.ai "
+                "resolves for it, and has no hosted providers of its own."
+            )
+        for provider, entry in entries.items():
+            if entry.api_key is None and not _is_keyless(provider):
+                msg = (
+                    f"hosted_providers.{provider}.api_key is required: {provider} needs a key. "
+                    "Reference it as ${VAR} rather than writing it into the file."
+                )
+                raise ValueError(msg)
+            if provider == LLMProvider.BEDROCK.value:
+                _validate_bedrock_client_config(provider, entry.client_args, block="hosted_providers")
+
     def _warn_on_uncredentialed_bare_entry(self, instance: str) -> None:
         """Warn when a settings-less entry names a provider that needs a credential.
 
@@ -2718,6 +2752,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config._resolve_platform_token()
     config.validate_mode_selection()
     config.validate_provider_instances()
+    config.validate_hosted_providers()
     config.validate_aliases()
     config.validate_declared_access()
     config.validate_routing_policies()

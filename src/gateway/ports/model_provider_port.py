@@ -47,7 +47,9 @@ class HostedCredential:
     carrying an empty key.
     """
 
-    api_key: str
+    # None for a keyless self-hosted backend (vLLM, Ollama), which any-llm
+    # calls without one.
+    api_key: str | None
     api_base: str | None
     response_provider: str
     # What the upstream SDK client needs beyond the key (Bedrock's region and

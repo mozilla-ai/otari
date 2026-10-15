@@ -19,20 +19,19 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import HostedCatalogEmptyError
 from gateway.models.pricing import ModelPricing
-from gateway.repositories.providers import (
-    HostedProviderModelRepository,
-    HostedProviderRepository,
-    ProviderEndpointRepository,
-)
+from gateway.repositories.providers import HostedProviderModelRepository, ProviderEndpointRepository
 from gateway.schemas.providers import HostedCatalogProviderRefreshPublic, HostedCatalogRefreshPublic
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.provider_kwargs import split_selector
 from gateway.services.providers._hosted_catalog import CATALOG_SAMPLE, classify_priced_keys, kept_groups
-from gateway.services.providers._hosted_credentials import ResolvedHostedProvider, credential_of
+from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_offers import HostedOffers
+from gateway.services.providers._hosted_sources import HostedSources
 
-Dial = Callable[[str, ResolvedHostedProvider], Awaitable[ProviderDiscovery]]
+# A provider, the connection it serves on, and the models configuration
+# declares for it when it cannot list them.
+Dial = Callable[[str, ResolvedHostedProvider, tuple[str, ...]], Awaitable[ProviderDiscovery]]
 LiveByoPairs = Callable[[Collection[str]], Awaitable[set[tuple[uuid.UUID, str]]]]
 
 UNDECRYPTABLE = (
@@ -54,7 +53,7 @@ class HostedCatalogSweep:
         uow: UnitOfWork,
         *,
         config: GatewayConfig,
-        providers: HostedProviderRepository,
+        sources: HostedSources,
         models: HostedProviderModelRepository,
         endpoints: ProviderEndpointRepository,
         offers: HostedOffers,
@@ -68,7 +67,7 @@ class HostedCatalogSweep:
         """
         self.uow = uow
         self.config = config
-        self.providers = providers
+        self.sources = sources
         self.models = models
         self.endpoints = endpoints
         self.offers = offers
@@ -90,23 +89,31 @@ class HostedCatalogSweep:
         """
         async with self.uow:
             serving = [
-                (row.provider, credential_of(row), await self.models.names_for_provider(row.provider))
-                for row in await self.providers.list_all()
-                if row.enabled
+                (
+                    source.provider,
+                    source.credential(),
+                    source.declared_models,
+                    await self.models.names_for_provider(source.provider),
+                )
+                for source in await self.sources.all()
+                if source.enabled
             ]
 
         # One provider at a time, each bounded by the discovery timeout.
-        dialed = [await self._dial_one(provider, credential, offered) for provider, credential, offered in serving]
+        dialed = [
+            await self._dial_one(provider, credential, declared, offered)
+            for provider, credential, declared, offered in serving
+        ]
         defaults: dict[str, dict[str, ModelPricing]] = {}
         if apply:
-            for (provider, _, offered), answer in zip(serving, dialed, strict=True):
+            for (provider, _, _, offered), answer in zip(serving, dialed, strict=True):
                 defaults[provider] = await self.offers.defaults_for(provider, [*answer.added, *offered])
 
         async with self.uow:
             if apply:
                 # Read again rather than carried across: a provider removed
                 # while the dials ran must not get rows with nothing to own them.
-                present = {row.provider for row in await self.providers.list_all() if row.enabled}
+                present = {source.provider for source in await self.sources.all() if source.enabled}
                 for answer in dialed:
                     if answer.provider not in present:
                         answer.added = []
@@ -168,14 +175,14 @@ class HostedCatalogSweep:
         ]
 
     async def _dial_one(
-        self, provider: str, credential: ResolvedHostedProvider | None, offered: set[str]
+        self, provider: str, credential: ResolvedHostedProvider | None, declared: tuple[str, ...], offered: set[str]
     ) -> HostedCatalogProviderRefreshPublic:
         """Ask one provider what it serves, reporting a refusal rather than raising."""
         if credential is None:
             return HostedCatalogProviderRefreshPublic(
                 provider=provider, added=[], error=UNDECRYPTABLE, credential_unreadable=True
             )
-        discovery = await self.dial(provider, credential)
+        discovery = await self.dial(provider, credential, declared)
         if discovery.error is not None or discovery.discovery_unsupported:
             return HostedCatalogProviderRefreshPublic(
                 provider=provider,

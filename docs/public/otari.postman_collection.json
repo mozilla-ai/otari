@@ -2691,7 +2691,7 @@
         {
           "name": "List Hosted Providers",
           "request": {
-            "description": "List the providers this deployment serves hosted inference on.",
+            "description": "List the providers this deployment serves hosted inference on.\n\nStored providers and those defined in the configuration's\n``hosted_providers:`` block alike, each marked with its ``source``.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2733,7 +2733,7 @@
               },
               "raw": "{\n  \"api_key\": \"<your OpenAI API key>\",\n  \"provider\": \"openai\"\n}"
             },
-            "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error.",
+            "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error. A\nprovider the configuration defines may be created too, and the stored one\nthen serves instead.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2807,7 +2807,7 @@
               },
               "raw": "{\n  \"enabled\": false\n}"
             },
-            "description": "Rotate the key, repoint the base, or turn a provider off.",
+            "description": "Rotate the key, repoint the base, or turn a provider off.\n\nA provider defined in configuration answers 409: it is changed there.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2839,7 +2839,7 @@
         {
           "name": "Delete Hosted Provider",
           "request": {
-            "description": "Remove a provider and its roster, leaving the runtime with no hosted path for it.",
+            "description": "Remove a provider and its roster, leaving the runtime with no hosted path for it.\n\nA provider defined in configuration answers 409. A stored provider that\noverrides a configured one keeps the roster, which the configured one\nserves again.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -2866,7 +2866,7 @@
         {
           "name": "List Available Models",
           "request": {
-            "description": "Ask the provider what it serves on the stored credential.\n\nDials the upstream on every call rather than caching: the caller is the\nadmin form's model picker, opened rarely and entitled to a current answer.\nFailure comes back in the body, so the picker can fall back to a text box.",
+            "description": "Ask the provider what it serves on its credential.\n\nDials the upstream on every call rather than caching: the caller is the\nadmin form's model picker, opened rarely and entitled to a current answer.\nFailure comes back in the body, so the picker can fall back to a text box.",
             "header": [],
             "method": "GET",
             "url": {

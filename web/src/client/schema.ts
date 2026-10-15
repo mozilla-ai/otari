@@ -1563,6 +1563,9 @@ export interface paths {
         /**
          * List Hosted Providers
          * @description List the providers this deployment serves hosted inference on.
+         *
+         *     Stored providers and those defined in the configuration's
+         *     ``hosted_providers:`` block alike, each marked with its ``source``.
          */
         get: operations["hosted-providers-list_hosted_providers"];
         put?: never;
@@ -1571,7 +1574,9 @@ export interface paths {
          * @description Configure a provider with the key this deployment will serve it on.
          *
          *     Everything the provider lists on that key is offered at once; a provider
-         *     that will not say yields a provider with no models, not an error.
+         *     that will not say yields a provider with no models, not an error. A
+         *     provider the configuration defines may be created too, and the stored one
+         *     then serves instead.
          */
         post: operations["hosted-providers-create_hosted_provider"];
         delete?: never;
@@ -1643,6 +1648,10 @@ export interface paths {
         /**
          * Delete Hosted Provider
          * @description Remove a provider and its roster, leaving the runtime with no hosted path for it.
+         *
+         *     A provider defined in configuration answers 409. A stored provider that
+         *     overrides a configured one keeps the roster, which the configured one
+         *     serves again.
          */
         delete: operations["hosted-providers-delete_hosted_provider"];
         options?: never;
@@ -1650,6 +1659,8 @@ export interface paths {
         /**
          * Update Hosted Provider
          * @description Rotate the key, repoint the base, or turn a provider off.
+         *
+         *     A provider defined in configuration answers 409: it is changed there.
          */
         patch: operations["hosted-providers-update_hosted_provider"];
         trace?: never;
@@ -1663,7 +1674,7 @@ export interface paths {
         };
         /**
          * List Available Models
-         * @description Ask the provider what it serves on the stored credential.
+         * @description Ask the provider what it serves on its credential.
          *
          *     Dials the upstream on every call rather than caching: the caller is the
          *     admin form's model picker, opened rarely and entitled to a current answer.
@@ -10595,6 +10606,13 @@ export interface components {
          *     known by its last four characters and nothing else, ``client_args`` goes
          *     out with credential-shaped values masked, and ``api_base`` with the
          *     password in its userinfo and its query values masked.
+         *
+         *     ``source`` says where the provider is defined. A ``config`` provider comes
+         *     from the ``hosted_providers:`` block, has no row and so no ``id`` or
+         *     timestamps, and is changed by editing the configuration rather than through
+         *     this API; its models are administered as a stored provider's are.
+         *     ``shadows_config`` marks a stored provider that wins over a configuration
+         *     entry of the same provider, which serves again once the row is deleted.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -10605,22 +10623,27 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
+            /** Created At */
+            created_at?: string | null;
             /** Enabled */
             enabled: boolean;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
+            /** Id */
+            id?: string | null;
             /** Provider */
             provider: string;
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
+            /**
+             * Shadows Config
+             * @default false
+             */
+            shadows_config: boolean;
+            /**
+             * Source
+             * @default database
+             * @enum {string}
+             */
+            source: "database" | "config";
             /** Updated At */
             updated_at?: string | null;
         };
