@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from any_llm import LLMProvider
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +46,12 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
 )
-from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key, split_selector
+from gateway.services.provider_kwargs import (
+    credential_ladder_exhausted,
+    is_deployment_instance_key,
+    normalize_pricing_key,
+    split_selector,
+)
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_model_access import (
@@ -422,6 +428,16 @@ class CatalogScope:
     its priced models anyway.
     """
 
+    withhold_unserved: bool = False
+    """Whether a priced model nothing would serve this caller is withheld too.
+
+    Set for an organization API key, whose view is otherwise the whole price
+    list: a provider the operator switched off or deleted leaves its rates
+    behind, and without this they would keep listing models dispatch refuses.
+    A non-operator session is narrowed by its allow-list instead, and the
+    deployment's own callers see its whole price list.
+    """
+
     deployment_key_models: HostedModels = field(default_factory=dict)
     """What the caller reaches on a deployment-owned key, by provider, for the credential label.
 
@@ -478,10 +494,25 @@ def withheld_as_unadvertised(config: GatewayConfig, scope: CatalogScope, model_k
         return False
     if provider in scope.withheld_providers:
         return True
-    advertised = scope.hosted_models.get(provider)
+    if provider not in scope.hosted_models:
+        return scope.withhold_unserved and not _served_without_a_key_of_its_own(provider)
+    advertised = scope.hosted_models[provider]
     if advertised is None:
         return False
     return model not in advertised
+
+
+def _served_without_a_key_of_its_own(provider: str) -> bool:
+    """Whether dispatch reaches ``provider`` with no configured, organization or hosted key.
+
+    True for a provider that needs no key and for one whose own environment
+    variable is set; false for a name any-llm does not know, which nothing serves.
+    """
+    try:
+        implementation = LLMProvider(provider)
+    except ValueError:
+        return False
+    return not credential_ladder_exhausted(implementation, {})
 
 
 async def hosted_providers_withheld_from(
@@ -626,7 +657,8 @@ async def catalog_scope(
     # only once something is advertised, and never for the selector index's
     # deployment-wide view, which must not depend on any organization's keys.
     byo_providers: frozenset[str] = frozenset()
-    if hosted_models and include_offered:
+    withhold_unserved = include_offered and not is_master_key
+    if (hosted_models or withhold_unserved) and include_offered:
         dispatch_workspace_id = await lookup_default_workspace_id(db) if is_master_key else workspace_id
         byo_providers = await resolve_workspace_byo_providers(db, dispatch_workspace_id)
     return CatalogScope(
@@ -647,6 +679,7 @@ async def catalog_scope(
         hosted_models=hosted_models,
         byo_providers=byo_providers,
         withheld_providers=withheld_providers,
+        withhold_unserved=withhold_unserved,
         deployment_key_models=_without(hosted_models, byo_providers),
     )
 

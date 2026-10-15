@@ -255,3 +255,56 @@ def test_the_price_list_still_shows_a_restricted_provider_to_its_organization_an
     assert RESTRICTED_MODEL in versions
     assert RESTRICTED_MODEL in current
     assert (single, history) == (status.HTTP_200_OK, status.HTTP_200_OK)
+
+
+def _models(client: TestClient, headers: dict[str, str]) -> set[str]:
+    return {model["id"] for model in _ok(client.get(f"{API_ROOT}/models", headers=headers))["data"]}
+
+
+@pytest.mark.parametrize("how", ["switched_off", "deleted"])
+def test_an_organization_key_stops_listing_a_hosted_provider_the_operator_took_away(
+    client: TestClient, world: _World, how: str
+) -> None:
+    """Its rates stay on the price list, and dispatch refuses its models, so the catalog says so too."""
+    beta_key = _api_key(client, world, "beta_owner")
+    assert OPEN_MODEL in _models(client, beta_key)
+    assert OFF_MODEL not in _models(client, beta_key)
+
+    if how == "switched_off":
+        _ok(client.patch(f"{API_ROOT}/hosted-providers/openai", json={"enabled": False}, headers=MASTER))
+    else:
+        _ok(client.delete(f"{API_ROOT}/hosted-providers/openai", headers=MASTER))
+
+    listed = _models(client, beta_key)
+    assert OPEN_MODEL not in listed
+    assert OFF_MODEL not in listed
+    assert client.get(f"{API_ROOT}/models/{OPEN_MODEL}", headers=beta_key).status_code == status.HTTP_404_NOT_FOUND
+    # The member's session agrees, and the deployment's own view keeps its price list.
+    assert OPEN_MODEL not in {m["id"] for m in _ok(_as(client, world, "beta_member", "/models"))["data"]}
+    assert OPEN_MODEL in _models(client, MASTER)
+
+
+def test_an_organization_key_still_lists_a_model_it_reaches_on_its_own_key(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    from gateway.models.provider_keys import OrgProviderKey
+    from gateway.services.secret_box import encrypt_secret
+
+    session = db_session_factory()
+    try:
+        session.add(
+            OrgProviderKey(
+                organization_id=world.beta,
+                provider="openai",
+                name="openai-own",
+                encrypted_api_key=encrypt_secret("sk-beta-own"),
+                last4="1234",
+                is_org_default=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    _ok(client.patch(f"{API_ROOT}/hosted-providers/openai", json={"enabled": False}, headers=MASTER))
+
+    assert OPEN_MODEL in _models(client, _api_key(client, world, "beta_owner"))

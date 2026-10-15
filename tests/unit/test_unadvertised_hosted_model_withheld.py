@@ -61,3 +61,35 @@ def test_a_provider_withheld_from_the_callers_organization_lists_none_of_its_pri
     )
 
     assert withheld_as_unadvertised(_CONFIG, scope, model_key) is withheld
+
+
+@pytest.mark.parametrize(
+    ("model_key", "env", "withheld"),
+    [
+        pytest.param("anthropic:claude-x", None, True, id="nothing-serves-it"),
+        pytest.param("anthropic:claude-x", "ANTHROPIC_API_KEY", False, id="its-own-environment-variable"),
+        pytest.param("ollama:llama3", None, False, id="needs-no-key"),
+        pytest.param("not-a-provider:model", None, True, id="no-such-provider"),
+        pytest.param("home_lab:gpt-4o", None, False, id="configured-instance"),
+        pytest.param("openai:gpt-4o", None, False, id="reached-on-the-callers-own-key"),
+        pytest.param("mistral:mistral-small-latest", None, False, id="hosted"),
+    ],
+)
+def test_a_key_that_withholds_the_unserved_lists_only_what_some_credential_serves(
+    monkeypatch: pytest.MonkeyPatch, model_key: str, env: str | None, withheld: bool
+) -> None:
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    if env is not None:
+        monkeypatch.setenv(env, "sk-ambient")
+    scope = CatalogScope(
+        allowlist=None,
+        reads_workspace_layer=True,
+        deployment_supplied_providers=frozenset(),
+        offered_keys=frozenset(),
+        hosted_models={"mistral": None},
+        byo_providers=frozenset({"openai"}),
+        withhold_unserved=True,
+    )
+
+    assert withheld_as_unadvertised(_CONFIG, scope, model_key) is withheld

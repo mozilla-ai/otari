@@ -365,6 +365,14 @@ curl http://localhost:8000/api/v1/models \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
 
+An organization API key is shown a priced model only where something would
+serve it from the key's workspace: a configured instance, the organization's own
+provider key, a hosted provider the deployment serves the organization, or the
+provider's own environment variable. A hosted provider the operator switched
+off or deleted leaves its rates on the price list, and its models leave this
+listing. The master key and an operator session still list the whole price
+list.
+
 ## HuggingFace provider routing
 
 A HuggingFace model may be served by several inference providers. Pin the backend
