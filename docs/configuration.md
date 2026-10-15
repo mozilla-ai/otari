@@ -420,6 +420,22 @@ it. A retry setting in an instance's `client_args` (`max_retries`, or
 reaches an [owned provider endpoint](provider-endpoints.md), which keeps its
 SDK's default outside a policy that can fall over.
 
+### Bedrock read timeout
+
+A Bedrock client waits up to 600 seconds for the next part of a response.
+botocore's own default is 60 seconds, which fails a streamed response whose
+model goes quiet for a minute, as a model writing a long tool call can. A
+`config` in the instance's `client_args` takes the botocore `Config` options and
+wins over the default:
+
+```yaml
+providers:
+  bedrock:
+    client_args:
+      config:
+        read_timeout: 120
+```
+
 ### Runtime provider management
 
 Standalone operators can store provider credentials through the Providers page

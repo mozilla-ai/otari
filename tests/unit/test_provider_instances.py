@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 import yaml
@@ -20,6 +21,7 @@ from gateway.core.config import (
 )
 from gateway.log_config import logger as gateway_logger
 from gateway.services import provider_kwargs
+from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _AMBIENT_CREDENTIAL_PROVIDERS,
@@ -418,7 +420,7 @@ def test_bedrock_uses_aws_region_when_default_region_is_unset(monkeypatch: pytes
 
     kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.BEDROCK)
 
-    assert kwargs["client_args"] == {"region_name": "us-east-1"}
+    assert _without_read_timeout(kwargs["client_args"]) == {"region_name": "us-east-1"}
 
 
 def test_bedrock_region_fallback_preserves_other_client_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -428,7 +430,7 @@ def test_bedrock_region_fallback_preserves_other_client_args(monkeypatch: pytest
 
     kwargs = get_provider_kwargs(config, LLMProvider.BEDROCK)
 
-    assert kwargs["client_args"] == {
+    assert _without_read_timeout(kwargs["client_args"]) == {
         "retries": {"max_attempts": 2},
         "region_name": "us-east-1",
     }
@@ -445,8 +447,27 @@ def test_bedrock_preserves_explicit_region_and_aws_default_region(monkeypatch: p
     default_config = GatewayConfig(providers={"bedrock": {"client_args": {"retries": {"max_attempts": 2}}}})
     default_kwargs = get_provider_kwargs(default_config, LLMProvider.BEDROCK)
 
-    assert explicit_kwargs["client_args"] == {"region_name": "ap-southeast-2"}
-    assert default_kwargs["client_args"] == {"retries": {"max_attempts": 2}}
+    assert _without_read_timeout(explicit_kwargs["client_args"]) == {"region_name": "ap-southeast-2"}
+    assert _without_read_timeout(default_kwargs["client_args"]) == {"retries": {"max_attempts": 2}}
+
+
+def _without_read_timeout(client_args: dict[str, Any]) -> dict[str, Any]:
+    """``client_args`` less the read-timeout ``config`` every Bedrock client gets."""
+    rest = dict(client_args)
+    assert rest.pop("config").read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+    return rest
+
+
+def test_bedrock_outlasts_botocores_default_read_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """botocore's 60s default fails a stream whose model goes quiet for a minute."""
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    config = GatewayConfig(providers={"bedrock": {"client_args": {"config": {"connect_timeout": 5}}}})
+
+    client_config = get_provider_kwargs(config, LLMProvider.BEDROCK)["client_args"]["config"]
+
+    assert client_config.read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+    assert client_config.connect_timeout == 5
+    assert config.providers["bedrock"]["client_args"]["config"] == {"connect_timeout": 5}
 
 
 def test_aws_region_fallback_is_limited_to_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:

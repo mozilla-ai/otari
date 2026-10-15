@@ -254,7 +254,7 @@ async def test_a_provider_needing_no_credential_is_not_asked_about(selector: str
     """
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     resolved = resolve_provider_selector(GatewayConfig(), selector)
-    assert resolved.kwargs == {}
+    assert set(resolved.kwargs) <= {"client_args"}
     result = await _dispatch(_ctx(resolved_provider=resolved), port, selector=selector)
     assert result is resolved
     assert port.calls == []
