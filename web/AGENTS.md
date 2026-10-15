@@ -85,7 +85,8 @@ through the explicit overlay seams.
 - `operatorOnly`, deployment-wide authority
 - `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
   caller with no organization can use (Overview today); every other row,
-  overlay rows included, is hidden from that caller
+  overlay rows included, is hidden from that caller, and from every caller
+  until `GET /v1/organizations/me` has answered
 
 These gates combine with AND, and the top bar and the account menu gate their
 Playground link through the same predicate. Organization and workspace

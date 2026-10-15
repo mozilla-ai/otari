@@ -73,7 +73,11 @@ export function useNavVisibility(): (item: NavItem) => boolean {
         : isOperator
     }
 
-    if (answer === "no-organization") {
+    // While the read is in flight, draw only the rows a caller with no
+    // organization keeps. Right after an invitee's first sign-in that 404 is
+    // the answer coming, and drawing the member rail first flashes every row
+    // they are about to lose; a member instead sees the rest arrive late.
+    if (answer === "no-organization" || answer === "pending") {
       return (item: NavItem) =>
         item.reachableWithoutOrganization === true && isRouteVisible(item)
     }

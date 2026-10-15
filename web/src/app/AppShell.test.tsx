@@ -625,6 +625,8 @@ describe("AppShell surface gating", () => {
   it("renders every destination the deployment serves", async () => {
     mockMatchMedia(false)
     await renderShell()
+    // The rail beyond Overview waits on the membership read.
+    await screen.findByRole("button", { name: "Tools" })
     // Every label, not a sample: a surface misspelled on a NAV entry hides that
     // destination in every deployment, and only the full list catches it. Kept
     // as an exact comparison rather than a loop of presence checks, because a
@@ -656,10 +658,9 @@ describe("AppShell surface gating", () => {
     // Same reasoning as above, for the other context: the organization rail is
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
-    // Awaited on Providers rather than on any other row: it is the one that
-    // declares `operatorOnly`, so it arrives with the membership context while
-    // the rest paint with the first render. Waiting on one of those would leave
-    // the snapshot below a race, which it measurably is without this.
+    // Awaited on Providers rather than on any other row: it declares
+    // `operatorOnly`, so it is the last to settle once the membership context
+    // arrives. Waiting on another row would leave the snapshot below a race.
     await within(
       screen.getByRole("navigation", { name: "Sidebar" }),
     ).findByRole("link", { name: "Providers" })
@@ -1196,6 +1197,8 @@ describe("AppShell entitlement gating", () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
     await renderShell()
+    // The rail beyond Overview waits on the membership read.
+    await screen.findByRole("button", { name: "Tools" })
 
     // Shut to start. The panel stays mounted so it has a height to animate from,
     // but it is `hidden` and `aria-hidden` while shut, so its rows are reachable
@@ -1483,6 +1486,8 @@ describe("AppShell entitlement gating", () => {
     // bookmark was the only way back to them.
     window.localStorage.setItem("otari.dashboard.sidebarCollapsed", "1")
     await renderShell()
+    // The rail beyond Overview waits on the membership read.
+    await screen.findByRole("button", { name: "Tools" })
 
     expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
     await user.click(screen.getByRole("button", { name: "Tools" }))
