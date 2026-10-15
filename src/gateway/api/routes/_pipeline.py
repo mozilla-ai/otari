@@ -239,6 +239,7 @@ from gateway.services.inference import (
     UnidentifiedEndUserError,
     UnknownCaller,
     admit_deployment_paid,
+    describe_port_error,
     end_user_identifier,
     is_empty_completion,
     is_provider_billing_error,
@@ -1480,7 +1481,7 @@ async def resolve_dispatch_provider(
     client allowed to dial it.
 
     A candidate the port served is deployment-paid, and is admitted only past
-    :func:`_require_deployment_funds`. ``billing`` must be resolved on
+    :func:`_admit_or_refuse`. ``billing`` must be resolved on
     ``ctx.db``, because the charge it arms joins that session's settlement.
     """
     if ctx.resolved_provider is not None:
@@ -1526,29 +1527,27 @@ async def _prepare_for_dispatch(
         client_args = {"http_client": owned_endpoint_http_client()}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
     served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
-    if served.deployment_paid:
-        await _require_deployment_funds(ctx, served, adapter=adapter, billing=billing)
+    await _admit_or_refuse(ctx, served, adapter=adapter, billing=billing)
     return served
 
 
-async def _require_deployment_funds(
+async def _admit_or_refuse(
     ctx: RequestContext,
     resolved: ResolvedProvider,
     *,
     adapter: FormatAdapter[Any, Any],
     billing: BillingPort,
 ) -> None:
-    """Admit a deployment-paid request through ``admit_deployment_paid``, else refuse it over HTTP.
+    """Admit the request through ``admit_deployment_paid``, else refuse it over HTTP.
 
     The connection the gate checked out is handed back before dispatch, which
     also commits any credit it granted.
     """
     organization_id = ctx.organization_id
-    # The port serves a credential only to a request with an organization.
-    assert organization_id is not None
     try:
         charge = await admit_deployment_paid(
             billing,
+            deployment_paid=resolved.deployment_paid,
             organization_id=organization_id,
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
@@ -1584,7 +1583,7 @@ async def _require_deployment_funds(
             "BillingPort failed to admit a deployment-paid request: organization=%s request_id=%s: %s",
             organization_id,
             ctx.request_id,
-            _describe_port_error(exc),
+            describe_port_error(exc),
         )
         if ctx.db is not None:
             # Whatever the adapter wrote before failing is discarded, and a
@@ -1611,7 +1610,8 @@ async def _require_deployment_funds(
             tags=ctx.tags,
         )
         raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
-    await release_session(ctx.db)
+    if charge is not None:
+        await release_session(ctx.db)
     ctx.deployment_charge = charge
 
 
@@ -4632,40 +4632,15 @@ async def charge_deployment_paid(
     model: str,
     expects_cost: bool,
 ) -> None:
-    """Charge a deployment-paid request's settled cost, before its reservation settles.
+    """Settle a deployment-paid request's charge on ``db``, before its reservation settles.
 
-    Runs before the settlement's commit, which is what lands the charge, so the
-    budget and the organization's funds move together. One charge per settled
-    request: a tool loop's rounds settle as one row, and so as one charge.
-
-    Never raises: the response has already been served. The charge runs in a
-    savepoint, so a failed one is discarded whole and the budget settlement that
-    follows still lands; the usage row is written either way.
+    One charge per settled request: a tool loop's rounds settle as one row, and so as one charge.
     """
     if charge is None:
         return
-    amount = charge.amount_due(cost, model=model, expects_cost=expects_cost)
-    if amount is None:
-        return
-    try:
-        async with db.begin_nested():
-            await charge.charge(amount, description=f"{provider}:{model}")
-    except Exception as exc:
-        logger.error(
-            "Charge of %s for a served deployment-paid request failed; it goes uncharged: "
-            "organization=%s request_id=%s: %s",
-            amount,
-            charge.organization_id,
-            charge.request_id,
-            _describe_port_error(exc),
-        )
-
-
-def _describe_port_error(exc: Exception) -> str:
-    """Name a port failure without the row data a database error's text can carry."""
-    if isinstance(exc, DATABASE_ERRORS):
-        return describe_database_error(exc)
-    return type(exc).__name__
+    await charge.settle(
+        cost, model=model, description=f"{provider}:{model}", expects_cost=expects_cost, savepoint=db.begin_nested
+    )
 
 
 async def release_reservation(ctx: RequestContext) -> None:

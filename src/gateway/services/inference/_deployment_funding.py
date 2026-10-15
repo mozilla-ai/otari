@@ -7,9 +7,13 @@ that leaves, and the next request is refused.
 """
 
 import uuid
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.log_config import logger
 from gateway.ports.billing_port import BillingPort
 
@@ -73,24 +77,67 @@ class DeploymentCharge:
             api_key_id=self.api_key_id,
         )
 
+    async def settle(
+        self,
+        cost: Decimal | None,
+        *,
+        model: str,
+        description: str,
+        expects_cost: bool,
+        savepoint: Callable[[], AbstractAsyncContextManager[Any]],
+    ) -> None:
+        """Charge what a settled ``cost`` owes, inside ``savepoint``.
+
+        Called before the settlement's commit, which is what lands the charge, so
+        the budget and the organization's funds move together. Never raises: the
+        response has already been served, so a failed charge is discarded with its
+        savepoint and logged, and the settlement that follows still lands.
+        """
+        amount = self.amount_due(cost, model=model, expects_cost=expects_cost)
+        if amount is None:
+            return
+        try:
+            async with savepoint():
+                await self.charge(amount, description=description)
+        except Exception as exc:
+            logger.error(
+                "Charge of %s for a served deployment-paid request failed; it goes uncharged: "
+                "organization=%s request_id=%s: %s",
+                amount,
+                self.organization_id,
+                self.request_id,
+                describe_port_error(exc),
+            )
+
+
+def describe_port_error(exc: Exception) -> str:
+    """Name a port failure without the row data a database error's text can carry."""
+    if isinstance(exc, DATABASE_ERRORS):
+        return describe_database_error(exc)
+    return type(exc).__name__
+
 
 async def admit_deployment_paid(
     billing: BillingPort,
     *,
-    organization_id: uuid.UUID,
+    deployment_paid: bool,
+    organization_id: uuid.UUID | None,
     api_key_id: str | None,
     user_id: str | None,
     request_id: str | None,
-) -> DeploymentCharge:
-    """Admit a deployment-paid request and return what settlement charges it through.
+) -> DeploymentCharge | None:
+    """Admit a request on its credential, returning what settlement charges it through.
 
-    Grants any credit the organization is owed, then refuses one with nothing
-    paid in.
+    Only a deployment-paid request with an organization is gated and charged; any
+    other request is admitted with nothing to charge (``None``). A gated one is
+    granted any credit its organization is owed, then refused with nothing paid in.
 
     Raises:
         InsufficientFundsError: If the organization has no funds paid in.
 
     """
+    if not deployment_paid or organization_id is None:
+        return None
     await billing.apply_due_credit(organization_id=organization_id)
     await billing.require_funds_on_deposit(organization_id=organization_id)
     return DeploymentCharge(

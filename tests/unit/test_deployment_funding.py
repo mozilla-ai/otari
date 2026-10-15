@@ -7,7 +7,8 @@ the log without the provider, which the usage row carries.
 
 import logging
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, cast
 
@@ -50,13 +51,16 @@ def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCapture
 
 
 async def _admit(billing: _Billing, user_id: str | None = str(IDENTITY_ID)) -> DeploymentCharge:
-    return await admit_deployment_paid(
+    charge = await admit_deployment_paid(
         cast(BillingPort, billing),
+        deployment_paid=True,
         organization_id=ORGANIZATION_ID,
         api_key_id="key-1",
         user_id=user_id,
         request_id="req-1",
     )
+    assert charge is not None
+    return charge
 
 
 @pytest.mark.asyncio
@@ -121,3 +125,81 @@ async def test_a_charge_is_attributed_to_the_request() -> None:
             "api_key_id": "key-1",
         },
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("deployment_paid", "organization_id"), [(False, ORGANIZATION_ID), (True, None)])
+async def test_a_request_the_deployment_does_not_pay_for_is_admitted_with_nothing_to_charge(
+    deployment_paid: bool, organization_id: uuid.UUID | None
+) -> None:
+    billing = _Billing(refuse=True)
+    charge = await admit_deployment_paid(
+        cast(BillingPort, billing),
+        deployment_paid=deployment_paid,
+        organization_id=organization_id,
+        api_key_id="key-1",
+        user_id=None,
+        request_id="req-1",
+    )
+    assert charge is None
+    assert billing.calls == []
+
+
+class _Savepoint:
+    def __init__(self) -> None:
+        self.entered = 0
+        self.rolled_back = 0
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator[None]:
+        self.entered += 1
+        try:
+            yield
+        except Exception:
+            self.rolled_back += 1
+            raise
+
+
+@pytest.mark.asyncio
+async def test_settlement_charges_a_positive_cost_inside_the_savepoint() -> None:
+    billing = _Billing()
+    charge = await _admit(billing)
+    savepoint = _Savepoint()
+    await charge.settle(
+        Decimal("0.25"), model="gpt-4o", description="openai:gpt-4o", expects_cost=True, savepoint=savepoint
+    )
+    assert savepoint.entered == 1
+    assert billing.calls[-1][0] == "charge"
+
+
+@pytest.mark.asyncio
+async def test_settlement_with_nothing_due_opens_no_savepoint() -> None:
+    billing = _Billing()
+    charge = await _admit(billing)
+    savepoint = _Savepoint()
+    await charge.settle(Decimal(0), model="gpt-4o", description="openai:gpt-4o", expects_cost=True, savepoint=savepoint)
+    assert savepoint.entered == 0
+    assert all(call[0] != "charge" for call in billing.calls)
+
+
+class _FailingBilling(_Billing):
+    async def charge(self, **kwargs: Any) -> None:
+        raise RuntimeError("ledger unavailable: secret row data")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_charge_is_rolled_back_and_logged_without_its_text(
+    gateway_logs: pytest.LogCaptureFixture,
+) -> None:
+    charge = await _admit(_FailingBilling())
+    savepoint = _Savepoint()
+    await charge.settle(
+        Decimal("0.25"), model="gpt-4o", description="openai:gpt-4o", expects_cost=True, savepoint=savepoint
+    )
+    assert savepoint.rolled_back == 1
+    (record,) = gateway_logs.records
+    assert record.levelno == logging.ERROR
+    message = record.getMessage()
+    assert "RuntimeError" in message
+    assert "secret row data" not in message
+    assert record.exc_info is None
