@@ -1551,7 +1551,8 @@ async def _refuse_if_hosted_model_switched_off(
     the ordinary missing-credential answer, so nothing here says whether such a
     provider exists.
     """
-    assert ctx.organization_id is not None
+    if ctx.organization_id is None:
+        return
     try:
         served = await port.get_hosted_models(organization_id=ctx.organization_id)
     except Exception:
