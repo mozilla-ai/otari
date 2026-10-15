@@ -9,14 +9,18 @@ switched off is not. Model discovery is stubbed; the provider call is captured
 at the any-llm boundary and never made.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
+from gateway.models.usage import UsageLog
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 
@@ -112,6 +116,35 @@ def test_a_hosted_provider_serves_a_candidate_nothing_else_credentials(
     assert captured["client_args"] == {"timeout": 9}
     # Served under the name asked for, so the pricing key does not move.
     assert captured["model"] == "openai:gpt-4o"
+
+
+def test_a_request_a_hosted_provider_served_is_recorded_as_deployment_paid(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """The deployment settles the upstream bill for it, so its usage row says so."""
+    _create_user(client, master_key_header)
+    _price(client, master_key_header, "openai:gpt-4o")
+    _hosted_openai(client, master_key_header)
+    completion = ChatCompletion(
+        id="chatcmpl-hosted",
+        object="chat.completion",
+        created=0,
+        model="gpt-4o",
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")],
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=completion)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "openai:gpt-4o", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+            headers=master_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    with db_session_factory() as db:
+        flags = list(db.scalars(select(UsageLog.deployment_paid).where(UsageLog.user_id == "u1")))
+    assert flags == [True]
 
 
 def test_with_no_hosted_provider_the_candidate_goes_out_uncredentialed(
