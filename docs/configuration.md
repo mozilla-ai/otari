@@ -68,7 +68,9 @@ providers:
 ```
 
 Precedence from lowest to highest is the config file, structured environment
-config, then scalar `OTARI_<FIELD>` values. Stored runtime settings override
+config, then `OTARI_<FIELD>` values: the scalar fields, and
+`OTARI_HOSTED_PROVIDERS` as JSON. A non-scalar setting replaces the lower
+layer's value whole rather than merging into it. Stored runtime settings override
 the corresponding startup value after the database is available.
 
 ## Common settings
@@ -480,11 +482,16 @@ hosted_providers:
 Reference the key as `${VAR}` rather than writing it into the file: it is
 resolved from the environment as every `${VAR}` in the file is, so the key stays
 in your secret store. The whole block can instead be set as JSON through
-`OTARI_HOSTED_PROVIDERS`:
+`OTARI_HOSTED_PROVIDERS`, where `${VAR}` resolves the same way:
 
 ```bash
-OTARI_HOSTED_PROVIDERS='{"openai": {"api_key": "sk-..."}}'
+OTARI_HOSTED_PROVIDERS='{"openai": {"api_key": "${OPENAI_API_KEY}"}}'
 ```
+
+When it is set, it replaces the `hosted_providers:` block of the file (and of
+`OTARI_CONFIG_YAML`) whole: a provider only the file names is not served, and
+the two are never merged per provider. An empty value leaves the file's block
+in place.
 
 The block is validated at load: an unknown implementation, a `provider_type`
 key (a named instance belongs in `providers:`), an unknown field, or a missing

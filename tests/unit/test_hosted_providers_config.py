@@ -179,3 +179,67 @@ def test_the_environment_block_is_validated_at_load(tmp_path: Path, monkeypatch:
 
     with pytest.raises(ValueError, match=r"hosted_providers\.openai\.api_key is required"):
         _load(tmp_path, "")
+
+
+def test_the_environment_block_replaces_the_file_block_whole(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "OTARI_HOSTED_PROVIDERS", json.dumps({"openrouter": {"api_key": KEY, "api_base": "https://env.test/v1"}})
+    )
+
+    config = _load(
+        tmp_path,
+        "hosted_providers:\n"
+        "  openrouter:\n    api_key: sk-file-1111\n    api_base: https://file.test/v1\n"
+        "  anthropic:\n    api_key: sk-file-2222\n",
+    )
+
+    entries = config.hosted_provider_entries()
+    assert set(entries) == {"openrouter"}
+    assert entries["openrouter"].api_key == KEY
+    assert entries["openrouter"].api_base == "https://env.test/v1"
+
+
+def test_the_environment_block_beats_the_structured_environment_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_CONFIG_YAML", "hosted_providers:\n  anthropic:\n    api_key: sk-yaml-3333\n")
+    monkeypatch.setenv("OTARI_HOSTED_PROVIDERS", json.dumps({"openai": {"api_key": KEY}}))
+
+    config = _load(tmp_path, "")
+
+    assert set(config.hosted_provider_entries()) == {"openai"}
+
+
+def test_the_environment_block_interpolates_variables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+    monkeypatch.setenv("OTARI_HOSTED_PROVIDERS", json.dumps({"openai": {"api_key": "${OPENAI_API_KEY}"}}))
+
+    config = _load(tmp_path, "")
+
+    assert config.hosted_provider_entries()["openai"].api_key == KEY
+
+
+@pytest.mark.parametrize(
+    ("raw", "match"),
+    [
+        ('{"openai": {"api_key": "' + KEY + '"', "is not valid JSON"),
+        (json.dumps([{"openai": {"api_key": KEY}}]), "must be a JSON object"),
+    ],
+)
+def test_a_malformed_environment_block_fails_without_quoting_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str, match: str
+) -> None:
+    monkeypatch.setenv("OTARI_HOSTED_PROVIDERS", raw)
+
+    with pytest.raises(ValueError, match=match) as refused:
+        _load(tmp_path, "")
+
+    assert KEY not in str(refused.value)
+
+
+def test_an_empty_environment_block_leaves_the_file_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_HOSTED_PROVIDERS", "")
+
+    config = _load(tmp_path, f"hosted_providers:\n  openai:\n    api_key: {KEY}\n")
+
+    assert set(config.hosted_provider_entries()) == {"openai"}

@@ -9,7 +9,8 @@ the hosted-providers API body takes. An entry is never written to the database
 and never encrypted: it is read from this block on every use, and a stored row
 of the same provider wins over it. ``${VAR}`` interpolation reaches it as it
 reaches the rest of a configuration file, and ``OTARI_HOSTED_PROVIDERS`` sets
-the whole block as JSON.
+the whole block as JSON, replacing the file's block rather than merging into it
+(``load_config`` applies it).
 
 Validation errors name the entry and the field and never the value, because a
 value here may be a key.
@@ -123,7 +124,7 @@ class ProviderSettings(BaseModel):
             "'restricted_to_organization_id', and an optional 'models' list offered when the provider cannot list "
             "its own. Served after every other credential, as a stored hosted provider is, and never written to "
             "the database; a stored hosted provider of the same name wins. Settable as JSON through "
-            "OTARI_HOSTED_PROVIDERS."
+            "OTARI_HOSTED_PROVIDERS, which replaces the file's block whole."
         ),
     )
 

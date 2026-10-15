@@ -1,5 +1,6 @@
 import base64
 import binascii
+import json
 import os
 import re
 import types
@@ -139,6 +140,10 @@ RESERVED_PROVIDER_INSTANCE_NAMES: frozenset[str] = frozenset({"otari", HOSTED_OF
 
 OTARI_CONFIG_YAML_ENV = "OTARI_CONFIG_YAML"
 OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
+# Mapping fields an OTARI_<FIELD> variable sets as a JSON object. The variable
+# replaces the file's block whole, as a top-level key of OTARI_CONFIG_YAML does,
+# rather than merging into it per entry.
+JSON_ENV_FIELDS = ("hosted_providers",)
 # GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
 # code. The read sites still consult otari_env() (they have no config object in
 # scope), so load_config bridges values set in the YAML config into the process
@@ -2735,6 +2740,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     structured_env_config = _load_structured_env_config()
     if structured_env_config:
         config_dict.update(structured_env_config)
+    _apply_json_env_overrides(config_dict)
 
     # Snapshot which bridged fields the YAML config set, before the env
     # overrides below inject OTARI_ values into the same dict: only YAML-set
@@ -2839,6 +2845,30 @@ def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
             config[field_name] = _coerce_scalar_env(value, GatewayConfig.model_fields[field_name].annotation)
         except _NonScalarField:
             continue
+
+
+def _apply_json_env_overrides(config: dict[str, Any]) -> None:
+    """Replace each ``JSON_ENV_FIELDS`` block with its ``OTARI_<FIELD>`` JSON object, when one is set.
+
+    Written into the init dict for the reason the scalar overrides are: pydantic's
+    own env source ranks below init, and merges a mapping under it per key, so the
+    file's entries would win. ``${VAR}`` references resolve as in a config file.
+    Errors name the variable and the position, never the content, which may hold a key.
+    """
+    for field_name in JSON_ENV_FIELDS:
+        env_name = f"{OTARI_ENV_PREFIX}{field_name.upper()}"
+        raw = os.getenv(env_name)
+        if raw is None or not raw.strip():
+            continue
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            msg = f"{env_name} is not valid JSON: {exc.msg} at line {exc.lineno}, column {exc.colno}."
+            raise ValueError(msg) from None
+        if not isinstance(value, dict):
+            msg = f"{env_name} must be a JSON object, got {type(value).__name__}."
+            raise ValueError(msg)
+        config[field_name] = _resolve_env_vars(value)
 
 
 def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
