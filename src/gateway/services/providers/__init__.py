@@ -8,7 +8,6 @@ are still in the flat modules beside `services/`, and move here when the
 domain's migration reaches them (`DOMAINS.md`).
 """
 
-from gateway.services.providers._hosted_discovery import hosted_discovery
 from gateway.services.providers._hosted_provider_service import (
     HostedProviderService,
     LiveByoPairs,
@@ -46,7 +45,6 @@ __all__ = [
     "amessages",
     "aresponses",
     "cached_owned_endpoint",
-    "hosted_discovery",
     "load_provider_endpoints_at_startup",
     "missing_provider_credential",
     "owned_endpoint_http_client",

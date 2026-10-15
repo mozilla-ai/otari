@@ -24,6 +24,7 @@ from gateway import features
 from gateway.api.deps import (
     build_budget_service,
     build_file_service,
+    build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
     build_trace_service,
@@ -105,7 +106,6 @@ from gateway.services.provider_store_service import (
     run_provider_refresher,
 )
 from gateway.services.providers import (
-    hosted_discovery,
     load_provider_endpoints_at_startup,
     reset_provider_endpoint_cache,
     run_provider_endpoint_refresher,
@@ -334,9 +334,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     # raising it from 0 flips every read onto a cache nothing then fills.
     _LifespanWorker(
         "model discovery",
-        lambda config, _container: run_discovery_refresher(
-            config, hosted=hosted_discovery(functools.partial(build_hosted_provider_service, config=config))
-        ),
+        lambda config, _container: run_discovery_refresher(config, hosted=build_hosted_discovery(config)),
         reset_discovery_cache,
     ),
     _LifespanWorker(

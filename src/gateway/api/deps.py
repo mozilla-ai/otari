@@ -16,7 +16,7 @@ from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
 from gateway.core.feature import CoreFeature
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
@@ -79,6 +79,7 @@ from gateway.services.inference import InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.mail import Mailer
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.organizations import InvitationMailLimit
@@ -1584,6 +1585,20 @@ def get_hosted_provider_service(
 
 
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
+
+
+def build_hosted_discovery(config: GatewayConfig) -> HostedDiscovery:
+    """Build the discovery worker's read of the hosted providers' dials.
+
+    Each call reads in a unit of work of its own, which closes before any dial
+    runs, so no session is held across an upstream call.
+    """
+
+    async def dials() -> dict[str, DiscoveryDial]:
+        async with create_unit_of_work() as uow:
+            return await build_hosted_provider_service(uow, config=config).discovery_dials()
+
+    return dials
 
 
 def get_rate_limit_service(

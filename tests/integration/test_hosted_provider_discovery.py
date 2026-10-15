@@ -6,7 +6,6 @@ listing stays out of the catalog, which lists the roster the operator switched
 on. Every dial is stubbed at the hosted-provider service's boundary.
 """
 
-import functools
 from collections.abc import Iterator
 from typing import Any
 
@@ -14,10 +13,9 @@ import pytest
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 
-from gateway.api.deps import build_hosted_provider_service
+from gateway.api.deps import build_hosted_discovery
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.model_discovery_service import ProviderDiscovery, get_model_cache
-from gateway.services.providers import hosted_discovery
 from gateway.services.secret_box import generate_secret_key
 
 KEY = "sk-live-hosted-1234"
@@ -145,7 +143,7 @@ def test_the_refresher_reads_the_hosted_providers_in_a_transaction_of_its_own(
     _dials.clear()
 
     async def tick() -> list[str]:
-        dials = await hosted_discovery(functools.partial(build_hosted_provider_service, config=test_config))()
+        dials = await build_hosted_discovery(test_config)()
         return [(await dial()).provider for dial in dials.values()]
 
     assert client.portal is not None
