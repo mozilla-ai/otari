@@ -654,9 +654,13 @@ function DataTableGrid<Row extends object>({
               <SelectionCheckbox ariaLabel="Select row" excludeFromTabOrder />
             </Table.Cell>
           ) : null}
+          {/* A body cell's `data-key` is a generated collection key, unlike its
+              header's, so `data-column` is what lets a stylesheet name its
+              column. */}
           {columns.map((col) => (
             <Table.Cell
               key={col.id}
+              data-column={col.id}
               className={
                 col.align === "end" ? "text-right tabular-nums" : undefined
               }

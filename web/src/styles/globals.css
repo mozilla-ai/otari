@@ -2528,21 +2528,21 @@ main {
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="time"],
-.otari-activity-table .table__cell[data-key="time"] {
+.otari-activity-table .table__cell[data-column="time"] {
   position: sticky;
   left: var(--activity-pin-start);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="user"],
-.otari-activity-table .table__cell[data-key="user"] {
+.otari-activity-table .table__cell[data-column="user"] {
   position: sticky;
   left: calc(var(--activity-pin-start) + 7.5rem);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="model"],
-.otari-activity-table .table__cell[data-key="model"] {
+.otari-activity-table .table__cell[data-column="model"] {
   position: sticky;
   left: calc(var(--activity-pin-start) + 16.875rem);
   z-index: 1;
@@ -2551,7 +2551,7 @@ main {
 /* One boundary, at the edge of the held region, and only while it is holding
    something back. */
 .otari-activity-table[data-scrolled="true"] .table__column[data-key="model"],
-.otari-activity-table[data-scrolled="true"] .table__cell[data-key="model"] {
+.otari-activity-table[data-scrolled="true"] .table__cell[data-column="model"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-mcp-table .table__row .table__cell {
@@ -2654,7 +2654,7 @@ main {
   min-width: 12.5rem;
 }
 .otari-accounts-table .table__column[data-key="account"],
-.otari-accounts-table .table__cell[data-key="account"] {
+.otari-accounts-table .table__cell[data-column="account"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2663,7 +2663,8 @@ main {
   min-width: 18.75rem;
 }
 .otari-accounts-table[data-scrolled="true"] .table__column[data-key="account"],
-.otari-accounts-table[data-scrolled="true"] .table__cell[data-key="account"] {
+.otari-accounts-table[data-scrolled="true"]
+  .table__cell[data-column="account"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-workspaces-table .table__row .table__cell {
@@ -2685,7 +2686,7 @@ main {
   min-width: 6rem;
 }
 .otari-workspaces-table .table__column[data-key="name"],
-.otari-workspaces-table .table__cell[data-key="name"] {
+.otari-workspaces-table .table__cell[data-column="name"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2694,7 +2695,7 @@ main {
   min-width: 27.5rem;
 }
 .otari-workspaces-table[data-scrolled="true"] .table__column[data-key="name"],
-.otari-workspaces-table[data-scrolled="true"] .table__cell[data-key="name"] {
+.otari-workspaces-table[data-scrolled="true"] .table__cell[data-column="name"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-provider-keys-table .table__row .table__cell {
@@ -2731,7 +2732,7 @@ main {
   min-width: 18rem;
 }
 .otari-provider-keys-table .table__column[data-key="name"],
-.otari-provider-keys-table .table__cell[data-key="name"] {
+.otari-provider-keys-table .table__cell[data-column="name"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2739,7 +2740,8 @@ main {
 }
 .otari-provider-keys-table[data-scrolled="true"]
   .table__column[data-key="name"],
-.otari-provider-keys-table[data-scrolled="true"] .table__cell[data-key="name"] {
+.otari-provider-keys-table[data-scrolled="true"]
+  .table__cell[data-column="name"] {
   border-right: 1px solid var(--color-control-border);
 }
 /* The organization's guardrail definitions. Name, guardrail and checks absorb
@@ -2793,7 +2795,7 @@ main {
   width: 12rem;
   min-width: 12rem;
 }
-.otari-guardrail-mandates-table .table__cell[data-key="on_unavailable"] {
+.otari-guardrail-mandates-table .table__cell[data-column="on_unavailable"] {
   white-space: nowrap;
 }
 .otari-guardrail-mandates-table .table__column[data-key="actions"] {
@@ -2858,7 +2860,7 @@ main {
   min-width: 9rem;
 }
 .otari-members-table .table__column[data-key="member"],
-.otari-members-table .table__cell[data-key="member"] {
+.otari-members-table .table__cell[data-column="member"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2867,7 +2869,7 @@ main {
 /* One boundary, at the edge of the held lane, and only while it is holding
    something back. */
 .otari-members-table[data-scrolled="true"] .table__column[data-key="member"],
-.otari-members-table[data-scrolled="true"] .table__cell[data-key="member"] {
+.otari-members-table[data-scrolled="true"] .table__cell[data-column="member"] {
   border-right: 1px solid var(--color-control-border);
 }
 /* Key lanes stay fixed while the name absorbs the available width. */
@@ -2985,8 +2987,7 @@ main {
 /* A relative time is short but wraps at this lane width ("4 minutes ago" is
    three words), and a wrapped cell is the one thing that can break the row
    pitch below. */
-.otari-overview-activity .table__cell[data-key="time"],
-.otari-overview-activity .table__row .table__cell:first-child {
+.otari-overview-activity .table__cell[data-column="time"] {
   white-space: nowrap;
 }
 .otari-overview-activity .table__column[data-key="key"] {

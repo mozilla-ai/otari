@@ -798,6 +798,17 @@ describe("a table is a region, not a card", () => {
       "delete the declaration; `.otari-table` is what decides these three",
     ).toEqual([])
   })
+
+  it("names a body cell's column by data-column, never by data-key", () => {
+    // A body cell's `data-key` is a generated collection key (`react-aria-5`),
+    // so a rule keyed on it matches nothing and a pinned header leaves its
+    // cells to scroll away underneath it.
+    const bare = CSS.replace(/\/\*[\s\S]*?\*\//g, "")
+    expect(
+      bare.match(/\.table__cell\[data-key=[^\]]*\]/g) ?? [],
+      "use `.table__cell[data-column=…]`, which DataTable stamps on every cell",
+    ).toEqual([])
+  })
 })
 
 describe("a token named as a class is registered", () => {
