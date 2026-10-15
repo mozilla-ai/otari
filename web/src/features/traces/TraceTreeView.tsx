@@ -42,7 +42,7 @@ const ROW =
 const TEXT = "flex min-w-0 flex-1 flex-col justify-center py-0.5 pr-1 pl-2"
 
 // A level indents 16px: an 8px elbow plus half a 16px mark, so every connector
-// runs through the centre of its parent's mark and meets its own at mid-height.
+// runs through the center of its parent's mark and meets its own at mid-height.
 const MARK =
   "relative flex w-4 shrink-0 items-center justify-center self-stretch"
 

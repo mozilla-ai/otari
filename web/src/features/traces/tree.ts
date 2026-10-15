@@ -37,7 +37,7 @@ export function buildTree(observations: Observation[]): TreeNode[] {
   return roots
 }
 
-// Depth-first, honouring `collapsed`, with the connector bookkeeping the tree
+// Depth-first, honoring `collapsed`, with the connector bookkeeping the tree
 // and the indented log both draw from.
 export function flattenTreeOrder(
   roots: TreeNode[],

@@ -9,7 +9,7 @@ import { seedParitySession, seedParityUsage } from "./parity-data"
 // re-seeding per file would be work repeated for no isolation gained. Declaring
 // it a dependency also makes the order explicit rather than resting on the
 // alphabetical order of filenames.
-test("seed the behavioural-parity usage fixture", async ({ page }) => {
+test("seed the behavioral-parity usage fixture", async ({ page }) => {
   await seedParityUsage(page)
   await seedParitySession(page)
   // The fixture is imported usage, which is deliberately not a call to this
