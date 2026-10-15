@@ -116,7 +116,10 @@ deployment settles the upstream bill for a hosted model, which is why its rate
 belongs to the deployment and not to any one organization. A hosted provider
 can be restricted to one organization, and every other organization is then
 served as if it did not exist. Any standalone or hosted deployment configures
-them on the Hosted providers page or through `/api/v1/hosted-providers`.
+them on the Hosted providers page, through `/api/v1/hosted-providers`, or in the
+`hosted_providers:` block of `config.yml` (see
+[Configuration](configuration.md#hosted-providers-in-configyml)), where a stored
+provider of the same name wins over the configured one.
 
 What a hosted provider contributes to the catalog is its roster: the models
 switched on under it, answered for the caller's organization. It also takes part
@@ -124,11 +127,12 @@ in the operator's views of the deployment's credentials, beside the configured
 instances. `GET /api/v1/models/discoverable` lists what each hosted provider's
 stored key can reach, and `GET /api/v1/providers/health` reports whether it
 answers, each under the provider's name. Both are the deployment's view, so a
-provider restricted to one organization is included, and a provider switched off
-is not. A hosted provider whose stored key cannot be decrypted with the
-configured `OTARI_SECRET_KEY` is reported unhealthy with that reason rather than
-dialed. A configured instance named like a hosted provider shadows it here as it
-does at dispatch, so only the instance is listed.
+provider restricted to one organization is included, a provider defined in
+`config.yml` is too, and a provider switched off is not. A hosted provider whose
+stored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is
+reported unhealthy with that reason rather than dialed. A configured instance
+named like a hosted provider shadows it here as it does at dispatch, so only the
+instance is listed.
 
 Being in those views means a hosted provider's model listing is dialed upstream
 on the deployment's stored key, at its `api_base` when one is set. The

@@ -127,7 +127,10 @@ gateway process rather than to any organization on it:
   one provider again, and Refresh and purge asks every provider and then removes
   priced models nothing on the deployment serves, listing them before anything
   is removed. A provider kept to one organization shows which; that restriction
-  is set through `/api/v1/hosted-providers`.
+  is set through `/api/v1/hosted-providers`. A provider defined in the
+  `hosted_providers:` block of `config.yml` carries a `config.yml` badge and
+  cannot be edited, switched or removed here, while its models can; adding a
+  provider of the same name overrides it, which the form warns about.
 
 Accounts and Hosted providers are listed only for a deployment operator, and
 answer anyone else that they are not available to them.

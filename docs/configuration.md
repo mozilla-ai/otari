@@ -448,6 +448,58 @@ run the provider and search-tool re-encryption endpoints, then remove the old
 key. Losing every configured encryption key makes stored credentials
 unrecoverable.
 
+### Hosted providers in config.yml
+
+A hosted provider is a credential the deployment serves requests on when
+nothing else credentials them (see [Modes](modes.md#hosted-providers-and-byo-credentials)).
+Besides the Hosted providers page, a standalone or hosted deployment can declare
+them in a `hosted_providers:` block, keyed by any-llm implementation, with the
+fields the `/api/v1/hosted-providers` body takes:
+
+```yaml
+hosted_providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    restricted_to_organization_id: 4f1c2a7e-0b9d-4c55-9a0e-2d6f8b3c1e90
+  vllm:
+    api_base: http://vllm.internal:8000/v1
+    models: [qwen3-32b]
+```
+
+| Field | Meaning |
+|---|---|
+| `api_key` | The key the provider is served on. Required unless the provider is a keyless self-hosted backend (vLLM, Ollama, llama.cpp, LM Studio). |
+| `api_base` | An endpoint other than the provider's default. |
+| `client_args` | What the provider's SDK client needs beyond the key, such as Bedrock's region. |
+| `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
+| `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
+| `models` | Model ids offered when the provider cannot list its own. |
+
+Reference the key as `${VAR}` rather than writing it into the file: it is
+resolved from the environment as every `${VAR}` in the file is, so the key stays
+in your secret store. The whole block can instead be set as JSON through
+`OTARI_HOSTED_PROVIDERS`:
+
+```bash
+OTARI_HOSTED_PROVIDERS='{"openai": {"api_key": "sk-..."}}'
+```
+
+The block is validated at load: an unknown implementation, a `provider_type`
+key (a named instance belongs in `providers:`), an unknown field, or a missing
+`api_key` for a provider that needs one fails the start. It is never shown by
+`/api/v1/settings`.
+
+A configured entry is never written to the database or encrypted. The Hosted
+providers page lists it with a `config.yml` badge and the API marks it
+`source: "config"` with no `id`; changing or deleting it through the API answers
+`409`, so change it in the configuration and restart. Its models, their serving
+switches and their prices are managed on the page as any hosted provider's are.
+A provider stored through the page or the API under the same name wins over the
+entry, and the start logs each entry it shadows; deleting the stored provider
+serves the entry again on the same models. A hybrid gateway ignores the block.
+
 ### Provider copies
 
 A request that asks a provider's own code execution to run over an attached file
