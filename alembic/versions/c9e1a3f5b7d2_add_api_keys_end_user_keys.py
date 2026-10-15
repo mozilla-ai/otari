@@ -30,7 +30,8 @@ _PARENT_INDEX = "ix_api_keys_parent_key_id"
 
 
 def upgrade() -> None:
-    """Add the issuing key, the mint limit and the key's tags."""
+    """Upgrade schema."""
+    # Inline on SQLite, so the FK lands without a batch rebuild of api_keys.
     if op.get_bind().dialect.name == "sqlite":
         op.execute(
             "ALTER TABLE api_keys ADD COLUMN parent_key_id VARCHAR "
@@ -45,9 +46,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop the minted keys, then the three columns.
+    """Downgrade schema.
 
-    A minted key cannot outlive the column that marks it as one: left in place it
+    The minted keys are deleted first. A minted key cannot outlive the column that marks it as one: left in place it
     would authenticate as an ordinary key of its end user, with no expiry bound to
     a service key any more.
     """
