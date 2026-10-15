@@ -832,7 +832,7 @@ async def create_message(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
-    tags_header: RequestTagsHeader = None,
+    tags_header: RequestTagsHeader,
 ) -> dict[str, Any] | Response:
     """Anthropic Messages API-compatible endpoint.
 

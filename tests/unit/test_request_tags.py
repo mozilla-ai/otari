@@ -89,6 +89,10 @@ def test_header_pairs_are_trimmed_and_percent_decoded() -> None:
     }
 
 
+def test_a_non_ascii_value_is_read_percent_encoded() -> None:
+    assert header_tags("agent=caf%C3%A9") == {"agent": "caf\u00e9"}
+
+
 def test_a_header_value_keeps_everything_after_the_first_equals() -> None:
     assert header_tags("expr=a=b") == {"expr": "a=b"}
     assert header_tags("empty=") == {"empty": ""}
@@ -107,6 +111,7 @@ def test_an_empty_header_has_no_tags(value: str | None) -> None:
         "=value",
         "agent=a,agent=b",
         "agent=%FF",
+        "agent=caf\u00c3\u00a9",
         f"{'k' * (MAX_TAG_KEY_LENGTH + 1)}=v",
         f"agent={'v' * (MAX_TAG_VALUE_LENGTH + 1)}",
         ",".join(f"k{i}=v" for i in range(MAX_REQUEST_TAGS + 1)),

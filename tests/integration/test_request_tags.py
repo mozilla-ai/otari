@@ -221,6 +221,24 @@ def test_messages_header_tags_are_recorded_and_filterable(
     assert [row["user_id"] for row in rows] == ["tags-header-messages"]
 
 
+def test_a_repeated_tags_header_is_read_as_one_list(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    async def mock_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _completion()
+
+    client.post(f"{API_ROOT}/users", json={"user_id": "tags-header-twice"}, headers=master_key_header)
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "hi"}], "user": "tags-header-twice"},
+            headers=[*master_key_header.items(), ("Otari-Tags", "agent=bug-fix"), ("Otari-Tags", "run=1234")],
+        )
+
+    assert response.status_code == 200, response.text
+    assert _row(db_session, "tags-header-twice").tags == {"agent": "bug-fix", "run": "1234"}
+
+
 @pytest.mark.parametrize("value", ["agent", "agent=a,agent=b", ",".join(f"k{i}=v" for i in range(17))])
 def test_a_malformed_tags_header_is_refused(client: TestClient, master_key_header: dict[str, str], value: str) -> None:
     response = _chat(client, {**master_key_header, "Otari-Tags": value}, "tags-header-bad")

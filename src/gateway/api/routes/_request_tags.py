@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from urllib.parse import unquote
 
-from fastapi import Header
+from fastapi import Depends, Header, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import AfterValidator, Field
 
@@ -131,7 +131,8 @@ def forwarded_metadata(fields: dict[str, Any]) -> dict[str, Any]:
 TAGS_HEADER_DESC = (
     "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), "
     "for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either "
-    "may carry an encoded `,` or `=`, and whitespace around a pair is ignored. The bounds are the body's: "
+    "may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair "
+    "is ignored, and a repeated header is read as one list. The bounds are the body's: "
     f"up to {MAX_REQUEST_TAGS} pairs, keys up to {MAX_TAG_KEY_LENGTH} characters and values up to "
     f"{MAX_TAG_VALUE_LENGTH}, counted after merging with the body's tags, which win on the same key. "
     "Never forwarded to the provider."
@@ -141,11 +142,17 @@ TAGS_HEADER_DESC = (
 def header_tags(value: str | None) -> dict[str, str] | None:
     """Return the tags an ``Otari-Tags`` header value carries, or None when it carries none.
 
-    Raises ``ValueError`` on a pair without ``=``, a key given twice, a value
-    that does not percent-decode to UTF-8, or anything past the bounds.
+    Raises ``ValueError`` on a non-ASCII character, a pair without ``=``, a key
+    given twice, a value that does not percent-decode to UTF-8, or anything past
+    the bounds.
     """
     if not value or not value.strip():
         return None
+    if not value.isascii():
+        # The server reads header bytes as Latin-1, so raw UTF-8 would be
+        # recorded garbled; only the percent-encoded form is unambiguous.
+        msg = f"{TAGS_HEADER}: percent-encode non-ASCII characters"
+        raise ValueError(msg)
     pairs: dict[str, Any] = {}
     for item in value.split(","):
         item = item.strip()
@@ -199,19 +206,27 @@ def resolved_tags(
     try:
         return merge_tags(header_tags(header), request_tags(metadata, ignore=ignore))
     except ValueError as exc:
-        raise RequestValidationError(
-            [{"type": "value_error", "loc": ("header", TAGS_HEADER), "msg": str(exc)}]
-        ) from exc
+        raise _header_error(exc) from exc
 
 
-def _validated_header(value: str | None) -> str | None:
-    header_tags(value)
+def _header_error(exc: ValueError) -> RequestValidationError:
+    return RequestValidationError([{"type": "value_error", "loc": ("header", TAGS_HEADER), "msg": str(exc)}])
+
+
+def _tags_header(
+    raw_request: Request,
+    _declared: Annotated[str | None, Header(alias=TAGS_HEADER, description=TAGS_HEADER_DESC)] = None,
+) -> str | None:
+    # Every ``Otari-Tags`` line the request sent, joined as one list: a header
+    # that repeats means the same as its values comma-joined (RFC 9110, 5.3).
+    # ``_declared`` is read only so the header appears in the OpenAPI spec.
+    value = ",".join(raw_request.headers.getlist(TAGS_HEADER)) or None
+    try:
+        header_tags(value)
+    except ValueError as exc:
+        raise _header_error(exc) from exc
     return value
 
 
 # The ``Otari-Tags`` request header, declared on each route that records tags.
-RequestTagsHeader = Annotated[
-    str | None,
-    Header(alias=TAGS_HEADER, description=TAGS_HEADER_DESC),
-    AfterValidator(_validated_header),
-]
+RequestTagsHeader = Annotated[str | None, Depends(_tags_header)]

@@ -493,7 +493,7 @@ async def create_response(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
-    tags_header: RequestTagsHeader = None,
+    tags_header: RequestTagsHeader,
 ) -> dict[str, Any] | FastAPIResponse:
     """OpenAI-compatible Responses endpoint.
 

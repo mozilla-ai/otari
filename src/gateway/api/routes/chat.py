@@ -470,7 +470,7 @@ async def chat_completions(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
-    tags_header: RequestTagsHeader = None,
+    tags_header: RequestTagsHeader,
 ) -> ChatCompletion | Response:
     """OpenAI-compatible chat completions endpoint.
 

@@ -252,10 +252,12 @@ Otari-Tags: agent=bug-fix,run=1234
 
 The value is comma-separated `key=value` pairs. Whitespace around a pair is
 ignored, everything after a pair's first `=` is its value, and keys and values
-are percent-decoded, so `note=a%2Cb` records `a,b`. Header tags are the base and
-the body's tags override them on the same key; the bounds apply to the merged
-set. A pair without `=`, a key given twice, a value that does not decode to
-UTF-8, or tags past the bounds is refused with a 422 whose `detail` locates the
+are percent-decoded, so `note=a%2Cb` records `a,b`. A non-ASCII character must
+be percent-encoded as UTF-8 (`caf%C3%A9`), and a header sent more than once is
+read as one comma-joined list. Header tags are the base and the body's tags
+override them on the same key; the bounds apply to the merged set. A raw
+non-ASCII character, a pair without `=`, a key given twice, a value that does
+not decode to UTF-8, or tags past the bounds is refused with a 422 whose `detail` locates the
 error at `["header", "Otari-Tags"]`, as a malformed `metadata` is refused. The
 header is never forwarded to the provider.
 
