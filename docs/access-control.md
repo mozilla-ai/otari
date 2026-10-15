@@ -142,6 +142,11 @@ restores the secret config.yml declares.
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
 
+A backend on Google Cloud, or behind another OpenID Connect issuer, can
+authenticate as a key with its platform identity token instead of the key's
+secret, once the operator trusts the issuer and gives the key a federation
+rule; see [Workload identity](workload-identity.md).
+
 `/api/v1/keys` manages every key in the caller's organization and requires the
 deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than

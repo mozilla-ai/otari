@@ -33,6 +33,7 @@ Running and managing a gateway.
 - [Configuration](configuration.md): configuration sources, precedence, and common settings.
 - [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
+- [Workload identity](workload-identity.md): a backend on Google Cloud authenticates with its platform identity token instead of a key's secret.
 - [Models](models.md): selectors, providers, discovery, aliases, and capabilities.
 - [Provider endpoints](provider-endpoints.md): model servers a workspace or a user brings, reached by name and kept out of budgets.
 - [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
