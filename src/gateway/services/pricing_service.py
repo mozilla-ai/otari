@@ -1,12 +1,12 @@
 """Shared pricing lookup utilities."""
 
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import case, distinct, func, inspect, or_, select, true
+from sqlalchemy import ColumnElement, case, distinct, func, inspect, not_, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
@@ -473,12 +473,42 @@ async def _keys_shadowed_by_their_canonical_form(db: AsyncSession) -> set[str]:
     return {key for key, form in canonical.items() if form in present}
 
 
+def _outside_providers(providers: Collection[str]) -> ColumnElement[bool]:
+    """Keys priced under none of ``providers``, in either spelling."""
+    if not providers:
+        return true()
+    return not_(
+        or_(
+            *(
+                ModelPricing.model_key.startswith(f"{provider}{separator}", autoescape=True)
+                for provider in sorted(providers)
+                for separator in (":", "/")
+            )
+        )
+    )
+
+
+async def pricing_versions_page(
+    db: AsyncSession, *, skip: int, limit: int, hidden_providers: Collection[str] = ()
+) -> list[ModelPricing]:
+    """One page of every stored rate version, newest first per key, leaving out ``hidden_providers``' keys."""
+    stmt = (
+        select(ModelPricing)
+        .where(_outside_providers(hidden_providers))
+        .order_by(ModelPricing.model_key, ModelPricing.effective_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return list((await db.execute(stmt)).scalars())
+
+
 async def current_rates_page(
     db: AsyncSession,
     *,
     skip: int,
     limit: int,
     as_of: datetime | None = None,
+    hidden_providers: Collection[str] = (),
 ) -> tuple[list[ModelPricing], int]:
     """One page of each priced model's current rate, with the total model count.
 
@@ -487,6 +517,9 @@ async def current_rates_page(
     a rate an operator has queued is one the table has to show, so this falls
     back to the earliest scheduled row where nothing has taken effect yet. The
     two agree wherever a rate is live.
+
+    ``hidden_providers`` leaves out every key priced under those providers, and
+    the count with them.
     """
 
     lookup_time = normalize_effective_at(as_of)
@@ -504,6 +537,7 @@ async def current_rates_page(
             ).label("effective_at"),
         )
         .where(ModelPricing.model_key.notin_(shadowed) if shadowed else true())
+        .where(_outside_providers(hidden_providers))
         .group_by(ModelPricing.model_key)
         .subquery()
     )
@@ -520,7 +554,7 @@ async def current_rates_page(
         .limit(limit)
     )
     rows = list((await db.execute(stmt)).scalars())
-    total = select(func.count(distinct(ModelPricing.model_key)))
+    total = select(func.count(distinct(ModelPricing.model_key))).where(_outside_providers(hidden_providers))
     if shadowed:
         total = total.where(ModelPricing.model_key.notin_(shadowed))
     count = await db.scalar(total)

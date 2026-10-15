@@ -8,15 +8,25 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
+from gateway.api.deps import (
+    RequestSessionModelProviderPortDep,
+    get_config,
+    get_db,
+    get_session_identity,
+    require_deployment_operator,
+    verify_catalog_reader,
+)
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
+from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float, to_usd, to_usd_or_none
 from gateway.models.pricing import API_ORIGIN, ModelPricing
 from gateway.models.pricing_schemas import PricingTier
+from gateway.models.tenancy import User as TenancyUser
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
+from gateway.services.merged_catalog_service import hosted_providers_withheld_from
 from gateway.services.policy_store import all_policy_names, resolve_effective_policy
 from gateway.services.pricing_refresh_service import (
     PendingSnapshotChanged,
@@ -35,6 +45,7 @@ from gateway.services.pricing_service import (
     default_pricing_enabled,
     default_pricing_reference,
     normalize_effective_at,
+    pricing_versions_page,
     rates_in_force,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
@@ -56,6 +67,32 @@ catalog_router = APIRouter(
 )
 
 SURFACE = Surface("pricing")
+
+
+async def _withheld_providers(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: RequestSessionModelProviderPortDep,
+) -> frozenset[str]:
+    """The hosted providers whose rates this reader may not see: those restricted to another organization."""
+    return await hosted_providers_withheld_from(
+        db, config, auth=auth, session_identity=session_identity, model_provider=model_provider
+    )
+
+
+WithheldProviders = Annotated[frozenset[str], Depends(_withheld_providers)]
+
+
+def _refuse_if_withheld(model_key: str, candidates: list[str], withheld: frozenset[str]) -> None:
+    """Answer a withheld provider's key as unknown, the way a key with no price answers."""
+    for candidate in candidates:
+        split = split_selector(candidate)
+        if split is not None and provider_key(split[0]) in withheld:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Pricing for model '{model_key}' not found"
+            )
 
 
 _PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
@@ -580,19 +617,16 @@ async def set_pricing(
 @catalog_router.get("")
 async def list_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
+    withheld: WithheldProviders,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[PricingResponse]:
-    """List all model pricing."""
-    stmt = (
-        select(ModelPricing)
-        .order_by(ModelPricing.model_key, ModelPricing.effective_at.desc())
-        .offset(skip)
-        .limit(limit)
-    )
-    result = await db.execute(stmt)
-    pricings = result.scalars().all()
+    """List all model pricing.
 
+    A hosted provider restricted to another organization than the caller's is
+    left out, as it is from the catalog.
+    """
+    pricings = await pricing_versions_page(db, skip=skip, limit=limit, hidden_providers=withheld)
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
@@ -608,6 +642,7 @@ class CurrentPricingPage(BaseModel):
 @catalog_router.get("/current")
 async def list_current_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
+    withheld: WithheldProviders,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> CurrentPricingPage:
@@ -618,10 +653,11 @@ async def list_current_pricing(
     answers one row per key: the newest rate that has taken effect, or the
     earliest scheduled rate for a key that has none yet. ``count`` is the number
     of priced models, so a caller can page without reading the collection to
-    learn how long it is.
+    learn how long it is. A hosted provider restricted to another organization
+    than the caller's is left out of both.
     """
 
-    rows, count = await current_rates_page(db, skip=skip, limit=limit)
+    rows, count = await current_rates_page(db, skip=skip, limit=limit, hidden_providers=withheld)
     return CurrentPricingPage(data=[PricingResponse.from_model(row) for row in rows], count=count)
 
 
@@ -629,10 +665,16 @@ async def list_current_pricing(
 async def get_pricing_history(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    withheld: WithheldProviders,
 ) -> list[PricingResponse]:
-    """Return the full pricing history for a model."""
+    """Return the full pricing history for a model.
+
+    A 404 for a model of a hosted provider restricted to another organization
+    than the caller's.
+    """
 
     candidates = _candidate_model_keys(model_key)
+    _refuse_if_withheld(model_key, candidates, withheld)
     pricings = await _get_pricing_history(db, candidates)
     if not pricings:
         raise HTTPException(
@@ -647,11 +689,17 @@ async def get_pricing_history(
 async def get_pricing(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    withheld: WithheldProviders,
     as_of: Annotated[datetime | None, Query(description="ISO datetime for effective lookup", title="as_of")] = None,
 ) -> PricingResponse:
-    """Get pricing for a specific model as of a timestamp."""
+    """Get pricing for a specific model as of a timestamp.
+
+    A 404 for a model of a hosted provider restricted to another organization
+    than the caller's.
+    """
 
     candidates = _candidate_model_keys(model_key)
+    _refuse_if_withheld(model_key, candidates, withheld)
     pricing = await _get_effective_pricing(db, candidates, normalize_effective_at(as_of))
 
     if not pricing:

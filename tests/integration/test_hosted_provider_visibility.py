@@ -196,3 +196,62 @@ def test_a_visitor_to_the_public_catalog_never_sees_a_provider_restricted_to_one
     assert by_id.status_code == status.HTTP_404_NOT_FOUND, by_id.text
     # The organization it is restricted to still sees it.
     assert RESTRICTED_MODEL in _catalog_selectors(_as(client, world, "alpha_member", "/catalog/models"))
+
+
+def _api_key(client: TestClient, world: _World, owner: str) -> dict[str, str]:
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions[owner])
+    try:
+        minted = _ok(client.post(f"{API_ROOT}/organizations/me/keys", json={"key_name": f"{owner} key"}))
+    finally:
+        client.cookies.clear()
+    return {API_KEY_HEADER: f"Bearer {minted['key']}"}
+
+
+def _price_list_reads(client: TestClient, get: Callable[[str], Any]) -> tuple[set[str], set[str], int, int]:
+    """Every price-list read for ``RESTRICTED_MODEL``: the two listings' keys and the two single reads' statuses."""
+    versions = {row["model_key"] for row in _ok(get("/pricing"))}
+    current = {row["model_key"] for row in _ok(get("/pricing/current"))["data"]}
+    single = get(f"/pricing/{RESTRICTED_MODEL}").status_code
+    history = get(f"/pricing/{RESTRICTED_MODEL}/history").status_code
+    return versions, current, single, history
+
+
+@pytest.mark.parametrize("who", ["beta_member", "beta_owner", "beta_key"])
+def test_the_price_list_withholds_a_restricted_provider_from_another_organization(
+    client: TestClient, world: _World, who: str
+) -> None:
+    if who == "beta_key":
+        headers = _api_key(client, world, "beta_owner")
+
+        def get(path: str) -> Any:
+            return client.get(f"{API_ROOT}{path}", headers=headers)
+    else:
+
+        def get(path: str) -> Any:
+            return _as(client, world, who, path)
+
+    versions, current, single, history = _price_list_reads(client, get)
+
+    assert OPEN_MODEL in versions
+    assert OPEN_MODEL in current
+    assert RESTRICTED_MODEL not in versions
+    assert RESTRICTED_MODEL not in current
+    assert (single, history) == (status.HTTP_404_NOT_FOUND, status.HTTP_404_NOT_FOUND)
+    count = _ok(get("/pricing/current"))["count"]
+    assert count == len(current), "the count leaves the withheld key out too"
+
+
+@pytest.mark.parametrize("who", ["alpha_member", "master"])
+def test_the_price_list_still_shows_a_restricted_provider_to_its_organization_and_the_operator(
+    client: TestClient, world: _World, who: str
+) -> None:
+    def get(path: str) -> Any:
+        if who == "master":
+            return client.get(f"{API_ROOT}{path}", headers=MASTER)
+        return _as(client, world, who, path)
+
+    versions, current, single, history = _price_list_reads(client, get)
+
+    assert RESTRICTED_MODEL in versions
+    assert RESTRICTED_MODEL in current
+    assert (single, history) == (status.HTTP_200_OK, status.HTTP_200_OK)

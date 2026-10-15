@@ -484,6 +484,43 @@ def withheld_as_unadvertised(config: GatewayConfig, scope: CatalogScope, model_k
     return model not in advertised
 
 
+async def hosted_providers_withheld_from(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    model_provider: ModelProviderPort | None,
+) -> frozenset[str]:
+    """The hosted providers restricted to another organization than this caller's.
+
+    For a read that names models or rates outside the catalog, such as the
+    deployment price list, which would otherwise publish a restricted
+    provider's model names and rates to every reader. Empty for the deployment
+    itself, the master key and an operator session. A provider the caller's
+    organization holds a key of its own for, or a configured instance of the
+    same name, is the caller's to read and is not withheld.
+    """
+    organization_id: uuid.UUID | None
+    if session_identity is not None:
+        if await DeploymentUserService(db).has_administration_access(session_identity):
+            return frozenset()
+        organization_id = session_identity.active_organization_id
+    else:
+        api_key, is_master_key = auth
+        if is_master_key:
+            return frozenset()
+        organization_id = await organization_for_key_id(db, api_key.id if api_key is not None else None)
+    every = frozenset(await resolve_hosted_models(model_provider, None))
+    if not every:
+        return frozenset()
+    reachable = frozenset(await resolve_hosted_models(model_provider, organization_id or NO_ORGANIZATION))
+    withheld = every - reachable - frozenset(config.providers)
+    if withheld:
+        withheld -= await resolve_organization_byo_providers(db, organization_id)
+    return withheld
+
+
 async def _operator_offered_keys(db: AsyncSession, identity: TenancyUser) -> frozenset[str]:
     """The offered models of the organization a deployment operator is acting in.
 

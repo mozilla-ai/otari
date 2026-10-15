@@ -4258,6 +4258,9 @@ export interface paths {
         /**
          * List Pricing
          * @description List all model pricing.
+         *
+         *     A hosted provider restricted to another organization than the caller's is
+         *     left out, as it is from the catalog.
          */
         get: operations["pricing-list_pricing"];
         put?: never;
@@ -4292,7 +4295,8 @@ export interface paths {
          *     answers one row per key: the newest rate that has taken effect, or the
          *     earliest scheduled rate for a key that has none yet. ``count`` is the number
          *     of priced models, so a caller can page without reading the collection to
-         *     learn how long it is.
+         *     learn how long it is. A hosted provider restricted to another organization
+         *     than the caller's is left out of both.
          */
         get: operations["pricing-list_current_pricing"];
         put?: never;
@@ -4443,6 +4447,9 @@ export interface paths {
         /**
          * Get Pricing
          * @description Get pricing for a specific model as of a timestamp.
+         *
+         *     A 404 for a model of a hosted provider restricted to another organization
+         *     than the caller's.
          */
         get: operations["pricing-get_pricing"];
         put?: never;
@@ -4467,6 +4474,9 @@ export interface paths {
         /**
          * Get Pricing History
          * @description Return the full pricing history for a model.
+         *
+         *     A 404 for a model of a hosted provider restricted to another organization
+         *     than the caller's.
          */
         get: operations["pricing-get_pricing_history"];
         put?: never;
