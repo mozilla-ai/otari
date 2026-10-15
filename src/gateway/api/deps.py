@@ -1558,6 +1558,7 @@ def get_hosted_provider_service(
         config=config,
         providers=HostedProviderRepository(uow),
         models=HostedProviderModelRepository(uow),
+        endpoints=ProviderEndpointRepository(uow),
         pricing=DeploymentPricingService(
             uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
         ),
