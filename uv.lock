@@ -341,16 +341,16 @@ wheels = [
 
 [[package]]
 name = "apron-auth"
-version = "0.15.2"
+version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "authlib" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/9f/652dd3301d1741d12c95f8da7e2db3874caba8cc6168434ef4532b6a940c/apron_auth-0.15.2.tar.gz", hash = "sha256:d36656efb4f9340533b9bfe462686f3d0a3ec444331f8e64c3c8509fcacaf703", size = 180366, upload-time = "2026-09-03T16:43:30.116Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/83/edd2172122803f884884303c95f6ad7127b6187fb3adf63ada0e35c13f64/apron_auth-0.16.0.tar.gz", hash = "sha256:608283c68e059e8ea45a8889cac357a9d660ad7d45f5cd90c3db38c191ab29be", size = 183513, upload-time = "2026-10-12T13:41:47.154Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/fe/ad0f28fb3e15e606a2e0249312625b9fc5a853d155c1ad387c68be7cbb06/apron_auth-0.15.2-py3-none-any.whl", hash = "sha256:b451f3b4b89cd9d51ec8a9bac21a3988713d8e707e7ec7b86bced2415615bddf", size = 91667, upload-time = "2026-09-03T16:43:28.508Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/48/78e6d2a8265f94d4b7470f68294384c27c83aea2ee28a6741d10bfb0cb3f/apron_auth-0.16.0-py3-none-any.whl", hash = "sha256:11bf6ead86c279dfc17c3ee096387145ab19da8665f7e7ccfae8316acf11feee", size = 93309, upload-time = "2026-10-12T13:41:45.638Z" },
 ]
 
 [[package]]
@@ -1366,7 +1366,7 @@ requires-dist = [
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
     { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.36.0" },
     { name = "any-search", editable = "any-search" },
-    { name = "apron-auth", specifier = ">=0.15.1,<0.16.0" },
+    { name = "apron-auth", specifier = ">=0.16.0,<0.17.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.42.0" },
