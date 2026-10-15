@@ -22,6 +22,8 @@ from gateway.services.provider_kwargs import split_selector
 KEEP_GATEWAY_TOOL = "prices a gateway-run tool, not a model"
 KEEP_SEARCH_TOOL = "prices a configured search tool, not a model"
 KEEP_DEPLOYMENT_INSTANCE = "served by a provider instance configured on this deployment"
+KEEP_ORGANIZATION_KEY = "priced for an organization's own key on this provider"
+KEEP_OWNED_ENDPOINT = "served by a provider endpoint a workspace or user owns"
 KEEP_UNATTRIBUTABLE = "no provider prefix to attribute it to"
 
 # How many model names a sweep's response carries per group. The counts are
@@ -59,6 +61,8 @@ def _keep_reason(
     *,
     deployment_instances: frozenset[str],
     search_providers: frozenset[str],
+    organization_key_providers: frozenset[str],
+    owned_endpoints: frozenset[str],
 ) -> str | None:
     """What keeps an unoffered key on the catalog, or None when nothing does."""
     if prefix is None:
@@ -69,6 +73,10 @@ def _keep_reason(
         return KEEP_SEARCH_TOOL
     if prefix in deployment_instances:
         return KEEP_DEPLOYMENT_INSTANCE
+    if prefix in organization_key_providers:
+        return KEEP_ORGANIZATION_KEY
+    if prefix in owned_endpoints:
+        return KEEP_OWNED_ENDPOINT
     return None
 
 
@@ -78,16 +86,19 @@ def classify_priced_keys(
     offered: frozenset[str],
     deployment_instances: frozenset[str],
     search_providers: frozenset[str] = frozenset(),
+    organization_key_providers: frozenset[str] = frozenset(),
+    owned_endpoints: frozenset[str] = frozenset(),
 ) -> list[CatalogVerdict]:
     """Decide, for each priced key, whether the hosted-providers surface is what lists it.
 
     Order is the safety rule rather than a style choice. A key the surface
     offers is kept whatever else also serves it. Only what is left over goes: a
     model under a provider the surface does not offer it on, or under a
-    provider nothing on this deployment serves at all. An organization holding
-    its own key for the provider keeps nothing here: its models are listed from
-    that key's own roster and priced from its own override first. The override
-    itself is spared by the repository, not by this classification.
+    provider nothing on this deployment serves at all. A provider some
+    organization holds a live key for, and the name of an endpoint a workspace
+    or user owns, keep their rates: the deployment price list is the rung such
+    a request settles at when its organization holds no override, so taking it
+    would leave those requests unpriced.
 
     NOTE: not every rate on the list prices a model. A gateway-run tool is keyed
     under the reserved ``otari`` provider, and a configured search tool is keyed
@@ -114,7 +125,13 @@ def classify_priced_keys(
         if canonical in offered:
             verdicts.append(CatalogVerdict(model_key, versions, "offered", None, canonical))
             continue
-        reason = _keep_reason(prefix, deployment_instances=deployment_instances, search_providers=search_providers)
+        reason = _keep_reason(
+            prefix,
+            deployment_instances=deployment_instances,
+            search_providers=search_providers,
+            organization_key_providers=organization_key_providers,
+            owned_endpoints=owned_endpoints,
+        )
         verdict: Verdict = "removed" if reason is None else "kept"
         verdicts.append(CatalogVerdict(model_key, versions, verdict, reason, canonical))
     return verdicts
@@ -140,6 +157,8 @@ __all__ = [
     "CATALOG_SAMPLE",
     "KEEP_DEPLOYMENT_INSTANCE",
     "KEEP_GATEWAY_TOOL",
+    "KEEP_ORGANIZATION_KEY",
+    "KEEP_OWNED_ENDPOINT",
     "KEEP_SEARCH_TOOL",
     "KEEP_UNATTRIBUTABLE",
     "CatalogVerdict",

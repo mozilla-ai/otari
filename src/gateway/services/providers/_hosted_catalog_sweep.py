@@ -19,7 +19,11 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import HostedCatalogEmptyError
 from gateway.models.pricing import ModelPricing
-from gateway.repositories.providers import HostedProviderModelRepository, HostedProviderRepository
+from gateway.repositories.providers import (
+    HostedProviderModelRepository,
+    HostedProviderRepository,
+    ProviderEndpointRepository,
+)
 from gateway.schemas.providers import HostedCatalogProviderRefreshPublic, HostedCatalogRefreshPublic
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.pricing import DeploymentPricingService
@@ -52,16 +56,21 @@ class HostedCatalogSweep:
         config: GatewayConfig,
         providers: HostedProviderRepository,
         models: HostedProviderModelRepository,
+        endpoints: ProviderEndpointRepository,
         offers: HostedOffers,
         pricing: DeploymentPricingService,
         dial: Dial,
         live_byo_pairs: LiveByoPairs,
     ) -> None:
-        """``live_byo_pairs`` answers which organizations hold a live key for each of the given providers."""
+        """``live_byo_pairs`` answers which organizations hold a live key for each of the given providers.
+
+        Live means unarchived, whether or not the stored secret decrypts here.
+        """
         self.uow = uow
         self.config = config
         self.providers = providers
         self.models = models
+        self.endpoints = endpoints
         self.offers = offers
         self.pricing = pricing
         self.dial = dial
@@ -112,11 +121,16 @@ class HostedCatalogSweep:
             if not offered_keys:
                 raise HostedCatalogEmptyError
 
+            priced = await self.pricing.all_keys()
+            prefixes = {prefix for key, _ in priced if (prefix := _prefix(key)) is not None}
+            organization_key_providers = {provider for _, provider in await self.live_byo_pairs(prefixes)}
             verdicts = classify_priced_keys(
-                await self.pricing.all_keys(),
+                priced,
                 offered=frozenset(offered_keys),
                 deployment_instances=frozenset(self.config.providers),
                 search_providers=frozenset(self.config.search_tool_providers()),
+                organization_key_providers=frozenset(organization_key_providers),
+                owned_endpoints=frozenset(row.name for row in await self.endpoints.list_all()),
             )
             doomed = [verdict for verdict in verdicts if verdict.verdict == "removed"]
             removed = sorted(verdict.model_key for verdict in doomed)
@@ -140,22 +154,12 @@ class HostedCatalogSweep:
     async def _doomed_override_ids(self, canonical_keys: list[str]) -> list[uuid.UUID]:
         """The overrides above ``canonical_keys`` a sweep takes with them.
 
-        An override is spared when its own organization holds a live key for
-        the provider: the deployment's rate is going because nothing here serves
-        the model, but that organization reaches it on its own key and this is
-        its rate on it. Live means unarchived, whether or not the stored secret
-        decrypts here.
+        All of them: a key is only doomed when no organization holds a live key
+        for its provider, so no override above it prices a request any more.
         """
         if not canonical_keys:
             return []
-        overrides = await self.pricing.doomed_overrides(canonical_keys)
-        providers = {prefix for _, _, key in overrides if (prefix := _prefix(key)) is not None}
-        spared = await self.live_byo_pairs(providers) if providers else set()
-        return [
-            override_id
-            for override_id, organization_id, key in overrides
-            if (organization_id, _prefix(key)) not in spared
-        ]
+        return [override_id for override_id, _, _ in await self.pricing.doomed_overrides(canonical_keys)]
 
     async def _dial_one(
         self, provider: str, credential: ResolvedHostedProvider | None, offered: set[str]

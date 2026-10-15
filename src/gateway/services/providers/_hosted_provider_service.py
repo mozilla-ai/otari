@@ -34,6 +34,7 @@ from gateway.repositories.providers import (
     HostedProviderConflict,
     HostedProviderModelRepository,
     HostedProviderRepository,
+    ProviderEndpointRepository,
 )
 from gateway.schemas.providers import (
     HostedAvailableModelsPublic,
@@ -80,6 +81,7 @@ class HostedProviderService:
         config: GatewayConfig,
         providers: HostedProviderRepository,
         models: HostedProviderModelRepository,
+        endpoints: ProviderEndpointRepository,
         pricing: DeploymentPricingService,
         live_byo_pairs: LiveByoPairs,
         organization_exists: OrganizationExists,
@@ -105,6 +107,7 @@ class HostedProviderService:
             config=config,
             providers=providers,
             models=models,
+            endpoints=endpoints,
             offers=self.offers,
             pricing=pricing,
             dial=self._dial,

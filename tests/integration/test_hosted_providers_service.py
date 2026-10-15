@@ -31,12 +31,16 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing, OrganizationModelPricing
-from gateway.models.providers import HostedProvider, HostedProviderModel
+from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import REDACTED_VALUE
 from gateway.models.tenancy import Organization
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
-from gateway.repositories.providers import HostedProviderModelRepository, HostedProviderRepository
-from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository
+from gateway.repositories.providers import (
+    HostedProviderModelRepository,
+    HostedProviderRepository,
+    ProviderEndpointRepository,
+)
+from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository, WorkspaceRepository
 from gateway.schemas.providers import (
     HostedModelCreateRequest,
     HostedModelUpdateRequest,
@@ -47,6 +51,7 @@ from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.providers import HostedProviderService
+from gateway.services.providers._hosted_catalog import KEEP_ORGANIZATION_KEY, KEEP_OWNED_ENDPOINT
 from gateway.services.secret_box import generate_secret_key
 
 pytestmark = pytest.mark.asyncio
@@ -72,6 +77,7 @@ def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedPro
         config=config or GatewayConfig(),
         providers=HostedProviderRepository(uow),
         models=HostedProviderModelRepository(uow),
+        endpoints=ProviderEndpointRepository(uow),
         pricing=DeploymentPricingService(
             uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
         ),
@@ -777,26 +783,52 @@ async def test_a_sweep_takes_unoffered_prices_off_the_list_and_the_preview_names
     assert len(await _versions(async_db, "openai:gpt-4o")) == 1
 
 
-async def test_a_sweep_spares_the_rate_a_tenant_set_on_its_own_key(
+async def test_a_sweep_keeps_the_rates_an_organizations_own_key_settles_at(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A BYO request with no override settles at the deployment's rate, so taking it would leave it unpriced."""
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
     await _price(async_db, "nebius:llama", "1", "2")
     with_key = await _organization(async_db, "with-key")
-    without_key = await _organization(async_db, "without-key")
     await _own_key(async_db, with_key, "nebius")
     await _override(async_db, with_key, "nebius:llama")
-    await _override(async_db, without_key, "nebius:llama")
     service = _service(async_db)
     await _provider(service, monkeypatch, "gpt-4o")
 
     preview = await service.refresh_catalog(apply=False)
     applied = await service.refresh_catalog(apply=True)
 
-    assert preview.removed_override_rows == 1
-    assert applied.removed_override_rows == 1
-    remaining = (await async_db.execute(select(OrganizationModelPricing))).scalars().all()
-    assert [row.organization_id for row in remaining] == [with_key.id]
+    assert preview.removed == applied.removed == []
+    assert [(group.reason, group.models) for group in applied.kept] == [(KEEP_ORGANIZATION_KEY, ["nebius:llama"])]
+    assert len(await _versions(async_db, "nebius:llama")) == 1
+    assert len((await async_db.execute(select(OrganizationModelPricing))).scalars().all()) == 1
+
+
+async def test_a_sweep_keeps_the_rates_an_owned_endpoint_settles_at(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _price(async_db, "my-vllm:llama", "1", "2")
+    organization = await _organization(async_db, "owner")
+    workspace = await WorkspaceRepository(async_db).create_workspace(
+        name="Default", organization_id=organization.id, created_by_user_id=None
+    )
+    async_db.add(
+        ProviderEndpoint(
+            workspace_id=workspace.id,
+            name="my-vllm",
+            provider="openai",
+            api_base="https://vllm.example.com/v1",
+        )
+    )
+    await async_db.commit()
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+
+    applied = await service.refresh_catalog(apply=True)
+
+    assert applied.removed == []
+    assert [(group.reason, group.models) for group in applied.kept] == [(KEEP_OWNED_ENDPOINT, ["my-vllm:llama"])]
 
 
 async def test_a_sweep_offers_what_a_provider_newly_lists_before_judging(
