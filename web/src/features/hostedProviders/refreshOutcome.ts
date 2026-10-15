@@ -75,7 +75,9 @@ export function catalogPreviewOutcome(result: HostedCatalogRefresh): string {
       ? undefined
       : `The model lists of providers nothing configures any more will be dropped: ${orphaned}.`
   if (result.removed_count === 0) {
-    return lists ?? "Nothing to remove: every priced model has something serving it."
+    return (
+      lists ?? "Nothing to remove: every priced model has something serving it."
+    )
   }
   const rates = plural(result.removed_price_rows, "stored rate", "stored rates")
   const overrides = plural(
