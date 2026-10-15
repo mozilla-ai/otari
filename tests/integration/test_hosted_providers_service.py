@@ -26,6 +26,7 @@ from gateway.exceptions.providers_exceptions import (
     HostedProviderClientArgsUnreadableError,
     HostedProviderKeyRequiredError,
     HostedProviderNotFoundError,
+    HostedProviderUnknownOrganizationError,
     HostedProviderUnknownProviderError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
@@ -75,6 +76,7 @@ def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedPro
             uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
+        organization_exists=OrganizationRepository(uow).exists,
     )
 
 
@@ -231,7 +233,7 @@ async def test_client_args_are_encrypted_at_rest_and_read_back_whole(
     assert row.encrypted_client_args is not None
     assert "shh" not in row.encrypted_client_args
     assert "eu-west-1" not in row.encrypted_client_args
-    resolved = await service.resolve("bedrock")
+    resolved = await service.resolve("bedrock", organization_id=None)
     assert resolved is not None
     assert resolved.client_args == {"region": "eu-west-1", "aws_secret_access_key": "shh"}
 
@@ -311,7 +313,7 @@ async def test_a_toggle_sends_no_key_and_keeps_the_stored_one(
 
     assert public.enabled is False
     assert public.api_key_last4 == "1234"
-    assert await service.resolve("openai") is None
+    assert await service.resolve("openai", organization_id=None) is None
 
 
 async def test_rotating_the_key_replaces_it(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -322,7 +324,7 @@ async def test_rotating_the_key_replaces_it(async_db: AsyncSession, monkeypatch:
     public = await service.update_provider("openai", HostedProviderUpdateRequest(api_key="sk-live-rotated-9876"))
 
     assert public.api_key_last4 == "9876"
-    resolved = await service.resolve("openai")
+    resolved = await service.resolve("openai", organization_id=None)
     assert resolved is not None
     assert resolved.api_key == "sk-live-rotated-9876"
 
@@ -365,7 +367,7 @@ async def test_echoing_the_mask_back_keeps_the_stored_secret_and_null_clears_it(
         "bedrock",
         HostedProviderUpdateRequest(client_args={"region": "eu-west-2", "aws_secret_access_key": REDACTED_VALUE}),
     )
-    resolved = await service.resolve("bedrock")
+    resolved = await service.resolve("bedrock", organization_id=None)
     assert resolved is not None
     assert resolved.client_args == {"region": "eu-west-2", "aws_secret_access_key": "shh"}
     assert echoed.client_args == {"region": "eu-west-2", "aws_secret_access_key": REDACTED_VALUE}
@@ -397,7 +399,7 @@ async def test_a_mask_with_nothing_readable_behind_it_is_refused_rather_than_sto
         "bedrock", HostedProviderUpdateRequest(api_key="sk-live-new-0001", client_args={"aws_secret_access_key": "new"})
     )
     assert full.client_args == {"aws_secret_access_key": REDACTED_VALUE}
-    resolved = await service.resolve("bedrock")
+    resolved = await service.resolve("bedrock", organization_id=None)
     assert resolved is not None
     assert resolved.client_args == {"aws_secret_access_key": "new"}
 
@@ -426,7 +428,7 @@ async def test_removing_a_provider_takes_its_roster_and_leaves_its_rates(
     assert (await service.list_providers()).count == 0
     assert await _offered(async_db, "openai") == {}
     assert len(await _versions(async_db, "openai:gpt-4o")) == 1
-    assert await service.resolve("openai") is None
+    assert await service.resolve("openai", organization_id=None) is None
 
 
 async def test_a_provider_added_again_keeps_following_the_dataset(
@@ -654,7 +656,7 @@ async def test_a_model_the_operator_switched_off_stays_off_when_a_refresh_prices
 
     assert outcome.repriced == ["gpt-4o"]
     assert await _offered(async_db, "openai") == {"gpt-4o": False}
-    assert await service.resolve("openai", "gpt-4o") is None
+    assert await service.resolve("openai", "gpt-4o", organization_id=None) is None
 
 
 async def test_two_refreshes_racing_leave_the_loser_with_a_conflict_not_a_crash(
@@ -867,12 +869,12 @@ async def test_the_runtime_resolves_the_row_the_surface_wrote(
         HostedProviderCreateRequest(provider="openai", api_key=KEY, api_base="http://a/v1", client_args={"x": 1})
     )
 
-    resolved = await service.resolve("openai", "gpt-4o")
+    resolved = await service.resolve("openai", "gpt-4o", organization_id=None)
 
     assert resolved is not None
     assert (resolved.api_key, resolved.api_base, resolved.client_args) == (KEY, "http://a/v1", {"x": 1})
-    assert await service.resolve("openai-compatible", "gpt-4o") is not None
-    assert await service.resolve("anthropic") is None
+    assert await service.resolve("openai-compatible", "gpt-4o", organization_id=None) is not None
+    assert await service.resolve("anthropic", organization_id=None) is None
 
 
 async def test_a_disabled_model_is_refused_and_an_unlisted_one_serves(
@@ -884,9 +886,9 @@ async def test_a_disabled_model_is_refused_and_an_unlisted_one_serves(
     [model] = (await service.list_models("openai")).data
     await service.update_model("openai", model.id, HostedModelUpdateRequest(enabled=False))
 
-    assert await service.resolve("openai", "gpt-4o") is None
-    assert await service.resolve("openai", "gpt-4o-mini") is not None
-    assert await service.resolve("openai") is not None
+    assert await service.resolve("openai", "gpt-4o", organization_id=None) is None
+    assert await service.resolve("openai", "gpt-4o-mini", organization_id=None) is not None
+    assert await service.resolve("openai", organization_id=None) is not None
 
 
 async def test_the_listing_answers_for_exactly_what_resolves(
@@ -898,10 +900,73 @@ async def test_the_listing_answers_for_exactly_what_resolves(
     _discovery(monkeypatch, "claude")
     await service.create_provider(HostedProviderCreateRequest(provider="anthropic", api_key=KEY, enabled=False))
 
-    advertised = await service.serveable_models()
+    advertised = await service.serveable_models(organization_id=None)
 
     assert advertised == {"openai": frozenset({"gpt-4o"})}
-    assert await service.resolve("anthropic", "claude") is None
+    assert await service.resolve("anthropic", "claude", organization_id=None) is None
+
+
+async def test_a_restricted_provider_serves_its_organization_alone(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every other organization is answered as if the provider were not configured, in the listing as in the resolve."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    owner = await _organization(async_db, "owner")
+    other = await _organization(async_db, "other")
+    service = _service(async_db)
+    _discovery(monkeypatch, "gpt-4o")
+    created = await service.create_provider(
+        HostedProviderCreateRequest(provider="openai", api_key=KEY, restricted_to_organization_id=owner.id)
+    )
+
+    assert created.restricted_to_organization_id == owner.id
+    assert await service.resolve("openai", "gpt-4o", organization_id=owner.id) is not None
+    assert await service.resolve("openai", "gpt-4o", organization_id=other.id) is None
+    assert await service.serveable_models(organization_id=owner.id) == {"openai": frozenset({"gpt-4o"})}
+    assert await service.serveable_models(organization_id=other.id) == {}
+    # The deployment's own view sees every provider.
+    assert await service.serveable_models(organization_id=None) == {"openai": frozenset({"gpt-4o"})}
+
+
+async def test_an_omitted_restriction_is_kept_and_a_null_one_lifts_it(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = await _organization(async_db, "owner")
+    other = await _organization(async_db, "other")
+    service = _service(async_db)
+    _discovery(monkeypatch)
+    await service.create_provider(
+        HostedProviderCreateRequest(provider="openai", api_key=KEY, restricted_to_organization_id=owner.id)
+    )
+
+    kept = await service.update_provider("openai", HostedProviderUpdateRequest(enabled=True))
+    assert kept.restricted_to_organization_id == owner.id
+    assert await service.resolve("openai", organization_id=other.id) is None
+
+    lifted = await service.update_provider(
+        "openai", HostedProviderUpdateRequest.model_validate({"restricted_to_organization_id": None})
+    )
+    assert lifted.restricted_to_organization_id is None
+    assert await service.resolve("openai", organization_id=other.id) is not None
+
+
+async def test_a_restriction_naming_no_organization_is_refused(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service(async_db)
+    _discovery(monkeypatch)
+    unknown = uuid.uuid4()
+
+    with pytest.raises(HostedProviderUnknownOrganizationError):
+        await service.create_provider(
+            HostedProviderCreateRequest(provider="openai", api_key=KEY, restricted_to_organization_id=unknown)
+        )
+    assert (await async_db.execute(select(HostedProvider))).scalars().all() == []
+
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
+    with pytest.raises(HostedProviderUnknownOrganizationError):
+        await service.update_provider("openai", HostedProviderUpdateRequest(restricted_to_organization_id=unknown))
+    assert await service.resolve("openai", organization_id=uuid.uuid4()) is not None
 
 
 async def test_a_credential_no_configured_key_can_read_is_unserved_rather_than_fatal(
@@ -911,6 +976,6 @@ async def test_a_credential_no_configured_key_can_read_is_unserved_rather_than_f
     await _provider(service, monkeypatch)
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
-    assert await service.resolve("openai") is None
-    assert await service.serveable_models() == {}
+    assert await service.resolve("openai", organization_id=None) is None
+    assert await service.serveable_models(organization_id=None) == {}
     assert (await service.list_providers()).data[0].api_key_last4 == "1234"

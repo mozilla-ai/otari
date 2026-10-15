@@ -291,6 +291,13 @@ class HostedProviderUnknownProviderError(TenancyValidationError):
             super().__init__(f"'{provider}' is not a known provider implementation")
 
 
+class HostedProviderUnknownOrganizationError(TenancyValidationError):
+    """A restriction naming an organization this deployment does not hold."""
+
+    def __init__(self, organization_id: object) -> None:
+        super().__init__(f"No organization with id {organization_id} exists on this deployment")
+
+
 class HostedProviderUnsafeApiBaseError(TenancyValidationError):
     """An ``api_base`` the SSRF gate refused; the message is that gate's own."""
 
@@ -307,6 +314,7 @@ __all__ = [
     "HostedProviderNotFoundError",
     "HostedProviderClientArgsUnreadableError",
     "HostedProviderKeyRequiredError",
+    "HostedProviderUnknownOrganizationError",
     "HostedProviderUnknownProviderError",
     "HostedProviderUnsafeApiBaseError",
     "OrgDefaultProviderKeyConflictError",

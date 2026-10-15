@@ -40,10 +40,18 @@ def upgrade() -> None:
         sa.Column("api_base", sa.String(length=1024), nullable=True),
         sa.Column("encrypted_client_args", sa.String(), nullable=True),
         sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("restricted_to_organization_id", sa.Uuid(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(["restricted_to_organization_id"], ["organization.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("provider", name="uq_hosted_providers_provider"),
+    )
+    op.create_index(
+        op.f("ix_hosted_providers_restricted_to_organization_id"),
+        _PROVIDERS,
+        ["restricted_to_organization_id"],
+        unique=False,
     )
     op.create_table(
         "hosted_provider_models",
@@ -61,4 +69,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table(_MODELS)
+    op.drop_index(op.f("ix_hosted_providers_restricted_to_organization_id"), table_name=_PROVIDERS)
     op.drop_table(_PROVIDERS)

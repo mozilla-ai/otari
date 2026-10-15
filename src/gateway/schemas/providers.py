@@ -358,6 +358,8 @@ class HostedProviderCreateRequest(SQLModel):
     ``client_args`` is whatever the provider's SDK client needs beyond the key
     (Bedrock's region and IAM pair), the same shape an organization provider
     key takes. Values under credential-shaped names come back masked.
+    ``restricted_to_organization_id`` keeps the provider to one organization;
+    every other one is served as if it were not configured.
     """
 
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "sk-live-..."}}}
@@ -367,6 +369,7 @@ class HostedProviderCreateRequest(SQLModel):
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
     enabled: bool = True
+    restricted_to_organization_id: uuid.UUID | None = None
 
 
 class HostedProviderUpdateRequest(SQLModel):
@@ -377,6 +380,8 @@ class HostedProviderUpdateRequest(SQLModel):
     leaves the stored credential untouched, so a toggle never re-sends a secret
     the caller does not have. ``client_args`` omitted is left alone; an explicit
     null clears it, and an entry echoed back as the mask keeps the stored value.
+    ``restricted_to_organization_id`` reads the same way: omitted keeps the
+    restriction, null lifts it.
     """
 
     # A toggle alone, so a reader who edits the example never re-sends a key.
@@ -386,6 +391,7 @@ class HostedProviderUpdateRequest(SQLModel):
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
     enabled: bool | None = None
+    restricted_to_organization_id: uuid.UUID | None = None
 
 
 class HostedProviderPublic(SQLModel):
@@ -402,6 +408,7 @@ class HostedProviderPublic(SQLModel):
     api_base: str | None = None
     client_args: dict[str, Any] | None = None
     enabled: bool
+    restricted_to_organization_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -419,6 +426,7 @@ class HostedProviderPublic(SQLModel):
             api_base=row.api_base,
             client_args=redact_secret_like_values(client_args),
             enabled=row.enabled,
+            restricted_to_organization_id=row.restricted_to_organization_id,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

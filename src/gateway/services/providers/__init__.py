@@ -11,6 +11,7 @@ domain's migration reaches them (`DOMAINS.md`).
 from gateway.services.providers._hosted_provider_service import (
     HostedProviderService,
     LiveByoPairs,
+    OrganizationExists,
     ResolvedHostedProvider,
 )
 from gateway.services.providers._missing_credential import missing_provider_credential, unpriced_model_refusal
@@ -35,6 +36,7 @@ from gateway.services.providers._provider_endpoint_service import ProviderEndpoi
 __all__ = [
     "HostedProviderService",
     "LiveByoPairs",
+    "OrganizationExists",
     "OrgProviderModelService",
     "OwnedEndpoint",
     "ProviderEndpointService",

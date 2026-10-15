@@ -216,6 +216,12 @@ class HostedProvider(Base):
     # protect a copy of the database.
     encrypted_client_args: Mapped[str | None] = mapped_column()
     enabled: Mapped[bool] = mapped_column(default=True)
+    # The one organization served on this provider, or None for every one. Any
+    # other organization is answered as if the provider were not configured.
+    # Deleting that organization deletes the row rather than widening it.
+    restricted_to_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), index=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)

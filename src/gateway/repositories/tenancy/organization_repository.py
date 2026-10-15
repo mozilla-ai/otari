@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import Organization, OrganizationCreate, OrganizationUpdate
 from gateway.repositories.base_repository import BaseRepository
 
@@ -14,8 +15,13 @@ from gateway.repositories.base_repository import BaseRepository
 class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, OrganizationUpdate]):
     """Repository for organization rows."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession | UnitOfWork):
         super().__init__(db, Organization)
+
+    async def exists(self, organization_id: uuid.UUID) -> bool:
+        """Whether this deployment holds ``organization_id``."""
+        result = await self.db.execute(select(col(Organization.id)).where(col(Organization.id) == organization_id))
+        return result.scalar_one_or_none() is not None
 
     async def get_by_slug(self, slug: str) -> Organization | None:
         """Return the organization with this slug, or None."""

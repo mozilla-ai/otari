@@ -12,6 +12,7 @@ writes in another.
 """
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -23,6 +24,7 @@ from gateway.exceptions.providers_exceptions import (
     HostedProviderClientArgsUnreadableError,
     HostedProviderKeyRequiredError,
     HostedProviderNotFoundError,
+    HostedProviderUnknownOrganizationError,
     HostedProviderUnsafeApiBaseError,
 )
 from gateway.models.providers import HostedProvider, HostedProviderModel
@@ -65,6 +67,8 @@ from gateway.services.providers._hosted_offers import HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
+OrganizationExists = Callable[[uuid.UUID], Awaitable[bool]]
+
 
 class HostedProviderService:
     """Configure the deployment's hosted providers, and resolve one to serve a request."""
@@ -78,18 +82,22 @@ class HostedProviderService:
         models: HostedProviderModelRepository,
         pricing: DeploymentPricingService,
         live_byo_pairs: LiveByoPairs,
+        organization_exists: OrganizationExists,
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
 
         Rates are read and written through ``pricing``, the pricing domain's
         service on the same unit of work. ``live_byo_pairs`` answers which
-        organizations hold a live key for each of the given providers; a
-        callable, because the rows it reads are another domain's.
+        organizations hold a live key for each of the given providers, and
+        ``organization_exists`` whether the deployment holds an organization a
+        restriction names; callables, because the rows they read are another
+        domain's.
         """
         self.uow = uow
         self.config = config
         self.providers = providers
         self.models = models
+        self.organization_exists = organization_exists
         self.offers = HostedOffers(models, pricing)
         self.runtime = HostedProviderRuntime(uow, providers=providers, models=models)
         self.sweep = HostedCatalogSweep(
@@ -119,6 +127,7 @@ class HostedProviderService:
             HostedProviderUnknownProviderError: ``provider`` names no any-llm implementation.
             HostedProviderUnsafeApiBaseError: ``api_base`` is refused by the SSRF gate.
             SecretBoxUnavailableTenancyError: no usable ``OTARI_SECRET_KEY``.
+            HostedProviderUnknownOrganizationError: the restriction names no organization here.
             HostedProviderAlreadyExistsError: that provider is already configured.
         """
         provider = normalize_provider(request.provider)
@@ -128,6 +137,7 @@ class HostedProviderService:
         encrypted_client_args = encrypt_client_args(request.client_args)
 
         async with self.uow:
+            await self._require_organization(request.restricted_to_organization_id)
             if await self.providers.get_by_provider(provider) is not None:
                 raise HostedProviderAlreadyExistsError(provider)
             offered = await self.models.names_for_provider(provider)
@@ -145,6 +155,7 @@ class HostedProviderService:
                     api_base=api_base,
                     encrypted_client_args=encrypted_client_args,
                     enabled=request.enabled,
+                    restricted_to_organization_id=request.restricted_to_organization_id,
                 )
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
@@ -158,10 +169,12 @@ class HostedProviderService:
         A field left unset is left alone. An empty ``api_base`` clears the
         endpoint back to the provider's default. ``client_args`` omitted is left
         alone, null clears, and an entry echoed back as the mask keeps the
-        stored value.
+        stored value. The restriction reads the same way: omitted keeps it,
+        null lifts it.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
+            HostedProviderUnknownOrganizationError: the restriction names no organization here.
             HostedProviderUnsafeApiBaseError: ``api_base`` is refused by the SSRF gate.
             HostedProviderKeyRequiredError: the base moves to another origin and no key came with it.
             HostedProviderClientArgsUnreadableError: a masked entry has nothing stored to keep.
@@ -192,6 +205,9 @@ class HostedProviderService:
                 row.encrypted_client_args = encrypt_client_args(restore_redacted_values(request.client_args, stored))
             if request.enabled is not None:
                 row.enabled = request.enabled
+            if "restricted_to_organization_id" in request.model_fields_set:
+                await self._require_organization(request.restricted_to_organization_id)
+                row.restricted_to_organization_id = request.restricted_to_organization_id
             await self.providers.save(row)
             return self._public(row)
 
@@ -355,13 +371,18 @@ class HostedProviderService:
         """
         return await self.sweep.run(apply=apply)
 
-    async def serveable_models(self) -> dict[str, frozenset[str]]:
-        """Each serveable provider with the models switched on under it."""
-        return await self.runtime.serveable_models()
+    async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
+        """Each provider serveable to ``organization_id``, with the models switched on under it.
 
-    async def resolve(self, provider: str, model: str | None = None) -> ResolvedHostedProvider | None:
-        """A usable credential for ``provider``, or None."""
-        return await self.runtime.resolve(provider, model)
+        ``None`` is the deployment's own view, which sees every provider.
+        """
+        return await self.runtime.serveable_models(organization_id=organization_id)
+
+    async def resolve(
+        self, provider: str, model: str | None = None, *, organization_id: uuid.UUID | None
+    ) -> ResolvedHostedProvider | None:
+        """A usable credential for ``provider`` on behalf of ``organization_id``, or None."""
+        return await self.runtime.resolve(provider, model, organization_id=organization_id)
 
     async def _dial(self, provider: str, credential: ResolvedHostedProvider) -> ProviderDiscovery:
         return await test_provider_credentials(
@@ -386,6 +407,10 @@ class HostedProviderService:
     def _public(row: HostedProvider) -> HostedProviderPublic:
         return HostedProviderPublic.from_row(row, client_args=client_args_of(row))
 
+    async def _require_organization(self, organization_id: uuid.UUID | None) -> None:
+        if organization_id is not None and not await self.organization_exists(organization_id):
+            raise HostedProviderUnknownOrganizationError(organization_id)
+
     async def _provider_or_raise(self, provider: str) -> HostedProvider:
         row = await self.providers.get_by_provider(lookup_name(provider))
         if row is None:
@@ -405,4 +430,4 @@ def _listed(discovery: ProviderDiscovery) -> set[str]:
     return {model.id for model in discovery.models}
 
 
-__all__ = ["HostedProviderService", "LiveByoPairs", "ResolvedHostedProvider"]
+__all__ = ["HostedProviderService", "LiveByoPairs", "OrganizationExists", "ResolvedHostedProvider"]
