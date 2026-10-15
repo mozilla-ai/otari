@@ -4,6 +4,7 @@ from typing import Never
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey
@@ -11,10 +12,13 @@ from gateway.repositories.base_repository import BaseRepository
 
 
 class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
-    """Query API keys in the open block of a Unit of Work."""
+    """Query API keys.
 
-    def __init__(self, uow: UnitOfWork) -> None:
-        super().__init__(uow, APIKey)
+    Built on a Unit of Work, and on the request's session for authentication, which only reads.
+    """
+
+    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
+        super().__init__(db, APIKey)
 
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""

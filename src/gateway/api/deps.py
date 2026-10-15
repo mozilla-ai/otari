@@ -37,7 +37,7 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
-from gateway.repositories.api_keys import ApiKeyRepositories, FederationRuleRepository
+from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.identity import IdentityRepositories
@@ -370,7 +370,7 @@ async def _verify_federated_token(request: Request, db: AsyncSession, token: str
         match = match_federation_rules(
             await FederationRuleRepository(db).candidates(identity.issuer, identity.audiences), identity
         )
-        api_key = (await db.execute(select(APIKey).where(APIKey.id == match.api_key_id))).scalar_one_or_none()
+        api_key = await ApiKeyRepository(db).get(match.api_key_id)
     except FederationUnavailableError as exc:
         record_auth_failure("federation_unavailable")
         raise HTTPException(
