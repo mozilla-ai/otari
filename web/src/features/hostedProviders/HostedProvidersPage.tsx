@@ -43,9 +43,8 @@ import {
 // Operator-only, and the API refuses anyone else with a 404, so the page asks
 // the deployment admin gate first, as Accounts does, and words a refusal as the
 // page not being theirs rather than as an error. Whether this deployment hosts
-// the surface at all is the shell's question, answered from the nav registry;
-// the page answers it again for a deployment that publishes the surface but
-// serves no API behind it, which is what a 404 from the gate itself means.
+// the surface at all is the shell's question, answered from the bootstrap; the
+// page reads the same answer, so it says so itself wherever it is rendered.
 //
 // A provider kept to one organization shows which; the restriction is set and
 // lifted through the API, since this build has no deployment-wide list of
@@ -161,9 +160,6 @@ function CatalogSweepPreview({
   )
 }
 
-const isNotFound = (error: unknown) =>
-  error instanceof ApiError && error.status === 404
-
 export function HostedProvidersPage() {
   const hostsSurface = useSurfaces()
   // Before any hook that asks the API, so an unpublished surface asks nothing.
@@ -212,10 +208,6 @@ function HostedProvidersContent() {
     return <PageLoading label="Loading hosted providers…" />
   }
 
-  if (isNotFound(access.error)) {
-    return <UnavailableHere title="Hosted providers" />
-  }
-
   // A gate that failed to answer is not a gate that said no.
   if (access.isError) {
     return (
@@ -226,8 +218,11 @@ function HostedProvidersContent() {
     )
   }
 
-  // The list's 404 is the same operator refusal, should the two ever disagree.
-  if (!isGranted || isNotFound(providers.error)) {
+  // The list's 404 is the router's operator refusal, the same predicate as the
+  // gate's, so a disagreement between the two still offers no write.
+  const isListRefused =
+    providers.error instanceof ApiError && providers.error.status === 404
+  if (!isGranted || isListRefused) {
     return (
       <div className="flex flex-col">
         <PageIntro title="Hosted providers" />

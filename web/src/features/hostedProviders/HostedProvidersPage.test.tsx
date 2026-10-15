@@ -73,8 +73,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function mockApi(
   opts: {
-    /** `"absent"` answers the gate 404, as a deployment serving no `/admin`. */
-    granted?: boolean | "absent"
+    granted?: boolean
     /** Answers the list 404, as the router refusing a non-operator. */
     listRefused?: boolean
     /** Answers a provider PATCH with this refusal. */
@@ -101,9 +100,7 @@ function mockApi(
     const hosted = `${API_ROOT}/hosted-providers`
 
     if (url.includes(`${API_ROOT}/admin/access`)) {
-      return granted === "absent"
-        ? jsonResponse({ detail: "Not Found" }, 404)
-        : jsonResponse({ granted })
+      return jsonResponse({ granted })
     }
     if (url.includes(`${API_ROOT}/providers/catalog`)) {
       return jsonResponse([{ id: "anthropic", name: "Anthropic" }])
@@ -226,17 +223,6 @@ describe("HostedProvidersPage", () => {
       await screen.findByText("Hosted providers is not available here"),
     ).toBeInTheDocument()
     expect(requests).toEqual([])
-  })
-
-  it("says the page is not served where the admin gate itself is absent", async () => {
-    const requests = mockApi({ granted: "absent" })
-    await renderPage()
-
-    expect(
-      await screen.findByText("Hosted providers is not available here"),
-    ).toBeInTheDocument()
-    expect(hostedRequests(requests)).toEqual([])
-    expect(screen.queryByRole("button", { name: "Add provider" })).toBeNull()
   })
 
   it("offers to add the first provider when none is configured", async () => {
