@@ -1694,8 +1694,8 @@ async def _serve_from_hosted_credential(
     resolved upstream of here (``services/provider_kwargs.py``), and a candidate
     any of them served comes back untouched, so BYO precedence is unchanged: the
     port is asked when the ladder is exhausted and never before it. The core
-    adapter answers ``None`` for every candidate, which is what makes a build
-    with no overlay behave exactly as it did, rung for rung.
+    adapter answers from the deployment's hosted providers, and ``None`` where
+    none serves the candidate.
 
     On a resolved credential the dispatch is re-keyed onto
     ``response_provider``, the upstream that usage and telemetry name (which the

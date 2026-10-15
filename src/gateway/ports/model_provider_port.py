@@ -5,7 +5,7 @@ BYO provider key. A caller's own stored key never reaches this port: resolving
 one is identical in every build, so it stays a plain, unseamed lookup upstream
 of here. Only what happens when there is no BYO key varies, and hosted
 inference (a metered fleet the deployment owns and proxies to) is the "core
-port + hosted adapter" row of ``ARCHITECTURE.md``'s capability lines.
+port + core adapter" row of ``ARCHITECTURE.md``'s capability lines.
 
 Self-hosting is a first-class path *upstream* of this port, not behind it: a
 deployment pointing at its own backends resolves a credential the ordinary way
