@@ -488,6 +488,7 @@ signed-in member's.
 | Anthropic, including Azure and Vertex AI | `metadata.user_id` |
 | Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model |
 | Gemini API | the `safety_identifier` label, cut to the 63 characters a label value allows, on chat completions and Messages |
+| Meta | `safety_identifier` on chat completions |
 | Any other provider with a native Messages API, on Messages | `metadata.user_id` |
 
 Bedrock's abuse detection reads no end-user identifier, but `requestMetadata`,

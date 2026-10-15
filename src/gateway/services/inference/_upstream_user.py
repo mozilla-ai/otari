@@ -38,6 +38,8 @@ _USER_FIELD = frozenset(
         LLMProvider.XAI,
     }
 )
+# Chat APIs that document ``safety_identifier`` and deprecate ``user``.
+_SAFETY_IDENTIFIER_FIELD = frozenset({LLMProvider.META})
 # Anthropic's API reads ``metadata.user_id`` and rejects ``user``.
 _METADATA_USER_ID = frozenset({LLMProvider.ANTHROPIC, LLMProvider.AZUREANTHROPIC, LLMProvider.VERTEXAIANTHROPIC})
 # Bedrock's abuse detection reads no end-user id, but ``requestMetadata`` reaches the
@@ -122,6 +124,8 @@ def chat_user_fields(provider: LLMProvider | str | None, identifier: str) -> dic
         return {}
     if resolved in _USER_FIELD:
         return {"user": identifier}
+    if resolved in _SAFETY_IDENTIFIER_FIELD:
+        return {"safety_identifier": identifier}
     if resolved in _METADATA_USER_ID:
         return {"metadata": {"user_id": identifier}}
     if resolved == LLMProvider.BEDROCK:

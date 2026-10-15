@@ -43,6 +43,8 @@ _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     LLMProvider.BEDROCK: "requestMetadata",
     # Gemini API documents a ``safety_identifier`` label for aggregators.
     LLMProvider.GEMINI: "labels",
+    # Meta's chat API documents ``safety_identifier`` and deprecates ``user``.
+    LLMProvider.META: "safety_identifier",
     # The SDK any-llm calls has no ``user`` argument, so the call would fail.
     LLMProvider.COHERE: None,
     LLMProvider.HUGGINGFACE: None,
@@ -72,7 +74,6 @@ _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     LLMProvider.INCEPTION: None,
     LLMProvider.KENARI: None,
     LLMProvider.LLAMA: None,
-    LLMProvider.META: None,
     LLMProvider.MINIMAX: None,
     LLMProvider.MOONSHOT: None,
     LLMProvider.MZAI: None,
@@ -141,6 +142,7 @@ def test_each_provider_gets_its_own_field(provider: LLMProvider, field: str | No
         "metadata": {"metadata": {"user_id": "id"}},
         "requestMetadata": {"requestMetadata": {"otari_user": "id"}},
         "labels": {"http_options": {"extra_body": {"labels": {"safety_identifier": "id"}}}},
+        "safety_identifier": {"safety_identifier": "id"},
         None: {},
     }[field]
 
@@ -283,6 +285,26 @@ async def test_the_gemini_request_body_carries_a_safety_identifier_label() -> No
         )
 
     assert captured["labels"] == {"safety_identifier": "id"}
+
+
+@pytest.mark.asyncio
+async def test_the_meta_call_receives_a_safety_identifier() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_create(*_: Any, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        raise _Stop
+
+    with patch("openai.resources.chat.completions.AsyncCompletions.create", new=fake_create), pytest.raises(_Stop):
+        await acompletion(
+            model="meta:Llama-4-Maverick-17B-128E-Instruct-FP8",
+            messages=[{"role": "user", "content": "hi"}],
+            api_key="meta-key",
+            **chat_user_fields(LLMProvider.META, "id"),
+        )
+
+    assert captured["safety_identifier"] == "id"
+    assert "user" not in captured
 
 
 def _identifier(**overrides: Any) -> str | None:
