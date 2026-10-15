@@ -181,7 +181,7 @@ dev = [
     # The fsspec file store test reaches a real S3-compatible store through s3fs.
     # Its aiobotocore dependency pins botocore, so it also bounds the boto3 this lock can take.
     "s3fs>=2026.3.0",
-    "testcontainers[postgres,redis]>=4.0.0",
+    "testcontainers[postgres,redis]>=4.15.0",
 ]
 # The load test's tools container (loadtest/run.sh), which installs this group
 # alone from the lock, so a dependency release cannot move the gate between runs.
