@@ -26264,6 +26264,24 @@
         "operationId": "chat-chat_completions",
         "parameters": [
           {
+            "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and whitespace around a pair is ignored. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+            "in": "header",
+            "name": "Otari-Tags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and whitespace around a pair is ignored. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+              "title": "Otari-Tags"
+            }
+          },
+          {
             "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
             "in": "header",
             "name": "Idempotency-Key",
@@ -28847,6 +28865,24 @@
         "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
         "operationId": "messages-create_message",
         "parameters": [
+          {
+            "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and whitespace around a pair is ignored. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+            "in": "header",
+            "name": "Otari-Tags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and whitespace around a pair is ignored. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+              "title": "Otari-Tags"
+            }
+          },
           {
             "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
             "in": "header",
@@ -38654,6 +38690,24 @@
         "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
         "operationId": "responses-create_response",
         "parameters": [
+          {
+            "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and whitespace around a pair is ignored. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+            "in": "header",
+            "name": "Otari-Tags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and whitespace around a pair is ignored. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+              "title": "Otari-Tags"
+            }
+          },
           {
             "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
             "in": "header",

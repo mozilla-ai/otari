@@ -1,10 +1,12 @@
-"""Request tags: caller-supplied attribution read from a request's ``metadata``.
+"""Request tags: caller-supplied attribution read from a request's ``metadata`` and ``Otari-Tags``.
 
 A tag is a short string pair (``purpose=chat``, ``country=DE``) that lands on
 every usage row the request writes, so spend can be sliced by it later. Tags
 come from the request's ``metadata`` object, OpenAI's own field for this, and
 also from LiteLLM's nested ``metadata.spend_logs_metadata``, so a caller moving
-off a LiteLLM proxy keeps its attribution without changing its requests.
+off a LiteLLM proxy keeps its attribution without changing its requests. The
+``Otari-Tags`` header carries the same pairs for a client that can add a header
+but not a body field, such as Claude Code; body tags win over it on a key.
 
 The bounds are OpenAI's for ``metadata``: 16 pairs, keys up to 64 characters,
 values up to 512.
@@ -13,8 +15,13 @@ values up to 512.
 from __future__ import annotations
 
 from typing import Annotated, Any
+from urllib.parse import unquote
 
+from fastapi import Header
+from fastapi.exceptions import RequestValidationError
 from pydantic import AfterValidator, Field
+
+from gateway.core.config import TAGS_HEADER
 
 MAX_REQUEST_TAGS = 16
 MAX_TAG_KEY_LENGTH = 64
@@ -119,3 +126,92 @@ def forwarded_metadata(fields: dict[str, Any]) -> dict[str, Any]:
         else:
             fields.pop("metadata")
     return fields
+
+
+TAGS_HEADER_DESC = (
+    "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), "
+    "for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either "
+    "may carry an encoded `,` or `=`, and whitespace around a pair is ignored. The bounds are the body's: "
+    f"up to {MAX_REQUEST_TAGS} pairs, keys up to {MAX_TAG_KEY_LENGTH} characters and values up to "
+    f"{MAX_TAG_VALUE_LENGTH}, counted after merging with the body's tags, which win on the same key. "
+    "Never forwarded to the provider."
+)
+
+
+def header_tags(value: str | None) -> dict[str, str] | None:
+    """Return the tags an ``Otari-Tags`` header value carries, or None when it carries none.
+
+    Raises ``ValueError`` on a pair without ``=``, a key given twice, a value
+    that does not percent-decode to UTF-8, or anything past the bounds.
+    """
+    if not value or not value.strip():
+        return None
+    pairs: dict[str, Any] = {}
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        raw_key, sep, raw_value = item.partition("=")
+        if not sep:
+            msg = f"{TAGS_HEADER}: each tag must be key=value"
+            raise ValueError(msg)
+        try:
+            key = unquote(raw_key.strip(), errors="strict")
+            tag_value = unquote(raw_value.strip(), errors="strict")
+        except UnicodeDecodeError as exc:
+            msg = f"{TAGS_HEADER}: a tag must percent-decode to UTF-8"
+            raise ValueError(msg) from exc
+        if key in pairs:
+            msg = f"{TAGS_HEADER}.{key}: a tag key may appear once"
+            raise ValueError(msg)
+        pairs[key] = tag_value
+    tags = _tag_pairs(pairs, TAGS_HEADER)
+    if len(tags) > MAX_REQUEST_TAGS:
+        msg = f"{TAGS_HEADER}: at most {MAX_REQUEST_TAGS} tags"
+        raise ValueError(msg)
+    return tags or None
+
+
+def merge_tags(*layers: dict[str, str] | None) -> dict[str, str] | None:
+    """Merge tag layers, a later layer winning on a key, within the bounds.
+
+    Raises ``ValueError`` when the merged tags exceed ``MAX_REQUEST_TAGS``.
+    """
+    merged: dict[str, str] = {}
+    for layer in layers:
+        if layer:
+            merged.update(layer)
+    if len(merged) > MAX_REQUEST_TAGS:
+        msg = f"{TAGS_HEADER} and metadata: at most {MAX_REQUEST_TAGS} tags together"
+        raise ValueError(msg)
+    return merged or None
+
+
+def resolved_tags(
+    header: str | None, metadata: dict[str, Any] | None, *, ignore: frozenset[str] = frozenset()
+) -> dict[str, str] | None:
+    """The tags to record for a request: the ``Otari-Tags`` header, overridden by the body's.
+
+    Both sources were validated on their own at intake, so the one refusal left
+    is their union exceeding the bound, which is answered like any other
+    invalid request.
+    """
+    try:
+        return merge_tags(header_tags(header), request_tags(metadata, ignore=ignore))
+    except ValueError as exc:
+        raise RequestValidationError(
+            [{"type": "value_error", "loc": ("header", TAGS_HEADER), "msg": str(exc)}]
+        ) from exc
+
+
+def _validated_header(value: str | None) -> str | None:
+    header_tags(value)
+    return value
+
+
+# The ``Otari-Tags`` request header, declared on each route that records tags.
+RequestTagsHeader = Annotated[
+    str | None,
+    Header(alias=TAGS_HEADER, description=TAGS_HEADER_DESC),
+    AfterValidator(_validated_header),
+]

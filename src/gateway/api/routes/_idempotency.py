@@ -33,6 +33,7 @@ from gateway.core.config import (
     REQUEST_ID_HEADER,
     ROUTER_HEADER,
     ROUTER_TASK_HEADER,
+    TAGS_HEADER,
     GatewayConfig,
 )
 from gateway.core.unit_of_work import UnitOfWork
@@ -74,6 +75,7 @@ _REQUEST_SHAPING_HEADERS = (
     ROUTER_TASK_HEADER,
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
+    TAGS_HEADER,
 )
 
 INVALID_IDEMPOTENCY_KEY_DETAIL = (

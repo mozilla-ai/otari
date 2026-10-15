@@ -36,7 +36,14 @@ from gateway.api.main import register_routers
 from gateway.api.trace_capture import TraceCaptureMiddleware
 from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    GATEWAY_TOKEN_HEADER,
+    TAGS_HEADER,
+    X_API_KEY_HEADER,
+    GatewayConfig,
+)
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
@@ -1237,6 +1244,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "Authorization",
                 API_KEY_HEADER,
                 X_API_KEY_HEADER,
+                TAGS_HEADER,
             ],
         )
 

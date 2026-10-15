@@ -73,7 +73,8 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
     AnthropicRequestMetadata,
-    request_tags,
+    RequestTagsHeader,
+    resolved_tags,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -831,6 +832,7 @@ async def create_message(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
+    tags_header: RequestTagsHeader = None,
 ) -> dict[str, Any] | Response:
     """Anthropic Messages API-compatible endpoint.
 
@@ -924,7 +926,7 @@ async def create_message(
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
-            tags=request_tags(request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
+            tags=resolved_tags(tags_header, request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
             turn=read_turn("messages", request.messages),
             session_label=request.session_label,
         )

@@ -1,6 +1,7 @@
-"""Request tags read from a request's ``metadata``."""
+"""Request tags read from a request's ``metadata`` and its ``Otari-Tags`` header."""
 
 import pytest
+from fastapi.exceptions import RequestValidationError
 
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
@@ -8,7 +9,10 @@ from gateway.api.routes._request_tags import (
     MAX_TAG_KEY_LENGTH,
     MAX_TAG_VALUE_LENGTH,
     forwarded_metadata,
+    header_tags,
+    merge_tags,
     request_tags,
+    resolved_tags,
 )
 
 
@@ -75,3 +79,60 @@ def test_forwarded_metadata_removes_a_field_left_empty() -> None:
 def test_forwarded_metadata_leaves_plain_metadata_alone() -> None:
     fields = {"metadata": {"purpose": "chat"}}
     assert forwarded_metadata(fields) == {"metadata": {"purpose": "chat"}}
+
+
+def test_header_pairs_are_trimmed_and_percent_decoded() -> None:
+    assert header_tags(" agent=bug-fix , run=1234,note=a%2Cb%3Dc ,") == {
+        "agent": "bug-fix",
+        "run": "1234",
+        "note": "a,b=c",
+    }
+
+
+def test_a_header_value_keeps_everything_after_the_first_equals() -> None:
+    assert header_tags("expr=a=b") == {"expr": "a=b"}
+    assert header_tags("empty=") == {"empty": ""}
+
+
+@pytest.mark.parametrize("value", [None, "", "  ", ",", " , "])
+def test_an_empty_header_has_no_tags(value: str | None) -> None:
+    assert header_tags(value) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "agent",
+        "agent=a,run",
+        "=value",
+        "agent=a,agent=b",
+        "agent=%FF",
+        f"{'k' * (MAX_TAG_KEY_LENGTH + 1)}=v",
+        f"agent={'v' * (MAX_TAG_VALUE_LENGTH + 1)}",
+        ",".join(f"k{i}=v" for i in range(MAX_REQUEST_TAGS + 1)),
+    ],
+)
+def test_a_malformed_header_is_refused(value: str) -> None:
+    with pytest.raises(ValueError, match="Otari-Tags"):
+        header_tags(value)
+
+
+def test_a_later_layer_wins_on_a_key() -> None:
+    assert merge_tags({"agent": "header", "run": "1"}, None, {"agent": "body"}) == {"agent": "body", "run": "1"}
+    assert merge_tags(None, None) is None
+
+
+def test_body_tags_override_header_tags() -> None:
+    tags = resolved_tags("agent=bug-fix,run=1234", {"agent": "triage", "user_id": "u1"}, ignore=frozenset({"user_id"}))
+    assert tags == {"agent": "triage", "run": "1234"}
+
+
+def test_the_bound_counts_header_and_body_together() -> None:
+    header = ",".join(f"h{i}=v" for i in range(MAX_REQUEST_TAGS // 2))
+    body = {f"b{i}": "v" for i in range(MAX_REQUEST_TAGS // 2)}
+    assert resolved_tags(header, body) is not None
+    # An overlapping key counts once.
+    assert resolved_tags(header, {**body, "h0": "w"}) is not None
+    with pytest.raises(RequestValidationError) as exc_info:
+        resolved_tags(header, {**body, "extra": "w"})
+    assert exc_info.value.errors()[0]["loc"] == ("header", "Otari-Tags")

@@ -97,6 +97,10 @@ RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"
 # Request header naming the budget a service key's new end user starts on, and
 # response header naming the budget that end user is on.
 END_USER_BUDGET_HEADER = "Otari-End-User-Budget"
+# Request header carrying request tags as comma-separated ``key=value`` pairs,
+# for clients that can add a header but not a body field (Claude Code's
+# ANTHROPIC_CUSTOM_HEADERS). See ``api/routes/_request_tags.py``.
+TAGS_HEADER = "Otari-Tags"
 # The version this deployment's API is served under. The root is built from it
 # rather than parsed back out of it, so nothing has to guess where the version
 # segment sits in a path.

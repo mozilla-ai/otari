@@ -50,6 +50,23 @@ it, but hybrid authentication does not.
 
 The same values can go in the `env` block of Claude Code's settings file.
 
+## Tag Claude Code traffic
+
+Claude Code cannot set a request body's `metadata`, but it can add headers, so
+it tags its spend with the `Otari-Tags` header through
+`ANTHROPIC_CUSTOM_HEADERS`:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS="Otari-Tags: agent=bug-fix,run=1234"
+claude
+```
+
+Every request the session makes is then recorded with those tags, and the usage
+endpoints filter and group by them (`GET /api/v1/usage?tag=run:1234`), so one
+key can split its cost by agent, run or requester. Percent-encode a `,` or `=`
+inside a value. Tags are recorded in standalone mode only. See
+[Request tags](api-reference.md#request-tags) for the format and limits.
+
 ## Choosing a model
 
 Otari can translate Messages requests to non-Anthropic providers. Set Claude
