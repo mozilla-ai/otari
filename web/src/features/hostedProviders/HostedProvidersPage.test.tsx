@@ -200,6 +200,9 @@ describe("HostedProvidersPage", () => {
     ).toBeInTheDocument()
     expect(hostedRequests(requests)).toEqual([])
     expect(screen.queryByRole("button", { name: "Add provider" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Refresh and purge" }),
+    ).toBeNull()
   })
 
   it("refuses an operator the list itself 404s, without offering a write", async () => {
