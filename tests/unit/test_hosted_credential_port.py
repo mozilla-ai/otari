@@ -29,6 +29,7 @@ from typing import Any, cast
 import pytest
 from any_llm import LLMProvider
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes import _pipeline as pipeline
 from gateway.api.routes import chat, messages, responses
@@ -732,6 +733,33 @@ async def test_a_billing_failure_refunds_and_becomes_a_503(monkeypatch: pytest.M
     assert "wallet" not in str(exc_info.value.detail)
     assert len(released) == 1
     assert [row["status_code"] for row in rejections] == [503]
+
+
+@pytest.mark.asyncio
+async def test_an_admission_that_does_not_commit_becomes_a_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The commit lands any credit admission granted, so a request is not served on one that rolled back."""
+    released, rejections = _capture_settlement(monkeypatch)
+
+    async def _commit_failed(_session: object) -> bool:
+        return False
+
+    async def _no_pricing_check(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(pipeline, "release_session", _commit_failed)
+    # A session would otherwise send the unpriced-upstream warning to the database.
+    monkeypatch.setattr(pipeline, "_warn_if_hosted_upstream_is_unpriced", _no_pricing_check)
+    billing = RecordingBilling()
+    ctx = _ctx(resolved_provider=_uncredentialed())
+    ctx.db = cast(AsyncSession, object())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _dispatch_billed(ctx, _hosted_port(), cast(BillingPort, billing))
+
+    assert exc_info.value.status_code == 503
+    assert len(released) == 1
+    assert [row["status_code"] for row in rejections] == [503]
+    assert ctx.deployment_charge is None
 
 
 @pytest.mark.asyncio

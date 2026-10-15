@@ -1594,25 +1594,42 @@ async def _admit_or_refuse(
                 logger.warning(
                     "Could not roll back a failed funding check: %s", describe_database_error(rollback_error)
                 )
-        await release_reservation(ctx)
-        await log_gateway_rejection(
-            db=ctx.db,
-            log_writer=ctx.log_writer,
-            api_key_id=ctx.api_key_id,
-            user_id=ctx.user_id,
-            model=resolved.model,
-            provider=resolved.instance,
-            endpoint=adapter.endpoint,
-            detail=FUNDS_CHECK_UNAVAILABLE_DETAIL,
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            started_at=ctx.started_at,
-            request_id=ctx.request_id,
-            tags=ctx.tags,
+        raise await _funding_unavailable(ctx, resolved, adapter=adapter) from exc
+    # The commit also lands any credit admission granted, so a request whose
+    # admission did not commit is not served on it.
+    if charge is not None and ctx.db is not None and not await release_session(ctx.db):
+        logger.error(
+            "Could not commit a deployment-paid admission: organization=%s request_id=%s",
+            organization_id,
+            ctx.request_id,
         )
-        raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
-    if charge is not None:
-        await release_session(ctx.db)
+        raise await _funding_unavailable(ctx, resolved, adapter=adapter)
     ctx.deployment_charge = charge
+
+
+async def _funding_unavailable(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    *,
+    adapter: FormatAdapter[Any, Any],
+) -> HTTPException:
+    """Release the reservation, record the refusal, and return the 503 to raise."""
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=resolved.model,
+        provider=resolved.instance,
+        endpoint=adapter.endpoint,
+        detail=FUNDS_CHECK_UNAVAILABLE_DETAIL,
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+    )
+    return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
 
 
 async def _warn_if_hosted_upstream_is_unpriced(
