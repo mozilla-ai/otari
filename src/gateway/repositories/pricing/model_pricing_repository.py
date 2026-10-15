@@ -23,7 +23,7 @@ _KEY_CHUNK = 500
 
 
 class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
-    """Repository for `model_pricing` rows, and the overrides a sweep takes with them.
+    """Repository for `model_pricing` rows, the deployment price list.
 
     A version is written by the service, which owns the inherit-forward rule a
     new version follows.

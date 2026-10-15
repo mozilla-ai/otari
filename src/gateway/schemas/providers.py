@@ -347,11 +347,6 @@ class ProviderEndpointsPublic(SQLModel):
     count: int
 
 
-# ==============================================================================
-# Hosted providers
-# ==============================================================================
-
-
 class HostedProviderCreateRequest(SQLModel):
     """Configure a provider this deployment will serve hosted inference on.
 

@@ -34,9 +34,13 @@ class HostedProviderConflict(Exception):
 
 
 class HostedModelConflict(Exception):
-    """The unique constraint refused a model already offered on this provider."""
+    """The unique constraint refused a model already offered on this provider.
 
-    def __init__(self, model: str) -> None:
+    ``model`` names it where one name was staged; a bulk insert cannot say
+    which of its names the constraint refused, so it carries None.
+    """
+
+    def __init__(self, model: str | None) -> None:
         super().__init__(model)
         self.model = model
 
@@ -193,7 +197,7 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         try:
             await self.db.flush()
         except IntegrityError as exc:
-            raise HostedModelConflict(names[0]) from exc
+            raise HostedModelConflict(names[0] if len(names) == 1 else None) from exc
         return rows
 
     async def save(self, row: HostedProviderModel) -> HostedProviderModel:

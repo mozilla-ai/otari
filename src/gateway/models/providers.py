@@ -184,11 +184,6 @@ class ProviderEndpoint(Base):
     )
 
 
-# ==============================================================================
-# Hosted providers
-# ==============================================================================
-
-
 class HostedProvider(Base):
     """A provider this deployment serves hosted inference on, and the key it serves it with.
 

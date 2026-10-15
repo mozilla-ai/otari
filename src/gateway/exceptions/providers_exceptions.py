@@ -223,8 +223,11 @@ class HostedCatalogEmptyError(TenancyConflictError):
 class HostedModelAlreadyOfferedError(TenancyConflictError):
     """The unique index is the arbiter; a racing insert's conflict is mapped to this."""
 
-    def __init__(self, provider: str, model: str) -> None:
-        super().__init__(f"'{model}' is already offered on the '{provider}' hosted provider")
+    def __init__(self, provider: str, model: str | None) -> None:
+        if model is None:
+            super().__init__(f"A model being offered is already offered on the '{provider}' hosted provider")
+        else:
+            super().__init__(f"'{model}' is already offered on the '{provider}' hosted provider")
 
 
 class HostedModelNameRequiredError(TenancyValidationError):
