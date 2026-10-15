@@ -43,20 +43,19 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         can refuse: a model the operator switched off on this provider is not
         served, which is what makes that switch more than a stored boolean.
 
-        ``organization_id`` and ``workspace_id`` are unused: whether this
-        deployment holds a credential for a provider is a deployment-wide fact.
-        An adapter that decides per organization raises
-        ``HostedAccessDeniedError`` from here rather than changing what a
-        credential is.
+        ``organization_id`` decides one thing: a provider restricted to another
+        organization answers ``None``, as if it were not configured, so a tenant
+        learns nothing about a credential kept from it. ``workspace_id`` is
+        attribution only and unused.
 
         ``provider`` is the caller's *instance* name, which equals the any-llm
         implementation for a bare selector. A ``config.yml`` instance of its own
         name is credentialed upstream of this port and never reaches it.
         """
-        del organization_id, workspace_id
+        del workspace_id
         if self._service is None:
             return None
-        resolved = await self._service.resolve(provider, model)
+        resolved = await self._service.resolve(provider, model, organization_id=organization_id)
         if resolved is None:
             return None
         return HostedCredential(
@@ -69,13 +68,13 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         )
 
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
-        """The providers this deployment serves hosted inference on, each with the models it advertises.
+        """The providers this deployment serves ``organization_id`` hosted inference on, with their advertised models.
 
-        ``organization_id`` is unused for the reason ``resolve_hosted_credential``
-        ignores it. The service answers the same refusals for the listing as
-        for the resolve, which is what the port requires of the two.
+        A provider restricted to another organization is absent, as
+        ``resolve_hosted_credential`` refuses it; ``None`` is the deployment's
+        own view and sees every provider. The service answers the same refusals
+        for the listing as for the resolve, which is what the port requires.
         """
-        del organization_id
         if self._service is None:
             return {}
-        return await self._service.serveable_models()
+        return await self._service.serveable_models(organization_id=organization_id)
