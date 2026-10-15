@@ -431,11 +431,13 @@ class CatalogScope:
     withhold_unserved: bool = False
     """Whether a priced model nothing would serve this caller is withheld too.
 
-    Set for an organization API key, whose view is otherwise the whole price
-    list: a provider the operator switched off or deleted leaves its rates
-    behind, and without this they would keep listing models dispatch refuses.
-    A non-operator session is narrowed by its allow-list instead, and the
-    deployment's own callers see its whole price list.
+    Set for an organization API key on a deployment that hosts at least one
+    provider, whose view is otherwise the whole price list: a provider the
+    operator switched off or deleted leaves its rates behind, and without this
+    they would keep listing models dispatch refuses. A non-operator session is
+    narrowed by its allow-list instead, and the deployment's own callers see its
+    whole price list. A deployment hosting nothing lists its price list as it
+    always has.
     """
 
     deployment_key_models: HostedModels = field(default_factory=dict)
@@ -650,14 +652,19 @@ async def catalog_scope(
     organization_id = None if workspace_id is None else await organization_for_workspace_id(db, workspace_id)
     hosted_models = await resolve_hosted_models(model_provider, None if is_master_key else organization_id)
     withheld_providers: frozenset[str] = frozenset()
-    if not is_master_key and organization_id is not None:
-        withheld_providers = frozenset(await resolve_hosted_models(model_provider, None)) - frozenset(hosted_models)
+    deployment_hosts = frozenset[str]()
+    if not is_master_key:
+        deployment_hosts = frozenset(await resolve_hosted_models(model_provider, None))
+    if organization_id is not None:
+        withheld_providers = deployment_hosts - frozenset(hosted_models)
     # The key active where this caller dispatches from, which for the master key
     # is the deployment's default workspace, exactly as pricing resolves it. Read
     # only once something is advertised, and never for the selector index's
     # deployment-wide view, which must not depend on any organization's keys.
     byo_providers: frozenset[str] = frozenset()
-    withhold_unserved = include_offered and not is_master_key
+    # Only on a deployment that hosts something: one that hosts nothing keeps
+    # listing its whole price list, as it always has.
+    withhold_unserved = include_offered and bool(deployment_hosts)
     if (hosted_models or withhold_unserved) and include_offered:
         dispatch_workspace_id = await lookup_default_workspace_id(db) if is_master_key else workspace_id
         byo_providers = await resolve_workspace_byo_providers(db, dispatch_workspace_id)
