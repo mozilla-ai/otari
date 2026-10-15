@@ -16,7 +16,7 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -28,6 +28,7 @@ from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.pricing_exceptions import OrganizationPricingOverlapError
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization
+from gateway.ports.model_provider_port import HostedCredential, HostedModels, ModelProviderPort
 from gateway.services.external_usage_service import _load_pricing_index, _resolve_pricing
 from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
@@ -910,3 +911,38 @@ def test_the_import_path_does_not_persist_a_resolved_override() -> None:
         assert stored == []
 
     _run(scenario)
+
+
+class _RecordingPort:
+    """A model-provider port that serves ``openai`` except ``gpt-off``, recording what it was asked."""
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str | None]] = []
+
+    async def resolve_hosted_credential(
+        self, *, organization_id: uuid.UUID, workspace_id: uuid.UUID | None, provider: str, model: str | None
+    ) -> HostedCredential | None:
+        self.asked.append((provider, model))
+        if provider != "openai" or model == "gpt-off":
+            return None
+        return HostedCredential(api_key="sk-hosted", api_base=None, response_provider=provider)
+
+    async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
+        return {}
+
+
+def test_a_provider_the_port_does_not_serve_is_asked_once_for_all_its_models() -> None:
+    """An org-key refresh can name hundreds of models; one unserved provider costs one question, not one each."""
+    port = _RecordingPort()
+
+    async def scenario(session: AsyncSession) -> set[str]:
+        organization_id = await _organization(session)
+        service = OrganizationPricingService(session, _CONFIG, model_provider=cast(ModelProviderPort, port))
+        keys = ["openai:gpt-4o", "openai:gpt-off", *(f"nebius:model-{n}" for n in range(50))]
+        return await service.deployment_supplied_keys(organization_id, keys)
+
+    supplied = _run(scenario)
+
+    assert supplied == {"openai:gpt-4o"}
+    assert [ask for ask in port.asked if ask[0] == "nebius"] == [("nebius", None)]
+    assert ("openai", "gpt-off") in port.asked

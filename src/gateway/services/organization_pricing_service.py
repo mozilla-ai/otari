@@ -268,9 +268,10 @@ class OrganizationPricingService:
 
         Asked in a batch because the organization's BYO providers have to be
         resolved before the port can be asked at all, and that is one query for
-        an answer that does not change between models. The port call stays per
-        model: whether a hosted credential serves one is a question about that
-        model.
+        an answer that does not change between models. The port is asked once
+        per provider first: ``model`` can only make it refuse, so a provider it
+        serves no credential for serves none of its models, and only a provider
+        it does serve is asked again per model.
 
         Two callers want different things from the same answer.
         :meth:`raise_if_deployment_supplied` refuses an override for such a
@@ -280,9 +281,31 @@ class OrganizationPricingService:
         if not model_keys:
             return set()
         byo = await self.provider_keys.get_byo_providers(organization_id=organization_id)
-        return {
-            model_key for model_key in model_keys if await self._is_deployment_supplied(organization_id, model_key, byo)
-        }
+        provider_served: dict[str, bool] = {}
+        supplied: set[str] = set()
+        for model_key in model_keys:
+            split = split_selector(model_key)
+            if split is not None and split[0] not in byo and not is_deployment_instance_key(self.config, model_key):
+                provider = split[0]
+                if provider not in provider_served:
+                    provider_served[provider] = await self._hosted_serves_provider(organization_id, provider)
+                if not provider_served[provider]:
+                    continue
+            if await self._is_deployment_supplied(organization_id, model_key, byo):
+                supplied.add(model_key)
+        return supplied
+
+    async def _hosted_serves_provider(self, organization_id: uuid.UUID, provider: str) -> bool:
+        """Whether the port serves ``provider`` at all, before any model is named."""
+        if self.model_provider is None:
+            return False
+        try:
+            credential = await self.model_provider.resolve_hosted_credential(
+                organization_id=organization_id, workspace_id=None, provider=provider, model=None
+            )
+        except HostedAccessDeniedError:
+            return True
+        return credential is not None
 
     async def _is_deployment_supplied(
         self, organization_id: uuid.UUID, model_key: str, byo_providers: Collection[str]
