@@ -110,10 +110,16 @@ class HostedCatalogSweep:
                 defaults[provider] = await self.offers.defaults_for(provider, [*answer.added, *offered])
 
         async with self.uow:
+            # Read again rather than carried across: a provider removed while
+            # the dials ran must not get rows with nothing to own them.
+            sources = await self.sources.all()
+            defined = {source.provider for source in sources}
+            # A roster outlives what defined its provider (a config entry taken
+            # out, say), and serves nothing; it is not offered, and an apply
+            # removes it with the prices it was keeping.
+            orphaned = sorted(await self.models.rostered_providers() - defined)
             if apply:
-                # Read again rather than carried across: a provider removed
-                # while the dials ran must not get rows with nothing to own them.
-                present = {source.provider for source in await self.sources.all() if source.enabled}
+                present = {source.provider for source in sources if source.enabled}
                 for answer in dialed:
                     if answer.provider not in present:
                         answer.added = []
@@ -121,7 +127,7 @@ class HostedCatalogSweep:
                         continue
                     answer.repriced = await self.offers.reseed(answer.provider, defaults[answer.provider])
                     await self.offers.offer(answer.provider, answer.added, defaults[answer.provider])
-            offered_keys = await self.models.offered_keys()
+            offered_keys = await self.models.offered_keys(defined)
             if not apply:
                 # What an apply would offer, folded in without writing it.
                 offered_keys |= {f"{answer.provider}:{model}" for answer in dialed for model in answer.added}
@@ -141,6 +147,8 @@ class HostedCatalogSweep:
             override_ids = await self._doomed_override_ids(override_keys)
             if apply:
                 price_rows, override_rows = await self.pricing.delete_keys(removed, override_ids)
+                for provider in orphaned:
+                    await self.models.delete_for_provider(provider)
             else:
                 price_rows = sum(verdict.versions for verdict in doomed)
                 override_rows = len(override_ids)
@@ -152,6 +160,7 @@ class HostedCatalogSweep:
             removed_price_rows=price_rows,
             removed_override_rows=override_rows,
             kept=kept_groups(verdicts),
+            orphaned_rosters=orphaned,
         )
 
     async def _doomed_override_ids(self, canonical_keys: list[str]) -> list[uuid.UUID]:

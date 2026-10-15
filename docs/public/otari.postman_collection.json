@@ -2757,7 +2757,7 @@
         {
           "name": "Refresh Catalog",
           "request": {
-            "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
+            "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
             "header": [],
             "method": "POST",
             "url": {

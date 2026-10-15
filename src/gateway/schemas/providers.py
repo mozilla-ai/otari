@@ -681,7 +681,9 @@ class HostedCatalogRefreshPublic(SQLModel):
 
     ``removed`` is a sample and ``removed_count`` the total, so a deployment
     that has never been swept does not answer one button press with a few
-    thousand strings.
+    thousand strings. ``orphaned_rosters`` names the providers that still have
+    a model list but nothing defining them, such as a removed ``config.yml``
+    entry: nothing serves them, and an apply deletes their model lists.
     """
 
     providers: list[HostedCatalogProviderRefreshPublic]
@@ -690,6 +692,7 @@ class HostedCatalogRefreshPublic(SQLModel):
     removed_price_rows: int
     removed_override_rows: int
     kept: list[HostedCatalogKeptGroupPublic]
+    orphaned_rosters: list[str] = Field(default_factory=list)
 
 
 class HostedAvailableModelsPublic(SQLModel):

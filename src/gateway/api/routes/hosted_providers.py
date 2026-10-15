@@ -102,7 +102,9 @@ async def refresh_catalog(service: HostedProviderServiceDep) -> HostedCatalogRef
 
     The whole deployment rather than one provider: a stored price is what puts a
     model on a tenant's Models page, and a price under a provider nothing here
-    serves cannot be reached by a per-provider refresh. Declared before the
+    serves cannot be reached by a per-provider refresh. A model list whose
+    provider nothing defines any more, such as a removed ``config.yml`` entry,
+    goes too, and is named in ``orphaned_rosters``. Declared before the
     ``/{provider}`` paths to read in the order the surface is used; no method
     collides in any case.
     """

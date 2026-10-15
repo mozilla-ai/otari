@@ -505,7 +505,12 @@ providers page lists it with a `config.yml` badge and the API marks it
 switches and their prices are managed on the page as any hosted provider's are.
 A provider stored through the page or the API under the same name wins over the
 entry, and the start logs each entry it shadows; deleting the stored provider
-serves the entry again on the same models. A hybrid gateway ignores the block.
+serves the entry again on the same models. Taking an entry out of the
+configuration leaves its models in the database, serving nothing and offered
+in no catalog; they come back if the entry does, and the next catalog sweep on
+the Hosted providers page (`POST /api/v1/hosted-providers/refresh`) deletes
+them and their prices, naming the provider in `orphaned_rosters`. A hybrid
+gateway ignores the block.
 
 ### Provider copies
 

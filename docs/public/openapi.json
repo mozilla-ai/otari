@@ -7663,13 +7663,20 @@
         "type": "object"
       },
       "HostedCatalogRefreshPublic": {
-        "description": "What a catalog sweep did, or would do.\n\n``removed`` is a sample and ``removed_count`` the total, so a deployment\nthat has never been swept does not answer one button press with a few\nthousand strings.",
+        "description": "What a catalog sweep did, or would do.\n\n``removed`` is a sample and ``removed_count`` the total, so a deployment\nthat has never been swept does not answer one button press with a few\nthousand strings. ``orphaned_rosters`` names the providers that still have\na model list but nothing defining them, such as a removed ``config.yml``\nentry: nothing serves them, and an apply deletes their model lists.",
         "properties": {
           "kept": {
             "items": {
               "$ref": "#/components/schemas/HostedCatalogKeptGroupPublic"
             },
             "title": "Kept",
+            "type": "array"
+          },
+          "orphaned_rosters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Orphaned Rosters",
             "type": "array"
           },
           "providers": {
@@ -28470,7 +28477,7 @@
     },
     "/api/v1/hosted-providers/refresh": {
       "post": {
-        "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
+        "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
         "operationId": "hosted-providers-refresh_catalog",
         "responses": {
           "200": {

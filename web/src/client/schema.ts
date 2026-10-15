@@ -1600,7 +1600,9 @@ export interface paths {
          *
          *     The whole deployment rather than one provider: a stored price is what puts a
          *     model on a tenant's Models page, and a price under a provider nothing here
-         *     serves cannot be reached by a per-provider refresh. Declared before the
+         *     serves cannot be reached by a per-provider refresh. A model list whose
+         *     provider nothing defines any more, such as a removed ``config.yml`` entry,
+         *     goes too, and is named in ``orphaned_rosters``. Declared before the
          *     ``/{provider}`` paths to read in the order the surface is used; no method
          *     collides in any case.
          */
@@ -10415,11 +10417,15 @@ export interface components {
          *
          *     ``removed`` is a sample and ``removed_count`` the total, so a deployment
          *     that has never been swept does not answer one button press with a few
-         *     thousand strings.
+         *     thousand strings. ``orphaned_rosters`` names the providers that still have
+         *     a model list but nothing defining them, such as a removed ``config.yml``
+         *     entry: nothing serves them, and an apply deletes their model lists.
          */
         HostedCatalogRefreshPublic: {
             /** Kept */
             kept: components["schemas"]["HostedCatalogKeptGroupPublic"][];
+            /** Orphaned Rosters */
+            orphaned_rosters?: string[];
             /** Providers */
             providers: components["schemas"]["HostedCatalogProviderRefreshPublic"][];
             /** Removed */

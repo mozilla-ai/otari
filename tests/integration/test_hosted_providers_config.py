@@ -268,6 +268,40 @@ async def test_deleting_the_shadowing_row_keeps_the_roster_and_restores_the_entr
     assert roster == ["gpt-4o"]
 
 
+async def test_a_roster_outliving_its_entry_serves_nothing_and_the_sweep_removes_it(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _discovery(monkeypatch)
+    both = GatewayConfig(
+        hosted_providers={"openai": {"api_key": CONFIG_KEY}, "anthropic": {"api_key": "sk-ant-config-5555"}}
+    )
+    before = _service(async_db, both)
+    for provider, model in (("openai", "o3"), ("anthropic", "claude-x")):
+        await before.add_model(
+            provider, HostedModelCreateRequest(model=model, input_price_per_million=2, output_price_per_million=8)
+        )
+    # The openai entry is taken out of the configuration; its roster stays behind.
+    after = _service(async_db, GatewayConfig(hosted_providers={"anthropic": {"api_key": "sk-ant-config-5555"}}))
+
+    preview = await after.refresh_catalog(apply=False)
+
+    assert await after.resolve("openai", "o3", organization_id=None) is None
+    assert "openai" not in await after.serveable_models(organization_id=None)
+    assert preview.orphaned_rosters == ["openai"]
+    assert "openai:o3" in preview.removed
+    assert "anthropic:claude-x" not in preview.removed
+
+    applied = await after.refresh_catalog(apply=True)
+
+    assert applied.orphaned_rosters == ["openai"]
+    roster = (await async_db.execute(select(HostedProviderModel.provider))).scalars().all()
+    assert roster == ["anthropic"]
+    priced = (await async_db.execute(select(ModelPricing.model_key))).scalars().all()
+    assert "openai:o3" not in priced
+    assert "anthropic:claude-x" in priced
+    assert (await after.refresh_catalog(apply=False)).orphaned_rosters == []
+
+
 async def test_an_unknown_configured_restriction_is_audited(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
