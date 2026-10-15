@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   FiAlignLeft,
   FiCheck,
@@ -11,12 +11,14 @@ import {
 
 import { IconButton } from "@/design-system/actions/IconButton"
 import { SearchField } from "@/design-system/forms/SearchField"
+import { copyToClipboard } from "@/design-system/helpers/clipboard"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
 import { formatDuration, formatRelativeTime } from "./format"
 import { type Format, IOBlock } from "./IOBlock"
 import { LevelChip } from "./LevelChip"
 import { TypeMark } from "./observationTypes"
+import { matchesSearch } from "./search"
 import { buildTree, flattenTreeOrder } from "./tree"
 import type { Trace } from "./types"
 
@@ -25,24 +27,28 @@ const INDENT_PX = 12
 const gridClass = (showMs: boolean) =>
   `grid ${showMs ? "grid-cols-[1rem_minmax(0,1fr)_3rem_5rem_4.5rem]" : "grid-cols-[1rem_minmax(0,1fr)_3rem_3rem_4.5rem]"} items-center gap-2 px-3`
 
+// A toggle keeps one name and says its state through `aria-pressed`; only the
+// tooltip reads as the action.
 function ToolbarButton({
   label,
+  tooltip = label,
   pressed,
   onPress,
   children,
 }: {
   label: string
+  tooltip?: string
   pressed?: boolean
   onPress: () => void
   children: React.ReactNode
 }) {
   return (
-    <Tooltip content={label}>
+    <Tooltip content={tooltip}>
       <IconButton
         label={label}
         size="sm"
         aria-pressed={pressed}
-        className={`md:min-h-7 md:min-w-7 ${pressed ? "bg-surface-subtle" : ""}`}
+        className={pressed ? "bg-surface-subtle" : ""}
         onPress={onPress}
       >
         {children}
@@ -57,18 +63,19 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
   const [showMs, setShowMs] = useState(false)
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [copied, setCopied] = useState(false)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+  useEffect(() => () => clearTimeout(copiedTimer.current), [])
 
   const items = useMemo(
     () => flattenTreeOrder(buildTree(trace.observations)),
     [trace],
   )
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return items
-    return items.filter(({ node: { obs } }) =>
-      [obs.name, obs.type, obs.id].some((v) => v.toLowerCase().includes(q)),
-    )
-  }, [items, query])
+  const visible = useMemo(
+    () => items.filter(({ node }) => matchesSearch(node.obs, query)),
+    [items, query],
+  )
 
   const allExpanded =
     visible.length > 0 && visible.every(({ node }) => expanded.has(node.obs.id))
@@ -81,20 +88,18 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
     })
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        JSON.stringify(trace.observations, null, 2),
-      )
-    } catch {
+    // The shared helper falls back where the Clipboard API is missing, as on
+    // the plain-HTTP origins a gateway is often served from.
+    if (!(await copyToClipboard(JSON.stringify(trace.observations, null, 2))))
       return
-    }
     setCopied(true)
-    setTimeout(() => setCopied(false), 1000)
+    clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => setCopied(false), 1000)
   }
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="otari-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+      <div className="otari-toolbar flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
         <SearchField
           label="Search observations"
           placeholder="Search observations..."
@@ -103,14 +108,16 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
           className="min-w-0 flex-1"
         />
         <ToolbarButton
-          label={indent ? "Hide indentation" : "Show indentation"}
+          label="Indentation"
+          tooltip={indent ? "Hide indentation" : "Show indentation"}
           pressed={indent}
           onPress={() => setIndent((v) => !v)}
         >
           <FiAlignLeft aria-hidden="true" className="size-4" />
         </ToolbarButton>
         <ToolbarButton
-          label={showMs ? "Hide milliseconds" : "Show milliseconds"}
+          label="Milliseconds"
+          tooltip={showMs ? "Hide milliseconds" : "Show milliseconds"}
           pressed={showMs}
           onPress={() => setShowMs((v) => !v)}
         >
@@ -143,7 +150,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
 
       <div className="min-h-0 flex-1 overflow-auto">
         <div
-          className={`${gridClass(showMs)} sticky top-0 z-10 min-h-6 border-b border-border bg-surface py-0.5 text-overline text-muted`}
+          className={`${gridClass(showMs)} sticky top-0 z-10 min-h-6 border-b border-border bg-surface py-0.5 text-overline`}
         >
           <span />
           <span>Observation</span>
@@ -154,14 +161,14 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
         {visible.map(({ node }) => {
           const { obs } = node
           const isOpen = expanded.has(obs.id)
-          const items = node.children.length
+          const childCount = node.children.length
           return (
             <div key={obs.id} className="border-b border-border">
               <button
                 type="button"
                 aria-expanded={isOpen}
                 onClick={() => toggleRow(obs.id)}
-                className={`${gridClass(showMs)} min-h-11 w-full text-left hover:bg-surface-alt md:min-h-6`}
+                className={`otari-trace-ring ${gridClass(showMs)} min-h-11 w-full text-left hover:bg-surface-alt md:min-h-6`}
               >
                 <FiChevronRight
                   aria-hidden="true"
@@ -176,9 +183,9 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
                     {obs.name} ({obs.id.slice(0, 8)})
                   </span>
                   <LevelChip level={obs.level} />
-                  {items > 0 ? (
+                  {childCount > 0 ? (
                     <span className="shrink-0 text-caption text-subtle">
-                      {items} {items === 1 ? "item" : "items"}
+                      {childCount} {childCount === 1 ? "item" : "items"}
                     </span>
                   ) : null}
                 </span>
@@ -189,15 +196,13 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
                   {formatRelativeTime(obs.startMs, showMs)}
                 </span>
                 <span className="text-right text-mono-caption text-muted">
-                  {formatDuration(obs.endMs - obs.startMs) ?? "-"}
+                  {formatDuration(obs.endMs - obs.startMs)}
                 </span>
               </button>
               {isOpen ? (
                 <div className="flex flex-col gap-4 border-t border-border bg-surface-alt px-4 py-3">
                   {obs.input == null && obs.output == null ? (
-                    <span className="text-caption text-muted">
-                      No input or output
-                    </span>
+                    <span className="text-caption">No input or output</span>
                   ) : null}
                   {obs.input != null ? (
                     <IOBlock label="Input" value={obs.input} format={format} />

@@ -1,7 +1,6 @@
 import type { IconType } from "react-icons"
 import {
   FiArrowRight,
-  FiDisc,
   FiGitBranch,
   FiMessageSquare,
   FiServer,
@@ -16,59 +15,53 @@ export type TypeKey = ObservationType | "TRACE"
 
 // The trace, generation, tool, guardrail and MCP marks are the shell's own
 // Sessions, Playground, Tools, Guardrails and MCP servers glyphs. The types
-// that do work take chart slots 1 to 5 in order; a span only groups them, so it
-// stays neutral. Full class strings, so Tailwind sees every one.
+// that do work take chart slots 1 to 5 in order; a span or the session only
+// groups them, so it stays neutral. Full class strings, so Tailwind sees every one.
 export const OBSERVATION_TYPES: Record<
   TypeKey,
-  { label: string; icon: IconType; inkClass: string; barClass: string | null }
+  { label: string; icon: IconType; inkClass: string; barClass: string }
 > = {
   TRACE: {
     label: "Trace",
     icon: FiGitBranch,
     inkClass: "text-foreground",
-    barClass: null,
+    barClass: "bg-trace-bar-span",
   },
   GENERATION: {
     label: "Generation",
     icon: FiMessageSquare,
     inkClass: "text-chart-cat-1",
-    barClass: "bg-[var(--trace-bar-generation)]",
+    barClass: "bg-trace-bar-generation",
   },
   SPAN: {
     label: "Span",
     icon: FiArrowRight,
     inkClass: "text-muted",
-    barClass: "bg-[var(--trace-bar-span)]",
+    barClass: "bg-trace-bar-span",
   },
   AGENT: {
     label: "Agent",
     icon: FiTerminal,
     inkClass: "text-chart-cat-3",
-    barClass: "bg-[var(--trace-bar-agent)]",
+    barClass: "bg-trace-bar-agent",
   },
   TOOL: {
     label: "Tool",
     icon: FiTool,
     inkClass: "text-chart-cat-2",
-    barClass: "bg-[var(--trace-bar-tool)]",
+    barClass: "bg-trace-bar-tool",
   },
   GUARDRAIL: {
     label: "Guardrail",
     icon: FiShield,
     inkClass: "text-chart-cat-4",
-    barClass: "bg-[var(--trace-bar-guardrail)]",
+    barClass: "bg-trace-bar-guardrail",
   },
   MCP: {
     label: "MCP",
     icon: FiServer,
     inkClass: "text-chart-cat-5",
-    barClass: "bg-[var(--trace-bar-mcp)]",
-  },
-  EVENT: {
-    label: "Event",
-    icon: FiDisc,
-    inkClass: "text-subtle",
-    barClass: null,
+    barClass: "bg-trace-bar-mcp",
   },
 }
 

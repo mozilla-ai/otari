@@ -1,5 +1,4 @@
 import type { TraceDetail, TraceSpan, TraceSummary, TraceTurn } from "@/client"
-import type { ChipTone } from "@/design-system/indicators/Chip"
 
 import { guardrailProfile, mcpServer } from "./gateway"
 
@@ -83,41 +82,6 @@ export function spanLabel(span: TraceSpan): string {
   }
 }
 
-export function spanTone(span: TraceSpan): ChipTone {
-  if (span.outcome === "error") {
-    return span.recovered ? "warning" : "danger"
-  }
-  return span.outcome === "unknown" ? "neutral" : "success"
-}
-
-export function spanOutcomeLabel(span: TraceSpan): string {
-  if (span.outcome === "error") {
-    return span.recovered ? "Recovered" : "Failed"
-  }
-  return span.outcome === "unknown" ? "No result" : "OK"
-}
-
-const TURN_STATE_TONE: Record<TraceTurn["state"], ChipTone> = {
-  active: "info",
-  completed: "success",
-  failed: "danger",
-  incomplete: "warning",
-}
-
-const TURN_STATE_LABEL: Record<TraceTurn["state"], string> = {
-  active: "Active",
-  completed: "Completed",
-  failed: "Failed",
-  incomplete: "Incomplete",
-}
-
-export function turnStatus(turn: TraceTurn): { tone: ChipTone; label: string } {
-  return {
-    tone: TURN_STATE_TONE[turn.state],
-    label: TURN_STATE_LABEL[turn.state],
-  }
-}
-
 // A row of the activity list is a session (requests that named one) or a single
 // request that named none; both are traces, so they share one list.
 export function traceKind(summary: TraceSummary): "Session" | "Request" {
@@ -132,26 +96,6 @@ export function sessionName(summary: TraceSummary): string {
 
 export function shortId(traceId: string): string {
   return traceId.replace(/^s-/, "").slice(0, 10)
-}
-
-export function sessionFailed(summary: TraceSummary): boolean {
-  return summary.error_count > 0
-}
-
-const SOURCE_LABEL: Record<TraceSummary["session_source"], string> = {
-  client: "Grouped by the client's session id",
-  harness: "Grouped by the agent's own session id",
-  otlp: "Exported by an instrumented agent",
-  none: "A single request: the client named no session",
-}
-
-export function sessionSourceLabel(summary: TraceSummary): string {
-  return SOURCE_LABEL[summary.session_source]
-}
-
-// The flat view: every span in start order, for reading a session as a log.
-export function spanLog(detail: TraceDetail): TraceSpan[] {
-  return [...detail.spans].sort(byStart)
 }
 
 export function sessionDurationMs(summary: TraceSummary): number {

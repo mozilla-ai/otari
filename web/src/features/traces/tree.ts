@@ -1,4 +1,4 @@
-import { type Observation, observationCost } from "./types"
+import type { Observation } from "./types"
 
 export interface TreeNode {
   obs: Observation
@@ -57,12 +57,12 @@ export function flattenTreeOrder(
   return out
 }
 
-// Own cost plus every descendant's, bottom-up, as Langfuse's tree building does
-// for the timeline's bar labels.
+// Own cost plus every descendant's, bottom-up, so a parent's bar label says
+// what everything under it cost.
 export function rolledUpCosts(roots: TreeNode[]): Map<string, number> {
   const totals = new Map<string, number>()
   const walk = (node: TreeNode): number => {
-    const own = observationCost(node.obs)
+    const own = node.obs.cost ?? 0
     const total = node.children.reduce((sum, child) => sum + walk(child), own)
     totals.set(node.obs.id, total)
     return total

@@ -222,10 +222,11 @@ export function mockApi(
         const query = new URL(url, "http://localhost").searchParams
         return jsonResponse(
           (opts.ceilings ?? []).filter(
-            (c) =>
+            (ceiling) =>
               (!query.has("scope_type") ||
-                c.scope_type === query.get("scope_type")) &&
-              (!query.has("scope_id") || c.scope_id === query.get("scope_id")),
+                ceiling.scope_type === query.get("scope_type")) &&
+              (!query.has("scope_id") ||
+                ceiling.scope_id === query.get("scope_id")),
           ),
         )
       }

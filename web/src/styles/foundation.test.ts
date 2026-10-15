@@ -736,6 +736,7 @@ describe("a table is a region, not a card", () => {
     "otari-provider-keys-table",
     "otari-providers-table",
     "otari-routing-table",
+    "otari-sessions-table",
     "otari-workspaces-table",
   ]
 

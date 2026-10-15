@@ -1,9 +1,4 @@
-import type {
-  TraceDetail,
-  TraceSpan,
-  TraceSummary as TraceSummaryRecord,
-  TraceTurn,
-} from "@/client"
+import type { TraceDetail, TraceSpan, TraceSummary, TraceTurn } from "@/client"
 
 import {
   failureLabel,
@@ -17,9 +12,7 @@ import {
   buildTraceTree,
   type SpanNode,
   sessionName,
-  sessionSourceLabel,
   spanLabel,
-  traceKind,
 } from "./traceModel"
 import type {
   Observation,
@@ -106,10 +99,7 @@ function spanMetadata(span: TraceSpan): Record<string, string> {
 // so the peek can open on the summary while the spans load. Turns become parent
 // observations over their steps once a session has more than one, the grouping
 // `buildTraceTree` reads from the API; a single request is not wrapped in one.
-export function toTrace(
-  summary: TraceSummaryRecord,
-  detail?: TraceDetail,
-): Trace {
+export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
   const origin = Date.parse(summary.started_at)
   const offset = (iso: string | null) =>
     iso == null ? null : Math.max(0, Date.parse(iso) - origin)
@@ -128,7 +118,6 @@ export function toTrace(
         const endMs = offset(turn.ended_at) ?? startMs
         observations.push({
           id,
-          traceId: summary.trace_id,
           parentObservationId: null,
           type: "SPAN",
           name: turn.continued ? "Earlier steps" : `Turn ${turn.index + 1}`,
@@ -164,7 +153,6 @@ export function toTrace(
       const endMs = offset(span.end_time) ?? startMs + (span.duration_ms ?? 0)
       observations.push({
         id: span.span_id,
-        traceId: summary.trace_id,
         parentObservationId:
           span.parent_span_id && byId.has(span.parent_span_id)
             ? span.parent_span_id
@@ -192,22 +180,11 @@ export function toTrace(
     id: summary.trace_id,
     name: sessionName(summary),
     timestamp: summary.started_at,
-    userId: summary.user_id ?? "",
-    sessionId: summary.trace_id,
-    environment: "",
-    tags: [traceKind(summary)],
-    input: null,
-    output: null,
-    metadata: {
-      Source: sessionSourceLabel(summary),
-      Workspace: summary.workspace_id,
-      ...(detail ? { State: detail.state } : {}),
-    },
     observations,
     gateway: detail
       ? {
           events: gatewayEvents(detail),
-          apiKeyId: summary.api_key_id,
+          apiKeyId: summary.api_key_id ?? "",
           cost: summary.cost,
         }
       : undefined,

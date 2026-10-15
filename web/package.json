@@ -21,16 +21,13 @@
     "client:generate": "openapi-typescript ../docs/public/openapi.json -o src/client/schema.ts",
     "icons:generate": "node scripts/generate-pwa-icons.mjs",
     "lint": "biome check",
-    "lint:fix": "biome check --write",
-    "demo": "VITE_MOCK_GATEWAY=1 vite --open /#/activity"
+    "lint:fix": "biome check --write"
   },
   "dependencies": {
     "@heroui/react": "3.2.5",
     "@heroui/styles": "3.2.5",
     "@tanstack/react-query": "^5.102.8",
     "@tanstack/react-router": "^1.170.34",
-    "@tanstack/react-table": "^9.2.6",
-    "@tanstack/react-virtual": "^3.14.13",
     "canvas-confetti": "^1.9.4",
     "clsx": "2.1.1",
     "react": "^19.3.0",
@@ -38,11 +35,9 @@
     "react-dom": "^19.3.0",
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
-    "react-resizable-panels": "^4.14.2",
     "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
-    "thinking-orbs": "^0.3.1",
-    "zod": "^4.6.5"
+    "thinking-orbs": "^0.3.1"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

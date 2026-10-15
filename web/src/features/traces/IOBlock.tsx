@@ -12,6 +12,21 @@ function tryJson(text: string): unknown {
   }
 }
 
+// One chat message: its text as prose, or its JSON when the content is
+// structured.
+function MessageContent({ message }: { message: unknown }) {
+  const content = (message as { content?: unknown }).content
+  const embedded = typeof content === "string" ? tryJson(content) : undefined
+  if (typeof content === "string" && embedded === undefined) {
+    return <p className="text-body whitespace-pre-wrap">{content}</p>
+  }
+  return (
+    <pre className="overflow-x-auto text-mono-caption whitespace-pre-wrap">
+      {JSON.stringify(embedded ?? message, null, 2)}
+    </pre>
+  )
+}
+
 export function IOBlock({
   label,
   value,
@@ -43,30 +58,15 @@ export function IOBlock({
   const text = embedded !== undefined ? null : rawText
   return (
     <section className="flex flex-col gap-1.5">
-      <h3 className="text-overline text-muted">{label}</h3>
+      <h3 className="text-overline">{label}</h3>
       {format === "formatted" && messages ? (
         <div className="flex flex-col gap-2">
           {messages.map((message, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: static mock content
             <div key={index} className="flex flex-col gap-0.5">
               <span className="text-mono-caption text-muted">
                 {String((message as { role?: string }).role ?? "message")}
               </span>
-              {(() => {
-                const content = (message as { content?: unknown }).content
-                const embedded =
-                  typeof content === "string" ? tryJson(content) : undefined
-                if (typeof content === "string" && embedded === undefined) {
-                  return (
-                    <p className="text-body whitespace-pre-wrap">{content}</p>
-                  )
-                }
-                return (
-                  <pre className="overflow-x-auto text-mono-caption whitespace-pre-wrap">
-                    {JSON.stringify(embedded ?? message, null, 2)}
-                  </pre>
-                )
-              })()}
+              <MessageContent message={message} />
             </div>
           ))}
         </div>

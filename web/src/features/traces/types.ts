@@ -1,6 +1,5 @@
-// Shapes modeled on Langfuse's trace and observation records
-// (MIT, Copyright (c) 2023-2026 ClickHouse, Inc.), carrying Otari-shaped
-// fields on generations. Filled from the trace API by `fromApi.ts`.
+// Shapes after Langfuse's trace and observation records (see
+// LANGFUSE-LICENSE.md), filled from the trace API by `fromApi.ts`.
 
 import type { GatewayEvent } from "./gateway"
 
@@ -10,15 +9,13 @@ export type ObservationType =
   | "GENERATION"
   | "AGENT"
   | "TOOL"
-  | "EVENT"
   | "GUARDRAIL"
   | "MCP"
 
-export type ObservationLevel = "DEBUG" | "DEFAULT" | "WARNING" | "ERROR"
+export type ObservationLevel = "DEFAULT" | "WARNING" | "ERROR"
 
 export interface Observation {
   id: string
-  traceId: string
   parentObservationId: string | null
   type: ObservationType
   name: string
@@ -32,10 +29,7 @@ export interface Observation {
   provider?: string
   promptTokens?: number
   completionTokens?: number
-  /** The whole cost, when the record does not split it into input and output. */
   cost?: number
-  inputCost?: number
-  outputCost?: number
   input?: unknown
   output?: unknown
   metadata?: Record<string, string>
@@ -45,50 +39,31 @@ export interface Trace {
   id: string
   name: string
   timestamp: string
-  userId: string
-  sessionId: string
-  environment: string
-  tags: string[]
-  input: unknown
-  output: unknown
-  metadata: Record<string, string>
   observations: Observation[]
   /** Absent until the session's spans have loaded. */
   gateway?: {
     events: GatewayEvent[]
-    apiKeyId: string | null
+    /** Empty when the session's requests named no key. */
+    apiKeyId: string
     cost: number
   }
 }
 
-export interface TraceSummary {
+export interface TraceTotals {
   latencyMs: number
   promptTokens: number
   completionTokens: number
   totalTokens: number
   totalCost: number
-  inputCost: number
-  outputCost: number
-  errorCount: number
-  warningCount: number
-  observationCount: number
   models: string[]
   level: ObservationLevel
 }
 
-export function observationCost(o: Observation): number {
-  return o.cost ?? (o.inputCost ?? 0) + (o.outputCost ?? 0)
-}
-
-export function summarizeTrace(trace: Trace): TraceSummary {
+export function summarizeTrace(trace: Trace): TraceTotals {
   let latencyMs = 0
   let promptTokens = 0
   let completionTokens = 0
-  let inputCost = 0
-  let outputCost = 0
   let totalCost = 0
-  let errorCount = 0
-  let warningCount = 0
   let level: ObservationLevel = "DEFAULT"
   const models = new Set<string>()
   for (const o of trace.observations) {
@@ -98,11 +73,7 @@ export function summarizeTrace(trace: Trace): TraceSummary {
       promptTokens += o.promptTokens ?? 0
       completionTokens += o.completionTokens ?? 0
     }
-    inputCost += o.inputCost ?? 0
-    outputCost += o.outputCost ?? 0
-    totalCost += observationCost(o)
-    if (o.level === "ERROR") errorCount += 1
-    if (o.level === "WARNING") warningCount += 1
+    totalCost += o.cost ?? 0
     if (o.model) models.add(o.model)
     if (o.level === "ERROR") level = "ERROR"
     else if (o.level === "WARNING" && level !== "ERROR") level = "WARNING"
@@ -113,11 +84,6 @@ export function summarizeTrace(trace: Trace): TraceSummary {
     completionTokens,
     totalTokens: promptTokens + completionTokens,
     totalCost,
-    inputCost,
-    outputCost,
-    errorCount,
-    warningCount,
-    observationCount: trace.observations.length,
     models: [...models],
     level,
   }

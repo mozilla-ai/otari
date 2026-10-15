@@ -7,8 +7,9 @@ const OPTIONS: { value: NavView; label: string }[] = [
   { value: "timeline", label: "Timeline" },
 ]
 
-// Tree / Timeline as a flat track with a filled thumb, after Langfuse's inset
-// tabs. Native radios, so arrow keys and a single tab stop come with them.
+// Tree / Timeline as a flat track with a filled thumb, quieter than a bordered
+// segmented control in a header this dense. Native radios, so arrow keys and a
+// single tab stop come with them.
 export function TraceViewSwitch({
   value,
   onChange,
@@ -21,7 +22,7 @@ export function TraceViewSwitch({
     <div
       role="radiogroup"
       aria-label="Trace view"
-      className="inline-flex h-7 items-stretch bg-[var(--trace-switch-track)] p-0.5"
+      className="inline-flex items-stretch bg-[var(--trace-switch-track)] p-0.5 md:h-7"
     >
       {OPTIONS.map((option) => {
         const selected = option.value === value

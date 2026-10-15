@@ -126,6 +126,23 @@ export const InlineValueTruncated: Story = {
   ),
 }
 
+/**
+ * `isTruncated` ellipsizes a value too long for the room it is given and keeps
+ * the copy control in view, so a header can hold an id of any length.
+ */
+export const InlineValueEllipsized: Story = {
+  render: () => (
+    <div className="flex w-48 min-w-0 rounded-lg border border-border bg-surface px-3 py-2">
+      <CopyableValue
+        value="s-7c1f0e2a9b4d4e6f8a3b5c7d9e1f2a4b"
+        label="trace ID"
+        className="font-mono text-caption"
+        isTruncated
+      />
+    </div>
+  ),
+}
+
 /** The button alone, when the surrounding layout is already yours. */
 export const Button: Story = {
   render: () => (

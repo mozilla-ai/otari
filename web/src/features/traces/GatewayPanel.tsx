@@ -7,7 +7,9 @@ import { formatCost, formatPct, formatUsd } from "@/shared/helpers/format"
 import { formatRelativeTime } from "./format"
 import type { Trace } from "./types"
 
-function Spend({ cost, apiKeyId }: { cost: number; apiKeyId: string | null }) {
+type Gateway = NonNullable<Trace["gateway"]>
+
+function Spend({ cost, apiKeyId }: { cost: number; apiKeyId: string }) {
   // The ceilings read is deployment-wide, so only an operator asks for it.
   const { isOperator } = useDeploymentOperator()
   const ceiling = useApiKeyCeiling(apiKeyId, isOperator)
@@ -19,7 +21,7 @@ function Spend({ cost, apiKeyId }: { cost: number; apiKeyId: string | null }) {
         This session cost {formatCost(cost)}.
         {ceiling.data && limit !== null
           ? ` That is ${formatPct(limit > 0 ? cost / limit : 0)} of this key's ${formatUsd(limit)} ceiling, which has ${formatUsd(ceiling.data.current_spend)} spent this period.`
-          : ceiling.data === null
+          : ceiling.isSuccess && !ceiling.data
             ? " This key has no spend ceiling of its own."
             : null}
       </p>
@@ -39,17 +41,15 @@ function Spend({ cost, apiKeyId }: { cost: number; apiKeyId: string | null }) {
 // what the panel shows before a span is picked: the API stores no request or
 // response content, so there is no trace-level input or output to show instead.
 export function GatewayPanel({
-  trace,
+  gateway,
+  startedAt,
   onSelect,
 }: {
-  trace: Trace
+  gateway: Gateway
+  startedAt: string
   onSelect: (spanId: string) => void
 }) {
-  const { gateway } = trace
-  if (!gateway) {
-    return <span className="text-caption text-subtle">Loading the spans</span>
-  }
-  const start = Date.parse(trace.timestamp)
+  const start = Date.parse(startedAt)
   return (
     <>
       <Spend cost={gateway.cost} apiKeyId={gateway.apiKeyId} />

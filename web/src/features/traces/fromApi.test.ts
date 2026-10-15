@@ -45,8 +45,7 @@ describe("toTrace", () => {
     expect(recovered?.level).toBe("WARNING")
     expect(recovered?.statusMessage).toBe("error, recovered by a fallback")
     expect(summarizeTrace(trace)).toMatchObject({
-      errorCount: 0,
-      warningCount: 1,
+      level: "WARNING",
       totalCost: 0.01,
     })
   })
@@ -170,9 +169,8 @@ describe("toTrace", () => {
     expect(trace).toMatchObject({
       id: traceSummary().trace_id,
       name: "claude-code",
-      userId: "alice",
-      tags: ["Request"],
       observations: [],
+      gateway: undefined,
     })
   })
 })
