@@ -14,6 +14,7 @@ import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { ApiError } from "@/shared/api/client"
 import { useDeploymentAdminAccess } from "@/shared/api/deployment"
 import {
   useDeleteHostedProvider,
@@ -22,6 +23,8 @@ import {
   useHostedProviders,
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
+import { UnavailableHere } from "@/shared/components/access/UnavailableHere"
+import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { EditHostedProviderForm } from "./EditHostedProviderForm"
@@ -40,7 +43,9 @@ import {
 // Operator-only, and the API refuses anyone else with a 404, so the page asks
 // the deployment admin gate first, as Accounts does, and words a refusal as the
 // page not being theirs rather than as an error. Whether this deployment hosts
-// the surface at all is the shell's question, answered from the nav registry.
+// the surface at all is the shell's question, answered from the nav registry;
+// the page answers it again for a deployment that publishes the surface but
+// serves no API behind it, which is what a 404 from the gate itself means.
 //
 // A provider kept to one organization shows which; the restriction is set and
 // lifted through the API, since this build has no deployment-wide list of
@@ -156,7 +161,19 @@ function CatalogSweepPreview({
   )
 }
 
+const isNotFound = (error: unknown) =>
+  error instanceof ApiError && error.status === 404
+
 export function HostedProvidersPage() {
+  const hostsSurface = useSurfaces()
+  // Before any hook that asks the API, so an unpublished surface asks nothing.
+  if (!hostsSurface("hosted_providers")) {
+    return <UnavailableHere title="Hosted providers" />
+  }
+  return <HostedProvidersContent />
+}
+
+function HostedProvidersContent() {
   const access = useDeploymentAdminAccess()
   // Withheld until the gate answers, so a non-operator load does not put a 404
   // in the console to learn what the gate is about to say.
@@ -195,6 +212,10 @@ export function HostedProvidersPage() {
     return <PageLoading label="Loading hosted providers…" />
   }
 
+  if (isNotFound(access.error)) {
+    return <UnavailableHere title="Hosted providers" />
+  }
+
   // A gate that failed to answer is not a gate that said no.
   if (access.isError) {
     return (
@@ -205,7 +226,8 @@ export function HostedProvidersPage() {
     )
   }
 
-  if (!isGranted) {
+  // The list's 404 is the same operator refusal, should the two ever disagree.
+  if (!isGranted || isNotFound(providers.error)) {
     return (
       <div className="flex flex-col">
         <PageIntro title="Hosted providers" />

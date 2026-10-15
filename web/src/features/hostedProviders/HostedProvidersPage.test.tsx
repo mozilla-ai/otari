@@ -73,7 +73,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function mockApi(
   opts: {
-    granted?: boolean
+    /** `"absent"` answers the gate 404, as a deployment serving no `/admin`. */
+    granted?: boolean | "absent"
+    /** Answers the list 404, as the router refusing a non-operator. */
+    listRefused?: boolean
     providers?: HostedProvider[]
     models?: HostedModel[]
     sweep?: HostedCatalogRefresh
@@ -96,7 +99,9 @@ function mockApi(
     const hosted = `${API_ROOT}/hosted-providers`
 
     if (url.includes(`${API_ROOT}/admin/access`)) {
-      return jsonResponse({ granted })
+      return granted === "absent"
+        ? jsonResponse({ detail: "Not Found" }, 404)
+        : jsonResponse({ granted })
     }
     if (url.includes(`${API_ROOT}/providers/catalog`)) {
       return jsonResponse([{ id: "anthropic", name: "Anthropic" }])
@@ -114,6 +119,7 @@ function mockApi(
     }
     if (url.includes(hosted)) {
       if (method === "GET") {
+        if (opts.listRefused) return jsonResponse({ detail: "Not Found" }, 404)
         return jsonResponse({ data: providers, count: providers.length })
       }
       if (method === "DELETE") {
@@ -127,12 +133,12 @@ function mockApi(
   return requests
 }
 
-function renderPage() {
+function renderPage(surfaces?: string[]) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return renderWithRouter(
-    <DeploymentProvider value={bootstrap()}>
+    <DeploymentProvider value={bootstrap(surfaces ? { surfaces } : {})}>
       <QueryClientProvider client={client}>
         <HostedProvidersPage />
       </QueryClientProvider>
@@ -186,6 +192,40 @@ describe("HostedProvidersPage", () => {
 
     expect(
       await screen.findByText("Hosted providers is not available to you"),
+    ).toBeInTheDocument()
+    expect(hostedRequests(requests)).toEqual([])
+    expect(screen.queryByRole("button", { name: "Add provider" })).toBeNull()
+  })
+
+  it("refuses an operator the list itself 404s, without offering a write", async () => {
+    mockApi({ listRefused: true })
+    await renderPage()
+
+    expect(
+      await screen.findByText("Hosted providers is not available to you"),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add provider" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Refresh and purge" }),
+    ).toBeNull()
+  })
+
+  it("says the page is not served where the surface is not published, asking nothing", async () => {
+    const requests = mockApi()
+    await renderPage([])
+
+    expect(
+      await screen.findByText("Hosted providers is not available here"),
+    ).toBeInTheDocument()
+    expect(requests).toEqual([])
+  })
+
+  it("says the page is not served where the admin gate itself is absent", async () => {
+    const requests = mockApi({ granted: "absent" })
+    await renderPage()
+
+    expect(
+      await screen.findByText("Hosted providers is not available here"),
     ).toBeInTheDocument()
     expect(hostedRequests(requests)).toEqual([])
     expect(screen.queryByRole("button", { name: "Add provider" })).toBeNull()
