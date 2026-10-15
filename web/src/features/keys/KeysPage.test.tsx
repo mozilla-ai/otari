@@ -1277,6 +1277,32 @@ describe("KeysPage", () => {
       expect(ceilingPost(fetchMock, "/scoped-budgets")).toBeUndefined()
     })
 
+    it("takes back a custom budget whose cap was refused", async () => {
+      const fetchMock = mockApi({ keys: [], ceilingStatus: 409 })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+      await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+      await user.keyboard("{Escape}")
+      await pickOption(user, "Budget (optional)", "Custom amount…")
+      await user.type(screen.getByLabelText(/Limit \(USD\)/), "50")
+      await submitTheCreateDialog(user)
+
+      await screen.findByText(/its budget was not applied/)
+      // Left behind it would cap nothing, and a retry would make another.
+      expect(
+        fetchMock.mock.calls.some(
+          ([u, init]) =>
+            String(u).endsWith(`${API_ROOT}/budgets/b-custom`) &&
+            init?.method === "DELETE",
+        ),
+      ).toBe(true)
+    })
+
     it("keeps the secret on screen when the cap is refused", async () => {
       mockApi({ keys: [], budgets: [team], ceilingStatus: 404 })
       const user = userEvent.setup()
@@ -1367,6 +1393,44 @@ describe("KeysPage", () => {
         expect(
           screen.getByRole("columnheader", { name: "Budget" }),
         ).toBeInTheDocument()
+      })
+
+      it("shows the budget field once the ceilings land after the form opened", async () => {
+        let release: (() => void) | undefined
+        const held = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        const base = mockApi({
+          keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+          budgets: [team],
+          ceilings: [capped],
+        })
+        const inner = base.getMockImplementation()!
+        base.mockImplementation(async (input, init) => {
+          if (String(input).includes(`${API_ROOT}/scoped-budgets?`)) await held
+          return inner(input, init)
+        })
+        const user = userEvent.setup()
+        renderPage(<KeysPage />)
+
+        const row = (await screen.findByText("ci-bot")).closest("tr")!
+        await chooseAction(user, row, "Edit")
+        const dialog = await screen.findByRole("dialog", { name: "Edit key" })
+        expect(
+          within(dialog).queryByText("Budget (optional)"),
+        ).not.toBeInTheDocument()
+
+        release?.()
+        // Opens on the key's budget, and that is the seed rather than an edit.
+        expect(
+          await within(dialog).findByRole("button", {
+            name: /Team standard.*Budget \(optional\)$/,
+          }),
+        ).toBeInTheDocument()
+        await user.keyboard("{Escape}")
+        await waitFor(() =>
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+        )
       })
 
       it("puts an uncapped key under a budget from its edit form", async () => {

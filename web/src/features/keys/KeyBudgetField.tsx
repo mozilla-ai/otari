@@ -28,6 +28,8 @@ import {
   useCreateOrganizationBudget,
   useCreateOrganizationSpendCeiling,
   useCreateScopedBudget,
+  useDeleteBudget,
+  useDeleteOrganizationBudget,
   useDeleteOrganizationSpendCeiling,
   useDeleteScopedBudget,
   useOrganizationBudgets,
@@ -168,6 +170,8 @@ export function useKeyBudgets(isDeploymentWide: boolean, enabled = true) {
   )
   const createDeploymentBudget = useCreateBudget()
   const createOrganizationBudget = useCreateOrganizationBudget()
+  const deleteDeploymentBudget = useDeleteBudget()
+  const deleteOrganizationBudget = useDeleteOrganizationBudget()
   const createScoped = useCreateScopedBudget()
   const updateScoped = useUpdateScopedBudget()
   const deleteScoped = useDeleteScopedBudget()
@@ -203,6 +207,7 @@ export function useKeyBudgets(isDeploymentWide: boolean, enabled = true) {
         return ceilingLabel(current, budgets)
       }
       let budget = budgets.find((each) => each.budget_id === draft.choice)
+      let created: CappingBudget | undefined
       if (draft.choice === CUSTOM_BUDGET) {
         const body = {
           name: `${keyLabel} (API key)`.slice(0, 200),
@@ -211,24 +216,37 @@ export function useKeyBudgets(isDeploymentWide: boolean, enabled = true) {
             PERIOD_OPTIONS.find((option) => option.value === draft.period)
               ?.alignment ?? null,
         }
-        budget = isDeploymentWide
+        created = isDeploymentWide
           ? await createDeploymentBudget.mutateAsync(body)
           : await createOrganizationBudget.mutateAsync(body)
+        budget = created
       }
       if (!budget) throw new Error("That budget is no longer listed.")
       const budgetId = budget.budget_id
-      if (current) {
-        const change = { id: current.id, body: { budget_id: budgetId } }
-        if (isDeploymentWide) await updateScoped.mutateAsync(change)
-        else await updateCeiling.mutateAsync(change)
-      } else {
-        const ceiling = {
-          scope_type: "api_token" as const,
-          scope_id: keyId,
-          budget_id: budgetId,
+      try {
+        if (current) {
+          const change = { id: current.id, body: { budget_id: budgetId } }
+          if (isDeploymentWide) await updateScoped.mutateAsync(change)
+          else await updateCeiling.mutateAsync(change)
+        } else {
+          const ceiling = {
+            scope_type: "api_token" as const,
+            scope_id: keyId,
+            budget_id: budgetId,
+          }
+          if (isDeploymentWide) await createScoped.mutateAsync(ceiling)
+          else await createCeiling.mutateAsync(ceiling)
         }
-        if (isDeploymentWide) await createScoped.mutateAsync(ceiling)
-        else await createCeiling.mutateAsync(ceiling)
+      } catch (error) {
+        // A budget made for this key alone and left capping nothing would sit
+        // in Spend & budgets, and a retry would make a second one.
+        if (created) {
+          const deleteBudget = isDeploymentWide
+            ? deleteDeploymentBudget
+            : deleteOrganizationBudget
+          await deleteBudget.mutateAsync(budgetId).catch(() => undefined)
+        }
+        throw error
       }
       return draft.choice === CUSTOM_BUDGET
         ? unnamedBudgetLabel(budget)

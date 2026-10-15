@@ -822,10 +822,10 @@ function EditKeyForm({
   const update = useUpdateKey()
   const keyBudgets = useKeyBudgets(isDeploymentWide)
   const ceiling = keyBudgets.ceilings.find((row) => row.scope_id === apiKey.id)
-  // Seeded once, from the ceilings the page has already read. Until they are,
-  // the field stays off: a draft seeded as "none" would save a second ceiling
-  // over the one the key already has.
-  const [initialBudget] = useState(() =>
+  // Seeded from the key's ceiling once it has been read. Until it has, the
+  // field stays off: a draft seeded as "none" would save a second ceiling over
+  // the one the key already has.
+  const [initialBudget, setInitialBudget] = useState(() =>
     keyBudgets.ceilingsReady ? draftFor(ceiling) : undefined,
   )
   const [budgetDraft, setBudgetDraft] = useState(
@@ -852,7 +852,7 @@ function EditKeyForm({
   const serviceKeyReady = useServiceKeyReady(
     isDeploymentWide ? serviceKey : NO_SERVICE_KEY,
   )
-  const { isDirty } = useDirtySnapshot({
+  const { isDirty, reset: reseed } = useDirtySnapshot({
     keyName,
     expiresAt,
     allowedModels,
@@ -862,6 +862,24 @@ function EditKeyForm({
     scopeValid,
     budgetDraft,
   })
+  // Ceilings that land after the form opened are part of its seed, not an edit.
+  // The rest of the seed is the key as it was, so anything already typed still
+  // reads as unsaved.
+  if (initialBudget === undefined && keyBudgets.ceilingsReady) {
+    const seeded = draftFor(ceiling)
+    setInitialBudget(seeded)
+    setBudgetDraft(seeded)
+    reseed({
+      keyName: apiKey.key_name ?? "",
+      expiresAt: toDatetimeLocal(apiKey.expires_at),
+      allowedModels: apiKey.allowed_models ?? undefined,
+      excludeFromBudget: apiKey.exclude_from_budget,
+      serviceKey: serviceKeyChoice(apiKey),
+      rejectUserMismatch: userMismatchChoice(apiKey.reject_user_mismatch),
+      scopeValid: true,
+      budgetDraft: seeded,
+    })
+  }
   const showBudget = keyBudgets.canCap && initialBudget !== undefined
   // An exempt key is never gated, so its cap is left as it is.
   const budgetChanged =
