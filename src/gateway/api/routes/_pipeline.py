@@ -285,7 +285,9 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
+    credential_ladder_empty,
     credential_ladder_exhausted,
+    keyless_placeholder_api_key,
     missing_credential,
     provider_key,
     resolve_provider_selector,
@@ -1788,7 +1790,9 @@ async def _serve_from_hosted_credential(
     own key, a stored provider instance and a ``config.yml`` entry are all
     resolved upstream of here (``services/provider_kwargs.py``), and a candidate
     any of them served comes back untouched, so BYO precedence is unchanged: the
-    port is asked when the ladder is exhausted and never before it. The core
+    port is asked when the ladder found nothing and never before it. For a
+    provider that needs no key, only the deployment's own hosted provider of the
+    same name may answer. The core
     adapter answers from the deployment's hosted providers, and ``None`` where
     none serves the candidate.
 
@@ -1811,7 +1815,12 @@ async def _serve_from_hosted_credential(
         # answer for now. Reaching the port from the compiler is separate work:
         # the compiler is synchronous and documented as doing no I/O.
         return resolved
-    if not credential_ladder_exhausted(resolved.provider, resolved.kwargs):
+    # A provider any-llm calls with no key (a local vLLM, Bedrock on an instance
+    # profile) works with nothing configured, so it is asked about only to let the
+    # deployment's own hosted provider of that name serve it: an answer re-keyed
+    # elsewhere, a refusal or a failure leaves the request as it was.
+    own_name_only = not credential_ladder_exhausted(resolved.provider, resolved.kwargs)
+    if own_name_only and not credential_ladder_empty(resolved.provider, resolved.kwargs):
         return resolved
 
     try:
@@ -1828,6 +1837,8 @@ async def _serve_from_hosted_credential(
             model=resolved.model,
         )
     except HostedAccessDeniedError as exc:
+        if own_name_only:
+            return resolved
         # The port owns this refusal precisely so a caller need not name the
         # adapter that raised it, and the adapter's own wording is internal, so
         # the response carries the same detail an organization-scoped model
@@ -1864,6 +1875,14 @@ async def _serve_from_hosted_credential(
         )
         raise adapter.error(403, denied_detail, ErrorKind.PERMISSION) from exc
     except Exception as exc:
+        if own_name_only:
+            logger.warning(
+                "ModelProviderPort failed for %s:%s, which is served as configured: %s",
+                resolved.instance,
+                resolved.model,
+                exc,
+            )
+            return resolved
         # Everything an adapter can fail at that is not its own refusal. Resolving
         # a hosted credential is expected to be a network call (that is what an
         # overlay binds this port to do), so a timeout, a connection reset or a
@@ -1905,8 +1924,9 @@ async def _serve_from_hosted_credential(
         # behind your request", and which internal step failed is not theirs.
         raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
 
-    if credential is None:
+    if credential is None and not own_name_only:
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
+    if credential is None or (own_name_only and credential.response_provider != resolved.instance):
         # This build has no hosted path for the candidate. The candidate is
         # genuinely unserved, which is what it already was, so it goes to
         # any-llm uncredentialed and fails there exactly as it does today.
@@ -1957,7 +1977,10 @@ async def _serve_from_hosted_credential(
     # overlay binding this port owns that.
     await _warn_if_hosted_upstream_is_unpriced(ctx, resolved, credential.response_provider)
 
-    kwargs: dict[str, Any] = {"api_key": credential.api_key}
+    # A keyless backend's credential carries no key, so it takes the placeholder
+    # a keyless ``config.yml`` instance takes.
+    api_key = credential.api_key or keyless_placeholder_api_key(upstream, credential.api_base, None)
+    kwargs: dict[str, Any] = {} if api_key is None else {"api_key": api_key}
     if credential.api_base is not None:
         kwargs["api_base"] = credential.api_base
     if credential.client_args:

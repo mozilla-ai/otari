@@ -92,6 +92,11 @@ class ModelProviderPort(Protocol):
         only, never part of the access decision, which keys on
         ``organization_id`` alone.
 
+        Also asked about a provider any-llm calls with no key (vLLM, Ollama,
+        Bedrock) when nothing configures it. For one of those only an answer
+        whose ``response_provider`` is ``provider`` serves; another, a refusal
+        or a failure leaves the request to go out as it would have.
+
         Returns:
             ``None`` when this build has no hosted-inference path for this
             candidate: no hosted provider is configured for it, or the one

@@ -284,6 +284,19 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     return not _provider_env_key_present(provider)
 
 
+def credential_ladder_empty(provider: LLMProvider, kwargs: dict[str, Any]) -> bool:
+    """Whether neither the ladder nor the provider's own variable produced anything for ``provider``.
+
+    :func:`credential_ladder_exhausted` without its **was needed** half: it also
+    holds for a provider any-llm calls with no key (vLLM, Ollama, Vertex AI,
+    Bedrock), which still goes out with nothing the deployment configured for
+    it, such as an endpoint or a region. The hosted-provider rung asks on this,
+    so a keyless hosted provider serves the request rather than any-llm's
+    default endpoint. The routing and error paths keep the narrower question.
+    """
+    return not _kwargs_carry_a_credential(kwargs) and not _provider_env_key_present(provider)
+
+
 # Instances already reported as ignored, so the warning is logged once per
 # instance per process rather than on every overlay refresh.
 _uncredentialed_warned: set[str] = set()

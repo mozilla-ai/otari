@@ -263,21 +263,50 @@ async def test_provider_sdk_env_var_is_not_asked_about(monkeypatch: pytest.Monke
     ],
 )
 @pytest.mark.asyncio
-async def test_a_provider_needing_no_credential_is_not_asked_about(selector: str) -> None:
+async def test_a_provider_needing_no_credential_is_not_claimed_by_a_fleet(selector: str) -> None:
     """any-llm calls these without a key, so an empty kwargs is not a missing one.
 
     A bare ``ollama:llama3`` works today against a local backend, and a bare
-    ``bedrock:...`` works today off an EC2 instance profile. Reporting either as
-    unserved would hand a working request to a fleet that might answer it from
-    somewhere else, and self-hosting is a first-class path *upstream* of this
-    port (``ports/model_provider_port.py``).
+    ``bedrock:...`` works today off an EC2 instance profile. Handing either to a
+    fleet that answers it from somewhere else would move working traffic, and
+    self-hosting is a first-class path *upstream* of this port
+    (``ports/model_provider_port.py``). Only a hosted provider of the same name
+    may serve one, which the next test pins.
     """
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     resolved = resolve_provider_selector(GatewayConfig(), selector)
     assert set(resolved.kwargs) <= {"client_args"}
     result = await _dispatch(_ctx(resolved_provider=resolved), port, selector=selector)
     assert result is resolved
-    assert port.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_keyless_provider_is_served_on_the_deployments_own_hosted_provider_of_that_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A keyless hosted provider carries what the bare call lacks, its endpoint, and takes the placeholder key."""
+    monkeypatch.delenv("VLLM_API_KEY", raising=False)
+    port = RecordingPort(
+        credential=HostedCredential(api_key=None, api_base="http://vllm.internal:8000/v1", response_provider="vllm")
+    )
+    resolved = resolve_provider_selector(GatewayConfig(), "vllm:my-model")
+
+    result = await _dispatch(_ctx(resolved_provider=resolved), port, selector="vllm:my-model")
+
+    assert result.deployment_paid is True
+    assert result.kwargs == {"api_key": "otari-no-key-required", "api_base": "http://vllm.internal:8000/v1"}
+
+
+@pytest.mark.parametrize("error", [HostedAccessDeniedError("no"), RuntimeError("down")])
+@pytest.mark.asyncio
+async def test_a_keyless_provider_is_left_as_it_was_when_the_port_refuses_or_fails(error: Exception) -> None:
+    """The request worked before the port was asked, so nothing the port does can break it."""
+    port = RecordingPort(error=error)
+    resolved = resolve_provider_selector(GatewayConfig(), "ollama:llama3")
+
+    result = await _dispatch(_ctx(resolved_provider=resolved), port, selector="ollama:llama3")
+
+    assert result is resolved
 
 
 @pytest.mark.parametrize(

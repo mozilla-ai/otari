@@ -417,3 +417,41 @@ def test_a_request_is_served_on_a_configured_provider(
     assert captured, "the provider call was never made"
     assert captured["api_key"] == CONFIG_KEY
     assert captured["model"] == "openai:gpt-4o"
+
+
+@pytest.fixture
+def keyless_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    config = test_config.model_copy(
+        update={"hosted_providers": {"vllm": {"api_base": "http://vllm.internal:8000/v1", "models": ["qwen3-32b"]}}}
+    )
+    yield from build_test_client(config)
+
+
+def test_a_request_is_served_on_a_keyless_configured_provider(
+    keyless_client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("VLLM_API_KEY", raising=False)
+    _discovery(monkeypatch)
+    assert (
+        keyless_client.post(
+            f"{API_ROOT}/users", json={"user_id": "u1", "alias": "u1"}, headers=master_key_header
+        ).status_code
+        == 200
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs: object) -> None:
+        captured.update(kwargs)
+        raise RuntimeError
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=fake_acompletion)):
+        keyless_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "vllm:qwen3-32b", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+            headers=master_key_header,
+        )
+
+    assert captured, "the provider call was never made"
+    assert captured["api_base"] == "http://vllm.internal:8000/v1"
+    # The keyless placeholder, never None and never another provider's key.
+    assert captured["api_key"] == "otari-no-key-required"
