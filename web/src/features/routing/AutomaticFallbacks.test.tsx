@@ -53,6 +53,28 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).queryByText(/No backup/)).not.toBeInTheDocument()
   })
 
+  it("names each provider once, and Bedrock without Amazon", async () => {
+    const kimi: AutomaticFallback = {
+      ...SONNET,
+      id: "moonshotai/kimi-k3",
+      name: "Kimi K3",
+      offerings: [
+        offering("bedrock:global.moonshotai.kimi-k3", [], ["web_search"]),
+        offering("bedrock:us.moonshotai.kimi-k3", [], ["web_search"]),
+        offering(
+          "fireworks:accounts/fireworks/models/kimi-k3",
+          [],
+          ["web_search"],
+        ),
+      ],
+    }
+    await renderWithRouter(<AutomaticFallbacks fallbacks={[kimi]} />)
+
+    const row = await rowOf("Kimi K3")
+    expect(within(row).getAllByText("Bedrock")).toHaveLength(1)
+    expect(within(row).getAllByLabelText("then")).toHaveLength(1)
+  })
+
   it("warns that a model on one provider has no backup", async () => {
     const gemini: AutomaticFallback = {
       ...SONNET,

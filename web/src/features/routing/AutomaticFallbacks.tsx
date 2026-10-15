@@ -28,11 +28,31 @@ function toolsCaption(offering: FallbackOffering): string | undefined {
   return undefined
 }
 
-/** The offerings a catalog ID tries, each with who runs its tools. */
+/** Shorter than the shared display names, for a chain read across a row. */
+const SHORT_NAMES: Record<string, string> = { bedrock: "Bedrock" }
+
+function providerName(provider: string): string {
+  return SHORT_NAMES[provider] ?? providerDisplayName(provider)
+}
+
+/**
+ * One entry per provider, first offering kept: a provider's second offering
+ * (Bedrock's US endpoint after its global one) reads as a repeat in a chain
+ * about providers.
+ */
+function byProvider(offerings: FallbackOffering[]): FallbackOffering[] {
+  return offerings.filter(
+    (offering, index) =>
+      offerings.findIndex((other) => other.provider === offering.provider) ===
+      index,
+  )
+}
+
+/** The providers a catalog ID tries, each with who runs its tools. */
 function Chain({ offerings }: { offerings: FallbackOffering[] }) {
   return (
     <span className="flex flex-wrap items-start gap-x-2 gap-y-1">
-      {offerings.map((offering, index) => {
+      {byProvider(offerings).map((offering, index) => {
         const caption = toolsCaption(offering)
         return (
           <Fragment key={offering.selector}>
@@ -46,7 +66,7 @@ function Chain({ offerings }: { offerings: FallbackOffering[] }) {
               <span
                 className={`text-sm ${index === 0 ? "text-foreground" : "text-muted"}`}
               >
-                {providerDisplayName(offering.provider)}
+                {providerName(offering.provider)}
               </span>
               {caption ? (
                 <span className="text-caption text-subtle">{caption}</span>
@@ -67,9 +87,9 @@ function Chain({ offerings }: { offerings: FallbackOffering[] }) {
  */
 function OrderCell({ row }: { row: AutomaticFallback }) {
   const { offerings } = row
-  const isPinned =
-    offerings.length > 1 && row.requests > 0 && row.pinned >= row.requests
-  if (offerings.length > 1 && !isPinned) {
+  const hasBackup = byProvider(offerings).length > 1
+  const isPinned = hasBackup && row.requests > 0 && row.pinned >= row.requests
+  if (hasBackup && !isPinned) {
     return <Chain offerings={offerings} />
   }
   const reached = isPinned
