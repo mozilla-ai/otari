@@ -3,7 +3,8 @@
 Two never reach a provider: the gateway's own MCP client capability, and every
 beta at all when the dispatched model is served with no Anthropic Messages API,
 where any-llm refuses the whole request and a model swap would otherwise stop
-working. On Bedrock, any-llm forwards only the betas Bedrock supports.
+working, and ``context_management`` with them. On Bedrock, any-llm forwards
+only the betas Bedrock supports.
 """
 
 from __future__ import annotations

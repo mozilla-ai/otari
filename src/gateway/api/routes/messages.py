@@ -175,7 +175,7 @@ def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Take out the betas no provider should see, and say whether MCP's was among them.
+    """Take out the betas (and ``context_management``) no provider should see, and say whether MCP's was among them.
 
     Two never travel. The MCP client capability is the gateway's own, consumed
     here. And every beta is dropped for a model served with no Messages API of
