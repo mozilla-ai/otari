@@ -1,14 +1,34 @@
+import { Tooltip as HeroTooltip } from "@heroui/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent, { type UserEvent } from "@testing-library/user-event"
-import type { ReactElement } from "react"
+import {
+  Children,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+} from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { ApiKey, DeploymentBootstrap, User } from "@/client"
+import type {
+  ApiKey,
+  Budget,
+  DeploymentBootstrap,
+  MembershipRole,
+  OrganizationBudget,
+  ScopedBudget,
+  User,
+} from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { apiKey, bootstrap, organizationMember } from "@/tests/fixtures"
+import {
+  apiKey,
+  bootstrap,
+  budget,
+  organizationMember,
+  scopedBudget,
+} from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { pickOption } from "@/tests/select"
 
@@ -69,6 +89,26 @@ async function chooseAction(user: UserEvent, row: HTMLElement, action: string) {
   )
 }
 
+/**
+ * What each tooltip that opens at once says.
+ *
+ * Read off the props HeroUI is handed rather than from an open tooltip, as
+ * `Tooltip.test.tsx` does: react-aria's hover never fires under jsdom.
+ */
+function instantTooltips(): () => string[] {
+  const root = vi.spyOn(HeroTooltip, "Root")
+  return () =>
+    root.mock.calls
+      .map(([props]) => props as { delay?: number; children?: ReactNode })
+      .filter((props) => props.delay === 0)
+      .flatMap((props) => Children.toArray(props.children))
+      .filter(
+        (child): child is ReactElement<{ children?: ReactNode }> =>
+          isValidElement(child) && child.type === HeroTooltip.Content,
+      )
+      .map((child) => String(child.props.children))
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -92,6 +132,15 @@ function mockApi(
     users?: User[]
     members?: ReturnType<typeof organizationMember>[]
     deploymentOperator?: boolean
+    role?: MembershipRole
+    /** The deployment's budgets, which an operator caps a key by. */
+    budgets?: Budget[]
+    /** The organization's own, which an owner or admin caps a key by. */
+    organizationBudgets?: OrganizationBudget[]
+    /** What both ceiling writes answer; 201 unless a case says otherwise. */
+    ceilingStatus?: number
+    /** The keys' own ceilings, as the deployment's list answers them. */
+    ceilings?: ScopedBudget[]
   } = {},
 ) {
   let list = [...(opts.keys ?? [])]
@@ -152,6 +201,53 @@ function mockApi(
         }
         return jsonResponse(list)
       }
+      // Both ceiling writes, the operator's and the organization's, echo a row.
+      if (
+        method === "POST" &&
+        (url.endsWith(`${API_ROOT}/scoped-budgets`) ||
+          url.endsWith(`${API_ROOT}/organizations/me/spend-ceilings`))
+      ) {
+        const status = opts.ceilingStatus ?? 201
+        if (status >= 400) {
+          return jsonResponse({ detail: "Budget not found" }, status)
+        }
+        return jsonResponse(
+          { id: "ceiling-1", ...JSON.parse(String(init?.body)) },
+          status,
+        )
+      }
+      // An existing key's cap moves or goes through its ceiling's own path.
+      if (url.includes(`${API_ROOT}/scoped-budgets/`)) {
+        if (method === "DELETE") return new Response(null, { status: 204 })
+        return jsonResponse({
+          ...scopedBudget({ scope_type: "api_token" }),
+          ...JSON.parse(String(init?.body ?? "{}")),
+        })
+      }
+      if (url.includes(`${API_ROOT}/scoped-budgets`) && method === "GET") {
+        return jsonResponse(opts.ceilings ?? [])
+      }
+      // A custom amount is created as a budget first, on either surface.
+      if (
+        method === "POST" &&
+        (url.endsWith(`${API_ROOT}/budgets`) ||
+          url.endsWith(`${API_ROOT}/organizations/me/budgets`))
+      ) {
+        return jsonResponse(
+          budget({
+            budget_id: "b-custom",
+            budget_duration_sec: null,
+            ...JSON.parse(String(init?.body)),
+          }),
+        )
+      }
+      if (url.includes(`${API_ROOT}/organizations/me/budgets`)) {
+        const rows = opts.organizationBudgets ?? []
+        return jsonResponse({ data: rows, count: rows.length })
+      }
+      if (url.includes(`${API_ROOT}/budgets`)) {
+        return jsonResponse(opts.budgets ?? [])
+      }
       // Before /api/v1/users, and paged: the owner picker names members through
       // this, and `fetchAllPaged` reads `data`/`count` rather than a bare list.
       if (url.includes(`${API_ROOT}/organizations/me/members`)) {
@@ -163,7 +259,7 @@ function mockApi(
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({
           organization_member_id: "om-1",
-          role: "member",
+          role: opts.role ?? "member",
           status: "active",
           organization: {
             id: "org-1",
@@ -303,11 +399,34 @@ describe("KeysPage", () => {
       "text-mono-caption",
     )
 
-    // Created, Last used and Expires are lanes here, so the menu does not
-    // repeat them.
+    // Last used and Expires are lanes here, and so are the name, the owner and
+    // the fingerprint, so the menu repeats none of them. Created has no lane,
+    // so the menu is where it is read.
+    expect(
+      screen.queryByRole("columnheader", { name: "Created" }),
+    ).not.toBeInTheDocument()
     await usr.click(screen.getByRole("button", { name: "Actions for named" }))
-    await screen.findByRole("menu")
-    expect(screen.queryByText("Created:")).not.toBeInTheDocument()
+    const menu = await screen.findByRole("menu")
+    expect(screen.getByText("Created:")).toBeInTheDocument()
+    expect(screen.queryByText("Last used:")).not.toBeInTheDocument()
+    expect(
+      within(menu.parentElement!).queryByText("named"),
+    ).not.toBeInTheDocument()
+    expect(
+      within(menu.parentElement!).queryByText("Alice Example"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("names each key with the tail of its secret, and the whole stand-in on hover", async () => {
+    mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot" })] })
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    expect(within(row).getByText("(7xKp)")).toBeVisible()
+    // The tail replaces the Key column rather than sitting beside it.
+    expect(
+      screen.queryByRole("columnheader", { name: "Key" }),
+    ).not.toBeInTheDocument()
   })
 
   it("loads inside the list on a phone rather than painting the table first", async () => {
@@ -353,6 +472,7 @@ describe("KeysPage", () => {
   })
 
   it("lists key fingerprints and supports keys without stored suffixes", async () => {
+    const tooltips = instantTooltips()
     mockApi({
       keys: [
         apiKey({
@@ -380,7 +500,9 @@ describe("KeysPage", () => {
 
     const activeRow = (await screen.findByText("ci-bot")).closest("tr")!
     expect(within(activeRow).getByText("Active")).toBeInTheDocument()
-    expect(within(activeRow).getByText("gw-AbC3dE…1234")).toBeInTheDocument()
+    // The name carries the tail, and the whole stand-in is its tooltip.
+    expect(within(activeRow).getByText("(1234)")).toBeVisible()
+    expect(tooltips()).toContain("gw-AbC3dE…1234")
     expect(
       within(activeRow).queryByRole("button", {
         name: "Copy key prefix for ci-bot",
@@ -388,12 +510,12 @@ describe("KeysPage", () => {
     ).not.toBeInTheDocument()
 
     const prefixOnlyRow = screen.getByText("prefix-only").closest("tr")!
-    expect(within(prefixOnlyRow).getByText("gw-Older…")).toBeInTheDocument()
+    expect(within(prefixOnlyRow).getByText("(gw-Older…)")).toBeInTheDocument()
 
-    // A key minted before the prefix existed renders "—", not a crash.
+    // A key minted before the prefix existed shows its name alone, not a crash.
     const legacyRow = screen.getByText("legacy").closest("tr")!
     expect(within(legacyRow).getByText("Disabled")).toBeInTheDocument()
-    expect(within(legacyRow).getByText("—")).toBeInTheDocument()
+    expect(within(legacyRow).queryByText(/\(/)).not.toBeInTheDocument()
 
     expect(document.body.textContent).not.toContain(NEW_SECRET)
   })
@@ -466,14 +588,12 @@ describe("KeysPage", () => {
       screen.getByRole("button", { name: /I.?ve saved this key/ }),
     )
 
-    // After closing, only the fingerprint remains.
+    // After closing, only the tail of the secret remains.
     expect(
       screen.queryByRole("alert", { name: /API key created|New secret for/ }),
     ).not.toBeInTheDocument()
     expect(
-      await screen.findByText(
-        `${NEW_SECRET.slice(0, 10)}…${NEW_SECRET.slice(-4)}`,
-      ),
+      await screen.findByText(`(${NEW_SECRET.slice(-4)})`),
     ).toBeInTheDocument()
     expect(document.body.textContent).not.toContain(NEW_SECRET)
   })
@@ -1073,6 +1193,293 @@ describe("KeysPage", () => {
         (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body)).exclude_from_budget).toBe(true)
+  })
+
+  describe("capping a new key by a budget", () => {
+    const team = budget({ budget_id: "b-1", name: "Team standard" })
+    const ceilingPost = (fetchMock: ReturnType<typeof mockApi>, path: string) =>
+      fetchMock.mock.calls.find(
+        ([u, init]) =>
+          String(u).endsWith(`${API_ROOT}${path}`) &&
+          (init?.method ?? "") === "POST",
+      )
+
+    async function createWithBudget(user: UserEvent, owner = true) {
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+      if (owner) {
+        await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+        await user.keyboard("{Escape}")
+      }
+      // The option spells out the budget's reset as well as its limit.
+      await pickOption(
+        user,
+        "Budget (optional)",
+        /^Team standard \(\$\d+\.\d{2}, resets (every|monthly)/,
+      )
+    }
+
+    it("puts the key under the picked budget once it exists", async () => {
+      const fetchMock = mockApi({ keys: [], budgets: [team] })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await createWithBudget(user)
+      await submitTheCreateDialog(user)
+
+      expect(
+        await screen.findByText(/Capped by Team standard/),
+      ).toBeInTheDocument()
+      const post = ceilingPost(fetchMock, "/scoped-budgets")
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        scope_type: "api_token",
+        scope_id: "key-new",
+        budget_id: "b-1",
+      })
+    })
+
+    it("writes an admin's cap through the organization's own ceilings", async () => {
+      const fetchMock = mockApi({
+        deploymentOperator: false,
+        role: "admin",
+        keys: [],
+        organizationBudgets: [
+          {
+            budget_id: "b-1",
+            organization_id: "org-1",
+            name: "Team standard",
+            max_budget: 250,
+            token_limit: null,
+            request_limit: null,
+            budget_duration_sec: null,
+            reset_alignment: "calendar_month",
+            ceiling_count: 0,
+            created_at: "2026-01-01T00:00:00+00:00",
+            updated_at: "2026-01-01T00:00:00+00:00",
+          },
+        ],
+      })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await createWithBudget(user, false)
+      await submitTheCreateDialog(user)
+
+      await screen.findByText(/Capped by Team standard/)
+      const post = ceilingPost(fetchMock, "/organizations/me/spend-ceilings")
+      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+        scope_type: "api_token",
+        scope_id: "key-new",
+        budget_id: "b-1",
+      })
+      expect(ceilingPost(fetchMock, "/scoped-budgets")).toBeUndefined()
+    })
+
+    it("keeps the secret on screen when the cap is refused", async () => {
+      mockApi({ keys: [], budgets: [team], ceilingStatus: 404 })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await createWithBudget(user)
+      await submitTheCreateDialog(user)
+
+      expect(
+        await screen.findByText(/its budget was not applied/),
+      ).toBeInTheDocument()
+      expect(screen.getByLabelText("Secret key")).toBeInTheDocument()
+    })
+
+    it("creates a budget of the key's own from a custom amount", async () => {
+      const fetchMock = mockApi({ keys: [], budgets: [team] })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+      await user.type(screen.getByPlaceholderText("ci-bot"), "ci-bot")
+      await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+      await user.keyboard("{Escape}")
+      await pickOption(user, "Budget (optional)", "Custom amount…")
+
+      // Nothing to cap by until there is an amount.
+      const dialog = await screen.findByRole("dialog")
+      const submit = within(dialog).getByRole("button", { name: "Create key" })
+      expect(submit).toBeDisabled()
+      await user.type(screen.getByLabelText(/Limit \(USD\)/), "50")
+      expect(submit).toBeEnabled()
+      await user.click(submit)
+
+      expect(await screen.findByText(/Capped by \$50\.00/)).toBeInTheDocument()
+      const created = ceilingPost(fetchMock, "/budgets")
+      expect(JSON.parse(String(created?.[1]?.body))).toEqual({
+        name: "ci-bot (API key)",
+        max_budget: 50,
+        reset_alignment: "calendar_month",
+      })
+      const post = ceilingPost(fetchMock, "/scoped-budgets")
+      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+        scope_id: "key-new",
+        budget_id: "b-custom",
+      })
+    })
+
+    describe("on an existing key", () => {
+      const capped = scopedBudget({
+        id: "ceiling-1",
+        scope_type: "api_token",
+        scope_id: "key-1",
+        budget_id: "b-1",
+        max_budget: 100,
+        current_spend: 2.5,
+      })
+      const other = budget({ budget_id: "b-2", name: "CI bots" })
+
+      async function editKey(user: UserEvent) {
+        const row = (await screen.findByText("ci-bot")).closest("tr")!
+        // The edit form seeds from the ceilings the page read for the column.
+        await within(row).findByText(/ of \$|^None$/)
+        await chooseAction(user, row, "Edit")
+        return screen.findByRole("dialog", { name: "Edit key" })
+      }
+
+      it("shows each key's spend against its own budget in a column", async () => {
+        const tooltips = instantTooltips()
+        mockApi({
+          keys: [
+            apiKey({ id: "key-1", key_name: "ci-bot" }),
+            apiKey({ id: "key-2", key_name: "uncapped" }),
+          ],
+          budgets: [team],
+          ceilings: [capped],
+        })
+        renderPage(<KeysPage />)
+
+        const row = (await screen.findByText("ci-bot")).closest("tr")!
+        // The figure alone; the budget it comes from is its tooltip.
+        expect(await within(row).findByText("$2.50 of $100.00")).toBeVisible()
+        expect(tooltips()).toContain("Team standard")
+        const bare = screen.getByText("uncapped").closest("tr")!
+        expect(within(bare).getByText("None")).toBeVisible()
+        expect(
+          screen.getByRole("columnheader", { name: "Budget" }),
+        ).toBeInTheDocument()
+      })
+
+      it("puts an uncapped key under a budget from its edit form", async () => {
+        const fetchMock = mockApi({
+          keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+          budgets: [team],
+        })
+        const user = userEvent.setup()
+        renderPage(<KeysPage />)
+
+        const dialog = await editKey(user)
+        await pickOption(user, "Budget (optional)", /^Team standard/, dialog)
+        await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+        await waitFor(() =>
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+        )
+        const post = ceilingPost(fetchMock, "/scoped-budgets")
+        expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+          scope_type: "api_token",
+          scope_id: "key-1",
+          budget_id: "b-1",
+        })
+      })
+
+      it("moves a capped key to another budget", async () => {
+        const fetchMock = mockApi({
+          keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+          budgets: [team, other],
+          ceilings: [capped],
+        })
+        const user = userEvent.setup()
+        renderPage(<KeysPage />)
+
+        const dialog = await editKey(user)
+        await pickOption(user, "Budget (optional)", /^CI bots/, dialog)
+        await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+        await waitFor(() => {
+          const patch = fetchMock.mock.calls.find(
+            ([u, init]) =>
+              String(u).endsWith(`${API_ROOT}/scoped-budgets/ceiling-1`) &&
+              init?.method === "PATCH",
+          )
+          expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
+            budget_id: "b-2",
+          })
+        })
+        expect(ceilingPost(fetchMock, "/scoped-budgets")).toBeUndefined()
+      })
+
+      it("takes a key's budget off", async () => {
+        const fetchMock = mockApi({
+          keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+          budgets: [team],
+          ceilings: [capped],
+        })
+        const user = userEvent.setup()
+        renderPage(<KeysPage />)
+
+        const dialog = await editKey(user)
+        await pickOption(user, "Budget (optional)", "No budget", dialog)
+        await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+        await waitFor(() =>
+          expect(
+            fetchMock.mock.calls.some(
+              ([u, init]) =>
+                String(u).endsWith(`${API_ROOT}/scoped-budgets/ceiling-1`) &&
+                init?.method === "DELETE",
+            ),
+          ).toBe(true),
+        )
+      })
+
+      it("leaves the cap alone when only the key changed", async () => {
+        const fetchMock = mockApi({
+          keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+          budgets: [team],
+          ceilings: [capped],
+        })
+        const user = userEvent.setup()
+        renderPage(<KeysPage />)
+
+        const dialog = await editKey(user)
+        await user.type(within(dialog).getByLabelText("Name"), "-2")
+        await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+        await waitFor(() =>
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+        )
+        expect(
+          fetchMock.mock.calls.some(([u]) =>
+            String(u).includes(`${API_ROOT}/scoped-budgets/`),
+          ),
+        ).toBe(false)
+        expect(ceilingPost(fetchMock, "/scoped-budgets")).toBeUndefined()
+      })
+    })
+
+    it("sends no cap for a budget-exempt key", async () => {
+      const fetchMock = mockApi({ keys: [], budgets: [team] })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await createWithBudget(user)
+      await user.click(screen.getByRole("button", { name: "Advanced" }))
+      await user.click(screen.getByLabelText("Exempt from budget"))
+      await submitTheCreateDialog(user)
+
+      await screen.findByRole("alert", { name: "API key created" })
+      expect(ceilingPost(fetchMock, "/scoped-budgets")).toBeUndefined()
+    })
   })
 
   it("creates a key pinned to accept a mismatched user field", async () => {
@@ -1700,6 +2107,8 @@ describe("KeysPage", () => {
         screen.queryByText("Choose an owner to create this key."),
       ).not.toBeInTheDocument()
 
+      // A member cannot write a ceiling, so there is no budget to pick.
+      expect(screen.queryByText("Budget (optional)")).not.toBeInTheDocument()
       await usr.click(screen.getByRole("button", { name: "Advanced" }))
       expect(
         screen.queryByLabelText("Exempt from budget"),

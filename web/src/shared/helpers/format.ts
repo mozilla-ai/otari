@@ -146,6 +146,21 @@ export function formatDateTime(iso: string | null | undefined): string {
   return date.toLocaleString()
 }
 
+// A date and a time to the minute, where the seconds are noise.
+export function formatDateTimeMinutes(iso: string | null | undefined): string {
+  if (!iso) {
+    return "—"
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return date.toLocaleString(undefined, {
+    dateStyle: "short",
+    timeStyle: "short",
+  })
+}
+
 // The time of day alone, for rows that already sit under their date.
 export function formatTime(iso: string | null | undefined): string {
   if (!iso) {

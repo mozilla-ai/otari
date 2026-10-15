@@ -52,15 +52,21 @@ export const TOOLTIP_OPEN_DELAY_MS = 300
 export function Tooltip({
   content,
   placement = "top",
+  delay = TOOLTIP_OPEN_DELAY_MS,
   children,
 }: {
   /** The label. A phrase, not a sentence, and never the only place it is said. */
   content: ReactNode
   placement?: "top" | "bottom" | "left" | "right"
+  /**
+   * Milliseconds before it opens. `0` where hovering is how the value is read,
+   * rather than a pointer passing a lane of icons on its way somewhere else.
+   */
+  delay?: number
   children: ReactNode | ((props: TooltipTriggerProps) => ReactElement)
 }) {
   return (
-    <HeroTooltip.Root delay={TOOLTIP_OPEN_DELAY_MS}>
+    <HeroTooltip.Root delay={delay}>
       {typeof children === "function" ? (
         // The generic is what types the render function for a `button` rather
         // than for the `div` HeroUI's trigger defaults to. A control wanting a
@@ -70,7 +76,10 @@ export function Tooltip({
         // `inline-flex` rather than the element override HeroUI offers: a
         // tooltip most often wraps a button sitting in a row of them, and the
         // trigger's default block display would break the row's flex layout.
-        <HeroTooltip.Trigger className="inline-flex">
+        // `cursor-default` because the wrapper's `role="button"` is for keyboard
+        // reach, and the base layer's pointer for that role would make text look
+        // clickable. A control inside keeps its own pointer.
+        <HeroTooltip.Trigger className="inline-flex cursor-default">
           {children}
         </HeroTooltip.Trigger>
       )}

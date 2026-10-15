@@ -157,7 +157,10 @@ extensions. The running dashboard is the source of truth.
 What a page shows can also depend on who is signed in. On API keys, an operator
 manages every key in the organization and chooses each key's owner, while a
 member sees the same page scoped to their own keys, always billed to themselves
-and never budget-exempt.
+and never budget-exempt. An operator, or an organization owner or admin, can also
+cap a key's own spend: the key's create and edit forms take an existing budget
+or a custom amount and reset, and a Budget column shows each key's spend this
+period against its limit.
 
 Overview splits the same way. Everyone lands on their own spend, traffic and
 recent requests. An organization owner or admin also gets a budget-health

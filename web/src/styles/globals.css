@@ -3005,10 +3005,9 @@ main {
 .otari-keys-table .table__column[data-key="owner"] {
   width: 10.625rem;
 }
-.otari-keys-table .table__column[data-key="key"] {
-  width: 11.25rem;
+.otari-keys-table .table__column[data-key="budget"] {
+  width: 10rem;
 }
-.otari-keys-table .table__column[data-key="created"],
 .otari-keys-table .table__column[data-key="expires"] {
   width: 6.875rem;
 }

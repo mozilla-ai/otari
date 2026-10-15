@@ -87,6 +87,8 @@ may also define:
 - expiration and active status
 - allowed models
 - budget exemption
+- a budget of its own: a spend ceiling on the key, which its owner's budget does
+  not replace (both apply)
 - whether mismatched client `user` fields are accepted
 - whether content-free agent telemetry is captured
 - whether it is a service key, which may name end users
