@@ -28798,7 +28798,7 @@
     },
     "/api/v1/hosted-providers/{provider}/models/refresh": {
       "post": {
-        "description": "Ask the provider again and offer whatever is newly listed.\n\nAdditive only: nothing already offered is removed or toggled. New models\nfollow the offer rule, seeded with the community default price and off\nwhen nothing prices them. A seeded price nobody changed moves with the\ndefault.",
+        "description": "Ask the provider again and offer whatever is newly listed.\n\nNothing already offered is removed, even when the provider no longer lists\nit. New models follow the offer rule, seeded with the community default\nprice and off when nothing prices them. A seeded price nobody changed moves\nwith the default. An offered model whose stored price has since been\ndeleted is seeded again, or switched off where the default does not price\nit, even one an operator switched on: a refresh never switches a model on.",
         "operationId": "hosted-providers-refresh_hosted_models",
         "parameters": [
           {

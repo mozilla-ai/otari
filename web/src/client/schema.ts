@@ -1714,10 +1714,12 @@ export interface paths {
          * Refresh Hosted Models
          * @description Ask the provider again and offer whatever is newly listed.
          *
-         *     Additive only: nothing already offered is removed or toggled. New models
-         *     follow the offer rule, seeded with the community default price and off
-         *     when nothing prices them. A seeded price nobody changed moves with the
-         *     default.
+         *     Nothing already offered is removed, even when the provider no longer lists
+         *     it. New models follow the offer rule, seeded with the community default
+         *     price and off when nothing prices them. A seeded price nobody changed moves
+         *     with the default. An offered model whose stored price has since been
+         *     deleted is seeded again, or switched off where the default does not price
+         *     it, even one an operator switched on: a refresh never switches a model on.
          */
         post: operations["hosted-providers-refresh_hosted_models"];
         delete?: never;
