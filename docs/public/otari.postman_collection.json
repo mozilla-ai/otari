@@ -40,7 +40,7 @@
         {
           "name": "List Deployment Users",
           "request": {
-            "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.",
+            "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.\n``search`` narrows the page and the count together.",
             "header": [],
             "method": "GET",
             "url": {
@@ -65,9 +65,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Narrow to accounts whose name or email contains this text, case-insensitively.",
+                  "disabled": true,
+                  "key": "search",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/admin/users?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/admin/users?skip=&limit=&search="
             }
           }
         },

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -9,6 +9,7 @@ import { DeploymentAccountsPage } from "@/features/admin/DeploymentAccountsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, deploymentUser } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 
 interface Request {
   url: string
@@ -26,6 +27,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 function mockApi(opts: {
   granted?: boolean
   accounts?: DeploymentUser[]
+  count?: number
   passwordLink?: PasswordLink
 }) {
   const granted = opts.granted ?? true
@@ -49,7 +51,10 @@ function mockApi(opts: {
     }
     if (url.includes(`${API_ROOT}/admin/users`)) {
       if (method === "GET") {
-        return jsonResponse({ data: accounts, count: accounts.length })
+        return jsonResponse({
+          data: accounts,
+          count: opts.count ?? accounts.length,
+        })
       }
       const body = init?.body ? JSON.parse(String(init.body)) : {}
       return jsonResponse({ ...accounts[0], ...body })
@@ -60,14 +65,15 @@ function mockApi(opts: {
   return requests
 }
 
-function renderPage(ui: ReactElement) {
+function renderPage(ui: ReactElement, url = "/admin/accounts") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  return renderWithRouter(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
     </DeploymentProvider>,
+    { url },
   )
 }
 
@@ -116,7 +122,7 @@ afterEach(() => {
 describe("DeploymentAccountsPage", () => {
   it("lists every account with its organizations, sign-in and standing", async () => {
     mockApi({ accounts: [OPERATOR, ANALYST] })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     expect(await screen.findByText("Analyst")).toBeInTheDocument()
     expect(screen.getByText("analyst@example.com")).toBeInTheDocument()
@@ -135,7 +141,7 @@ describe("DeploymentAccountsPage", () => {
   it("keeps an account's actions on its card on a phone", async () => {
     stubPhone()
     mockApi({ accounts: [OPERATOR, ANALYST] })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     expect(await screen.findByText("Analyst")).toBeInTheDocument()
     expect(screen.queryByRole("grid")).not.toBeInTheDocument()
@@ -160,7 +166,7 @@ describe("DeploymentAccountsPage", () => {
         }),
       ],
     })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     expect(
       await screen.findByText("Default organization (member, suspended)"),
@@ -169,7 +175,7 @@ describe("DeploymentAccountsPage", () => {
 
   it("deactivates an account after a confirmation", async () => {
     const requests = mockApi({ accounts: [ANALYST] })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     await userEvent.click(await screen.findByLabelText("Deactivate Analyst"))
     await userEvent.click(
@@ -190,7 +196,7 @@ describe("DeploymentAccountsPage", () => {
         expires_at: "2026-10-14T12:00:00Z",
       },
     })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     await userEvent.click(
       await screen.findByLabelText("Send Analyst a password link"),
@@ -222,7 +228,7 @@ describe("DeploymentAccountsPage", () => {
         expires_at: "2026-10-14T12:00:00Z",
       },
     })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     await userEvent.click(
       await screen.findByLabelText("Send Analyst a password link"),
@@ -241,7 +247,7 @@ describe("DeploymentAccountsPage", () => {
     mockApi({
       accounts: [deploymentUser({ full_name: "Analyst", is_active: false })],
     })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     expect(
       await screen.findByLabelText(
@@ -254,7 +260,7 @@ describe("DeploymentAccountsPage", () => {
     const requests = mockApi({
       accounts: [deploymentUser({ full_name: "Analyst", is_active: false })],
     })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     await userEvent.click(await screen.findByLabelText("Reactivate Analyst"))
 
@@ -264,7 +270,7 @@ describe("DeploymentAccountsPage", () => {
 
   it("grants operator access on its own, leaving the active flag alone", async () => {
     const requests = mockApi({ accounts: [ANALYST] })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     await userEvent.click(
       await screen.findByLabelText("Grant operator access to Analyst"),
@@ -287,7 +293,7 @@ describe("DeploymentAccountsPage", () => {
       is_self: true,
     })
     mockApi({ accounts: [SELF, ANALYST] })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     const own = await screen.findByLabelText(
       /^Deactivate Reader \(This is your own account/,
@@ -308,7 +314,7 @@ describe("DeploymentAccountsPage", () => {
     // its own row. Both controls are still off, and the reason is the one that
     // stays true whoever is reading.
     mockApi({ accounts: [OPERATOR, ANALYST] })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     expect(
       await screen.findByLabelText(
@@ -332,7 +338,7 @@ describe("DeploymentAccountsPage", () => {
         }),
       ],
     })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     expect(
       await screen.findByLabelText(
@@ -341,9 +347,43 @@ describe("DeploymentAccountsPage", () => {
     ).toBeDisabled()
   })
 
+  it("asks the server for the search term, not the page on screen", async () => {
+    const requests = mockApi({ accounts: [OPERATOR, ANALYST] })
+    await renderPage(<DeploymentAccountsPage />)
+    await screen.findByText("Analyst")
+
+    await userEvent.type(
+      screen.getByRole("searchbox", { name: "Search accounts" }),
+      "analyst@",
+    )
+
+    await waitFor(() => {
+      const searched = requests.filter((request) =>
+        request.url.includes("search=analyst%40"),
+      )
+      expect(searched).not.toHaveLength(0)
+    })
+    // Debounced: one request for the settled term, not one per keystroke.
+    expect(
+      requests.filter((request) => request.url.includes("search=")),
+    ).toHaveLength(1)
+  })
+
+  it("pages through the accounts on the server", async () => {
+    const requests = mockApi({ accounts: [OPERATOR, ANALYST], count: 60 })
+    await renderPage(<DeploymentAccountsPage />, "/admin/accounts?page=1")
+    await screen.findByText("Analyst")
+
+    expect(
+      requests.some((request) =>
+        request.url.includes("/admin/users?skip=25&limit=25"),
+      ),
+    ).toBe(true)
+  })
+
   it("says the surface is not for you when the gate refuses", async () => {
     mockApi({ granted: false })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     expect(
       await screen.findByText("Accounts is not available to you"),
@@ -359,7 +399,7 @@ describe("DeploymentAccountsPage", () => {
         ? jsonResponse({ detail: "Database error" }, 500)
         : jsonResponse({}),
     )
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     expect(await screen.findByText("Database error")).toBeInTheDocument()
     expect(screen.queryByText("Accounts is not available to you")).toBeNull()
@@ -367,7 +407,7 @@ describe("DeploymentAccountsPage", () => {
 
   it("does not fetch the list before the gate has answered yes", async () => {
     const requests = mockApi({ granted: false })
-    renderPage(<DeploymentAccountsPage />)
+    await renderPage(<DeploymentAccountsPage />)
 
     await screen.findByText("Accounts is not available to you")
     expect(

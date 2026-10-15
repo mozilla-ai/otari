@@ -46,6 +46,7 @@ export interface paths {
          *     membership, while this one carries every identity at whatever standing,
          *     including one whose memberships are all suspended. Each row also reports when
          *     the account last signed in to the dashboard, and null there means never.
+         *     ``search`` narrows the page and the count together.
          */
         get: operations["admin-list_deployment_users"];
         put?: never;
@@ -16996,6 +16997,8 @@ export interface operations {
                 skip?: number;
                 /** @description Maximum number of records to return */
                 limit?: number;
+                /** @description Narrow to accounts whose name or email contains this text, case-insensitively. */
+                search?: string | null;
             };
             header?: never;
             path?: never;

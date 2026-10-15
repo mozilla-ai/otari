@@ -527,6 +527,8 @@ export type WorkspaceMemberRole = NonNullable<
 export type DeploymentAdminAccess = Schemas["DeploymentAdminAccessPublic"]
 /** One account on the deployment, with every organization it belongs to. */
 export type DeploymentUser = Schemas["DeploymentUserPublic"]
+/** One page of the deployment's accounts, with the total the search matched. */
+export type DeploymentUsers = Schemas["DeploymentUsersPublic"]
 /** One organization an account belongs to, at whatever standing. */
 export type DeploymentUserOrganization =
   Schemas["DeploymentUserOrganizationPublic"]

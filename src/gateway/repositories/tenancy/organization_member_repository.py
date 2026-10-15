@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -21,29 +21,11 @@ from gateway.models.tenancy import (
     WorkspaceMember,
 )
 from gateway.repositories.base_repository import BaseRepository
-from gateway.repositories.tenancy.user_repository import user_alphabetical_order
+from gateway.repositories.tenancy.user_repository import user_alphabetical_order, user_matches_search
 
 # Statuses a membership can hold and still belong on the roster. Removal
 # suspends rather than deletes, so "suspended" is the one that drops off.
 LISTABLE_STATUSES = ("active", "invited")
-
-
-_LIKE_ESCAPE = "\\"
-
-
-def _contains_pattern(term: str) -> str:
-    """A case-folded ``LIKE`` pattern matching ``term`` anywhere.
-
-    The wildcards are escaped, so searching for ``100%`` finds the members whose
-    name contains that text rather than every member: a picker takes whatever
-    somebody types, and an unescaped ``%`` or ``_`` there is a wildcard nobody
-    asked for.
-    """
-
-    escaped = term.lower()
-    for character in (_LIKE_ESCAPE, "%", "_"):
-        escaped = escaped.replace(character, _LIKE_ESCAPE + character)
-    return f"%{escaped}%"
 
 
 class OrganizationMemberRepository(
@@ -280,13 +262,7 @@ class OrganizationMemberRepository(
             col(OrganizationMember.status).in_(LISTABLE_STATUSES),
         ]
         if term := (search or "").strip():
-            pattern = _contains_pattern(term)
-            filters.append(
-                or_(
-                    func.lower(col(User.full_name)).like(pattern, escape=_LIKE_ESCAPE),
-                    func.lower(col(User.email)).like(pattern, escape=_LIKE_ESCAPE),
-                )
-            )
+            filters.append(user_matches_search(term))
 
         count_result = await self.db.execute(
             select(func.count())
