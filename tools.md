@@ -129,8 +129,10 @@ here, so a float that happens to be whole is rejected too.
 
 Past the cap, the model is told the search was refused and can answer without it.
 An Anthropic-native declaration is answered in its own vocabulary, a
-`web_search_tool_result` carrying `error_code: max_uses_exceeded`; every other
-caller gets the same `[tool error]` string a failed tool produces. Even without
+`web_search_tool_result` carrying `error_code: max_uses_exceeded`. Otherwise the
+model gets the same `[tool error]` string a failed tool produces, and a Chat
+Completions client sees the search in `otari_tool_calls` as `failed`, with the
+tag `call_limit`. Even without
 `max_uses`, requests remain bounded by `max_tool_iterations` and the shared
 [10-call Search and Fetch limit](#web-fetch).
 
@@ -173,8 +175,17 @@ Otari consumes its own tool calls, sends results back to the model, and returns
 the final answer.
 
 Responses and Messages can expose native server-tool result blocks when their
-wire format expects them. Chat Completions returns only the final assistant
-message. Calls for tools the client must execute are preserved.
+wire format expects them. Chat Completions has no such blocks, so Otari reports
+its web searches and fetches in a field of its own, `otari_tool_calls`, at the
+top level of the response and of each streamed chunk: a search with its query
+and the sources it found, a fetch with the URL it read, and a failure with what
+may be shown about it. See [Web tool calls on Chat
+Completions](api-reference.md#web-tool-calls-on-chat-completions). Code execution
+and MCP calls are not reported there, so Chat Completions returns only the final
+assistant message for them. Calls for tools the client must execute are preserved.
+The dashboard Playground's own completion route is the one exception: its stream
+also reports every gateway-run call and its result in an `otari_tool_activity`
+field beside each chunk's `choices`, so the page can show them.
 
 For gateway-run MCP activity in Messages streams, see
 [Messages streaming activity](mcp.md#messages-streaming-activity).
@@ -501,6 +512,23 @@ conversation or tool data into a later Fetch URL on an attacker-controlled
 domain. Disable Fetch or restrict allowed domains when that residual egress risk
 is unacceptable.
 
+### Fetch providers
+
+A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
+names a provider for `otari_web_fetch` and for enriching search results. Neither
+runs on fetch instances yet, so the built-in fetcher above still does both;
+`POST /api/v1/search-tools/{name}/test` with a `url` tries one.
+
+- **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
+  reports what each fetch costs (`costDollars.total`).
+- **Tabstack** (`tabstack`) needs an API key, read from the instance's
+  `api_key`, such as `${TABSTACK_API_KEY}`, and reports no cost. Tabstack's
+  [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
+  page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
+  whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
+  Tabstack documents up to 15 seconds a page at its default `effort` and up to
+  60 at `effort: max`, so give the instance a `timeout` to match.
+
 ### Web search
 
 Otari reaches a licensed search API directly. Set `web_search_provider` to
@@ -685,5 +713,14 @@ The request, the response and the errors are in the
   10 adds to it, so a workspace's `max_results` ceiling also bounds what one search
   can cost. A search with no results reported a cost of 0 when the adapter was
   written.
+- **Mojeek** (`mojeek`) needs an API key, read from the tool's `api_key`, such as
+  `${MOJEEK_API_KEY}`. Mojeek takes the key and the query in the request URL,
+  which Otari keeps out of its logs. It reports no cost, so a search is billed at
+  the tool's rate, `mojeek:<search-tool-name>`. Mojeek's
+  [pricing](https://www.mojeek.com/services/search/web-search-api/), read
+  2026-10-13, is per search, in pounds before taxes: £2 per 1,000 on the Startup
+  plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what
+  your plan costs you. A search returns at most 10 results, the Startup plan's
+  limit, whatever the plan, and its hits carry a snippet but no page text.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate.

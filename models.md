@@ -22,8 +22,11 @@ A request may also name the model the way the catalog does. `vendor/model` (`dee
 
 The legacy `provider/model` spelling is still honored where it names an
 offering the deployment serves (`openai/gpt-4o` while an `openai` instance
-serves `gpt-4o`); read as a catalog id otherwise. Prefer the colon form in
-standalone configuration, pricing, aliases, and routing policies.
+serves `gpt-4o`); read as a catalog id otherwise. Where it is also the catalog
+id of a model the catalog also offers elsewhere (an OpenAI model served by
+Azure OpenAI too, say), the named offering serves first and the others are
+its fallback (see [Catalog spellings](#catalog-spellings)). Prefer the colon form in standalone
+configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
 
@@ -102,20 +105,20 @@ catalog indefinitely.
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
 caller's organization's own override, `configured` for the deployment's stored
-rate, `default` for the genai-prices fallback, `dynamic` for a routing policy
+rate, `default` for the models.dev fallback, `dynamic` for a routing policy
 that picks its model per request, and `none` for an unpriced model. An alias is
 priced from its target.
 
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 so a client does not have to guess them. Both come from models.dev's entry for
 the model under the provider serving it. Where that entry has no context window,
-the bundled genai-prices dataset supplies one; genai-prices lists no output
-limit, so a model models.dev does not describe reports `max_output_tokens` as
-`null`, as it does any limit neither dataset knows. An alias reports its target's
+the bundled or accepted models.dev pricing snapshot supplies one; the snapshot
+keeps no output limit, so a model the live catalog does not describe reports
+`max_output_tokens` as `null`, as it does any limit neither source knows. An alias reports its target's
 limits, and the grouped catalog reports the same values for each offering. An
 instance declared `openai-compatible` is looked up under OpenAI, so a model it
 serves under another name usually has no models.dev entry. With
-`models_dev_metadata: false`, the context window comes from genai-prices alone.
+`models_dev_metadata: false`, the context window comes from the pricing snapshot alone.
 
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
@@ -249,7 +252,7 @@ the size that matters rather than at their base rate.
 use, cheapest first, with each provider's context and output limits and the
 price the caller's organization would be charged, labeled by which price list
 it came from: the organization's own override, the deployment's stored rate, or
-the genai-prices default. Both routes accept the same credentials as
+the models.dev default. Both routes accept the same credentials as
 `GET /api/v1/models`, and a model the caller may not use answers 404.
 
 Grouping keys on the models.dev display name where the dataset knows the
@@ -265,8 +268,11 @@ reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
 `GET /api/v1/models/metadata` stays operator-only.
 
-Each offering also carries the provider's own list price from models.dev,
-where it has one, and for a signed-in caller the organization's last thirty
+Each offering also carries the provider's list price from the live models.dev
+catalog, where it has one. The default is billed from the accepted models.dev
+snapshot, which can lag that catalog, so a difference between the two means a
+price update is waiting for review. Each offering also carries, for a signed-in
+caller, for a signed-in caller the organization's last thirty
 days on that offering: requests, cache hit rate, and the effective price per
 million tokens after cache reads and tiers.
 
@@ -317,7 +323,7 @@ another tenant's selector lands, and a model nobody offers to the caller
 resolves as the deployment's view says. A model's `selector` in the catalog is
 null where the caller has no such spelling for it.
 
-In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it. In hybrid mode, the control plane decides which offerings a request may try.
+In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it. In hybrid mode, the control plane decides which offerings a request may try.
 
 The dashboard's Models page is this catalog: one card per model, with a rail
 of filters beside it, and a page per model with its facts and every offering

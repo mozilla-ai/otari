@@ -90,7 +90,7 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
-- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers.
+- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only. A hybrid or hosted deployment says that its policies are not where a request's attempt plan comes from.
 - Tools
 - API keys and workspace members
 
@@ -123,8 +123,10 @@ read-only.
 What a page shows can also depend on who is signed in, not only on the
 deployment. Spend and budgets is the clearest case: an organization owner or
 admin manages their own organization's budgets and the spend ceilings holding
-them, while a deployment operator gets the deployment-wide budgets and the
-gateway users assigned to them.
+them, while a deployment operator gets the deployment's own budgets, their
+active organization's, and the gateway users assigned to them. Usage, activity,
+traces, routing and the overview's key count likewise show an operator their
+active organization, not every organization on the deployment.
 
 Providers answers to the organization role rather than to deployment authority.
 Its owners and admins manage the keys, the models each key offers, and the rate
@@ -132,7 +134,7 @@ each model is billed at. An organization may set its own rate for a model it
 supplies the provider key for. A model reached through one of the deployment's
 own provider instances is not one of those: the deployment holds that credential
 and settles its upstream bill, so its rate is the deployment price list's, which
-is `/api/v1/pricing` and has no page of its own. The genai-prices defaults are
+is `/api/v1/pricing` and has no page of its own. The models.dev defaults are
 likewise kept current through `/api/v1/pricing/refresh` rather than from the
 dashboard.
 
@@ -183,6 +185,16 @@ lists everything you uploaded in the workspace, to attach again or to delete.
 These controls appear only where the deployment stores files: not when file
 uploads are off, and not on a hosted control plane.
 
+The Tools menu attaches web search, code execution and any number of MCP
+servers to the next message, in any mix: the model is offered all of them in one
+tool loop. A tool the gateway runs shows in the transcript above the reply as a
+collapsed row with its status, opening to the arguments the model sent and what
+the tool returned (a long result is shortened for display). This activity is
+shown in the Playground only (not on a hosted control plane, whose requests run
+on the data plane) and is not saved with a conversation; a request
+made through the API still returns just the final message, as
+[What clients receive](tools.md#what-clients-receive) describes.
+
 Two things are worth knowing about how it is billed and what it stores.
 
 A Playground request carries no API key. It is authorized by the dashboard
@@ -203,12 +215,14 @@ not offer the page at all.
 
 ## Observability
 
-Activity opens on [agent sessions](traces.md) where the deployment records
-traces (`trace_capture_enabled`, on by default; a hybrid gateway records none),
-with the per-request log one switch away (Sessions | Requests). A session opens
-in a side panel showing its turns, requests, and the spans under each. Where no
-traces are recorded, Activity is the per-request log alone. Usage provides
-aggregates and time series. Routed requests share a request-group ID, so the
+Activity is the per-request log. Sessions lists [agent sessions](traces.md)
+where the deployment records traces (`trace_capture_enabled`, on by default; a
+hybrid gateway records none), and has no entry where it does not. A session
+opens in a side panel as a tree of its turns, LLM calls and tool calls, a
+timeline of the same spans, or a flat log; before a span is picked, the panel
+shows what the session cost against its key's own spend ceiling and where the
+gateway stepped in. A request in Activity whose session was recorded links to it:
+**View trace** in the request's detail opens the session on that LLM call. Usage provides aggregates and time series. Routed requests share a request-group ID, so the
 request log can show the attempted models and the model that served the
 response. Imported usage is labeled by
 source and does not consume a budget.
@@ -259,6 +273,8 @@ lost link is recovered.
 
 Password sign-in works for an existing account. Optional passkeys, Google OAuth and GitHub OAuth add more ways to sign in. Set `passkeys_enabled: false` (`OTARI_PASSKEYS_ENABLED`) to switch passkeys off entirely. When the deployment sets `open_signup: true`, a new address can also create an account with its own organization, through the signup form or a Google or GitHub sign-in. Where the deployment publishes terms (`terms_url`), the signup page asks for them before any of those, and the invitation page asks before "Accept and sign in with a provider instead". A provider sign-in from the sign-in screen that would set up an account without them stops on the page the provider returns to, which asks for the terms and starts the sign-in again. A passkey never creates an account. OAuth requires `public_base_url` plus the provider's client ID and secret. Passkeys can instead use `public_base_url`, or an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
 
+A link to a dashboard page opened while signed out shows the sign-in screen first, then that page once you have signed in, whichever of these methods you use.
+
 Signing in *can* add a membership in one case. If an organization has claimed and
 proven the email domain that the identity's verified address belongs to, the
 sign-in joins them to that organization at the role the claim names, whichever of
@@ -287,4 +303,4 @@ privacy notice live. The account menu links each row it has an address for; see
 
 The dashboard source is under `web/`. The published Docker image includes the
 bundle. A source checkout needs `make dashboard` for the gateway to serve it, or
-`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.25.0/web/README.md).
+`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.26.0/web/README.md).

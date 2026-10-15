@@ -9,11 +9,11 @@ hybrid modes.
 Claude Code appends `/v1/messages` itself, so `ANTHROPIC_BASE_URL` ends in
 `/api`, not `/api/v1`.
 
-### Connected to otari.ai
+### On otari.ai
 
 ```bash
 export ANTHROPIC_BASE_URL="https://api.otari.ai/api"
-export ANTHROPIC_AUTH_TOKEN="tk_your_otari_token"
+export ANTHROPIC_AUTH_TOKEN="<your-otari-key>"   # an API key from otari.ai
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
@@ -141,7 +141,7 @@ travels in a header, and it must point at a standalone gateway: a hybrid one
 does not serve the route, so every spawn would fall back. The plugin is
 active from then on, in that session and
 every one after. The
-[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.25.0/plugins/otari-router/README.md) has the options, the
+[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.26.0/plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 The plugin hooks `agent.spawn`, sends the request above, and passes the

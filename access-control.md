@@ -2,7 +2,7 @@
 
 Otari separates deployment administration, human identity, workload credentials,
 and spend limits. This page explains how those pieces relate. The generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.25.0/docs/public/openapi.json) is the source of truth for endpoint
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.26.0/docs/public/openapi.json) is the source of truth for endpoint
 schemas.
 
 ## Deployment-wide account administration
@@ -394,7 +394,9 @@ a hold larger than the whole cap, since a fresh window would refuse it too.
 
 Usage is attributed to the workspace bound to the authenticating API key.
 Organization and workspace usage views then apply the signed-in identity's
-membership. Deployment operators can read the deployment-wide usage API.
+membership. Deployment operators can read the operator usage API, which covers
+every workspace of the operator's active organization (the default organization
+for the master key).
 
 Routing fallback and built-in tools can create several internal attempts, but a
 successful request remains one caller-visible request. The activity log records

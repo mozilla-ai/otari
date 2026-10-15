@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.25.0/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.25.0/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.26.0/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.26.0/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 The default server address is `http://localhost:8000`. The API is mounted at
@@ -134,8 +134,8 @@ together, and an unpriced or unreported request carries neither.
 In standalone mode the amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
 rate that priced the model: `organization` (an organization's override),
-`deployment` (a rate stored on this gateway), or `defaults` (the bundled
-genai-prices dataset). Hybrid mode attaches the platform's settlement instead;
+`deployment` (a rate stored on this gateway), or `defaults` (the bundled or
+accepted models.dev snapshot). Hybrid mode attaches the platform's settlement instead;
 see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
 
 Each request's cost is settled to the micro-dollar, half-up, so a request that
@@ -156,6 +156,65 @@ model runs it natively and runs Otari's on one that does not. `otari` always
 runs Otari's. `provider` always forwards the provider's own tool and never uses
 Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
 use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
+
+### Web tool calls on Chat Completions
+
+Chat Completions has no shape for a tool the server runs, so a chat completion
+reports Otari's own web searches and fetches in `otari_tool_calls`, at the top
+level of the response, beside `choices`. Each entry is one call:
+
+| Field | Value |
+|---|---|
+| `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch. |
+| `type` | `web_search` or `web_fetch`. |
+| `status` | `in_progress`, `completed` or `failed`. |
+| `query` | A search's query. |
+| `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
+| `sources` | A completed search's results, each with its `url`, `title` and `published_date` (the provider's own date string, or `null`); empty when it found none. Never page text. |
+| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses` has `"tag": "call_limit"` and a `null` provider. Absent when Otari can say no more than that the call failed. |
+
+A response that is not streamed carries the ended entry of every call, across
+all of the tool loop's rounds:
+
+```json
+{
+  "id": "chatcmpl-…",
+  "object": "chat.completion",
+  "choices": [{"index": 0, "message": {"role": "assistant", "content": "Python 3.14 is…"}, "finish_reason": "stop"}],
+  "otari_tool_calls": [
+    {
+      "id": "otari_ws_5f0c…",
+      "type": "web_search",
+      "status": "completed",
+      "query": "latest python release",
+      "sources": [{"url": "https://www.python.org/downloads/", "title": "Download Python", "published_date": null}]
+    }
+  ]
+}
+```
+
+A stream sends a chunk when each call starts and another when it ends, before
+the answer's text; a call refused past `max_uses` never started, so it is sent
+once, ended. Each chunk carries whole entries at its top level and one choice
+whose `delta` has no content or tool calls, so a client that reads only `choices`
+passes over it. Match entries by `id`: the ended one replaces the started one.
+
+```text
+data: {"id":"chatcmpl-…","choices":[{"delta":{"content":null,…},"finish_reason":null,"index":0}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"in_progress","query":"latest python release"}]}
+
+data: {"id":"chatcmpl-…","choices":[{"delta":{"content":null,…},"finish_reason":null,"index":0}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"completed","query":"latest python release","sources":[…]}]}
+```
+
+The entries are not in the `delta`, where the OpenAI Python SDK's stream helper
+(`client.chat.completions.stream()`) would fail on them. That helper ignores
+them, so read the raw chunks to see them. A stream that has sent an entry has
+sent response bytes, so a provider failure after it ends the stream with an
+error event rather than falling over to another candidate (see [Failure
+behavior](routing.md#failure-behavior)).
+
+A client may keep the entries on the assistant message it sends back: Otari
+removes `otari_tool_calls` from every assistant message before calling the
+provider. Code execution and MCP tool calls are not reported in the field.
 
 ### Provider-specific fields
 
@@ -445,7 +504,7 @@ never a body, a URL or the query:
 |---|---|
 | `Otari-Error-Provider` | The provider that failed, such as `exa`. |
 | `Otari-Error-Status` | The provider's own HTTP error status; absent when it gave none, as for a timeout, an error inside a successful answer, or an answer that could not be read. |
-| `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
+| `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `invalid_header` (a key holding a character that is not ASCII), `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
 | `Otari-Error-Retryable` | `true` for a timeout, a 429 or a 5xx from the provider, when a retry may help; otherwise `false`. |
 
 On a search the workspace's organization key serves, they name the key's
@@ -600,6 +659,7 @@ reworded.
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
+| `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price. An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | The gateway holds no credential for the model's provider, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the credential in `config.yml`, through the dashboard, or in the environment variable the detail names | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |

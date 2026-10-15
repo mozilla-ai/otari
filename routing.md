@@ -25,14 +25,27 @@ Callers send `model: fast`. If the first provider fails before any response is
 sent, Otari tries the fallback. The response keeps the policy name; Activity and
 usage record the models that were attempted.
 
+In the dashboard, choose Create policy on Routing, then Fallback: name it, pick
+the main model, and list at least one backup under "If unavailable, use", each a
+model other than the main one and the other backups. The backups are
+`on_failure`, in the order shown. Create policy offers one kind at a time
+(Fallback, Split traffic, Smart router, Spill over at rate limits, Tier down on
+budget), each with only its own fields. To combine them, open the policy from
+the list once it exists: its page has a section each for the main selection,
+the fallback chain, a budget tier-down and guardrails, and each section saves on
+its own, writing the rest of the policy back unchanged. A policy from
+`config.yml`, or one using options the page cannot show, opens read-only with
+its spec in full.
+
 ## Selection and failure are separate
 
-`select` chooses where a request starts. `on_failure` lists what to try after a
-retryable failure.
-A candidate whose provider has no credential configured counts as one, so the
-policy moves on to the next. When no candidate has a credential, the request is
+`select` chooses where a request starts. `on_failure` lists what to try when a
+candidate fails before its answer starts, whatever the provider's error: an
+outage, a rate limit, or a request it refuses as invalid (400) all move on.
+A candidate whose provider has no credential configured fails that way too, so
+the policy moves on to the next. When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
-the configured credential (401, or a 403 that does not reject the request itself) counts as one too; when every candidate
+the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
 request is refused with `424 provider_credential_rejected`.
 A Chat Completions candidate that answers with no choices has failed too, so the
@@ -144,9 +157,10 @@ The policy says which is which: `candidates` handles "full", `on_failure`
 handles "broke". `Otari-Router: off` skips the order and starts from the
 default.
 
-In the dashboard, create one from Routing with "Move to the next model when one
-hits its rate limit", order the models with the arrows, and add the limit under
-Settings, Rate limit rules, counted for "Each model".
+In the dashboard, choose Create policy on Routing, then "Spill over at rate
+limits", order the models with the arrows, and add the limit under Settings,
+Rate limit rules, counted for "Each model". On an existing policy, pick "Spill
+over" in its Main selection section.
 
 
 The `knn` router uses scored examples to rank candidates for each user's
@@ -254,7 +268,9 @@ else is dispatched. See
 Config-file policies apply to every workspace. Standalone operators can also
 manage stored policies through the Routing page or `/api/v1/routing/policies`.
 Stored policies belong to one workspace and can optionally be scoped to one
-user.
+user. The operator's list, like `/api/v1/aliases`, shows the stored entries of
+the workspaces in the operator's active organization, and the master key acts in
+the default organization.
 
 An organization's owners and admins manage their own workspaces' policies and
 aliases through `/api/v1/organizations/me/routing-policies` and
@@ -337,7 +353,9 @@ streaming failure after the stream begins is returned to the client because
 switching models mid-answer would corrupt the response.
 
 A tool loop that has already produced assistant state cannot be replayed on
-another provider. Shared service failures, such as an unavailable mandatory
+another provider. On Chat Completions, a stream that has reported one of Otari's
+web searches or fetches in `otari_tool_calls` has sent response bytes, so it is
+committed from that report on. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
 If every candidate of a plan with more than one candidate fails, Otari returns a gateway error in its own words, never a provider's message. A plan with one candidate answers as naming that model directly would. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.

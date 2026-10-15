@@ -27,7 +27,7 @@ Codex appends `/responses`, so `base_url` must include `/api/v1`.
 `model_provider` must select the custom provider; otherwise Codex continues
 using its built-in OpenAI provider.
 
-For otari.ai, change the URL and use an otari.ai user token:
+For otari.ai, change the URL and use an API key from otari.ai:
 
 ```toml
 model_provider = "otari"
@@ -41,7 +41,7 @@ env_key = "OTARI_API_KEY"
 ```
 
 ```bash
-export OTARI_API_KEY="tk_your_otari_token"
+export OTARI_API_KEY="<your-otari-key>"
 codex
 ```
 
@@ -59,8 +59,8 @@ Responses features Codex may use, such as tool types other than `function`; see
 [Responses on providers without a Responses API](api-reference.md#responses-on-providers-without-a-responses-api).
 Codex works best on a provider with a native Responses API.
 
-In standalone mode, inspect `GET /api/v1/models`. Hybrid model IDs come from the
-connected control plane.
+`GET /api/v1/models` lists the models a key can use, both on otari.ai and on a
+standalone gateway. Hybrid model IDs come from the connected control plane.
 
 ## Model metadata
 

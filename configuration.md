@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.25.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.26.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -80,8 +80,8 @@ the corresponding startup value after the database is available.
 | `host`, `port` | Server bind address. |
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
-| `default_pricing` | Use the bundled genai-prices catalog when no stored price exists. |
-| `pricing_refresh` | What a scheduled genai-prices check does with an update: `manual`, `review`, or `auto`. |
+| `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
+| `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
@@ -420,6 +420,22 @@ it. A retry setting in an instance's `client_args` (`max_retries`, or
 reaches an [owned provider endpoint](provider-endpoints.md), which keeps its
 SDK's default outside a policy that can fall over.
 
+### Bedrock read timeout
+
+A Bedrock client waits up to 600 seconds for the next part of a response.
+botocore's own default is 60 seconds, which fails a streamed response whose
+model goes quiet for a minute, as a model writing a long tool call can. A
+`config` in the instance's `client_args` takes the botocore `Config` options and
+wins over the default:
+
+```yaml
+providers:
+  bedrock:
+    client_args:
+      config:
+        read_timeout: 120
+```
+
 ### Runtime provider management
 
 Standalone operators can store provider credentials through the Providers page
@@ -510,9 +526,18 @@ once to a micro-dollar. Use PostgreSQL for durable accounting.
 
 ### Default pricing
 
-`default_pricing: true` enables a bundled genai-prices snapshot when no stored
-price exists. Explicit database or config pricing always wins. The dashboard can
-review and accept newer snapshots.
+`default_pricing: true` prices from a models.dev snapshot when no stored price
+exists. Explicit database or config pricing always wins. A snapshot ships inside
+the package, so defaults work offline and a fresh deployment needs no network;
+once an operator accepts a newer one (below), that one serves instead. The
+`models_dev_metadata` setting only controls the descriptions and capabilities
+shown beside a model: prices and context windows come from the snapshot whether
+or not it is on.
+
+A model is matched on its provider and id, including a pinned HuggingFace
+backend and Bedrock geo-prefixed ids. A bare id that providers list at different
+prices stays unpriced rather than guessing, so set a price for it or name the
+provider.
 
 Default pricing is off because provider catalogs and reseller rates change.
 With `require_pricing: true`, a budgeted request with no effective price is
@@ -539,7 +564,7 @@ each can be priced.
 
 ### Keeping the defaults current
 
-`pricing_refresh` decides what the gateway does with a newer genai-prices
+`pricing_refresh` decides what the gateway does with a newer models.dev
 snapshot on its own:
 
 - `manual` (the default) never fetches. An operator checks for updates with
@@ -551,6 +576,15 @@ snapshot on its own:
   differently until an operator accepts it. On a deployment with nobody to make
   that call, prefer `auto`.
 - `auto` fetches on the same schedule and applies a changed snapshot at once.
+
+Each accepted snapshot is kept, and a request or report priced for a past
+instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldest
+one for a time before the first. History therefore starts at the first accepted
+snapshot; models.dev publishes no dated price changes of its own.
+
+To refresh the bundled snapshot, as a maintainer does at release, run
+`python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
+saved `api.json`) and commit `src/gateway/data/models_dev_pricing.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
@@ -611,7 +645,6 @@ Optional cache fields reprice cached input when a provider reports it:
 
 - `cache_read_price_per_million`
 - `cache_write_price_per_million`
-- `cache_write_1h_price_per_million`
 
 Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
@@ -1058,7 +1091,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.25.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.26.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback
