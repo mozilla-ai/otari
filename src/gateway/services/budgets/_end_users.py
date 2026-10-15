@@ -87,7 +87,7 @@ class _EndUsers:
 
         An end user already on the budget keeps its period, so repeating the call changes nothing.
         """
-        _require_service_key(api_key)
+        require_service_key(api_key)
         _check_external_id(external_id)
         budget = await self._listed_budget(api_key, budget_id)
         owner_user_id = await self._available_owner(api_key)
@@ -126,7 +126,7 @@ class _EndUsers:
         limit: int,
     ) -> list[EndUserPublic]:
         """A page of the key owner's end users."""
-        _require_service_key(api_key)
+        require_service_key(api_key)
         users = await self._repositories.end_users.page(
             str(api_key.user_id), external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
         )
@@ -136,14 +136,14 @@ class _EndUsers:
         self, api_key: APIKey, *, external_id: str | None, budget_id: str | None, blocked: bool | None
     ) -> int:
         """How many of the key owner's end users ``page`` lists across every page."""
-        _require_service_key(api_key)
+        require_service_key(api_key)
         return await self._repositories.end_users.count_matching(
             str(api_key.user_id), external_id=external_id, budget_id=budget_id, blocked=blocked
         )
 
     async def budgets(self, api_key: APIKey) -> list[EndUserBudgetPublic]:
         """The budgets the key may assign, each with how many of its owner's end users are on it."""
-        _require_service_key(api_key)
+        require_service_key(api_key)
         budget_ids = api_key.assignable_end_user_budgets()
         counts = await self._repositories.end_users.count_by_budget(str(api_key.user_id), budget_ids)
         return [
@@ -158,16 +158,18 @@ class _EndUsers:
 
     async def require_owner(self, api_key: APIKey) -> None:
         """Refuse a service key whose own user is blocked or deleted."""
-        _require_service_key(api_key)
+        require_service_key(api_key)
         await self._available_owner(api_key)
 
-    async def _available_owner(self, api_key: APIKey) -> str:
+    async def available_owner(self, api_key: APIKey) -> User:
         """The key's user, refused when it is blocked or deleted, since its end users bill through it."""
-        owner_user_id = str(api_key.user_id)
-        owner = await self._repositories.end_users.get(owner_user_id)
+        owner = await self._repositories.end_users.get(str(api_key.user_id))
         if owner is None or owner.blocked or owner.deleted_at is not None:
             raise EndUserOwnerUnavailableError()
-        return owner_user_id
+        return owner
+
+    async def _available_owner(self, api_key: APIKey) -> str:
+        return (await self.available_owner(api_key)).user_id
 
     async def _assignable_budget(self, budget_id: str) -> Budget:
         budget = await self._repositories.budgets.get(budget_id)
@@ -182,7 +184,7 @@ class _EndUsers:
         return await self._assignable_budget(budget_id)
 
     async def _existing(self, api_key: APIKey, external_id: str) -> User:
-        _require_service_key(api_key)
+        require_service_key(api_key)
         user = await self._repositories.end_users.find(str(api_key.user_id), external_id)
         if user is None or user.deleted_at is not None:
             raise EndUserNotFoundError(external_id)
@@ -227,7 +229,8 @@ def check_path_external_id(external_id: str) -> None:
         raise EndUserPathInvalidError(external_id)
 
 
-def _require_service_key(api_key: APIKey) -> None:
+def require_service_key(api_key: APIKey) -> None:
+    """Refuse a key that has no end users: one that is not a service key, or has no user."""
     if not api_key.is_service_key or not api_key.user_id:
         raise NotAServiceKeyError(str(api_key.id))
 

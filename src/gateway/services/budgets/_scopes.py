@@ -1,6 +1,7 @@
 import uuid
 from typing import assert_never
 
+from gateway.exceptions.budget_exceptions import EndUserKeyCeilingError
 from gateway.models.budgets import ScopeType
 from gateway.repositories.budgets import ScopeIdSets
 from gateway.services.api_keys import ApiKeyService
@@ -56,6 +57,11 @@ class ScopeOwnership:
                 return await self._get_organization_id_for_workspace(workspace_id)
             case _:
                 assert_never(scope_type)
+
+    async def refuse_minted_key(self, scope_type: ScopeType, scope_id: str) -> None:
+        """Refuse a ceiling on a key a service key minted, which nothing would remove when the key goes."""
+        if scope_type == "api_token" and await self._api_keys.is_end_user_key(scope_id):
+            raise EndUserKeyCeilingError(scope_id)
 
     async def get_scope_ids_in(self, organization_id: uuid.UUID) -> ScopeIdSets:
         """Return the IDs of every scope of every kind inside an organization."""

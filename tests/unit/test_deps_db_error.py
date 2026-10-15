@@ -66,6 +66,7 @@ async def test_failed_last_used_bump_logs_warning_and_does_not_poison_request_se
         key_hash=hash_key(token),
         is_active=True,
         expires_at=None,
+        parent_key_id=None,
         last_used_at=None,
     )
 

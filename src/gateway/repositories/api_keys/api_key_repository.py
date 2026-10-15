@@ -1,8 +1,9 @@
 import uuid
 from collections.abc import Collection, Sequence
+from datetime import datetime
 from typing import Never
 
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -98,3 +99,83 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
             key.config_name = None
         await self.db.flush()
         return released
+
+    async def add_child(
+        self,
+        *,
+        parent: APIKey,
+        user_id: str,
+        key_hash: str,
+        key_prefix: str,
+        key_suffix: str,
+        key_name: str | None,
+        expires_at: datetime,
+        allowed_models: list[str] | None,
+        tags: dict[str, str] | None,
+    ) -> APIKey:
+        """Stage a key ``parent`` mints for its end user ``user_id``, in the parent's workspace."""
+        key = APIKey(
+            id=str(uuid.uuid4()),
+            workspace_id=parent.workspace_id,
+            key_hash=key_hash,
+            key_prefix=key_prefix,
+            key_suffix=key_suffix,
+            key_name=key_name,
+            user_id=user_id,
+            expires_at=expires_at,
+            allowed_models=allowed_models,
+            capture_agent_telemetry=parent.capture_agent_telemetry,
+            parent_key_id=parent.id,
+            parent=parent,
+            tags=tags,
+            metadata_={},
+        )
+        self.db.add(key)
+        await self.db.flush()
+        return key
+
+    async def list_children(
+        self,
+        parent_id: str,
+        *,
+        user_id: str | None,
+        active_at: datetime | None,
+        skip: int,
+        limit: int,
+    ) -> list[APIKey]:
+        """Return a page of the keys ``parent_id`` minted, oldest first.
+
+        ``user_id`` narrows them to one end user's; ``active_at`` to those active and unexpired then.
+        """
+        statement = select(APIKey).where(APIKey.parent_key_id == parent_id)
+        if user_id is not None:
+            statement = statement.where(APIKey.user_id == user_id)
+        if active_at is not None:
+            statement = statement.where(
+                APIKey.is_active.is_(True), or_(APIKey.expires_at.is_(None), APIKey.expires_at > active_at)
+            )
+        result = await self.db.execute(statement.order_by(APIKey.created_at, APIKey.id).offset(skip).limit(limit))
+        return list(result.scalars().all())
+
+    async def deactivate_child(self, parent_id: str, key_id: str) -> APIKey | None:
+        """Deactivate the key ``parent_id`` minted under this id and return it, or None when there is none."""
+        result = await self.db.execute(select(APIKey).where(APIKey.id == key_id, APIKey.parent_key_id == parent_id))
+        key = result.scalar_one_or_none()
+        if key is not None:
+            key.is_active = False
+            await self.db.flush()
+        return key
+
+    async def delete_children_expired_before(self, cutoff: datetime) -> int:
+        """Delete every minted key that expired before ``cutoff``, returning how many went."""
+        result = await self.db.execute(
+            delete(APIKey)
+            .where(APIKey.parent_key_id.is_not(None), APIKey.expires_at < cutoff)
+            .execution_options(synchronize_session=False)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def is_child(self, key_id: str) -> bool:
+        """Whether the key with this id was minted by another key."""
+        result = await self.db.execute(select(APIKey.parent_key_id).where(APIKey.id == key_id))
+        return result.scalar_one_or_none() is not None

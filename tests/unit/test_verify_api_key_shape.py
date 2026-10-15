@@ -59,6 +59,7 @@ async def test_migrated_key_authenticates_when_its_hash_is_on_a_row() -> None:
         key_hash=_platform_digest(MIGRATED_KEY),
         is_active=True,
         expires_at=None,
+        parent_key_id=None,
         # Recent enough that the throttled ``last_used_at`` bump is skipped, so
         # the test never reaches a real session.
         last_used_at=datetime.now(UTC),

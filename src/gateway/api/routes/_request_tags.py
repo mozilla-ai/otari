@@ -12,13 +12,16 @@ values up to 512.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import AfterValidator, Field
 
-MAX_REQUEST_TAGS = 16
-MAX_TAG_KEY_LENGTH = 64
-MAX_TAG_VALUE_LENGTH = 512
+from gateway.models.usage import MAX_REQUEST_TAGS as MAX_REQUEST_TAGS
+from gateway.models.usage import MAX_TAG_KEY_LENGTH as MAX_TAG_KEY_LENGTH
+from gateway.models.usage import MAX_TAG_VALUE_LENGTH as MAX_TAG_VALUE_LENGTH
+
+if TYPE_CHECKING:
+    from gateway.models.api_keys import APIKey
 
 # LiteLLM's key for spend-log attribution. The gateway consumes it, so it never
 # reaches a provider, which would reject a nested object in ``metadata``.
@@ -119,3 +122,13 @@ def forwarded_metadata(fields: dict[str, Any]) -> dict[str, Any]:
         else:
             fields.pop("metadata")
     return fields
+
+
+def with_key_tags(api_key: APIKey | None, tags: dict[str, str] | None) -> dict[str, str] | None:
+    """Return ``tags`` with the key's own tags written over them, or None when neither has any.
+
+    The key's tags win: whoever minted the key set them, and the caller holding it did not.
+    """
+    if api_key is None or not api_key.tags:
+        return tags
+    return {**(tags or {}), **api_key.tags}

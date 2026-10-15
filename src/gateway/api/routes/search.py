@@ -76,6 +76,7 @@ from gateway.api.routes._pipeline import (
     log_gateway_rejection,
     rate_limit_headers,
 )
+from gateway.api.routes._request_tags import with_key_tags
 from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.metered_pricing import quantize_cost
@@ -243,6 +244,7 @@ async def _dispatch_search(
     started_at = time.monotonic()
     api_key, _ = auth_result
     api_key_id = api_key.id if api_key else None
+    key_tags = with_key_tags(api_key, None)
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
     # into users.spend, matching every other billed endpoint.
     budget_exempt = api_key is not None and api_key.exclude_from_budget
@@ -273,6 +275,7 @@ async def _dispatch_search(
         """
         await log_gateway_rejection(
             db=db,
+            tags=key_tags,
             log_writer=log_writer,
             api_key_id=api_key_id,
             user_id=user_id,
@@ -422,6 +425,7 @@ async def _dispatch_search(
             api_key_id=api_key_id,
             user_id=user_id,
             timestamp=datetime.now(UTC),
+            tags=key_tags,
             model=tool.name,
             provider=tool.provider,
             endpoint=SEARCH_ENDPOINT,

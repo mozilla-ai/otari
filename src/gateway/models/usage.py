@@ -14,6 +14,12 @@ from gateway.models.money import UsdCost
 # Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
 PRICING_REFERENCE_MAX_LENGTH = 511
 
+# The bounds on the tags a usage row carries, OpenAI's for ``metadata``: 16
+# pairs, keys up to 64 characters, values up to 512.
+MAX_REQUEST_TAGS = 16
+MAX_TAG_KEY_LENGTH = 64
+MAX_TAG_VALUE_LENGTH = 512
+
 # ``usage_logs.source`` on a row this gateway served itself. Any other value is usage
 # imported through the external-events or OTLP ingest, which reserves this one so an
 # import cannot pass as traffic served here.

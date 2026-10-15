@@ -129,10 +129,15 @@ async def _resolve_identities(
 
     Membership is read off the key's owner rather than the billed user. The two
     differ only for a service key billing an end user, and that end user spends
-    inside its owner's member ceilings, not around them.
+    inside its owner's member ceilings, not around them. A key a service key
+    minted bills to the service key's scopes as well as its own: its owner is the
+    service key's user, and the service key's ceiling pools it with every other.
     """
     workspace_id = await resolve_workspace_id(db, scope.api_key)
-    owner = scope.api_key.user_id if scope.api_key is not None and scope.api_key.user_id else user_id
+    key = scope.api_key
+    issuer = key.parent if key is not None and key.parent_key_id is not None else None
+    owning_key = issuer if issuer is not None else key
+    owner = owning_key.user_id if owning_key is not None and owning_key.user_id else user_id
     identity = _identity_uuid(owner)
     workspace_member_id: uuid.UUID | None = None
     org_member_id: uuid.UUID | None = None
@@ -172,7 +177,7 @@ async def _resolve_identities(
         workspace_ids=(str(workspace_id),),
         organization_member_ids=() if org_member_id is None else (str(org_member_id),),
         workspace_member_ids=() if workspace_member_id is None else (str(workspace_member_id),),
-        api_key_ids=() if scope.api_key is None else (scope.api_key.id,),
+        api_key_ids=() if key is None else (key.id,) if issuer is None else (key.id, issuer.id),
     )
 
 

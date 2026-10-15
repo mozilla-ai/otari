@@ -70,6 +70,7 @@ from gateway.api.routes._platform import (
     run_platform_attempts,
     with_retry_hint,
 )
+from gateway.api.routes._request_tags import with_key_tags
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, PRICING_REQUIRED, PROVIDER_CREDENTIAL_REJECTED, error_headers
@@ -292,6 +293,7 @@ async def run_passthrough(
     started_at = time.monotonic()
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
+    key_tags = with_key_tags(api_key, None)
     # Zero I/O for a keyed request (see `_pipeline.resolve_request_context`'s
     # equivalent comment); only a master-key request pays a lookup. Fixed for
     # the whole request, so this also becomes the usage row's workspace below.
@@ -326,6 +328,7 @@ async def run_passthrough(
         ):
             await log_gateway_rejection(
                 db=db,
+                tags=key_tags,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
                 user_id=api_key.user_id,
@@ -350,6 +353,7 @@ async def run_passthrough(
         """
         await log_gateway_rejection(
             db=db,
+            tags=key_tags,
             log_writer=log_writer,
             api_key_id=api_key_id,
             user_id=user_id,
@@ -556,6 +560,7 @@ async def run_passthrough(
             api_key_id=api_key_id,
             user_id=user_id,
             timestamp=datetime.now(UTC),
+            tags=key_tags,
             model=resolved.model,
             provider=resolved.instance,
             endpoint=endpoint,
@@ -1090,6 +1095,7 @@ async def run_decision(
     started_at = time.monotonic()
     api_key, _ = auth_result
     api_key_id = api_key.id if api_key else None
+    key_tags = with_key_tags(api_key, None)
     budget_exempt = api_key is not None and api_key.exclude_from_budget
     workspace_id = await resolve_workspace_id(db, api_key)
     organization_id = await organization_for_workspace_id(db, workspace_id)
@@ -1105,6 +1111,7 @@ async def run_decision(
         ):
             await log_gateway_rejection(
                 db=db,
+                tags=key_tags,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
                 user_id=api_key.user_id,
@@ -1122,6 +1129,7 @@ async def run_decision(
     async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         await log_gateway_rejection(
             db=db,
+            tags=key_tags,
             log_writer=log_writer,
             api_key_id=api_key_id,
             user_id=user_id,
@@ -1247,6 +1255,7 @@ async def run_decision(
             api_key_id=api_key_id,
             user_id=user_id,
             timestamp=datetime.now(UTC),
+            tags=key_tags,
             model=model,
             provider=provider_name,
             endpoint=DECISIONS_ENDPOINT,

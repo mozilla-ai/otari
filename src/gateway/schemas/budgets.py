@@ -7,10 +7,11 @@ Responses echo the stored string, so a row that holds an unknown value still rea
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
+from gateway.models.api_keys import APIKey
 from gateway.models.budgets import (
     BUDGET_ID_PATTERN,
     MAX_COUNT_LIMIT,
@@ -23,6 +24,7 @@ from gateway.models.budgets import (
     WorkspaceBudgetDefault,
 )
 from gateway.models.money import MAX_USD_LIMIT, as_float
+from gateway.models.usage import MAX_REQUEST_TAGS, MAX_TAG_KEY_LENGTH, MAX_TAG_VALUE_LENGTH
 from gateway.models.users import User
 
 _PERIOD_DESCRIPTION = "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment"
@@ -234,6 +236,85 @@ class EndUserBudgetPublic(BaseModel):
     is_default: bool = Field(description="Whether a new end user starts here when its request names no budget")
     end_user_count: int = Field(description="End users of the key's user on this budget, blocked ones included")
     blocked_end_user_count: int
+
+
+_TagKey = Annotated[str, StringConstraints(min_length=1, max_length=MAX_TAG_KEY_LENGTH)]
+_TagValue = Annotated[str, StringConstraints(max_length=MAX_TAG_VALUE_LENGTH)]
+
+
+class EndUserKeyCreate(BaseModel):
+    """Mint a key bound to one end user of the calling service key."""
+
+    external_id: str = Field(
+        min_length=1,
+        description="The end user the key bills, by the id the service names it by; created when it does not exist",
+    )
+    expires_in_sec: int = Field(ge=1, description="Seconds the key lives, at most the service key's max_child_ttl_sec")
+    budget_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description="A budget on the service key's end_user_budget_ids for a new end user; "
+        "an existing end user keeps its own",
+    )
+    tags: dict[_TagKey, _TagValue] | None = Field(
+        default=None,
+        max_length=MAX_REQUEST_TAGS,
+        description=f"Tags written on every usage row the key writes, over the request's own: up to "
+        f"{MAX_REQUEST_TAGS} string pairs, keys up to {MAX_TAG_KEY_LENGTH} characters and values up to "
+        f"{MAX_TAG_VALUE_LENGTH}",
+    )
+    allowed_models: list[str] | None = Field(
+        default=None,
+        description="Model allow-list within the service key's own; null inherits the service key's",
+    )
+    key_name: str | None = Field(default=None, description="Display name; defaults to the end user's id")
+
+
+class EndUserKeyUpdate(BaseModel):
+    """Revoke a minted key. Revocation is the only change, and it is final."""
+
+    is_active: Literal[False] = Field(description="false revokes the key")
+
+
+class EndUserKeyPublic(BaseModel):
+    """A key a service key minted for one of its end users. The secret is never returned after the mint."""
+
+    id: str
+    key_prefix: str | None
+    key_suffix: str | None
+    key_name: str | None
+    external_id: str
+    end_user_id: str
+    created_at: str
+    last_used_at: str | None
+    expires_at: str
+    is_active: bool
+    allowed_models: list[str] | None
+    tags: dict[str, str] | None
+
+    @classmethod
+    def from_model(cls, key: APIKey, end_user: User) -> EndUserKeyPublic:
+        return cls(
+            id=key.id,
+            key_prefix=key.key_prefix,
+            key_suffix=key.key_suffix,
+            key_name=key.key_name,
+            external_id=end_user.external_id or "",
+            end_user_id=end_user.user_id,
+            created_at=key.created_at.isoformat(),
+            last_used_at=key.last_used_at.isoformat() if key.last_used_at else None,
+            expires_at=key.expires_at.isoformat() if key.expires_at else "",
+            is_active=bool(key.is_active),
+            allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
+            tags=dict(key.tags) if key.tags else None,
+        )
+
+
+class EndUserKeyCreated(EndUserKeyPublic):
+    """A newly minted key, with its secret, which is shown this once."""
+
+    key: str
+    budget_id: str | None = Field(description="The budget the end user is on")
 
 
 class BudgetResetLogResponse(BaseModel):

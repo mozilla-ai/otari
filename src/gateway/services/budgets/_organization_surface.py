@@ -158,6 +158,7 @@ class _OrganizationSurface:
             scope_type=request.scope_type,
             scope_id=request.scope_id,
         )
+        await self._scopes.refuse_minted_key(request.scope_type, request.scope_id)
         budget = await self._require_own_budget(organization=organization, budget_id=request.budget_id)
         # The pre-check names the clash, and the unique index closes the race it leaves with the same 409.
         await self._require_no_existing_ceiling(request)

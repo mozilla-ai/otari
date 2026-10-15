@@ -109,6 +109,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
+from gateway.api.routes._request_tags import with_key_tags
 from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
@@ -2619,6 +2620,7 @@ async def resolve_request_context(
         else:
             api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
             api_key_id = api_key.id if api_key else None
+            tags = with_key_tags(api_key, tags)
             # Zero I/O for a keyed request: `api_key.workspace_id` is already an
             # in-memory attribute on the row just loaded. Only a master-key request
             # pays a lookup, which `resolve_workspace_id` itself accepts as

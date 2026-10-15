@@ -96,6 +96,10 @@ def resolve_user_id(
     # globally can still pin an individual key strict.
     if api_key.reject_user_mismatch is not None:
         reject_mismatch = api_key.reject_user_mismatch
+    # A key a service key minted is bound to its end user and never refuses: its
+    # holder is often a client that fills ``user`` with telemetry of its own.
+    if api_key.parent_key_id is not None:
+        reject_mismatch = False
     if reject_mismatch and user_id_from_request and user_id_from_request != key_user_id:
         raise forbidden_user_error
 

@@ -10,6 +10,7 @@ import httpx
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import ColumnElement, Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from gateway.auth.models import hash_key
 from gateway.container import Container
@@ -291,7 +292,10 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: A
     key_hash = hash_key(token)
 
     try:
-        result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
+        # The issuing key and its user come in the same round trip, for the check on a minted key below.
+        result = await db.execute(
+            select(APIKey).options(joinedload(APIKey.parent).joinedload(APIKey.user)).where(APIKey.key_hash == key_hash)
+        )
     except DATABASE_ERRORS as e:
         record_auth_failure("db_error")
         raise HTTPException(
@@ -322,6 +326,13 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: A
             detail="API key has expired",
         )
 
+    if api_key.parent_key_id is not None and not _issuer_usable(api_key.parent):
+        record_auth_failure("issuer_unusable")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key's issuing service key is no longer usable",
+        )
+
     now = datetime.now(UTC)
     last_used_at = _as_utc(api_key.last_used_at)
     should_update_last_used = (
@@ -332,6 +343,21 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: A
         await _bump_last_used_at(api_key.id, now)
 
     return api_key
+
+
+def _issuer_usable(parent: APIKey | None) -> bool:
+    """Whether the service key that minted a key still vouches for it.
+
+    It must still be an active, unexpired service key whose user is neither blocked nor deleted. Deleting the user
+    deactivates its keys too, so the user check matters for a block.
+    """
+    if parent is None or not parent.is_active or not parent.is_service_key:
+        return False
+    expires_at = _as_utc(parent.expires_at)
+    if expires_at is not None and expires_at < datetime.now(UTC):
+        return False
+    owner = parent.user
+    return owner is not None and not owner.blocked and owner.deleted_at is None
 
 
 async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
@@ -816,6 +842,11 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
         raise RuntimeError("Unscoped uploads are not supported in this context; specify a workspace.")
 
     return FileService(uow, FileRepositories.on(uow), backends, config, reject_unscoped_upload)
+
+
+def build_api_key_service(uow: UnitOfWork) -> ApiKeyService:
+    """Build the api-keys service on a Unit of Work, for a request or a worker job."""
+    return ApiKeyService(ApiKeyRepository(uow), uow)
 
 
 def build_trace_service(uow: UnitOfWork) -> TraceService:
@@ -1386,7 +1417,7 @@ def get_budget_service(
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(ApiKeyRepository(uow)),
+        build_api_key_service(uow),
         WorkspaceAccess(db, organizations),
     )
 

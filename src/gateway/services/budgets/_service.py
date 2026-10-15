@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from collections.abc import Callable, Mapping
 
+from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.api_keys import ApiKeyConfig
 from gateway.core.settings.budgets import BudgetConfig
@@ -12,12 +13,16 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, ScopedBudget, ScopeType
 from gateway.models.tenancy import User
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.rate_limit import BudgetMinuteLimits
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
     BudgetResponse,
     CreateBudgetRequest,
     EndUserBudgetPublic,
+    EndUserKeyCreate,
+    EndUserKeyCreated,
+    EndUserKeyPublic,
     EndUserPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
@@ -35,6 +40,7 @@ from gateway.schemas.budgets import (
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets._declared import attach_key_ceiling
 from gateway.services.budgets._deployment_surface import _DeploymentSurface
+from gateway.services.budgets._end_user_keys import _EndUserKeys
 from gateway.services.budgets._end_users import ResolvedEndUser, _EndUsers, end_user_budget_list
 from gateway.services.budgets._member_policies import _MemberPolicies
 from gateway.services.budgets._organization_surface import _OrganizationSurface
@@ -73,6 +79,7 @@ class BudgetService:
         self._scopes = ScopeOwnership(organizations, api_keys)
         self._organization = _OrganizationSurface(repositories, self._scopes, organizations)
         self._end_users = _EndUsers(repositories)
+        self._end_user_keys = _EndUserKeys(repositories, self._end_users, api_keys)
         self._deployment = _DeploymentSurface(repositories)
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
         self._moves = _ReservationMoves(repositories)
@@ -368,6 +375,31 @@ class BudgetService:
         """Return the budgets the key may put its end users on, with how many of its owner's end users each holds."""
         async with self._uow:
             return await self._end_users.budgets(api_key)
+
+    async def mint_end_user_key(
+        self, *, api_key: APIKey, request: EndUserKeyCreate, key_format: ApiKeyFormatPort, config: GatewayConfig
+    ) -> EndUserKeyCreated:
+        """Mint a key bound to one end user of a service key, creating the end user on first use.
+
+        The key lives ``request.expires_in_sec``, at most the service key's ``max_child_ttl_sec``, reaches at most the
+        service key's models, and bills its end user whatever a request names. The secret is returned this once.
+        """
+        async with self._uow:
+            return await self._end_user_keys.mint(api_key, request, key_format=key_format, config=config)
+
+    async def list_end_user_keys(
+        self, *, api_key: APIKey, external_id: str | None, include_inactive: bool, skip: int, limit: int
+    ) -> list[EndUserKeyPublic]:
+        """Return a page of the keys a service key minted, oldest first; unless asked, only those that still work."""
+        async with self._uow:
+            return await self._end_user_keys.page(
+                api_key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit
+            )
+
+    async def revoke_end_user_key(self, *, api_key: APIKey, key_id: str) -> EndUserKeyPublic:
+        """Deactivate a key a service key minted. The end user, and what it spent, stay."""
+        async with self._uow:
+            return await self._end_user_keys.revoke(api_key, key_id)
 
     async def update_member_policy(
         self,

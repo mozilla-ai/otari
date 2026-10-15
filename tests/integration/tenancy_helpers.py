@@ -69,7 +69,7 @@ def budget_service(db: AsyncSession) -> BudgetService:
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(ApiKeyRepository(uow), uow),
         WorkspaceAccess(db, organizations),
     )
 

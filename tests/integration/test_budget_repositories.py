@@ -326,7 +326,7 @@ async def test_list_in_scopes_matches_what_the_organization_surface_lists(async_
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(ApiKeyRepository(uow), uow),
         WorkspaceAccess(
             async_db,
             OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),

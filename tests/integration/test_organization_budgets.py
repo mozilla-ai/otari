@@ -552,7 +552,7 @@ def _service(async_db: AsyncSession) -> BudgetService:
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(ApiKeyRepository(uow), uow),
         WorkspaceAccess(
             async_db,
             OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),

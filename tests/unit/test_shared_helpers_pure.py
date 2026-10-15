@@ -16,12 +16,30 @@ def _make_error(detail: str, status_code: int = 400) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
-def _make_key(user_id: str | None, *, reject_user_mismatch: bool | None = None) -> MagicMock:
+def _make_key(
+    user_id: str | None, *, reject_user_mismatch: bool | None = None, parent_key_id: str | None = None
+) -> MagicMock:
     """A key stub with the attributes resolve_user_id reads, all set explicitly."""
     api_key = MagicMock()
     api_key.user_id = user_id
     api_key.reject_user_mismatch = reject_user_mismatch
+    api_key.parent_key_id = parent_key_id
     return api_key
+
+
+def test_resolve_user_id_binds_a_minted_key_to_its_end_user_whatever_the_request_names() -> None:
+    """A key a service key minted never refuses a mismatch, even pinned strict, and never moves spend."""
+    user_id = resolve_user_id(
+        user_id_from_request='{"device_id":"telemetry"}',
+        api_key=_make_key("eu_run", reject_user_mismatch=True, parent_key_id="service"),
+        is_master_key=False,
+        master_key_error=_make_error("master"),
+        no_api_key_error=_make_error("no key"),
+        no_user_error=_make_error("no user"),
+        forbidden_user_error=_make_error("forbidden", 403),
+        reject_mismatch=True,
+    )
+    assert user_id == "eu_run"
 
 
 def test_resolve_user_id_master_key_with_user() -> None:

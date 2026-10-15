@@ -22,6 +22,7 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._helpers import database_error
 from gateway.core.database import DATABASE_ERRORS
+from gateway.exceptions.budget_exceptions import EndUserKeyCeilingError
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import (
     SCOPE_API_TOKEN,
@@ -99,6 +100,8 @@ async def _require_scope_exists(db: AsyncSession, scope_type: ScopeType, scope_i
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"{subject} '{scope_id}' not found",
         )
+    if isinstance(found, APIKey) and found.parent_key_id is not None:
+        raise EndUserKeyCeilingError(scope_id)
 
 
 async def _require_budget(db: AsyncSession, budget_id: str) -> Budget:

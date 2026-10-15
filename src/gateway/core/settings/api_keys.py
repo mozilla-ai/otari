@@ -13,7 +13,7 @@ from typing import Annotated, Any, Self
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from gateway.auth.models import API_KEY_PREFIX, MIN_API_KEY_LENGTH
-from gateway.core.settings_view import SECRET
+from gateway.core.settings_view import OMITTED, SECRET
 from gateway.models.api_keys import MAX_END_USER_BUDGETS
 from gateway.models.budgets import BUDGET_ID_PATTERN
 
@@ -63,6 +63,14 @@ class ApiKeyConfig(BaseModel):
         max_length=MAX_END_USER_BUDGETS,
         description="Budgets a request may start a new end user on with Otari-End-User-Budget.",
     )
+    max_child_ttl_sec: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Lets this service key mint keys bound to one of its end users, each living at most this many "
+            "seconds. Unset mints none."
+        ),
+    )
     ceiling: str | None = Field(
         default=None,
         description=(
@@ -99,6 +107,9 @@ class ApiKeyConfig(BaseModel):
         if listed is not None and self.end_user_budget_id is not None and self.end_user_budget_id not in listed:
             msg = "end_user_budget_id must be one of end_user_budget_ids"
             raise ValueError(msg)
+        if self.max_child_ttl_sec is not None and not self.is_service_key:
+            msg = "max_child_ttl_sec is for a service key; set is_service_key as well"
+            raise ValueError(msg)
         return self
 
 
@@ -112,6 +123,20 @@ class ApiKeySettings(BaseModel):
             "writes the declared secret and settings over an existing one, so config.yml wins over a change made "
             "through the API. A key removed from here is kept as it is. Standalone mode only."
         ),
+    )
+
+    child_key_retention_sec: Annotated[int, OMITTED] = Field(
+        default=2592000,
+        ge=0,
+        description=(
+            "How long a key a service key minted is kept after it expires before the sweep deletes it. Its "
+            "usage rows keep the end user they billed. 0 deletes it at the next sweep. Standalone mode only."
+        ),
+    )
+    child_key_sweep_interval_sec: Annotated[int, OMITTED] = Field(
+        default=3600,
+        ge=0,
+        description="How often expired keys a service key minted are swept. 0 disables the sweep.",
     )
 
     @field_validator("api_keys", mode="before")

@@ -53,6 +53,8 @@ class _Recorder:
                 exclude_from_budget=False,
                 reject_user_mismatch=None,
                 is_service_key=False,
+                parent_key_id=None,
+                tags=None,
                 workspace_id=uuid.uuid4(),
             ), False
 

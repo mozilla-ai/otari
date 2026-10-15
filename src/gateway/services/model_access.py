@@ -59,6 +59,8 @@ async def resolve_request_allowlist(db: AsyncSession, api_key: APIKey | None) ->
     list uses it directly, no user lookup. Only a key that inherits (its own list
     is ``None``) costs one scalar query for its user's default.
     """
+    if api_key is not None and api_key.parent_key_id is not None and api_key.parent is not None:
+        return await _minted_key_allowlist(db, api_key, api_key.parent)
     if api_key is None or api_key.allowed_models is not None:
         return effective_allowlist(api_key)
     if api_key.user_id is None:
@@ -67,6 +69,19 @@ async def resolve_request_allowlist(db: AsyncSession, api_key: APIKey | None) ->
         await db.execute(select(User.allowed_models).where(User.user_id == api_key.user_id))
     ).scalar_one_or_none()
     return user_default
+
+
+async def _minted_key_allowlist(db: AsyncSession, key: APIKey, issuer: APIKey) -> list[str] | None:
+    """A minted key's allow-list: its own, cut to what its issuing service key reaches now, or else the issuer's.
+
+    Cut at request time, so narrowing the service key narrows every key it minted.
+    """
+    issuer_list = await resolve_request_allowlist(db, issuer)
+    if key.allowed_models is None:
+        return issuer_list
+    if issuer_list is None:
+        return list(key.allowed_models)
+    return [entry for entry in key.allowed_models if is_allowlist_subset([entry], issuer_list)]
 
 
 def _covers(parent: list[str], entry: str) -> bool:

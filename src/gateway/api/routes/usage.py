@@ -26,7 +26,6 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.api.routes._helpers import retryable_on_database_outage
-from gateway.api.routes._request_tags import MAX_TAG_KEY_LENGTH
 from gateway.core.config import GatewayConfig
 from gateway.core.metered_pricing import quantize_cost
 from gateway.core.sql import (
@@ -42,7 +41,7 @@ from gateway.core.surface import Surface
 from gateway.inflight import get_registry
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
+from gateway.models.usage import MAX_TAG_KEY_LENGTH, SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,

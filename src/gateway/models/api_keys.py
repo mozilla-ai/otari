@@ -111,6 +111,16 @@ class APIKey(Base):
     # as a list rather than a join table because it is read only when a request
     # names a budget; deleting a budget removes it from every list.
     end_user_budget_ids: Mapped[list[str] | None] = mapped_column(JSON)
+    # The longest a key this service key mints may live, in seconds. NULL means
+    # it mints none.
+    max_child_ttl_sec: Mapped[int | None] = mapped_column(default=None)
+    # Set on a key a service key minted for one of its end users (``user_id``).
+    # Deleting the service key deletes it, and authentication refuses it once the
+    # service key is inactive or expired.
+    parent_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"), index=True)
+    # Written on every usage row this key writes, over the request's own tags,
+    # because whoever minted the key set them and the caller holding it did not.
+    tags: Mapped[dict[str, str] | None] = mapped_column(JSON, default=None)
 
     # Set only on a key this deployment mints for itself and has to present
     # again later, which today is the one the hosted Playground forwards with
@@ -127,6 +137,9 @@ class APIKey(Base):
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
     user = relationship("User", back_populates="api_keys")
+    # Joined on every load, so the request path reads the issuing key without a
+    # query of its own. A parent is never a child, so the chain is one level.
+    parent: Mapped["APIKey | None"] = relationship("APIKey", remote_side="APIKey.id", lazy="joined")
     usage_logs = relationship("UsageLog", back_populates="api_key", passive_deletes=True)
 
     def assignable_end_user_budgets(self) -> list[str]:
@@ -154,6 +167,9 @@ class APIKey(Base):
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
             "end_user_budget_ids": self.assignable_end_user_budgets(),
+            "max_child_ttl_sec": self.max_child_ttl_sec,
+            "parent_key_id": self.parent_key_id,
+            "tags": self.tags,
             "config_name": self.config_name,
             "metadata": self.metadata_,
         }

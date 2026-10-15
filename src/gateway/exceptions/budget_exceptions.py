@@ -284,12 +284,60 @@ class EndUserOwnerUnavailableError(TenancyForbiddenError):
         super().__init__("The user this key belongs to is blocked")
 
 
+class EndUserKeysNotAllowedError(TenancyForbiddenError):
+    """A key that may not mint keys for its end users was asked to."""
+
+    def __init__(self) -> None:
+        super().__init__("This service key may not mint keys; an operator sets its max_child_ttl_sec to allow it")
+
+
+class EndUserKeyLifetimeInvalidError(TenancyValidationError):
+    """A minted key was asked to live longer than its service key allows."""
+
+    def __init__(self, max_ttl_sec: int):
+        super().__init__(f"expires_in_sec must be at most {max_ttl_sec}, this service key's max_child_ttl_sec")
+
+
+class EndUserKeyModelsNotAllowedError(TenancyValidationError):
+    """A minted key was asked to reach a model its service key cannot."""
+
+    def __init__(self, reason: str = "allowed_models must be within the service key's own model access") -> None:
+        super().__init__(reason)
+
+
+class EndUserKeyNotFoundError(TenancyNotFoundError):
+    """No key this service key minted has this id."""
+
+    def __init__(self, key_id: str):
+        super().__init__(f"API key with id '{key_id}' not found")
+
+
+class EndUserKeyCeilingError(TenancyValidationError):
+    """A ceiling was asked for on a key a service key minted.
+
+    Such a key is deleted by its service key's deletion and by the expiry sweep,
+    neither of which looks for ceilings, so one placed on it would be stranded. Its
+    end user's budget caps it, and its service key's ceiling pools it.
+    """
+
+    def __init__(self, key_id: str):
+        super().__init__(
+            f"API key '{key_id}' was minted by a service key and takes no ceiling of its own; its end user's "
+            "budget caps it and the service key's ceiling pools it"
+        )
+
+
 __all__ = [
     "BudgetStillReferencedError",
     "EndUserBudgetNotAllowedError",
     "EndUserBudgetNotFoundError",
     "EndUserDefaultNotListedError",
     "EndUserIdInvalidError",
+    "EndUserKeyCeilingError",
+    "EndUserKeyLifetimeInvalidError",
+    "EndUserKeyModelsNotAllowedError",
+    "EndUserKeyNotFoundError",
+    "EndUserKeysNotAllowedError",
     "EndUserNotFoundError",
     "EndUserOwnerUnavailableError",
     "EndUserPathInvalidError",

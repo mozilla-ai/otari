@@ -22,6 +22,7 @@ import any_fetch
 import any_search
 from gateway import features
 from gateway.api.deps import (
+    build_api_key_service,
     build_budget_service,
     build_file_service,
     build_hosted_discovery,
@@ -58,7 +59,7 @@ from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.rate_limit import RateLimiter, RateLimitGrantMiddleware, RateLimitRules, UserRateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
-from gateway.services.api_keys import refuse_unusable_declared_secrets
+from gateway.services.api_keys import refuse_unusable_declared_secrets, run_end_user_key_sweeper
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budgets import run_reservation_sweeper
 from gateway.services.catalog import reset_selector_index
@@ -264,6 +265,15 @@ def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> 
     )
 
 
+def _start_end_user_key_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
+    """Return the sweep of expired keys a service key minted, or None when the interval disables it."""
+    if config.child_key_sweep_interval_sec <= 0:
+        return None
+    return run_end_user_key_sweeper(
+        config.child_key_sweep_interval_sec, config.child_key_retention_sec, build_api_key_service
+    )
+
+
 def _records_traces(config: GatewayConfig, enabled_features: tuple[CoreFeature, ...]) -> bool:
     """Whether this deployment records agent traces: where the traces feature is on and it holds a database.
 
@@ -397,6 +407,8 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
     # Stored responses hold generated content, so they go once their retention passes.
     _LifespanWorker("idempotency sweep", _start_idempotency_sweeper),
+    # A key a service key minted is useless once expired; this deletes it after its retention.
+    _LifespanWorker("end-user key sweep", _start_end_user_key_sweeper),
     # A trace is kept for its retention and no longer.
 )
 

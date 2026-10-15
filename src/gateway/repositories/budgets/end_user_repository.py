@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from typing import Never
 
 from sqlalchemy import ColumnElement, func, select
@@ -65,6 +66,13 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
             .group_by(User.budget_id)
         )
         return {str(budget_id): (int(total), int(blocked)) for budget_id, total, blocked in result.all()}
+
+    async def get_many(self, user_ids: Collection[str]) -> dict[str, User]:
+        """Return the users among ``user_ids`` by id, soft-deleted or not."""
+        if not user_ids:
+            return {}
+        result = await self.db.execute(select(User).where(User.user_id.in_(list(user_ids))))
+        return {user.user_id: user for user in result.scalars()}
 
     async def add(self, user: User) -> bool:
         """Stage a new end user, returning False when a concurrent request created it first.

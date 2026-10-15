@@ -26,7 +26,7 @@ from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
-from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.schemas.budgets import EndUserKeyPublic, EndUserKeyUpdate, EndUserPublic, EndUserPut, EndUserUpdate
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.workspace_scope import organization_default_workspace_id
@@ -37,6 +37,8 @@ _KEY_EXCEEDS_USER_DETAIL = (
     "This key's allowed_models exceeds its user's default; a key can only narrow "
     "the user's model access, not broaden it."
 )
+
+_MAX_CHILD_TTL_NEEDS_SERVICE_KEY = "max_child_ttl_sec is for a service key; set is_service_key as well"
 
 router = APIRouter(
     prefix="/keys",
@@ -149,6 +151,12 @@ class CreateKeyRequest(BaseModel):
         description="Budgets a request may start a new end user on by naming one in Otari-End-User-Budget. "
         "Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.",
     )
+    max_child_ttl_sec: int | None = Field(
+        default=None,
+        ge=1,
+        description="Lets a service key mint keys bound to one of its end users through POST /api/v1/end-user-keys, "
+        "each living at most this many seconds. Null mints none. Requires is_service_key.",
+    )
     workspace_id: uuid.UUID | None = Field(
         default=None,
         description="Workspace this key belongs to, which must be one in the caller's "
@@ -180,6 +188,9 @@ class CreateKeyResponse(BaseModel):
     is_service_key: bool
     end_user_budget_id: str | None
     end_user_budget_ids: list[str]
+    max_child_ttl_sec: int | None = None
+    parent_key_id: str | None = None
+    tags: dict[str, str] | None = None
     metadata: dict[str, Any]
 
 
@@ -206,6 +217,11 @@ class KeyInfo(BaseModel):
     end_user_budget_id: str | None
     # The budgets a request may start an end user on: the key's list, or its default alone.
     end_user_budget_ids: list[str]
+    max_child_ttl_sec: int | None = None
+    # Set on a key a service key minted for one of its end users: the service key's id.
+    parent_key_id: str | None = None
+    # Written on every usage row the key writes, over the request's own tags.
+    tags: dict[str, str] | None = None
     workspace_id: uuid.UUID
     # Set while config.yml declares this key: every start writes the declared
     # secret and settings back, so a change made here lasts until the next one.
@@ -234,6 +250,9 @@ class KeyInfo(BaseModel):
             is_service_key=bool(key.is_service_key),
             end_user_budget_id=key.end_user_budget_id,
             end_user_budget_ids=key.assignable_end_user_budgets(),
+            max_child_ttl_sec=key.max_child_ttl_sec,
+            parent_key_id=key.parent_key_id,
+            tags=dict(key.tags) if key.tags else None,
             config_name=key.config_name,
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
@@ -264,6 +283,9 @@ class UpdateKeyRequest(BaseModel):
     end_user_budget_id: str | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = the default alone.
     end_user_budget_ids: list[str] | None = Field(default=None, max_length=MAX_END_USER_BUDGETS)
+    # Tri-state via model_fields_set: absent = unchanged, null = mints no more keys.
+    # Keys already minted keep their expiry.
+    max_child_ttl_sec: int | None = Field(default=None, ge=1)
     metadata: dict[str, Any] | None = None
 
 
@@ -290,6 +312,8 @@ async def create_key(
     organization's provider credentials and bills there, so minting into another
     organization's workspace would spend its budget on its credentials.
     """
+    if request.max_child_ttl_sec is not None and not request.is_service_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_MAX_CHILD_TTL_NEEDS_SERVICE_KEY)
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
     except ValueError as exc:
@@ -387,6 +411,7 @@ async def create_key(
         is_service_key=request.is_service_key,
         end_user_budget_id=request.end_user_budget_id,
         end_user_budget_ids=end_user_budget_ids,
+        max_child_ttl_sec=request.max_child_ttl_sec,
         metadata_=request.metadata,
     )
 
@@ -412,18 +437,26 @@ async def list_keys(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     workspace_id: Annotated[uuid.UUID | None, Query(description="Only keys in this workspace.")] = None,
+    include_children: Annotated[
+        bool, Query(description="Also list the keys service keys minted for their end users.")
+    ] = False,
 ) -> list[KeyInfo]:
     """List the API keys in the caller's organization.
 
     Requires master key authentication. An unset ``workspace_id`` lists every key
     in that organization; naming a workspace in another one lists nothing rather
     than refusing, so the filter reports no more than the unfiltered read does.
+    The keys a service key minted for its end users are left out unless
+    ``include_children`` is set; ``GET /api/v1/keys/{key_id}/end-user-keys`` lists
+    one service key's.
     """
     statement = (
         select(APIKey)
         .join(Workspace, col(Workspace.id) == col(APIKey.workspace_id))
         .where(col(Workspace.organization_id) == organization_id, NOT_INTERNAL)
     )
+    if not include_children:
+        statement = statement.where(col(APIKey.parent_key_id).is_(None))
     if workspace_id is not None:
         statement = statement.where(col(APIKey.workspace_id) == workspace_id)
     result = await db.execute(statement.offset(skip).limit(limit))
@@ -461,6 +494,7 @@ async def update_key(
     Requires master key authentication.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
+    _refuse_child_changes(key, request)
     # Before the key is changed, for the reason create_key gives. The pair is
     # checked as the key will hold it, so a field left out keeps its stored value.
     fields = request.model_fields_set
@@ -509,6 +543,12 @@ async def update_key(
         key.end_user_budget_id = request.end_user_budget_id
     if "end_user_budget_ids" in request.model_fields_set:
         key.end_user_budget_ids = end_user_budget_ids
+    if "max_child_ttl_sec" in request.model_fields_set:
+        key.max_child_ttl_sec = request.max_child_ttl_sec
+    if not key.is_service_key:
+        if request.max_child_ttl_sec is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_MAX_CHILD_TTL_NEEDS_SERVICE_KEY)
+        key.max_child_ttl_sec = None
     if request.metadata is not None:
         key.metadata_ = request.metadata
 
@@ -520,6 +560,27 @@ async def update_key(
     await db.refresh(key)
 
     return KeyInfo.from_model(key)
+
+
+def _refuse_child_changes(key: APIKey, request: UpdateKeyRequest) -> None:
+    """Refuse a change that would let a key a service key minted outgrow it.
+
+    Such a key never names or mints for another user, and it always expires.
+    """
+    if key.parent_key_id is None:
+        return
+    fields = request.model_fields_set
+    widened = (
+        bool(request.is_service_key)
+        or request.max_child_ttl_sec is not None
+        or bool({"end_user_budget_id", "end_user_budget_ids"} & fields)
+        or ("expires_at" in fields and request.expires_at is None)
+    )
+    if widened:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A key a service key minted cannot be made a service key, mint keys or lose its expiry",
+        )
 
 
 @router.post("/{key_id}/rotate")
@@ -732,6 +793,48 @@ async def update_end_user(
     return await budgets.update_end_user(
         api_key=key, external_id=external_id, blocked=request.blocked, budget_id=request.budget_id
     )
+
+
+@router.get("/{key_id}/end-user-keys")
+async def list_end_user_keys(
+    key_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+    external_id: Annotated[
+        str | None, Query(min_length=1, description="Only the keys of the end user the service names with this id.")
+    ] = None,
+    include_inactive: Annotated[
+        bool, Query(description="Also list keys that were revoked or have expired and not been swept yet.")
+    ] = False,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> list[EndUserKeyPublic]:
+    """List the keys a service key minted for its end users, oldest first.
+
+    Only keys that still work are listed unless ``include_inactive`` is set.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await budgets.list_end_user_keys(
+        api_key=key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit
+    )
+
+
+@router.patch("/{key_id}/end-user-keys/{child_key_id}")
+async def revoke_end_user_key(
+    key_id: str,
+    child_key_id: str,
+    request: EndUserKeyUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+) -> EndUserKeyPublic:
+    """Revoke a key a service key minted for one of its end users.
+
+    ``is_active: false`` is the only change. A key the service key did not mint answers 404.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await budgets.revoke_end_user_key(api_key=key, key_id=child_key_id)
 
 
 async def _put_end_user(

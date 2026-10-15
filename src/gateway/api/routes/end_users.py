@@ -5,6 +5,9 @@ bills, by the ids it names them by, so it holds neither the master key nor its
 key's id. The operator's routes under ``/keys/{key_id}/end-users`` still reach
 any key's end users.
 
+A service key with ``max_child_ttl_sec`` also mints keys bound to one of its
+end users under ``/end-user-keys``, for jobs it does not trust with its own.
+
 An end user is named in the path, ``/end-users/{external_id}``, or by the
 ``external_id`` query parameter on ``/end-users`` itself. An id may contain
 '/', which proxies and HTTP clients can merge or collapse in a path, so the
@@ -17,10 +20,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 
-from gateway.api.deps import BudgetServiceDep, ServiceKey, verify_service_key
+from gateway.api.deps import ApiKeyFormatPortDep, BudgetServiceDep, ServiceKey, get_config, verify_service_key
 from gateway.api.routes.users import TOTAL_COUNT_HEADER
+from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
-from gateway.schemas.budgets import EndUserBudgetPublic, EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.schemas.budgets import (
+    EndUserBudgetPublic,
+    EndUserKeyCreate,
+    EndUserKeyCreated,
+    EndUserKeyPublic,
+    EndUserKeyUpdate,
+    EndUserPublic,
+    EndUserPut,
+    EndUserUpdate,
+)
 from gateway.services.budgets import BudgetService, check_path_external_id
 
 
@@ -33,6 +46,8 @@ async def _require_available_owner(api_key: ServiceKey, budgets: BudgetServiceDe
 _GATES = [Depends(verify_service_key), Depends(_require_available_owner)]
 router = APIRouter(prefix="/end-users", tags=["end-users"], dependencies=_GATES)
 budgets_router = APIRouter(prefix="/end-user-budgets", tags=["end-users"], dependencies=_GATES)
+# A sibling of ``/end-users`` rather than under it, where ``/end-users/{external_id:path}`` would match it.
+keys_router = APIRouter(prefix="/end-user-keys", tags=["end-users"], dependencies=_GATES)
 
 ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]
 ExternalIdParam = Annotated[
@@ -169,6 +184,57 @@ async def list_end_user_budgets(api_key: ServiceKey, budgets: BudgetServiceDep) 
     ones not.
     """
     return await budgets.list_end_user_budgets(api_key=api_key)
+
+
+@keys_router.post("", status_code=status.HTTP_201_CREATED)
+async def mint_end_user_key(
+    request: EndUserKeyCreate,
+    api_key: ServiceKey,
+    budgets: BudgetServiceDep,
+    key_format: ApiKeyFormatPortDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> EndUserKeyCreated:
+    """Mint a key bound to one end user of the calling service key, for a job the service does not trust.
+
+    Requires a service key with ``max_child_ttl_sec``; any other key is refused with 403. The end user is created on
+    first use, on ``budget_id`` (which must be on the key's ``end_user_budget_ids``, or 403 with
+    ``end_user_budget_not_allowed``) or else the key's default. A request on the minted key bills that end user
+    whatever its body names, is capped by the end user's budget and by the service key's own ceiling, and is refused
+    once the service key is inactive or expired. The secret is returned this once.
+    """
+    return await budgets.mint_end_user_key(api_key=api_key, request=request, key_format=key_format, config=config)
+
+
+@keys_router.get("")
+async def list_end_user_keys(
+    api_key: ServiceKey,
+    budgets: BudgetServiceDep,
+    external_id: ExternalIdFilter = None,
+    include_inactive: Annotated[
+        bool, Query(description="Also list keys that were revoked or have expired and not been swept yet.")
+    ] = False,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> list[EndUserKeyPublic]:
+    """List the keys the calling service key minted, oldest first.
+
+    Requires a service key. Only keys that still work are listed unless ``include_inactive`` is set.
+    """
+    return await budgets.list_end_user_keys(
+        api_key=api_key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit
+    )
+
+
+@keys_router.patch("/{key_id}")
+async def revoke_end_user_key(
+    key_id: str, request: EndUserKeyUpdate, api_key: ServiceKey, budgets: BudgetServiceDep
+) -> EndUserKeyPublic:
+    """Revoke a key the calling service key minted.
+
+    Requires a service key. ``is_active: false`` is the only change: a revoked key is never reactivated, and the end
+    user, with what it spent, stays. A key this service key did not mint answers 404.
+    """
+    return await budgets.revoke_end_user_key(api_key=api_key, key_id=key_id)
 
 
 async def _put(
