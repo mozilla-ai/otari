@@ -121,6 +121,39 @@ def test_no_response_body_anywhere_in_the_walk_carries_key_material(
         assert "encrypted_api_key" not in body, call
 
 
+def test_no_error_body_carries_the_key_material_the_request_sent(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A refusal is typed, so it names what was wrong and never echoes what was sent."""
+    _create(client, master_key_header, api_base="https://proxy.example.com/v1")
+    sent = "sk-live-refused-5678"
+    secret = "shh-refused"
+    refusals = [
+        # Already configured: 409.
+        ("POST", PATH, {"provider": "openai", "api_key": sent, "client_args": {"aws_secret_access_key": secret}}),
+        # No such implementation: 400.
+        ("POST", PATH, {"provider": "nope", "api_key": sent, "client_args": {"aws_secret_access_key": secret}}),
+        # Too short a body to be a provider: 422, whose detail echoes input by default.
+        ("POST", PATH, {"api_key": sent, "client_args": {"aws_secret_access_key": secret}}),
+        # No such provider: 404.
+        ("PATCH", f"{PATH}/anthropic", {"api_key": sent}),
+        # Moved to another origin without the key: 400.
+        ("PATCH", f"{PATH}/openai", {"api_base": f"https://user:{secret}@elsewhere.example.com/v1"}),
+        # The mask, edited: 400.
+        ("PATCH", f"{PATH}/openai", {"api_base": "https://user:***@proxy.example.com/v2", "api_key": sent}),
+        # Half a price: 422.
+        ("POST", f"{PATH}/openai/models", {"model": sent, "input_price_per_million": 1}),
+    ]
+
+    for method, path, body in refusals:
+        response = client.request(method, path, json=body, headers=master_key_header)
+
+        assert 400 <= response.status_code < 500, (method, path, response.text)
+        assert sent not in response.text, (method, path, response.text)
+        assert secret not in response.text, (method, path, response.text)
+        assert KEY not in response.text, (method, path, response.text)
+
+
 def test_a_credential_in_the_base_url_is_masked_and_an_echo_keeps_it(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
