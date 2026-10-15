@@ -221,7 +221,11 @@ describe("SessionsPage", () => {
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
 
-    expect(await within(peek).findByText("86.9% cached")).toBeInTheDocument()
+    await userEvent.hover(
+      await within(peek).findByRole("button", { name: "48,212 tokens" }),
+    )
+    expect(await screen.findByText("Cached")).toBeInTheDocument()
+    expect(screen.getByText("86.9%")).toBeInTheDocument()
     await userEvent.click(
       within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
     )

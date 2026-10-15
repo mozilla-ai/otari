@@ -143,15 +143,17 @@ function ResizeHandle({
   )
 }
 
-function Breakdown({ rows }: { rows: [string, string][] }) {
+function Breakdown({ rows }: { rows: [string, string | undefined][] }) {
   return (
     <dl className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 text-mono-caption">
-      {rows.map(([key, value]) => (
-        <div key={key} className="contents">
-          <dt>{key}</dt>
-          <dd className="text-right">{value}</dd>
-        </div>
-      ))}
+      {rows
+        .filter(([, value]) => value)
+        .map(([key, value]) => (
+          <div key={key} className="contents">
+            <dt>{key}</dt>
+            <dd className="text-right">{value}</dd>
+          </div>
+        ))}
     </dl>
   )
 }
@@ -599,6 +601,12 @@ export function TracePeek({
                 <Breakdown
                   rows={[
                     ["Input", formatNumber(shown.promptTokens)],
+                    [
+                      "Cached",
+                      shown.promptTokens && shown.cachedTokens
+                        ? formatPct(shown.cachedTokens / shown.promptTokens)
+                        : undefined,
+                    ],
                     ["Output", formatNumber(shown.completionTokens)],
                   ]}
                 />
@@ -610,11 +618,6 @@ export function TracePeek({
                 </button>
               )}
             </Tooltip>
-          ) : null}
-          {shown.cachedTokens > 0 && shown.promptTokens > 0 ? (
-            <span>
-              {formatPct(shown.cachedTokens / shown.promptTokens)} cached
-            </span>
           ) : null}
           {model ? <span>{model}</span> : null}
         </div>
