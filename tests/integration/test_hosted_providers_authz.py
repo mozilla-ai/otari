@@ -114,14 +114,19 @@ def _hosted_routes(client: TestClient) -> list[tuple[str, str]]:
 
 
 def _example_body(client: TestClient, method: str, template: str) -> dict[str, Any] | None:
-    """The request example the route's body schema declares, so a refused write is a well-formed one."""
+    """The request example the route's body schema declares, so a refused write is a well-formed one.
+
+    A body with no example is sent empty: still refused at the gate, and a 422
+    in the operator walk, which is the prompt to give it one.
+    """
     for route in iter_route_contexts(client.app.routes):  # type: ignore[attr-defined]
         if route.path == template and method in (route.methods or ()):
             body_field = route.original_route.body_field  # type: ignore[attr-defined]
             if body_field is None:
                 return None
             model = body_field.field_info.annotation
-            example: dict[str, Any] = dict(model.model_config["json_schema_extra"]["example"])
+            extra = model.model_config.get("json_schema_extra") or {}
+            example: dict[str, Any] = dict(extra.get("example", {}))
             return example
     raise AssertionError(f"{method} {template} is not mounted")
 
