@@ -42,7 +42,7 @@ from gateway.schemas.providers import (
 )
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.pricing import DeploymentPricingService
-from gateway.services.providers import HostedProviderService
+from gateway.services.providers import HostedProviderService, HostedSources
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client
@@ -84,10 +84,12 @@ def _configured(**entry: Any) -> GatewayConfig:
 
 def _service(db: AsyncSession, config: GatewayConfig) -> HostedProviderService:
     uow = UnitOfWork(db)
+    providers = HostedProviderRepository(uow)
     return HostedProviderService(
         uow,
         config=config,
-        providers=HostedProviderRepository(uow),
+        providers=providers,
+        sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
         pricing=DeploymentPricingService(

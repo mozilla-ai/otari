@@ -14,6 +14,7 @@ from gateway.services.providers._hosted_provider_service import (
     OrganizationExists,
     ResolvedHostedProvider,
 )
+from gateway.services.providers._hosted_sources import HostedSources
 from gateway.services.providers._missing_credential import missing_provider_credential, unpriced_model_refusal
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
 from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client
@@ -35,6 +36,7 @@ from gateway.services.providers._provider_endpoint_service import ProviderEndpoi
 
 __all__ = [
     "HostedProviderService",
+    "HostedSources",
     "LiveByoPairs",
     "OrganizationExists",
     "OrgProviderModelService",

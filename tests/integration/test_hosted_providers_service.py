@@ -54,7 +54,7 @@ from gateway.schemas.providers import (
 from gateway.services.model_discovery_service import ProviderDiscovery, get_model_cache
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import configure_default_pricing
-from gateway.services.providers import HostedProviderService
+from gateway.services.providers import HostedProviderService, HostedSources
 from gateway.services.providers._hosted_catalog import KEEP_OWNED_ENDPOINT
 from gateway.services.secret_box import generate_secret_key
 
@@ -76,10 +76,13 @@ def _secret_key_and_default_pricing(monkeypatch: pytest.MonkeyPatch) -> Iterator
 
 def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedProviderService:
     uow = UnitOfWork(db)
+    config = config or GatewayConfig()
+    providers = HostedProviderRepository(uow)
     return HostedProviderService(
         uow,
-        config=config or GatewayConfig(),
-        providers=HostedProviderRepository(uow),
+        config=config,
+        providers=providers,
+        sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
         pricing=DeploymentPricingService(

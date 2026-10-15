@@ -109,6 +109,7 @@ class HostedProviderService:
         *,
         config: GatewayConfig,
         providers: HostedProviderRepository,
+        sources: HostedSources,
         models: HostedProviderModelRepository,
         endpoints: ProviderEndpointRepository,
         pricing: DeploymentPricingService,
@@ -117,7 +118,8 @@ class HostedProviderService:
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
 
-        Rates are read and written through ``pricing``, the pricing domain's
+        ``sources`` is the merged view of the stored rows and the configured
+        entries, read over ``providers``. Rates are read and written through ``pricing``, the pricing domain's
         service on the same unit of work. ``live_byo_pairs`` answers which
         organizations hold a live key for each of the given providers, and
         ``organization_exists`` whether the deployment holds an organization a
@@ -129,7 +131,7 @@ class HostedProviderService:
         self.providers = providers
         self.models = models
         self.organization_exists = organization_exists
-        self.sources = HostedSources(config, providers)
+        self.sources = sources
         self.offers = HostedOffers(models, pricing)
         self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models)
         self.sweep = HostedCatalogSweep(

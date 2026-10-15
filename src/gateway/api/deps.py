@@ -88,6 +88,7 @@ from gateway.services.playground_service import ForwardedToolOffer, LocalToolOff
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.providers import (
     HostedProviderService,
+    HostedSources,
     OrgProviderModelService,
     ProviderEndpointService,
     refresh_provider_endpoint_cache,
@@ -1562,10 +1563,12 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
     pricing domain's own service on the same unit of work, so a rate written
     while offering a model lands in the same transaction as the offer.
     """
+    providers = HostedProviderRepository(uow)
     return HostedProviderService(
         uow,
         config=config,
-        providers=HostedProviderRepository(uow),
+        providers=providers,
+        sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
         pricing=DeploymentPricingService(
