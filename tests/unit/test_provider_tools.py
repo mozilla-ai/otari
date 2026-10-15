@@ -51,3 +51,12 @@ def test_gemini_runs_every_tool_in_its_own_format() -> None:
 
     assert answer.native == frozenset(tool.name for tool in BUILTIN_TOOLS)
     assert answer.claimed == frozenset()
+
+
+def test_gemini_tools_go_to_otari_where_the_deployment_always_runs_them() -> None:
+    config = GatewayConfig(code_execution_executor="otari", sandbox_url="http://sandbox:8080")
+
+    answer = provider_tools(config, "gemini")
+
+    assert _CODE in answer.claimed
+    assert _CODE not in answer.native

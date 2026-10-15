@@ -53,6 +53,29 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).queryByText(/No backup/)).not.toBeInTheDocument()
   })
 
+  it("keeps the short label for a mixed provider and details both on hover", async () => {
+    const gpt: AutomaticFallback = {
+      ...SONNET,
+      id: "openai/gpt-x",
+      name: "GPT X",
+      offerings: [
+        offering(
+          "openai:gpt-x",
+          ["web_search", "code_execution"],
+          ["web_fetch"],
+        ),
+        offering("bedrock:openai.gpt-x", [], ["web_search"]),
+      ],
+    }
+    await renderWithRouter(<AutomaticFallbacks fallbacks={[gpt]} />)
+
+    const row = await rowOf("GPT X")
+    expect(within(row).getByText("Own tools")).toHaveAttribute(
+      "title",
+      "Own: search, code · Otari's: fetch",
+    )
+  })
+
   it("names each provider once, and Bedrock without Amazon", async () => {
     const kimi: AutomaticFallback = {
       ...SONNET,

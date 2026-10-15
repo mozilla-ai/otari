@@ -21,6 +21,30 @@ function Warning({ children }: { children: string }) {
   )
 }
 
+const TOOL_NAMES: Record<string, string> = {
+  web_search: "search",
+  web_fetch: "fetch",
+  code_execution: "code",
+}
+
+/**
+ * Every tool and who runs it, for the caption's hover. The caption names the
+ * provider's own where it has any, so a mixed provider (OpenAI runs its search
+ * and code, Otari its fetch) keeps the short label and the detail lives here.
+ */
+function toolsDetail(offering: FallbackOffering): string {
+  const names = (tools: string[]) =>
+    tools.map((tool) => TOOL_NAMES[tool] ?? tool).join(", ")
+  return [
+    offering.own_tools.length > 0 ? `Own: ${names(offering.own_tools)}` : "",
+    offering.otari_tools.length > 0
+      ? `Otari's: ${names(offering.otari_tools)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 /** Who runs the built-in tools on one offering, or nothing where nobody does. */
 function toolsCaption(offering: FallbackOffering): string | undefined {
   if (offering.own_tools.length > 0) return "Own tools"
@@ -69,7 +93,12 @@ function Chain({ offerings }: { offerings: FallbackOffering[] }) {
                 {providerName(offering.provider)}
               </span>
               {caption ? (
-                <span className="text-caption text-subtle">{caption}</span>
+                <span
+                  className="text-caption text-subtle"
+                  title={toolsDetail(offering)}
+                >
+                  {caption}
+                </span>
               ) : null}
             </span>
           </Fragment>

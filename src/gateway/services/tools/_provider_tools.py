@@ -55,7 +55,13 @@ def provider_tools(config: GatewayConfig, provider: str) -> CandidateTools:
     native, so Otari runs it wherever its preference and a backend allow.
     """
     if provider in _OWN_TOOL_FORMATS:
-        return CandidateTools(native=frozenset(tool.name for tool in BUILTIN_TOOLS))
+        # Native everywhere, so only a deployment that always runs a tool here claims it.
+        claimed = frozenset(
+            tool.name
+            for tool in BUILTIN_TOOLS
+            if _deployment_preference(config, tool) is CodeExecutor.OTARI and tool.configured(config)
+        )
+        return CandidateTools(claimed=claimed, native=frozenset(tool.name for tool in BUILTIN_TOOLS) - claimed)
     answer = CandidateTools()
     for tool in BUILTIN_TOOLS:
         dialect, entry = next(
