@@ -45,7 +45,13 @@ ROWS = Counter(
 
 
 class LogWriter(Protocol):
-    async def put(self, log: UsageLog) -> None: ...
+    async def put(self, log: UsageLog) -> bool:
+        """Hand the writer a row, returning whether it accepted it.
+
+        Accepted means committed for an inline writer and queued for a batching one,
+        which can still drop a queued row when a flush fails.
+        """
+        ...
 
     async def start(self) -> None: ...
 
@@ -55,17 +61,19 @@ class LogWriter(Protocol):
 class SingleLogWriter:
     """Write each usage log inline, one transaction per event."""
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         async with create_log_session() as db:
             try:
                 # The writer only logs, because the reservation reconcile path owns spend.
                 db.add(log)
                 await db.commit()
                 ROWS.labels(writer="single", result="written").inc()
+                return True
             except DATABASE_ERRORS as e:  # pragma: no cover - defensive logging
                 await db.rollback()
                 logger.error("SingleLogWriter failed: %s", e)
                 ROWS.labels(writer="single", result="dropped").inc()
+                return False
 
     async def start(self) -> None:
         pass
@@ -107,13 +115,16 @@ class BatchLogWriter:
         self._taken = 0
         self._task: asyncio.Task[None] | None = None
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         try:
             self._queue.put_nowait(log)
         except asyncio.QueueFull:
             logger.error("BatchLogWriter queue is full; dropping a usage row")
             ROWS.labels(writer="batch", result="dropped").inc()
-        QUEUE_DEPTH.set(self._queue.qsize())
+            return False
+        finally:
+            QUEUE_DEPTH.set(self._queue.qsize())
+        return True
 
     async def start(self) -> None:
         self._stopping.clear()
@@ -236,17 +247,17 @@ class BatchLogWriter:
             self._taken -= len(chunk)
 
 
-def create_log_writer(strategy: str) -> LogWriter:
-    if strategy == "batch":
-        return BatchLogWriter()
-    return SingleLogWriter()
+def create_log_writer(strategy: str, signal: UsageSignalPort) -> LogWriter:
+    """Build the deployment's usage log writer, telling ``signal`` about each row it accepts."""
+    inner: LogWriter = BatchLogWriter() if strategy == "batch" else SingleLogWriter()
+    return SignalingLogWriter(inner, signal)
 
 
 class NoopLogWriter:
     """LogWriter implementation that discards all writes (used when DB is unavailable)."""
 
-    async def put(self, log: UsageLog) -> None:  # noqa: D401,B027 - trivial no-op
-        return None
+    async def put(self, log: UsageLog) -> bool:  # noqa: D401,B027 - trivial no-op
+        return False
 
     async def start(self) -> None:  # noqa: D401,B027
         return None
@@ -268,7 +279,7 @@ class TracingLogWriter:
         self._inner = inner
         self._traces = traces
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         trace = self._traces.get(log.request_group_id)
         if trace is not None:
             # The row is the billing record: tracing it must never be why it is not written.
@@ -276,7 +287,7 @@ class TracingLogWriter:
                 trace.record_llm_call(_llm_call(log))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Usage row not traced (%s)", type(exc).__name__)
-        await self._inner.put(log)
+        return await self._inner.put(log)
 
     async def start(self) -> None:
         await self._inner.start()
@@ -304,19 +315,19 @@ def _llm_call(log: UsageLog) -> LlmCall:
 
 
 class SignalingLogWriter:
-    """A usage log writer that also tells ``UsageSignalPort`` about each row it was handed.
+    """A usage log writer that also tells ``UsageSignalPort`` about each row the wrapped writer accepts.
 
-    Wraps whichever writer the deployment runs and changes nothing about how a
-    row is written: the row goes to the wrapped writer first, and only then is
-    the port told, so a port that fails or is slow never decides whether the
-    row is kept.
+    Changes nothing about how a row is written: the row goes to the wrapped
+    writer first, and the port is told only once it was accepted, so a port that
+    fails or is slow never decides whether the row is kept, and a dropped row is
+    never reported.
     """
 
     def __init__(self, inner: LogWriter, signal: UsageSignalPort) -> None:
         self._inner = inner
         self._signal = signal
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         # The row is the billing record and the port is an overlay's: neither
         # building the facts nor whatever the adapter raises may reach settlement.
         # Built before the row is handed over, because a batch writer flushes it
@@ -326,13 +337,14 @@ class SignalingLogWriter:
             usage = _recorded_usage(log)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Usage row not signaled (%s)", type(exc).__name__)
-        await self._inner.put(log)
-        if usage is None:
-            return
+        accepted = await self._inner.put(log)
+        if not accepted or usage is None:
+            return accepted
         try:
             await self._signal.usage_recorded(usage)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+        return accepted
 
     async def start(self) -> None:
         await self._inner.start()

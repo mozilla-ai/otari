@@ -846,8 +846,9 @@ class _FakeLogWriter:
     def __init__(self) -> None:
         self.put_rows: list[Any] = []
 
-    async def put(self, row: Any) -> None:
+    async def put(self, row: Any) -> bool:
         self.put_rows.append(row)
+        return True
 
 
 @pytest.mark.asyncio

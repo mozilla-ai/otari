@@ -568,8 +568,9 @@ async def test_log_usage_finds_pricing_with_legacy_slash_format(async_db: AsyncS
         def __init__(self) -> None:
             self.logs: list[UsageLog] = []
 
-        async def put(self, log: UsageLog) -> None:
+        async def put(self, log: UsageLog) -> bool:
             self.logs.append(log)
+            return True
 
         async def start(self) -> None:
             pass
@@ -612,8 +613,9 @@ async def test_log_usage_finds_pricing_with_colon_format(async_db: AsyncSession)
         def __init__(self) -> None:
             self.logs: list[UsageLog] = []
 
-        async def put(self, log: UsageLog) -> None:
+        async def put(self, log: UsageLog) -> bool:
             self.logs.append(log)
+            return True
 
         async def start(self) -> None:
             pass

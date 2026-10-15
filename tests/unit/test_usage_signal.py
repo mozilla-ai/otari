@@ -24,7 +24,13 @@ from gateway.container import PortShapeError, build_container
 from gateway.log_config import logger as gateway_logger
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
-from gateway.services.log_writer import SignalingLogWriter, _recorded_usage
+from gateway.services.log_writer import (
+    BatchLogWriter,
+    SignalingLogWriter,
+    SingleLogWriter,
+    _recorded_usage,
+    create_log_writer,
+)
 
 NO_SESSION = cast(AsyncSession, None)
 _WORKSPACE = uuid.uuid4()
@@ -142,7 +148,12 @@ def test_integration_traffic_is_served_here_and_not_the_playground(
 async def test_the_row_is_written_then_the_port_is_told_once() -> None:
     order: list[str] = []
     inner = AsyncMock()
-    inner.put.side_effect = lambda log: order.append("put")
+
+    async def _put(log: UsageLog) -> bool:
+        order.append("put")
+        return True
+
+    inner.put.side_effect = _put
     signal = AsyncMock()
     signal.usage_recorded.side_effect = lambda usage: order.append("signal")
     row = _usage_row()
@@ -186,6 +197,33 @@ async def test_a_row_the_facts_cannot_be_built_from_is_still_written(
     assert recorder.recorded == []
     assert "Usage row not signaled (ValueError)" in gateway_logs.text
     assert _SECRET_ERROR not in gateway_logs.text
+
+
+@pytest.mark.asyncio
+async def test_a_row_the_writer_dropped_is_not_reported() -> None:
+    inner = AsyncMock()
+    inner.put.return_value = False
+    recorder = _Recorder()
+
+    accepted = await SignalingLogWriter(inner, recorder).put(_usage_row())
+
+    assert accepted is False
+    assert recorder.recorded == []
+
+
+@pytest.mark.asyncio
+async def test_the_factory_wraps_either_strategy_in_the_signal() -> None:
+    for strategy, inner_type in (("single", SingleLogWriter), ("batch", BatchLogWriter)):
+        writer = create_log_writer(strategy, NullUsageSignalAdapter())
+        assert isinstance(writer, SignalingLogWriter)
+        assert isinstance(writer._inner, inner_type)
+
+
+@pytest.mark.asyncio
+async def test_a_full_batch_queue_refuses_the_row() -> None:
+    writer = BatchLogWriter(max_queue=1)
+    assert await writer.put(_usage_row()) is True
+    assert await writer.put(_usage_row()) is False
 
 
 @pytest.mark.asyncio

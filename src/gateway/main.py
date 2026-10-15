@@ -67,7 +67,6 @@ from gateway.services.inference import close_decision_client, run_idempotency_sw
 from gateway.services.log_writer import (
     LogWriter,
     NoopLogWriter,
-    SignalingLogWriter,
     TracingLogWriter,
     create_log_writer,
 )
@@ -807,9 +806,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await load_provider_endpoints_at_startup()
             container: Container = app.state.container
             # Only here: a hybrid gateway writes no usage rows, so it has none to report.
-            log_writer = SignalingLogWriter(
-                create_log_writer(config.log_writer_strategy), container.resolve(UsageSignalPort, None)
-            )
+            log_writer = create_log_writer(config.log_writer_strategy, container.resolve(UsageSignalPort, None))
             # The retention sweep below resolves this same port, so both it and
             # the request path use whatever store this build bound.
             app.state.file_store = _resolve_file_store(config, container)

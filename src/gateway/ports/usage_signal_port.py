@@ -13,9 +13,10 @@ of the request it describes, so a slow adapter is a slow request and a vendor
 outage must never reach the caller. That is why it returns nothing: there is
 nothing for a caller to act on, only something to fire and forget.
 
-It is called once per usage row, after the row was handed to the usage log
-writer: with the default ``single`` strategy the row is committed by then, and
-with ``batch`` it is only queued, so it may still be dropped. A request that
+It is called once per usage row the usage log writer accepted, after it did:
+with the default ``single`` strategy that means committed, and with ``batch``
+only queued, so a row may still be dropped when its flush fails. A row the
+writer refused is not reported. A request that
 failed over writes one row per attempt and is therefore reported once per
 attempt; ``request_group_id`` ties them together. A hybrid gateway writes no
 usage rows here, so nothing is reported on one; its usage goes to its control
@@ -75,7 +76,7 @@ class UsageSignalPort(Protocol):
     """What a build does when a request settles a usage row, if anything."""
 
     async def usage_recorded(self, usage: RecordedUsage) -> None:
-        """Notify that a usage row was handed to the writer.
+        """Notify that the usage log writer accepted a row.
 
         Must return promptly and never raise; see the module docstring.
         """
