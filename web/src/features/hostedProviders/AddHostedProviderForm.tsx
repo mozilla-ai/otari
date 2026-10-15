@@ -1,6 +1,7 @@
 import { useState } from "react"
 
 import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
@@ -28,7 +29,9 @@ import { useCreateHostedProvider } from "@/shared/api/hostedProviders"
 //
 // On submit the deployment asks the provider what it serves on the new key and
 // offers all of it, so the create can take a few seconds and arrives with its
-// models already listed.
+// models already listed. A provider config.yml already defines can be added,
+// and the stored one then serves instead, which the form says before it is
+// saved.
 
 interface ProviderDraft {
   provider: string
@@ -49,9 +52,12 @@ const EMPTY_DRAFT: ProviderDraft = {
 export function AddHostedProviderForm({
   isOpen,
   onClose,
+  configuredProviders = [],
 }: {
   isOpen: boolean
   onClose: () => void
+  /** The providers config.yml defines, which a stored one would override. */
+  configuredProviders?: string[]
 }) {
   const create = useCreateHostedProvider()
   const [draft, setDraft] = useState<ProviderDraft>(EMPTY_DRAFT)
@@ -115,6 +121,14 @@ export function AddHostedProviderForm({
         excludeIds={BYO_UNSUPPORTED_PROVIDERS}
         description="The implementation that serves it, so it has to be one this build can dispatch to."
       />
+      {configuredProviders.includes(draft.provider.trim()) ? (
+        <InfoBanner tone="warning">
+          <p role="status">
+            {draft.provider} is already defined in config.yml. The provider
+            added here overrides it until it is removed.
+          </p>
+        </InfoBanner>
+      ) : null}
       <SecretField
         label={spec?.apiKeyLabel ?? "API key"}
         value={draft.apiKey}

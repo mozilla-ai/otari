@@ -179,6 +179,12 @@ export function HostedProviderModelsPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-col">
           <h3 className="text-title">Models on {provider.provider}</h3>
+          {provider.source === "config" ? (
+            <p className="text-caption">
+              This provider is defined in config.yml: change its key, endpoint
+              or switch there. Its models are managed here.
+            </p>
+          ) : null}
           <p className="text-caption">
             Priced in USD per million tokens unless a rate says it is per
             request or per image. A model offered without a price starts

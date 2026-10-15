@@ -26,6 +26,8 @@ function hostedProvider(
   return {
     id: "11111111-1111-4111-8111-111111111111",
     provider: "openai",
+    source: "database",
+    shadows_config: false,
     api_key_last4: "abcd",
     api_base: null,
     client_args: null,
@@ -414,6 +416,88 @@ describe("HostedProvidersPage", () => {
         ),
       ).toHaveLength(1),
     )
+  })
+
+  it("lists a provider defined in config.yml read-only, with its models still managed here", async () => {
+    const requests = mockApi({
+      providers: [
+        hostedProvider({
+          id: null,
+          provider: "anthropic",
+          source: "config",
+          created_at: null,
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    expect(await within(table).findByText("config.yml")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Edit anthropic" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Remove anthropic" }),
+    ).toBeNull()
+    expect(
+      screen.getByRole("switch", { name: "Serve traffic on anthropic" }),
+    ).toBeDisabled()
+
+    await user.click(
+      screen.getByRole("button", { name: "Models on anthropic" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on anthropic",
+    })
+    expect(
+      within(panel).getByText(/defined in config\.yml/),
+    ).toBeInTheDocument()
+    await user.click(
+      await within(panel).findByRole("switch", { name: "Serve gpt-4o" }),
+    )
+    await waitFor(() =>
+      expect(
+        hostedRequests(requests, "PATCH").filter((request) =>
+          request.url.includes("/hosted-providers/anthropic/models/m1"),
+        ),
+      ).toHaveLength(1),
+    )
+  })
+
+  it("marks a stored provider that overrides config.yml, and says what removing it restores", async () => {
+    mockApi({ providers: [hostedProvider({ shadows_config: true })] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    expect(await screen.findByText("Overrides config.yml")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Remove openai" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText(/defined in config\.yml serves again/),
+    ).toBeInTheDocument()
+  })
+
+  it("warns that a provider config.yml already defines would be overridden", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({ id: null, provider: "anthropic", source: "config" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(
+      within(dialog).queryByText(/already defined in config\.yml/),
+    ).toBeNull()
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+
+    expect(
+      within(dialog).getByText(/already defined in config\.yml/),
+    ).toBeInTheDocument()
   })
 
   it("names what a sweep would remove before it removes anything", async () => {
