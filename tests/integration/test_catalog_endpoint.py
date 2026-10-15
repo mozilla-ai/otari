@@ -21,6 +21,7 @@ from gateway.models.pricing import OrganizationModelPricing
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services import model_catalog_service as mcs
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.merged_catalog_service import NO_ORGANIZATION
 
 from .conftest import build_test_client
 from .hosted_port_helpers import HostedModelProvider, bind_model_provider
@@ -562,7 +563,7 @@ def test_a_visitor_in_hosted_mode_reads_the_hosted_models_too(
 ) -> None:
     """The models the deployment pays for are its own offerings, so a visitor sees them.
 
-    What the port advertises with no organization, and no more: a priced model
+    What the port advertises to every organization, and no more: a priced model
     the port does not advertise stays off the list, as it does for a tenant.
     """
     model_provider = HostedModelProvider("groq", models={"groq": ["glm-5.3"]})
@@ -581,8 +582,9 @@ def test_a_visitor_in_hosted_mode_reads_the_hosted_models_too(
     assert offering["credential"] == "hosted"
     assert offering["price_source"] == "deployment"
     assert offering["usage_30d"] is None
-    # Asked for the deployment-wide answer, never for somebody's organization.
-    assert set(model_provider.asked_for) == {None}
+    # Asked for what an organization no restriction names reaches, never for
+    # somebody's organization and never for the deployment's own view.
+    assert set(model_provider.asked_for) == {NO_ORGANIZATION}
 
 
 @pytest.fixture

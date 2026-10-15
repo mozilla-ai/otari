@@ -432,6 +432,12 @@ class CatalogScope:
     """
 
 
+# An organization no hosted-provider restriction names, so the port's answer for
+# it is what every organization reaches. ``None`` is the deployment's own view,
+# which sees restricted providers too.
+NO_ORGANIZATION = uuid.UUID(int=0)
+
+
 def served_on_deployment_key(hosted_models: HostedModels, model_key: str) -> bool:
     """Whether ``model_key`` names a model the caller reaches on a deployment-owned key.
 
@@ -507,17 +513,18 @@ async def catalog_scope(
     Any other session gets what its organization can reach,
     and the workspace-scoped rows only for workspaces it may see.
     A visitor to the public catalog gets the configured instances and what the
-    hosted port advertises deployment-wide.
+    hosted port advertises to every organization.
     ``include_offered=False`` leaves out the organization's offered models, for
     the deployment-wide view the selector index is built from, which reads every
     organization's offerings separately.
     """
     # A visitor, while the catalog is public: what the deployment itself
-    # serves, its configured instances and the hosted port's deployment-wide
-    # roster, and nothing that belongs to a tenant. Not a member of anything,
-    # so no BYO key, no workspace's aliases or policies.
+    # serves, its configured instances and the hosted providers every
+    # organization reaches, and nothing that belongs to a tenant. Not a member
+    # of anything, so no BYO key, no workspace's aliases or policies, and no
+    # provider restricted to one organization.
     if anonymous:
-        hosted_models = await resolve_hosted_models(model_provider, None)
+        hosted_models = await resolve_hosted_models(model_provider, NO_ORGANIZATION)
         hosted = frozenset(hosted_models)
         allowlist = {f"{instance}:*" for instance in config.providers}
         allowlist |= hosted_allowlist_entries(hosted_models, hosted)

@@ -1094,7 +1094,8 @@ export interface paths {
          *     the deployment's row, else the models.dev default. Aliases and routing
          *     policies are not models and are not listed; see Routing. A visitor, where
          *     the catalog is public, sees the configured instances and the hosted
-         *     models at the deployment's rates, and nothing that belongs to a tenant.
+         *     models every organization reaches, at the deployment's rates, and nothing
+         *     that belongs to a tenant.
          */
         get: operations["catalog-list_catalog"];
         put?: never;
