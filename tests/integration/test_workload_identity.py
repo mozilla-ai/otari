@@ -208,9 +208,7 @@ def test_a_subject_rule_authenticates_a_token_with_no_email(
     assert _chat(client, _bearer(_token(email=None, email_verified=None))).status_code == 200
 
 
-def test_a_token_for_a_service_key_manages_its_end_users(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_a_token_for_a_service_key_manages_its_end_users(client: TestClient, master_key_header: dict[str, str]) -> None:
     _federated_key(client, master_key_header, is_service_key=True)
 
     listed = client.get(f"{API_ROOT}/end-users", headers=_bearer(_token()))

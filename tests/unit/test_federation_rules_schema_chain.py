@@ -40,7 +40,8 @@ def _add_key(engine: Engine) -> None:
         workspace = connection.execute(text("SELECT id FROM workspace LIMIT 1")).scalar_one()
         connection.execute(
             text(
-                "INSERT INTO api_keys (id, key_hash, workspace_id, created_at, is_active, exclude_from_budget, metadata)"
+                "INSERT INTO api_keys"
+                " (id, key_hash, workspace_id, created_at, is_active, exclude_from_budget, metadata)"
                 " VALUES ('key-1', 'hash-1', :workspace, CURRENT_TIMESTAMP, 1, 0, '{}')"
             ),
             {"workspace": workspace},

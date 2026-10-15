@@ -38,9 +38,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["api_key_id"], ["api_keys.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_api_key_federation_rules_api_key_id", "api_key_federation_rules", ["api_key_id"], unique=False
-    )
+    op.create_index("ix_api_key_federation_rules_api_key_id", "api_key_federation_rules", ["api_key_id"], unique=False)
     op.create_index(
         "ix_api_key_federation_rules_issuer_audience",
         "api_key_federation_rules",

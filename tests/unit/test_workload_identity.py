@@ -74,7 +74,12 @@ def _claims(**overrides: Any) -> dict[str, Any]:
 
 
 def _token(
-    private_key: Any = SIGNING_KEY, *, kid: str = "k1", algorithm: str = "RS256", drop: tuple[str, ...] = (), **claims: Any
+    private_key: Any = SIGNING_KEY,
+    *,
+    kid: str = "k1",
+    algorithm: str = "RS256",
+    drop: tuple[str, ...] = (),
+    **claims: Any,
 ) -> str:
     payload = {name: value for name, value in _claims(**claims).items() if name not in drop}
     return jwt.encode(payload, private_key, algorithm=algorithm, headers={"kid": kid})

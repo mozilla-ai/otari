@@ -51,9 +51,7 @@ class FederationRuleRepository(BaseRepository[APIKeyFederationRule, Never, Never
         statement = select(APIKeyFederationRule).where(
             APIKeyFederationRule.issuer == issuer,
             APIKeyFederationRule.audience == audience,
-            APIKeyFederationRule.subject.is_(None)
-            if subject is None
-            else APIKeyFederationRule.subject == subject,
+            APIKeyFederationRule.subject.is_(None) if subject is None else APIKeyFederationRule.subject == subject,
             APIKeyFederationRule.email.is_(None) if email is None else APIKeyFederationRule.email == email,
         )
         result = await self.db.execute(statement.limit(1))
