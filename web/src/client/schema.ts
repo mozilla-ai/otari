@@ -1265,6 +1265,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/end-user-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List End User Keys
+         * @description List the keys the calling service key minted, oldest first.
+         *
+         *     Requires a service key. Only keys that still work are listed unless ``include_inactive`` is set.
+         */
+        get: operations["end-users-list_end_user_keys"];
+        put?: never;
+        /**
+         * Mint End User Key
+         * @description Mint a key bound to one end user of the calling service key, for a job the service does not trust.
+         *
+         *     Requires a service key with ``max_child_ttl_sec``; any other key is refused with 403. The end user is created on
+         *     first use, on ``budget_id`` (which must be on the key's ``end_user_budget_ids``, or 403 with
+         *     ``end_user_budget_not_allowed``) or else the key's default. A request on the minted key bills that end user
+         *     whatever its body names, is capped by the end user's budget and by the service key's own ceiling, and is refused
+         *     once the service key is inactive or expired. The secret is returned this once.
+         */
+        post: operations["end-users-mint_end_user_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/end-user-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Revoke End User Key
+         * @description Revoke a key the calling service key minted.
+         *
+         *     Requires a service key. ``is_active: false`` is the only change: a revoked key is never reactivated, and the end
+         *     user, with what it spent, stays. A key this service key did not mint answers 404.
+         */
+        patch: operations["end-users-revoke_end_user_key"];
+        trace?: never;
+    };
     "/api/v1/end-users": {
         parameters: {
             query?: never;
@@ -1854,6 +1909,9 @@ export interface paths {
          *     Requires master key authentication. An unset ``workspace_id`` lists every key
          *     in that organization; naming a workspace in another one lists nothing rather
          *     than refusing, so the filter reports no more than the unfiltered read does.
+         *     The keys a service key minted for its end users are left out unless
+         *     ``include_children`` is set; ``GET /api/v1/keys/{key_id}/end-user-keys`` lists
+         *     one service key's.
          */
         get: operations["keys-list_keys"];
         put?: never;
@@ -1912,6 +1970,50 @@ export interface paths {
          *     Requires master key authentication.
          */
         patch: operations["keys-update_key"];
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/end-user-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List End User Keys
+         * @description List the keys a service key minted for its end users, oldest first.
+         *
+         *     Only keys that still work are listed unless ``include_inactive`` is set.
+         */
+        get: operations["keys-list_end_user_keys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/end-user-keys/{child_key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Revoke End User Key
+         * @description Revoke a key a service key minted for one of its end users.
+         *
+         *     ``is_active: false`` is the only change. A key the service key did not mint answers 404.
+         */
+        patch: operations["keys-revoke_end_user_key"];
         trace?: never;
     };
     "/api/v1/keys/{key_id}/end-users": {
@@ -8978,6 +9080,11 @@ export interface components {
              */
             key_name?: string | null;
             /**
+             * Max Child Ttl Sec
+             * @description Lets a service key mint keys bound to one of its end users through POST /api/v1/end-user-keys, each living at most this many seconds. Null mints none. Requires is_service_key.
+             */
+            max_child_ttl_sec?: number | null;
+            /**
              * Metadata
              * @description Optional metadata
              */
@@ -9033,12 +9140,20 @@ export interface components {
             key_prefix: string | null;
             /** Key Suffix */
             key_suffix: string | null;
+            /** Max Child Ttl Sec */
+            max_child_ttl_sec?: number | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /** Parent Key Id */
+            parent_key_id?: string | null;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Tags */
+            tags?: {
+                [key: string]: string;
+            } | null;
             /** User Id */
             user_id: string | null;
         };
@@ -9850,6 +9965,127 @@ export interface components {
              * @description Whether a new end user starts here when its request names no budget
              */
             is_default: boolean;
+        };
+        /**
+         * EndUserKeyCreate
+         * @description Mint a key bound to one end user of the calling service key.
+         */
+        EndUserKeyCreate: {
+            /**
+             * Allowed Models
+             * @description Model allow-list within the service key's own; null inherits the service key's
+             */
+            allowed_models?: string[] | null;
+            /**
+             * Budget Id
+             * @description A budget on the service key's end_user_budget_ids for a new end user; an existing end user keeps its own
+             */
+            budget_id?: string | null;
+            /**
+             * Expires In Sec
+             * @description Seconds the key lives, at most the service key's max_child_ttl_sec
+             */
+            expires_in_sec: number;
+            /**
+             * External Id
+             * @description The end user the key bills, by the id the service names it by; created when it does not exist
+             */
+            external_id: string;
+            /**
+             * Key Name
+             * @description Display name; defaults to the end user's id
+             */
+            key_name?: string | null;
+            /**
+             * Tags
+             * @description Tags written on every usage row the key writes, over the request's own: up to 16 string pairs, keys up to 64 characters and values up to 512
+             */
+            tags?: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * EndUserKeyCreated
+         * @description A newly minted key, with its secret, which is shown this once.
+         */
+        EndUserKeyCreated: {
+            /** Allowed Models */
+            allowed_models: string[] | null;
+            /**
+             * Budget Id
+             * @description The budget the end user is on
+             */
+            budget_id: string | null;
+            /** Created At */
+            created_at: string;
+            /** End User Id */
+            end_user_id: string;
+            /** Expires At */
+            expires_at: string;
+            /** External Id */
+            external_id: string;
+            /** Id */
+            id: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Key */
+            key: string;
+            /** Key Name */
+            key_name: string | null;
+            /** Key Prefix */
+            key_prefix: string | null;
+            /** Key Suffix */
+            key_suffix: string | null;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Tags */
+            tags: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * EndUserKeyPublic
+         * @description A key a service key minted for one of its end users. The secret is never returned after the mint.
+         */
+        EndUserKeyPublic: {
+            /** Allowed Models */
+            allowed_models: string[] | null;
+            /** Created At */
+            created_at: string;
+            /** End User Id */
+            end_user_id: string;
+            /** Expires At */
+            expires_at: string;
+            /** External Id */
+            external_id: string;
+            /** Id */
+            id: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Key Name */
+            key_name: string | null;
+            /** Key Prefix */
+            key_prefix: string | null;
+            /** Key Suffix */
+            key_suffix: string | null;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Tags */
+            tags: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * EndUserKeyUpdate
+         * @description Revoke a minted key. Revocation is the only change, and it is final.
+         */
+        EndUserKeyUpdate: {
+            /**
+             * Is Active
+             * @description false revokes the key
+             * @constant
+             */
+            is_active: false;
         };
         /**
          * EndUserPublic
@@ -10982,12 +11218,20 @@ export interface components {
             key_suffix: string | null;
             /** Last Used At */
             last_used_at: string | null;
+            /** Max Child Ttl Sec */
+            max_child_ttl_sec?: number | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /** Parent Key Id */
+            parent_key_id?: string | null;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Tags */
+            tags?: {
+                [key: string]: string;
+            } | null;
             /** User Id */
             user_id: string | null;
             /**
@@ -16146,6 +16390,8 @@ export interface components {
             is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
+            /** Max Child Ttl Sec */
+            max_child_ttl_sec?: number | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
@@ -19470,6 +19716,110 @@ export interface operations {
             };
         };
     };
+    "end-users-list_end_user_keys": {
+        parameters: {
+            query?: {
+                /** @description Only the end user the service names with this `user` value: zero or one. */
+                external_id?: string | null;
+                /** @description Also list keys that were revoked or have expired and not been swept yet. */
+                include_inactive?: boolean;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserKeyPublic"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-mint_end_user_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserKeyCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-revoke_end_user_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserKeyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "end-users-list_end_users": {
         parameters: {
             query?: {
@@ -20510,6 +20860,8 @@ export interface operations {
                 limit?: number;
                 /** @description Only keys in this workspace. */
                 workspace_id?: string | null;
+                /** @description Also list the keys service keys minted for their end users. */
+                include_children?: boolean;
             };
             header?: never;
             path?: never;
@@ -20652,6 +21004,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KeyInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-list_end_user_keys": {
+        parameters: {
+            query?: {
+                /** @description Only the keys of the end user the service names with this id. */
+                external_id?: string | null;
+                /** @description Also list keys that were revoked or have expired and not been swept yet. */
+                include_inactive?: boolean;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserKeyPublic"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-revoke_end_user_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                child_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserKeyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserKeyPublic"];
                 };
             };
             /** @description Validation Error */

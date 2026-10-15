@@ -4747,6 +4747,19 @@
             "description": "Optional name for the key",
             "title": "Key Name"
           },
+          "max_child_ttl_sec": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lets a service key mint keys bound to one of its end users through POST /api/v1/end-user-keys, each living at most this many seconds. Null mints none. Requires is_service_key.",
+            "title": "Max Child Ttl Sec"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Optional metadata",
@@ -4908,10 +4921,32 @@
             ],
             "title": "Key Suffix"
           },
+          "max_child_ttl_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Child Ttl Sec"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "parent_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Key Id"
           },
           "reject_user_mismatch": {
             "anyOf": [
@@ -4923,6 +4958,20 @@
               }
             ],
             "title": "Reject User Mismatch"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
           },
           "user_id": {
             "anyOf": [
@@ -6564,6 +6613,358 @@
           "blocked_end_user_count"
         ],
         "title": "EndUserBudgetPublic",
+        "type": "object"
+      },
+      "EndUserKeyCreate": {
+        "description": "Mint a key bound to one end user of the calling service key.",
+        "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model allow-list within the service key's own; null inherits the service key's",
+            "title": "Allowed Models"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A budget on the service key's end_user_budget_ids for a new end user; an existing end user keeps its own",
+            "title": "Budget Id"
+          },
+          "expires_in_sec": {
+            "description": "Seconds the key lives, at most the service key's max_child_ttl_sec",
+            "minimum": 1.0,
+            "title": "Expires In Sec",
+            "type": "integer"
+          },
+          "external_id": {
+            "description": "The end user the key bills, by the id the service names it by; created when it does not exist",
+            "minLength": 1,
+            "title": "External Id",
+            "type": "string"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display name; defaults to the end user's id",
+            "title": "Key Name"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "maxProperties": 16,
+                "propertyNames": {
+                  "maxLength": 64,
+                  "minLength": 1
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tags written on every usage row the key writes, over the request's own: up to 16 string pairs, keys up to 64 characters and values up to 512",
+            "title": "Tags"
+          }
+        },
+        "required": [
+          "external_id",
+          "expires_in_sec"
+        ],
+        "title": "EndUserKeyCreate",
+        "type": "object"
+      },
+      "EndUserKeyCreated": {
+        "description": "A newly minted key, with its secret, which is shown this once.",
+        "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The budget the end user is on",
+            "title": "Budget Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "end_user_id": {
+            "title": "End User Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Name"
+          },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
+          "key_suffix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Suffix"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "required": [
+          "id",
+          "key_prefix",
+          "key_suffix",
+          "key_name",
+          "external_id",
+          "end_user_id",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "is_active",
+          "allowed_models",
+          "tags",
+          "key",
+          "budget_id"
+        ],
+        "title": "EndUserKeyCreated",
+        "type": "object"
+      },
+      "EndUserKeyPublic": {
+        "description": "A key a service key minted for one of its end users. The secret is never returned after the mint.",
+        "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "end_user_id": {
+            "title": "End User Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Name"
+          },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
+          "key_suffix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Suffix"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "required": [
+          "id",
+          "key_prefix",
+          "key_suffix",
+          "key_name",
+          "external_id",
+          "end_user_id",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "is_active",
+          "allowed_models",
+          "tags"
+        ],
+        "title": "EndUserKeyPublic",
+        "type": "object"
+      },
+      "EndUserKeyUpdate": {
+        "description": "Revoke a minted key. Revocation is the only change, and it is final.",
+        "properties": {
+          "is_active": {
+            "const": false,
+            "description": "false revokes the key",
+            "title": "Is Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_active"
+        ],
+        "title": "EndUserKeyUpdate",
         "type": "object"
       },
       "EndUserPublic": {
@@ -8971,10 +9372,32 @@
             ],
             "title": "Last Used At"
           },
+          "max_child_ttl_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Child Ttl Sec"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "parent_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Key Id"
           },
           "reject_user_mismatch": {
             "anyOf": [
@@ -8986,6 +9409,20 @@
               }
             ],
             "title": "Reject User Mismatch"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
           },
           "user_id": {
             "anyOf": [
@@ -19742,6 +20179,18 @@
             ],
             "title": "Key Name"
           },
+          "max_child_ttl_sec": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Child Ttl Sec"
+          },
           "metadata": {
             "anyOf": [
               {
@@ -27270,6 +27719,215 @@
         ]
       }
     },
+    "/api/v1/end-user-keys": {
+      "get": {
+        "description": "List the keys the calling service key minted, oldest first.\n\nRequires a service key. Only keys that still work are listed unless ``include_inactive`` is set.",
+        "operationId": "end-users-list_end_user_keys",
+        "parameters": [
+          {
+            "description": "Only the end user the service names with this `user` value: zero or one.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user the service names with this `user` value: zero or one.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Also list keys that were revoked or have expired and not been swept yet.",
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also list keys that were revoked or have expired and not been swept yet.",
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserKeyPublic"
+                  },
+                  "title": "Response End-Users-List End User Keys",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List End User Keys",
+        "tags": [
+          "end-users"
+        ]
+      },
+      "post": {
+        "description": "Mint a key bound to one end user of the calling service key, for a job the service does not trust.\n\nRequires a service key with ``max_child_ttl_sec``; any other key is refused with 403. The end user is created on\nfirst use, on ``budget_id`` (which must be on the key's ``end_user_budget_ids``, or 403 with\n``end_user_budget_not_allowed``) or else the key's default. A request on the minted key bills that end user\nwhatever its body names, is capped by the end user's budget and by the service key's own ceiling, and is refused\nonce the service key is inactive or expired. The secret is returned this once.",
+        "operationId": "end-users-mint_end_user_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserKeyCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Mint End User Key",
+        "tags": [
+          "end-users"
+        ]
+      }
+    },
+    "/api/v1/end-user-keys/{key_id}": {
+      "patch": {
+        "description": "Revoke a key the calling service key minted.\n\nRequires a service key. ``is_active: false`` is the only change: a revoked key is never reactivated, and the end\nuser, with what it spent, stays. A key this service key did not mint answers 404.",
+        "operationId": "end-users-revoke_end_user_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserKeyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Revoke End User Key",
+        "tags": [
+          "end-users"
+        ]
+      }
+    },
     "/api/v1/end-users": {
       "get": {
         "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed. ``external_id`` reads one end user by any id, one containing '/'\nincluded, as a list of zero or one.",
@@ -29153,7 +29811,7 @@
     },
     "/api/v1/keys": {
       "get": {
-        "description": "List the API keys in the caller's organization.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\nin that organization; naming a workspace in another one lists nothing rather\nthan refusing, so the filter reports no more than the unfiltered read does.",
+        "description": "List the API keys in the caller's organization.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\nin that organization; naming a workspace in another one lists nothing rather\nthan refusing, so the filter reports no more than the unfiltered read does.\nThe keys a service key minted for its end users are left out unless\n``include_children`` is set; ``GET /api/v1/keys/{key_id}/end-user-keys`` lists\none service key's.",
         "operationId": "keys-list_keys",
         "parameters": [
           {
@@ -29196,6 +29854,18 @@
               ],
               "description": "Only keys in this workspace.",
               "title": "Workspace Id"
+            }
+          },
+          {
+            "description": "Also list the keys service keys minted for their end users.",
+            "in": "query",
+            "name": "include_children",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also list the keys service keys minted for their end users.",
+              "title": "Include Children",
+              "type": "boolean"
             }
           }
         ],
@@ -29434,6 +30104,185 @@
           }
         ],
         "summary": "Update Key",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/end-user-keys": {
+      "get": {
+        "description": "List the keys a service key minted for its end users, oldest first.\n\nOnly keys that still work are listed unless ``include_inactive`` is set.",
+        "operationId": "keys-list_end_user_keys",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only the keys of the end user the service names with this id.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the keys of the end user the service names with this id.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Also list keys that were revoked or have expired and not been swept yet.",
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also list keys that were revoked or have expired and not been swept yet.",
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserKeyPublic"
+                  },
+                  "title": "Response Keys-List End User Keys",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List End User Keys",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/end-user-keys/{child_key_id}": {
+      "patch": {
+        "description": "Revoke a key a service key minted for one of its end users.\n\n``is_active: false`` is the only change. A key the service key did not mint answers 404.",
+        "operationId": "keys-revoke_end_user_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "child_key_id",
+            "required": true,
+            "schema": {
+              "title": "Child Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserKeyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Revoke End User Key",
         "tags": [
           "keys"
         ]

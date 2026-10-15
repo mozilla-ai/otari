@@ -2096,6 +2096,125 @@
           }
         },
         {
+          "name": "List End User Keys",
+          "request": {
+            "description": "List the keys the calling service key minted, oldest first.\n\nRequires a service key. Only keys that still work are listed unless ``include_inactive`` is set.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-user-keys"
+              ],
+              "query": [
+                {
+                  "description": "Only the end user the service names with this `user` value: zero or one.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Also list keys that were revoked or have expired and not been swept yet.",
+                  "disabled": true,
+                  "key": "include_inactive",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-user-keys?external_id=&include_inactive=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Mint End User Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"external_id\": \"string\",\n  \"expires_in_sec\": 1\n}"
+            },
+            "description": "Mint a key bound to one end user of the calling service key, for a job the service does not trust.\n\nRequires a service key with ``max_child_ttl_sec``; any other key is refused with 403. The end user is created on\nfirst use, on ``budget_id`` (which must be on the key's ``end_user_budget_ids``, or 403 with\n``end_user_budget_not_allowed``) or else the key's default. A request on the minted key bills that end user\nwhatever its body names, is capped by the end user's budget and by the service key's own ceiling, and is refused\nonce the service key is inactive or expired. The secret is returned this once.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-user-keys"
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-user-keys"
+            }
+          }
+        },
+        {
+          "name": "Revoke End User Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"is_active\": false\n}"
+            },
+            "description": "Revoke a key the calling service key minted.\n\nRequires a service key. ``is_active: false`` is the only change: a revoked key is never reactivated, and the end\nuser, with what it spent, stays. A key this service key did not mint answers 404.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-user-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-user-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "List End Users",
           "request": {
             "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed. ``external_id`` reads one end user by any id, one containing '/'\nincluded, as a list of zero or one.",
@@ -3206,7 +3325,7 @@
         {
           "name": "List Keys",
           "request": {
-            "description": "List the API keys in the caller's organization.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\nin that organization; naming a workspace in another one lists nothing rather\nthan refusing, so the filter reports no more than the unfiltered read does.",
+            "description": "List the API keys in the caller's organization.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\nin that organization; naming a workspace in another one lists nothing rather\nthan refusing, so the filter reports no more than the unfiltered read does.\nThe keys a service key minted for its end users are left out unless\n``include_children`` is set; ``GET /api/v1/keys/{key_id}/end-user-keys`` lists\none service key's.",
             "header": [],
             "method": "GET",
             "url": {
@@ -3236,9 +3355,15 @@
                   "disabled": true,
                   "key": "workspace_id",
                   "value": ""
+                },
+                {
+                  "description": "Also list the keys service keys minted for their end users.",
+                  "disabled": true,
+                  "key": "include_children",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/keys?skip=&limit=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/keys?skip=&limit=&workspace_id=&include_children="
             }
           }
         },
@@ -3252,7 +3377,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"max_child_ttl_sec\": 1,\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
             "header": [
@@ -3312,7 +3437,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"max_child_ttl_sec\": 1,\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
             "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [
@@ -3364,6 +3489,108 @@
                 {
                   "description": "path parameter",
                   "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List End User Keys",
+          "request": {
+            "description": "List the keys a service key minted for its end users, oldest first.\n\nOnly keys that still work are listed unless ``include_inactive`` is set.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "end-user-keys"
+              ],
+              "query": [
+                {
+                  "description": "Only the keys of the end user the service names with this id.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Also list keys that were revoked or have expired and not been swept yet.",
+                  "disabled": true,
+                  "key": "include_inactive",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-user-keys?external_id=&include_inactive=&skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Revoke End User Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"is_active\": false\n}"
+            },
+            "description": "Revoke a key a service key minted for one of its end users.\n\n``is_active: false`` is the only change. A key the service key did not mint answers 404.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "end-user-keys",
+                ":child_key_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-user-keys/:child_key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "child_key_id",
                   "value": ""
                 }
               ]
