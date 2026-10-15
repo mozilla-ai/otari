@@ -2098,7 +2098,7 @@
         {
           "name": "List End User Keys",
           "request": {
-            "description": "List the keys the calling service key minted, oldest first.\n\nRequires a service key. Only keys that still work are listed unless ``include_inactive`` is set.",
+            "description": "List the keys the calling service key minted, oldest first.\n\nRequires a service key. Only keys that still work are listed unless ``include_inactive`` is set. A key a signed\nend-user token was materialized as is listed too, and ``jti`` finds it, so it can be revoked like any other.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2115,6 +2115,12 @@
                   "description": "Only the end user the service names with this `user` value: zero or one.",
                   "disabled": true,
                   "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only the key the signed end-user token with this jti was materialized as: zero or one.",
+                  "disabled": true,
+                  "key": "jti",
                   "value": ""
                 },
                 {
@@ -2136,7 +2142,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/end-user-keys?external_id=&include_inactive=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/end-user-keys?external_id=&jti=&include_inactive=&skip=&limit="
             }
           }
         },
@@ -2208,6 +2214,85 @@
                 {
                   "description": "path parameter",
                   "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List End User Signing Keys",
+          "request": {
+            "description": "List the public keys the calling service key signs end-user tokens with, oldest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-user-signing-keys"
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-user-signing-keys"
+            }
+          }
+        },
+        {
+          "name": "Register End User Signing Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"public_key\": \"string\"\n}"
+            },
+            "description": "Register an Ed25519 public key the calling service key's control plane signs end-user tokens with.\n\nRequires a service key with ``max_child_ttl_sec`` (else 403) on a deployment with ``end_user_tokens_enabled``\n(else 403). Only the public key is sent; a private key is refused with 400. The response's ``kid`` is what a\ntoken names in its header. A key holds at most five at once (409 past that), so a rotation registers the new key,\nmoves signing to it, and deletes the old one.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-user-signing-keys"
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-user-signing-keys"
+            }
+          }
+        },
+        {
+          "name": "Delete End User Signing Key",
+          "request": {
+            "description": "Delete a signing key of the calling service key, refusing every token it signed from then on.\n\nThe keys those tokens were materialized as are revoked with it, and their end users, with what they spent, stay.\nA kid this service key does not hold answers 404.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-user-signing-keys",
+                ":kid"
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-user-signing-keys/:kid",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "kid",
                   "value": ""
                 }
               ]
@@ -3498,7 +3583,7 @@
         {
           "name": "List End User Keys",
           "request": {
-            "description": "List the keys a service key minted for its end users, oldest first.\n\nOnly keys that still work are listed unless ``include_inactive`` is set.",
+            "description": "List the keys a service key minted for its end users, oldest first, those its signed tokens stand for included.\n\nOnly keys that still work are listed unless ``include_inactive`` is set.",
             "header": [],
             "method": "GET",
             "url": {
@@ -3520,6 +3605,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Only the key the signed end-user token with this jti was materialized as.",
+                  "disabled": true,
+                  "key": "jti",
+                  "value": ""
+                },
+                {
                   "description": "Also list keys that were revoked or have expired and not been swept yet.",
                   "disabled": true,
                   "key": "include_inactive",
@@ -3538,7 +3629,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-user-keys?external_id=&include_inactive=&skip=&limit=",
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-user-keys?external_id=&jti=&include_inactive=&skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3591,6 +3682,68 @@
                 {
                   "description": "path parameter",
                   "key": "child_key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List End User Signing Keys",
+          "request": {
+            "description": "List the public keys a service key's control plane signs end-user tokens with, oldest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "end-user-signing-keys"
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-user-signing-keys",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete End User Signing Key",
+          "request": {
+            "description": "Delete a service key's signing key, refusing every end-user token it signed and revoking the keys they became.\n\nA kid the service key does not hold answers 404.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "keys",
+                ":key_id",
+                "end-user-signing-keys",
+                ":kid"
+              ],
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/end-user-signing-keys/:kid",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "kid",
                   "value": ""
                 }
               ]

@@ -7073,6 +7073,73 @@
         "title": "EndUserPut",
         "type": "object"
       },
+      "EndUserSigningKeyCreate": {
+        "description": "Register a public key the calling service key's control plane signs end-user tokens with.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display name, for rotation",
+            "title": "Name"
+          },
+          "public_key": {
+            "description": "An Ed25519 public key, PEM-encoded SubjectPublicKeyInfo ('-----BEGIN PUBLIC KEY-----'). Never the private key, which Otari refuses",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Public Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "public_key"
+        ],
+        "title": "EndUserSigningKeyCreate",
+        "type": "object"
+      },
+      "EndUserSigningKeyPublic": {
+        "description": "A public key a service key signs end-user tokens with. ``kid`` is what a token names in its header.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kid": {
+            "title": "Kid",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "public_key": {
+            "title": "Public Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kid",
+          "name",
+          "public_key",
+          "created_at"
+        ],
+        "title": "EndUserSigningKeyPublic",
+        "type": "object"
+      },
       "EndUserUpdate": {
         "description": "Block, unblock or move an end user. An omitted field is left as it is.",
         "properties": {
@@ -27721,7 +27788,7 @@
     },
     "/api/v1/end-user-keys": {
       "get": {
-        "description": "List the keys the calling service key minted, oldest first.\n\nRequires a service key. Only keys that still work are listed unless ``include_inactive`` is set.",
+        "description": "List the keys the calling service key minted, oldest first.\n\nRequires a service key. Only keys that still work are listed unless ``include_inactive`` is set. A key a signed\nend-user token was materialized as is listed too, and ``jti`` finds it, so it can be revoked like any other.",
         "operationId": "end-users-list_end_user_keys",
         "parameters": [
           {
@@ -27741,6 +27808,25 @@
               ],
               "description": "Only the end user the service names with this `user` value: zero or one.",
               "title": "External Id"
+            }
+          },
+          {
+            "description": "Only the key the signed end-user token with this jti was materialized as: zero or one.",
+            "in": "query",
+            "name": "jti",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the key the signed end-user token with this jti was materialized as: zero or one.",
+              "title": "Jti"
             }
           },
           {
@@ -27923,6 +28009,132 @@
           }
         ],
         "summary": "Revoke End User Key",
+        "tags": [
+          "end-users"
+        ]
+      }
+    },
+    "/api/v1/end-user-signing-keys": {
+      "get": {
+        "description": "List the public keys the calling service key signs end-user tokens with, oldest first.",
+        "operationId": "end-users-list_end_user_signing_keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserSigningKeyPublic"
+                  },
+                  "title": "Response End-Users-List End User Signing Keys",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List End User Signing Keys",
+        "tags": [
+          "end-users"
+        ]
+      },
+      "post": {
+        "description": "Register an Ed25519 public key the calling service key's control plane signs end-user tokens with.\n\nRequires a service key with ``max_child_ttl_sec`` (else 403) on a deployment with ``end_user_tokens_enabled``\n(else 403). Only the public key is sent; a private key is refused with 400. The response's ``kid`` is what a\ntoken names in its header. A key holds at most five at once (409 past that), so a rotation registers the new key,\nmoves signing to it, and deletes the old one.",
+        "operationId": "end-users-register_end_user_signing_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserSigningKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserSigningKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Register End User Signing Key",
+        "tags": [
+          "end-users"
+        ]
+      }
+    },
+    "/api/v1/end-user-signing-keys/{kid}": {
+      "delete": {
+        "description": "Delete a signing key of the calling service key, refusing every token it signed from then on.\n\nThe keys those tokens were materialized as are revoked with it, and their end users, with what they spent, stay.\nA kid this service key does not hold answers 404.",
+        "operationId": "end-users-delete_end_user_signing_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kid",
+            "required": true,
+            "schema": {
+              "title": "Kid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete End User Signing Key",
         "tags": [
           "end-users"
         ]
@@ -30111,7 +30323,7 @@
     },
     "/api/v1/keys/{key_id}/end-user-keys": {
       "get": {
-        "description": "List the keys a service key minted for its end users, oldest first.\n\nOnly keys that still work are listed unless ``include_inactive`` is set.",
+        "description": "List the keys a service key minted for its end users, oldest first, those its signed tokens stand for included.\n\nOnly keys that still work are listed unless ``include_inactive`` is set.",
         "operationId": "keys-list_end_user_keys",
         "parameters": [
           {
@@ -30140,6 +30352,25 @@
               ],
               "description": "Only the keys of the end user the service names with this id.",
               "title": "External Id"
+            }
+          },
+          {
+            "description": "Only the key the signed end-user token with this jti was materialized as.",
+            "in": "query",
+            "name": "jti",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the key the signed end-user token with this jti was materialized as.",
+              "title": "Jti"
             }
           },
           {
@@ -30283,6 +30514,114 @@
           }
         ],
         "summary": "Revoke End User Key",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/end-user-signing-keys": {
+      "get": {
+        "description": "List the public keys a service key's control plane signs end-user tokens with, oldest first.",
+        "operationId": "keys-list_end_user_signing_keys",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserSigningKeyPublic"
+                  },
+                  "title": "Response Keys-List End User Signing Keys",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List End User Signing Keys",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/end-user-signing-keys/{kid}": {
+      "delete": {
+        "description": "Delete a service key's signing key, refusing every end-user token it signed and revoking the keys they became.\n\nA kid the service key does not hold answers 404.",
+        "operationId": "keys-delete_end_user_signing_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kid",
+            "required": true,
+            "schema": {
+              "title": "Kid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete End User Signing Key",
         "tags": [
           "keys"
         ]

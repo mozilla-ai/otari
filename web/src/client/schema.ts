@@ -1276,7 +1276,8 @@ export interface paths {
          * List End User Keys
          * @description List the keys the calling service key minted, oldest first.
          *
-         *     Requires a service key. Only keys that still work are listed unless ``include_inactive`` is set.
+         *     Requires a service key. Only keys that still work are listed unless ``include_inactive`` is set. A key a signed
+         *     end-user token was materialized as is listed too, and ``jti`` finds it, so it can be revoked like any other.
          */
         get: operations["end-users-list_end_user_keys"];
         put?: never;
@@ -1318,6 +1319,58 @@ export interface paths {
          *     user, with what it spent, stays. A key this service key did not mint answers 404.
          */
         patch: operations["end-users-revoke_end_user_key"];
+        trace?: never;
+    };
+    "/api/v1/end-user-signing-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List End User Signing Keys
+         * @description List the public keys the calling service key signs end-user tokens with, oldest first.
+         */
+        get: operations["end-users-list_end_user_signing_keys"];
+        put?: never;
+        /**
+         * Register End User Signing Key
+         * @description Register an Ed25519 public key the calling service key's control plane signs end-user tokens with.
+         *
+         *     Requires a service key with ``max_child_ttl_sec`` (else 403) on a deployment with ``end_user_tokens_enabled``
+         *     (else 403). Only the public key is sent; a private key is refused with 400. The response's ``kid`` is what a
+         *     token names in its header. A key holds at most five at once (409 past that), so a rotation registers the new key,
+         *     moves signing to it, and deletes the old one.
+         */
+        post: operations["end-users-register_end_user_signing_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/end-user-signing-keys/{kid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete End User Signing Key
+         * @description Delete a signing key of the calling service key, refusing every token it signed from then on.
+         *
+         *     The keys those tokens were materialized as are revoked with it, and their end users, with what they spent, stay.
+         *     A kid this service key does not hold answers 404.
+         */
+        delete: operations["end-users-delete_end_user_signing_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/end-users": {
@@ -1981,7 +2034,7 @@ export interface paths {
         };
         /**
          * List End User Keys
-         * @description List the keys a service key minted for its end users, oldest first.
+         * @description List the keys a service key minted for its end users, oldest first, those its signed tokens stand for included.
          *
          *     Only keys that still work are listed unless ``include_inactive`` is set.
          */
@@ -2014,6 +2067,48 @@ export interface paths {
          *     ``is_active: false`` is the only change. A key the service key did not mint answers 404.
          */
         patch: operations["keys-revoke_end_user_key"];
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/end-user-signing-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List End User Signing Keys
+         * @description List the public keys a service key's control plane signs end-user tokens with, oldest first.
+         */
+        get: operations["keys-list_end_user_signing_keys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/end-user-signing-keys/{kid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete End User Signing Key
+         * @description Delete a service key's signing key, refusing every end-user token it signed and revoking the keys they became.
+         *
+         *     A kid the service key does not hold answers 404.
+         */
+        delete: operations["keys-delete_end_user_signing_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/keys/{key_id}/end-users": {
@@ -10127,6 +10222,36 @@ export interface components {
              * @description A budget on the key's end_user_budget_ids
              */
             budget_id: string;
+        };
+        /**
+         * EndUserSigningKeyCreate
+         * @description Register a public key the calling service key's control plane signs end-user tokens with.
+         */
+        EndUserSigningKeyCreate: {
+            /**
+             * Name
+             * @description Display name, for rotation
+             */
+            name?: string | null;
+            /**
+             * Public Key
+             * @description An Ed25519 public key, PEM-encoded SubjectPublicKeyInfo ('-----BEGIN PUBLIC KEY-----'). Never the private key, which Otari refuses
+             */
+            public_key: string;
+        };
+        /**
+         * EndUserSigningKeyPublic
+         * @description A public key a service key signs end-user tokens with. ``kid`` is what a token names in its header.
+         */
+        EndUserSigningKeyPublic: {
+            /** Created At */
+            created_at: string;
+            /** Kid */
+            kid: string;
+            /** Name */
+            name: string | null;
+            /** Public Key */
+            public_key: string;
         };
         /**
          * EndUserUpdate
@@ -19721,6 +19846,8 @@ export interface operations {
             query?: {
                 /** @description Only the end user the service names with this `user` value: zero or one. */
                 external_id?: string | null;
+                /** @description Only the key the signed end-user token with this jti was materialized as: zero or one. */
+                jti?: string | null;
                 /** @description Also list keys that were revoked or have expired and not been swept yet. */
                 include_inactive?: boolean;
                 skip?: number;
@@ -19808,6 +19935,88 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EndUserKeyPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-list_end_user_signing_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserSigningKeyPublic"][];
+                };
+            };
+        };
+    };
+    "end-users-register_end_user_signing_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserSigningKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserSigningKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-delete_end_user_signing_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -21022,6 +21231,8 @@ export interface operations {
             query?: {
                 /** @description Only the keys of the end user the service names with this id. */
                 external_id?: string | null;
+                /** @description Only the key the signed end-user token with this jti was materialized as. */
+                jti?: string | null;
                 /** @description Also list keys that were revoked or have expired and not been swept yet. */
                 include_inactive?: boolean;
                 skip?: number;
@@ -21079,6 +21290,67 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EndUserKeyPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-list_end_user_signing_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserSigningKeyPublic"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-delete_end_user_signing_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                kid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
