@@ -13,7 +13,7 @@ from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
 
 
-def in_reach_of(organization_id: uuid.UUID) -> ColumnElement[bool]:
+def _in_reach_of(organization_id: uuid.UUID) -> ColumnElement[bool]:
     """Match a budget the deployment owns, or one this organization owns."""
     return or_(Budget.organization_id.is_(None), Budget.organization_id == organization_id)
 
@@ -88,6 +88,18 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
             select(Budget).where(Budget.budget_id == budget_id, Budget.organization_id == organization_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_in_reach_of(self, budget_id: str, organization_id: uuid.UUID) -> Budget | None:
+        """Return the budget with this ID when the deployment or this organization owns it, otherwise None."""
+        result = await self.db.execute(
+            select(Budget).where(Budget.budget_id == budget_id, _in_reach_of(organization_id))
+        )
+        return result.scalar_one_or_none()
+
+    async def list_in_reach_of(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
+        """Return a page of the budgets the deployment owns and this organization owns."""
+        result = await self.db.execute(select(Budget).where(_in_reach_of(organization_id)).offset(skip).limit(limit))
+        return list(result.scalars().all())
 
     async def get_many(self, budget_ids: Sequence[str]) -> dict[str, Budget]:
         """Return the budgets with these IDs, keyed on ID, omitting an ID that names none."""

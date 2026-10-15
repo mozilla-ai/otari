@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, st
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import BudgetServiceDep, CallerBudgets, get_db, require_deployment_operator
+from gateway.api.deps import BudgetServiceDep, CallerOrganization, get_db, require_deployment_operator
 from gateway.api.routes._helpers import database_error
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
@@ -99,13 +99,13 @@ async def create_budget(
 @router.get("")
 async def list_budgets(
     db: Annotated[AsyncSession, Depends(get_db)],
-    reach: CallerBudgets,
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[BudgetResponse]:
     """List the deployment's budgets and the caller's organization's, with pagination."""
-    result = await db.execute(select(Budget).where(reach).offset(skip).limit(limit))
-    budgets = result.scalars().all()
+    budgets = await service.list_deployment_budgets(organization_id, skip=skip, limit=limit)
 
     # One grouped query for the whole page instead of a per-budget aggregate, so
     # listing N budgets stays a fixed two queries rather than N+1. Scoped to the
@@ -141,11 +141,11 @@ async def list_budgets(
 async def get_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    reach: CallerBudgets,
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
 ) -> BudgetResponse:
     """Get details of a specific budget."""
-    result = await db.execute(select(Budget).where(Budget.budget_id == budget_id, reach))
-    budget = result.scalar_one_or_none()
+    budget = await service.get_deployment_budget(budget_id, organization_id)
 
     if not budget:
         raise HTTPException(
@@ -164,11 +164,11 @@ async def update_budget(
     budget_id: str,
     request: UpdateBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    reach: CallerBudgets,
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
 ) -> BudgetResponse:
     """Update a budget."""
-    result = await db.execute(select(Budget).where(Budget.budget_id == budget_id, reach))
-    budget = result.scalar_one_or_none()
+    budget = await service.get_deployment_budget(budget_id, organization_id)
 
     if not budget:
         raise HTTPException(
@@ -298,14 +298,13 @@ async def delete_budget(budget_id: str, service: BudgetServiceDep) -> None:
 async def list_budget_reset_logs(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    reach: CallerBudgets,
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[BudgetResetLogResponse]:
     """List per-user reset events for a budget, newest first."""
-    budget = (
-        await db.execute(select(Budget.budget_id).where(Budget.budget_id == budget_id, reach))
-    ).scalar_one_or_none()
+    budget = await service.get_deployment_budget(budget_id, organization_id)
     if not budget:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

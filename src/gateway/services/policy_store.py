@@ -39,7 +39,7 @@ import time
 import uuid
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -73,6 +73,16 @@ _user_cache: dict[uuid.UUID, dict[str, dict[str, PolicySpec]]] = {}
 # Where a lookup that names no workspace reads; see the module docstring.
 _default_workspace: uuid.UUID | None = None
 _cached_at: float | None = None
+
+
+async def list_stored_policies(
+    db: AsyncSession, *, workspaces: Select[tuple[uuid.UUID]], workspace_id: uuid.UUID | None
+) -> list[RoutingPolicy]:
+    """Return the stored routing policies in these workspaces, by name, narrowed to ``workspace_id`` when given."""
+    statement = select(RoutingPolicy).where(RoutingPolicy.workspace_id.in_(workspaces))
+    if workspace_id is not None:
+        statement = statement.where(RoutingPolicy.workspace_id == workspace_id)
+    return list((await db.execute(statement.order_by(RoutingPolicy.name))).scalars().all())
 
 
 def _scope(workspace_id: uuid.UUID | None) -> uuid.UUID | None:

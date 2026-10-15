@@ -71,7 +71,7 @@ class ScopeIdSets:
     api_key_ids: tuple[str, ...]
 
 
-def in_scopes(scopes: ScopeIdSets) -> ColumnElement[bool]:
+def _in_scopes(scopes: ScopeIdSets) -> ColumnElement[bool]:
     """Match a ceiling whose scope ID is in the set for its own scope kind, so an ID never matches across kinds."""
     return or_(
         (ScopedBudget.scope_type == SCOPE_ORGANIZATION) & ScopedBudget.scope_id.in_(scopes.organization_ids),
@@ -157,7 +157,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
 
     async def count_in_scopes(self, scopes: ScopeIdSets) -> int:
         """Count the ceilings on these scopes."""
-        result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(in_scopes(scopes)))
+        result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(_in_scopes(scopes)))
         return result.scalar_one()
 
     async def delete_for_member(self, member_id: uuid.UUID) -> None:
@@ -329,7 +329,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 Budget.request_limit,
             )
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-            .where(in_scopes(scopes))
+            .where(_in_scopes(scopes))
         )
         # NOTE: The scope predicate matches every row on a known scope type, which is what makes the cast sound.
         return [
@@ -355,17 +355,39 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
             ) in result.tuples().all()
         ]
 
-    async def list_in_scopes(self, scopes: ScopeIdSets, *, skip: int, limit: int) -> list[tuple[ScopedBudget, Budget]]:
-        """Return a page of the ceilings on these scopes, each with the budget it names, oldest first."""
-        result = await self.db.execute(
+    async def list_in_scopes(
+        self,
+        scopes: ScopeIdSets,
+        *,
+        skip: int,
+        limit: int,
+        scope_type: ScopeType | None = None,
+        scope_id: str | None = None,
+    ) -> list[tuple[ScopedBudget, Budget]]:
+        """Return a page of the ceilings on these scopes, each with the budget it names, oldest first.
+
+        ``scope_type`` and ``scope_id`` narrow the page to one scope kind or one scope.
+        """
+        statement = (
             select(ScopedBudget, Budget)
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-            .where(in_scopes(scopes))
-            .order_by(ScopedBudget.created_at, ScopedBudget.id)
-            .offset(skip)
-            .limit(limit)
+            .where(_in_scopes(scopes))
+        )
+        if scope_type is not None:
+            statement = statement.where(ScopedBudget.scope_type == scope_type)
+        if scope_id is not None:
+            statement = statement.where(ScopedBudget.scope_id == scope_id)
+        result = await self.db.execute(
+            statement.order_by(ScopedBudget.created_at, ScopedBudget.id).offset(skip).limit(limit)
         )
         return list(result.tuples().all())
+
+    async def get_in_scopes(self, scoped_budget_id: str, scopes: ScopeIdSets) -> ScopedBudget | None:
+        """Return the ceiling with this ID when it is on one of these scopes, otherwise None."""
+        result = await self.db.execute(
+            select(ScopedBudget).where(ScopedBudget.id == scoped_budget_id, _in_scopes(scopes))
+        )
+        return result.scalar_one_or_none()
 
     async def lock(self, scoped_budget_ids: Sequence[str]) -> None:
         """Lock these ceilings until the transaction ends, in the order of their IDs."""

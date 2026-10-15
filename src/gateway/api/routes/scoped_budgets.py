@@ -10,11 +10,16 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import ColumnElement, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CallerCeilings, OrganizationServiceDep, get_db, require_deployment_operator
+from gateway.api.deps import (
+    BudgetServiceDep,
+    CallerOrganization,
+    OrganizationServiceDep,
+    get_db,
+    require_deployment_operator,
+)
 from gateway.api.routes._helpers import database_error
 from gateway.core.database import DATABASE_ERRORS
 from gateway.models.api_keys import APIKey
@@ -30,7 +35,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.schemas.budgets import CreateScopedBudgetRequest, ScopedBudgetResponse, UpdateScopedBudgetRequest
-from gateway.services.budgets import lock_workspace_for_scope, period_window
+from gateway.services.budgets import BudgetService, lock_workspace_for_scope, period_window
 
 # Auth is declared on the router, not repeated on each handler, following
 # `routes/organizations.py`: every handler here needs the master key, and a
@@ -43,8 +48,8 @@ router = APIRouter(
 )
 
 
-async def _get_or_404(db: AsyncSession, budget_id: str, reach: ColumnElement[bool]) -> ScopedBudget:
-    budget = (await db.execute(select(ScopedBudget).where(ScopedBudget.id == budget_id, reach))).scalar_one_or_none()
+async def _get_or_404(service: BudgetService, budget_id: str, organization_id: uuid.UUID) -> ScopedBudget:
+    budget = await service.get_deployment_ceiling(budget_id, organization_id)
     if budget is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -166,38 +171,29 @@ async def create_scoped_budget(
 @router.get("")
 async def list_scoped_budgets(
     db: Annotated[AsyncSession, Depends(get_db)],
-    reach: CallerCeilings,
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
     scope_type: Annotated[ScopeType | None, Query()] = None,
     scope_id: Annotated[str | None, Query(max_length=255)] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[ScopedBudgetResponse]:
     """List the scoped budgets in the caller's organization, optionally filtered to one scope."""
-    stmt = select(ScopedBudget).where(reach)
-    if scope_type is not None:
-        stmt = stmt.where(ScopedBudget.scope_type == scope_type)
-    if scope_id is not None:
-        stmt = stmt.where(ScopedBudget.scope_id == scope_id)
-    # Joined rather than one lookup per row: the limit and period live on the
-    # budget now, and a page of ceilings would otherwise be a page of round trips.
-    result = await db.execute(
-        stmt.join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-        .add_columns(Budget)
-        .order_by(ScopedBudget.created_at)
-        .offset(skip)
-        .limit(limit)
+    rows = await service.list_deployment_ceilings(
+        organization_id, scope_type=scope_type, scope_id=scope_id, skip=skip, limit=limit
     )
-    return [ScopedBudgetResponse.from_model(ceiling, limit_row) for ceiling, limit_row in result.all()]
+    return [ScopedBudgetResponse.from_model(ceiling, limit_row) for ceiling, limit_row in rows]
 
 
 @router.get("/{budget_id}")
 async def get_scoped_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    reach: CallerCeilings,
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
 ) -> ScopedBudgetResponse:
     """Get one scoped budget."""
-    ceiling = await _get_or_404(db, budget_id, reach)
+    ceiling = await _get_or_404(service, budget_id, organization_id)
     limit = await db.get(Budget, ceiling.budget_id)
     if limit is None:  # pragma: no cover - RESTRICT keeps the budget alive
         raise HTTPException(
@@ -212,7 +208,8 @@ async def update_scoped_budget(
     budget_id: str,
     request: UpdateScopedBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    reach: CallerCeilings,
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
 ) -> ScopedBudgetResponse:
     """Relabel a ceiling, or point it at a different budget.
 
@@ -224,7 +221,7 @@ async def update_scoped_budget(
     budget, so changing what a ceiling allows is either editing that budget,
     which moves every ceiling naming it, or naming a different one.
     """
-    budget = await _get_or_404(db, budget_id, reach)
+    budget = await _get_or_404(service, budget_id, organization_id)
     limit = await db.get(Budget, budget.budget_id)
     if limit is None:  # pragma: no cover - RESTRICT keeps the budget alive
         raise HTTPException(
@@ -264,14 +261,15 @@ async def update_scoped_budget(
 async def delete_scoped_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    reach: CallerCeilings,
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
 ) -> None:
     """Delete a scoped budget.
 
     A request holding a reservation against it settles into nothing afterwards,
     which is the right outcome: the ceiling no longer exists to be credited.
     """
-    budget = await _get_or_404(db, budget_id, reach)
+    budget = await _get_or_404(service, budget_id, organization_id)
     await db.delete(budget)
     try:
         await db.commit()

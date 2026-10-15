@@ -17,7 +17,8 @@ from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
-    CallerWorkspaces,
+    CallerUsageScope,
+    CallerWorkspaceQuery,
     get_config,
     get_db,
     require_deployment_operator,
@@ -522,7 +523,7 @@ def _tag_conditions(tag: list[str]) -> list[ColumnElement[bool]]:
 @operator_router.get("")
 async def list_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
-    workspace_ids: CallerWorkspaces,
+    usage_scope: CallerUsageScope,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -576,7 +577,7 @@ async def list_usage(
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
-        scope=UsageLog.workspace_id.in_(workspace_ids),
+        scope=usage_scope,
     )
     # Outer-joined rather than looked up per row, and rather than left to the
     # client: naming a page of rows must not cost a round trip each, nor oblige a
@@ -702,7 +703,7 @@ async def get_request_settlement(
 @operator_router.get("/count")
 async def count_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
-    workspace_ids: CallerWorkspaces,
+    usage_scope: CallerUsageScope,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -756,7 +757,7 @@ async def count_usage(
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
-        scope=UsageLog.workspace_id.in_(workspace_ids),
+        scope=usage_scope,
     )
     if counts_toward_budget is False:
         # counts_toward_budget alone does not say "imported": gateway traffic on an
@@ -812,7 +813,7 @@ async def list_in_flight(raw_request: Request) -> InFlightResponse:
 async def delete_usage_rows(
     request: UsageDeleteRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    workspace_ids: CallerWorkspaces,
+    workspace_ids: CallerWorkspaceQuery,
 ) -> UsageDeleteResult:
     """Delete imported usage rows by explicit ids or by filter (standalone).
 
@@ -830,7 +831,7 @@ async def delete_usage_rows(
 async def set_usage_price_rows(
     request: UsageSetPriceRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    workspace_ids: CallerWorkspaces,
+    workspace_ids: CallerWorkspaceQuery,
 ) -> UsageSetPriceResult:
     """Set the cost of imported usage rows from manual per-1M rates (standalone).
 
@@ -1626,7 +1627,7 @@ async def _summary_response(
 @operator_router.get("/summary")
 async def usage_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
-    workspace_ids: CallerWorkspaces,
+    usage_scope: CallerUsageScope,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -1686,7 +1687,7 @@ async def usage_summary(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
-        scope=UsageLog.workspace_id.in_(workspace_ids),
+        scope=usage_scope,
     )
     return await _summary_response(
         db,
@@ -1793,7 +1794,7 @@ async def _grouped_series_response(
 @operator_router.get("/series")
 async def usage_series(
     db: Annotated[AsyncSession, Depends(get_db)],
-    workspace_ids: CallerWorkspaces,
+    usage_scope: CallerUsageScope,
     group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
@@ -1845,7 +1846,7 @@ async def usage_series(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
-        scope=UsageLog.workspace_id.in_(workspace_ids),
+        scope=usage_scope,
     )
     return await _grouped_series_response(
         db,

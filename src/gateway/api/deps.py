@@ -8,7 +8,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import ColumnElement, select, update
+from sqlalchemy import ColumnElement, Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
@@ -37,7 +37,7 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
-from gateway.repositories.budgets import BudgetRepositories, in_reach_of, in_scopes
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
@@ -50,6 +50,7 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrgProviderKeyRepository,
     WorkspaceRepository,
+    ids_in_organization,
 )
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
@@ -102,6 +103,7 @@ from gateway.services.tools import (
     WorkspaceSearchKeys,
 )
 from gateway.services.traces import TraceService
+from gateway.services.usage_admin_service import usage_in
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.types.traces import TraceScope
 
@@ -1641,20 +1643,20 @@ async def _caller_workspace_ids(
 CallerWorkspaces = Annotated[frozenset[uuid.UUID], Depends(_caller_workspace_ids)]
 
 
-def _caller_budgets(organization_id: CallerOrganization) -> ColumnElement[bool]:
-    """The budgets a deployment-wide route may address: the deployment's own and the caller's organization's."""
-    return in_reach_of(organization_id)
+def _caller_workspace_query(organization_id: CallerOrganization) -> Select[tuple[uuid.UUID]]:
+    """The same workspaces as a subquery, so a read of a growing table filters in the database."""
+    return ids_in_organization(organization_id)
 
 
-CallerBudgets = Annotated[ColumnElement[bool], Depends(_caller_budgets)]
+CallerWorkspaceQuery = Annotated[Select[tuple[uuid.UUID]], Depends(_caller_workspace_query)]
 
 
-async def _caller_ceilings(organization_id: CallerOrganization, budgets: BudgetServiceDep) -> ColumnElement[bool]:
-    """The spend ceilings a deployment-wide route may address: those whose scope is in the caller's organization."""
-    return in_scopes(await budgets.scope_ids_in(organization_id))
+def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]:
+    """The usage rows an operator's usage reads cover: those of the caller's organization."""
+    return usage_in(workspaces)
 
 
-CallerCeilings = Annotated[ColumnElement[bool], Depends(_caller_ceilings)]
+CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
 
 
 def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
@@ -1676,9 +1678,9 @@ __all__ = [
     "BillingPortDep",
     "CodeExecutionPolicyPortDep",
     "ContainerDep",
-    "CallerBudgets",
-    "CallerCeilings",
     "CallerOrganization",
+    "CallerUsageScope",
+    "CallerWorkspaceQuery",
     "CallerWorkspaces",
     "CurrentIdentity",
     "EntitlementPortDep",
