@@ -3,11 +3,12 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.api_keys import APIKey
+from gateway.models.api_keys import APIKey, EndUserTokenRedemption
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -142,14 +143,20 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         active_at: datetime | None,
         skip: int,
         limit: int,
+        jti: str | None = None,
     ) -> list[APIKey]:
         """Return a page of the keys ``parent_id`` minted, oldest first.
 
-        ``user_id`` narrows them to one end user's; ``active_at`` to those active and unexpired then.
+        ``user_id`` narrows them to one end user's; ``active_at`` to those active and unexpired then; ``jti`` to the
+        one a signed token with that id was materialized as.
         """
         statement = select(APIKey).where(APIKey.parent_key_id == parent_id)
         if user_id is not None:
             statement = statement.where(APIKey.user_id == user_id)
+        if jti is not None:
+            statement = statement.join(EndUserTokenRedemption, EndUserTokenRedemption.child_key_id == APIKey.id).where(
+                EndUserTokenRedemption.parent_key_id == parent_id, EndUserTokenRedemption.jti == jti
+            )
         if active_at is not None:
             statement = statement.where(
                 APIKey.is_active.is_(True), or_(APIKey.expires_at.is_(None), APIKey.expires_at > active_at)
@@ -167,10 +174,18 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         return key
 
     async def delete_children_expired_before(self, cutoff: datetime) -> int:
-        """Delete every minted key that expired before ``cutoff``, returning how many went."""
+        """Delete every minted key, and every token redemption, that expired before ``cutoff``.
+
+        Returns how many keys went. A redemption is useless once its token expires, since the token is refused then.
+        """
         result = await self.db.execute(
             delete(APIKey)
             .where(APIKey.parent_key_id.is_not(None), APIKey.expires_at < cutoff)
+            .execution_options(synchronize_session=False)
+        )
+        await self.db.execute(
+            delete(EndUserTokenRedemption)
+            .where(EndUserTokenRedemption.expires_at < cutoff)
             .execution_options(synchronize_session=False)
         )
         return int(getattr(result, "rowcount", 0) or 0)
@@ -179,3 +194,101 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Whether the key with this id was minted by another key."""
         result = await self.db.execute(select(APIKey.parent_key_id).where(APIKey.id == key_id))
         return result.scalar_one_or_none() is not None
+
+    async def get_with_owner(self, key_id: str) -> APIKey | None:
+        """The key with this id, with its user loaded."""
+        result = await self.db.execute(select(APIKey).options(joinedload(APIKey.user)).where(APIKey.id == key_id))
+        return result.unique().scalar_one_or_none()
+
+    async def lock(self, key_id: str) -> None:
+        """Hold the key's row until the transaction ends, so changes counted against it serialize."""
+        await self.db.execute(select(APIKey.id).where(APIKey.id == key_id).with_for_update())
+
+    async def find_redemption(self, parent_id: str, jti: str) -> tuple[EndUserTokenRedemption, APIKey | None] | None:
+        """The redemption of the token ``parent_id`` signed under ``jti``, and the key it was materialized as.
+
+        The key comes with its issuing key and that key's user, for the checks authentication makes on a minted key.
+        """
+        result = await self.db.execute(
+            select(EndUserTokenRedemption).where(
+                EndUserTokenRedemption.parent_key_id == parent_id, EndUserTokenRedemption.jti == jti
+            )
+        )
+        redemption = result.scalar_one_or_none()
+        if redemption is None:
+            return None
+        if redemption.child_key_id is None:
+            return redemption, None
+        child = await self.db.execute(
+            select(APIKey)
+            .options(joinedload(APIKey.parent).joinedload(APIKey.user))
+            .where(APIKey.id == redemption.child_key_id)
+        )
+        return redemption, child.unique().scalar_one_or_none()
+
+    async def add_token_child(
+        self,
+        *,
+        parent: APIKey,
+        user_id: str,
+        key_hash: str,
+        key_prefix: str,
+        key_name: str,
+        expires_at: datetime,
+        allowed_models: list[str] | None,
+        tags: dict[str, str] | None,
+        jti: str,
+        signing_key_id: str,
+        claims_digest: str,
+    ) -> APIKey | None:
+        """Stage the key a signed token is materialized as, with its redemption.
+
+        Returns None when a concurrent first use of the same token redeemed it first. Both rows go in one SAVEPOINT,
+        so losing that race rolls back this pair alone.
+        """
+        key = APIKey(
+            id=str(uuid.uuid4()),
+            workspace_id=parent.workspace_id,
+            key_hash=key_hash,
+            key_prefix=key_prefix,
+            key_name=key_name,
+            user_id=user_id,
+            expires_at=expires_at,
+            allowed_models=allowed_models,
+            capture_agent_telemetry=parent.capture_agent_telemetry,
+            parent_key_id=parent.id,
+            parent=parent,
+            tags=tags,
+            metadata_={},
+        )
+        redemption = EndUserTokenRedemption(
+            parent_key_id=parent.id,
+            jti=jti,
+            child_key_id=key.id,
+            signing_key_id=signing_key_id,
+            claims_digest=claims_digest,
+            expires_at=expires_at,
+        )
+        try:
+            async with self.db.begin_nested():
+                self.db.add(key)
+                # The redemption's foreign key needs the key's row first.
+                await self.db.flush([key])
+                self.db.add(redemption)
+        except IntegrityError:
+            return None
+        return key
+
+    async def deactivate_token_children(self, parent_id: str, signing_key_id: str) -> None:
+        """Deactivate every key a token ``signing_key_id`` signed for ``parent_id`` was materialized as."""
+        signed = select(EndUserTokenRedemption.child_key_id).where(
+            EndUserTokenRedemption.parent_key_id == parent_id,
+            EndUserTokenRedemption.signing_key_id == signing_key_id,
+            EndUserTokenRedemption.child_key_id.is_not(None),
+        )
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.parent_key_id == parent_id, APIKey.id.in_(signed))
+            .values(is_active=False)
+            .execution_options(synchronize_session=False)
+        )

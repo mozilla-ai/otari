@@ -1432,6 +1432,14 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/workspace_scope.py",
         ),
     },
+    "gateway.models.api_keys.EndUserSigningKey": {
+        "repository": "gateway/repositories/api_keys/signing_key_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.api_keys.EndUserTokenRedemption": {
+        "repository": "gateway/repositories/api_keys/api_key_repository.py",
+        "baseline": (),
+    },
     "gateway.models.budgets.Budget": {
         "repository": "gateway/repositories/budgets/budget_repository.py",
         "baseline": (

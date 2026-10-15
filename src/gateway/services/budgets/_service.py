@@ -388,13 +388,32 @@ class BudgetService:
             return await self._end_user_keys.mint(api_key, request, key_format=key_format, config=config)
 
     async def list_end_user_keys(
-        self, *, api_key: APIKey, external_id: str | None, include_inactive: bool, skip: int, limit: int
+        self,
+        *,
+        api_key: APIKey,
+        external_id: str | None,
+        include_inactive: bool,
+        skip: int,
+        limit: int,
+        jti: str | None = None,
     ) -> list[EndUserKeyPublic]:
-        """Return a page of the keys a service key minted, oldest first; unless asked, only those that still work."""
+        """Return a page of the keys a service key minted, oldest first; unless asked, only those that still work.
+
+        ``jti`` narrows it to the key a signed end-user token with that id was materialized as.
+        """
         async with self._uow:
             return await self._end_user_keys.page(
-                api_key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit
+                api_key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit, jti=jti
             )
+
+    async def authenticate_end_user_token(self, credential: str, config: GatewayConfig) -> APIKey:
+        """Authenticate a signed end-user token as the key it stands for, materializing that key on first use.
+
+        Raises ``EndUserTokenRefusedError`` with the reason for any refusal. The key's own state (active, unexpired,
+        its service key usable) is the caller's to check, as for a key presented by its secret.
+        """
+        async with self._uow:
+            return await self._end_user_keys.authenticate_token(credential, config)
 
     async def revoke_end_user_key(self, *, api_key: APIKey, key_id: str) -> EndUserKeyPublic:
         """Deactivate a key a service key minted. The end user, and what it spent, stay."""

@@ -91,6 +91,10 @@ dependencies = [
     "pypdfium2>=4.30.0",
     "psycopg2-binary>=2.9.9",
     "pydantic-settings>=2.14.2",
+    # Verifies the Ed25519-signed end-user tokens a service key's control plane
+    # issues (services/api_keys/_signed_tokens.py). Already in the tree through
+    # mcp[crypto]; declared because the gateway calls it directly.
+    "pyjwt[crypto]>=2.15.0,<3.0.0",
     "python-dotenv>=1.0.0",
     "python-multipart>=0.0.31",
     "pyyaml>=6.0",

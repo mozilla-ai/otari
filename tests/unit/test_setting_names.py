@@ -56,6 +56,7 @@ _SETTING_NAMES = frozenset(
         "email_verification_expiry_hours",
         "enable_docs",
         "enable_metrics",
+        "end_user_tokens_enabled",
         "feedback_enabled",
         "fetch_tools",
         "file_understanding_enabled",

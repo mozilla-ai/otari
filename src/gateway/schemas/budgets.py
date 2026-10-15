@@ -9,9 +9,9 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StringConstraints
 
-from gateway.models.api_keys import APIKey
+from gateway.models.api_keys import MAX_TOKEN_JTI_LENGTH, APIKey, EndUserSigningKey
 from gateway.models.budgets import (
     BUDGET_ID_PATTERN,
     MAX_COUNT_LIMIT,
@@ -240,6 +240,8 @@ class EndUserBudgetPublic(BaseModel):
 
 _TagKey = Annotated[str, StringConstraints(min_length=1, max_length=MAX_TAG_KEY_LENGTH)]
 _TagValue = Annotated[str, StringConstraints(max_length=MAX_TAG_VALUE_LENGTH)]
+# Printable ASCII without spaces, so a jti never needs escaping wherever it is shown or queried.
+_JTI_PATTERN = r"^[\x21-\x7e]+$"
 
 
 class EndUserKeyCreate(BaseModel):
@@ -315,6 +317,49 @@ class EndUserKeyCreated(EndUserKeyPublic):
 
     key: str
     budget_id: str | None = Field(description="The budget the end user is on")
+
+
+class EndUserTokenClaims(BaseModel):
+    """The claims of a signed end-user token: the mint request's fields, under JWT's names.
+
+    Nothing else is accepted, so a claim a later version gives meaning to is never read as absent by this one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    iss: StrictStr = Field(description="otari:api-key:<the service key's id>")
+    sub: StrictStr = Field(min_length=1, description="The end user's external_id")
+    exp: StrictInt = Field(description="Expiry, in seconds since the epoch; also the materialized key's expires_at")
+    iat: StrictInt = Field(description="Issue time; exp - iat is bounded by the service key's max_child_ttl_sec")
+    jti: Annotated[StrictStr, StringConstraints(min_length=1, max_length=MAX_TOKEN_JTI_LENGTH, pattern=_JTI_PATTERN)]
+    budget_id: StrictStr | None = Field(default=None, min_length=1)
+    tags: dict[_TagKey, _TagValue] | None = Field(default=None, max_length=MAX_REQUEST_TAGS)
+    allowed_models: list[StrictStr] | None = None
+
+
+class EndUserSigningKeyCreate(BaseModel):
+    """Register a public key the calling service key's control plane signs end-user tokens with."""
+
+    public_key: str = Field(
+        min_length=1,
+        max_length=1024,
+        description="An Ed25519 public key, PEM-encoded SubjectPublicKeyInfo ('-----BEGIN PUBLIC KEY-----'). "
+        "Never the private key, which Otari refuses",
+    )
+    name: str | None = Field(default=None, min_length=1, max_length=128, description="Display name, for rotation")
+
+
+class EndUserSigningKeyPublic(BaseModel):
+    """A public key a service key signs end-user tokens with. ``kid`` is what a token names in its header."""
+
+    kid: str
+    name: str | None
+    public_key: str
+    created_at: str
+
+    @classmethod
+    def from_model(cls, key: EndUserSigningKey) -> EndUserSigningKeyPublic:
+        return cls(kid=key.id, name=key.name, public_key=key.public_key, created_at=key.created_at.isoformat())
 
 
 class BudgetResetLogResponse(BaseModel):

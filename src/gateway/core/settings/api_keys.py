@@ -138,6 +138,14 @@ class ApiKeySettings(BaseModel):
         ge=0,
         description="How often expired keys a service key minted are swept. 0 disables the sweep.",
     )
+    end_user_tokens_enabled: Annotated[bool, OMITTED] = Field(
+        default=False,
+        description=(
+            "Lets a service key with max_child_ttl_sec register Ed25519 public keys and have its control plane sign "
+            "end-user tokens with them, each authenticating as a key bound to one of its end users without a mint "
+            "call. Off by default: registration is refused and every such token is refused. Standalone mode only."
+        ),
+    )
 
     @field_validator("api_keys", mode="before")
     @classmethod

@@ -10,6 +10,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
+    ApiKeyServiceDep,
     BudgetServiceDep,
     CallerOrganization,
     get_config,
@@ -26,7 +27,14 @@ from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
-from gateway.schemas.budgets import EndUserKeyPublic, EndUserKeyUpdate, EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.schemas.budgets import (
+    EndUserKeyPublic,
+    EndUserKeyUpdate,
+    EndUserPublic,
+    EndUserPut,
+    EndUserSigningKeyPublic,
+    EndUserUpdate,
+)
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.workspace_scope import organization_default_workspace_id
@@ -806,19 +814,23 @@ async def list_end_user_keys(
     external_id: Annotated[
         str | None, Query(min_length=1, description="Only the keys of the end user the service names with this id.")
     ] = None,
+    jti: Annotated[
+        str | None,
+        Query(min_length=1, description="Only the key the signed end-user token with this jti was materialized as."),
+    ] = None,
     include_inactive: Annotated[
         bool, Query(description="Also list keys that were revoked or have expired and not been swept yet.")
     ] = False,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[EndUserKeyPublic]:
-    """List the keys a service key minted for its end users, oldest first.
+    """List the keys a service key minted for its end users, oldest first, those its signed tokens stand for included.
 
     Only keys that still work are listed unless ``include_inactive`` is set.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
     return await budgets.list_end_user_keys(
-        api_key=key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit
+        api_key=key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit, jti=jti
     )
 
 
@@ -837,6 +849,34 @@ async def revoke_end_user_key(
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
     return await budgets.revoke_end_user_key(api_key=key, key_id=child_key_id)
+
+
+@router.get("/{key_id}/end-user-signing-keys")
+async def list_end_user_signing_keys(
+    key_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
+) -> list[EndUserSigningKeyPublic]:
+    """List the public keys a service key's control plane signs end-user tokens with, oldest first."""
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return [EndUserSigningKeyPublic.from_model(signing_key) for signing_key in await api_keys.list_signing_keys(key)]
+
+
+@router.delete("/{key_id}/end-user-signing-keys/{kid}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_end_user_signing_key(
+    key_id: str,
+    kid: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
+) -> None:
+    """Delete a service key's signing key, refusing every end-user token it signed and revoking the keys they became.
+
+    A kid the service key does not hold answers 404.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    await api_keys.delete_signing_key(key, kid)
 
 
 async def _put_end_user(

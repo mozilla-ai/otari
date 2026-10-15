@@ -215,6 +215,7 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(end_users.router, Plane.CONTROL),
     RouterMount(end_users.budgets_router, Plane.CONTROL),
     RouterMount(end_users.keys_router, Plane.CONTROL),
+    RouterMount(end_users.signing_keys_router, Plane.CONTROL),
     RouterMount(users.router, Plane.CONTROL),
     RouterMount(organizations.router, Plane.CONTROL),
     RouterMount(organization_budgets.budgets_router, Plane.CONTROL),

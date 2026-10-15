@@ -18,6 +18,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, Gate
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.exceptions.api_keys_exceptions import EndUserTokenRefusedError
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
@@ -38,7 +39,7 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
-from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.api_keys import ApiKeyRepository, SigningKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.identity import IdentityRepositories
@@ -69,7 +70,7 @@ from gateway.repositories.tools import (
 from gateway.repositories.traces import TracesRepositories
 from gateway.repositories.usage_and_telemetry import UsageLogRepository
 from gateway.repositories.users_repository import get_active_user
-from gateway.services.api_keys import ApiKeyService
+from gateway.services.api_keys import ApiKeyService, is_end_user_token
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
@@ -311,38 +312,66 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: A
             detail="Invalid API key",
         )
 
-    if not api_key.is_active:
-        record_auth_failure("inactive_key")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API key is inactive",
-        )
+    refusal = _refusal(api_key)
+    if refusal is not None:
+        reason, detail = refusal
+        record_auth_failure(reason)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
+    await _record_use(api_key)
+    return api_key
+
+
+def _refusal(api_key: APIKey) -> tuple[str, str] | None:
+    """Why a key that was found is still refused, as a metric reason and a detail, or None when it is admitted."""
+    if not api_key.is_active:
+        return "inactive_key", "API key is inactive"
     expires_at = _as_utc(api_key.expires_at)
     if expires_at is not None and expires_at < datetime.now(UTC):
-        record_auth_failure("expired_key")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API key has expired",
-        )
-
+        return "expired_key", "API key has expired"
     if api_key.parent_key_id is not None and not _issuer_usable(api_key.parent):
-        record_auth_failure("issuer_unusable")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API key's issuing service key is no longer usable",
-        )
+        return "issuer_unusable", "API key's issuing service key is no longer usable"
+    return None
 
+
+async def _record_use(api_key: APIKey) -> None:
+    """Bump the key's ``last_used_at``, at most once per ``_LAST_USED_UPDATE_INTERVAL_SECONDS``."""
     now = datetime.now(UTC)
     last_used_at = _as_utc(api_key.last_used_at)
-    should_update_last_used = (
-        last_used_at is None or (now - last_used_at).total_seconds() >= _LAST_USED_UPDATE_INTERVAL_SECONDS
-    )
-
-    if should_update_last_used:
+    if last_used_at is None or (now - last_used_at).total_seconds() >= _LAST_USED_UPDATE_INTERVAL_SECONDS:
         await _bump_last_used_at(api_key.id, now)
 
+
+async def _verify_end_user_token(db: AsyncSession, token: str, config: GatewayConfig) -> APIKey:
+    """Authenticate a signed end-user token as the key it was materialized as, materializing it on first use.
+
+    Every refusal answers the 401 an unknown key gets, so the holder cannot tell which check failed; the metric
+    records which one did. The key is then held to what a key presented by its secret is.
+    """
+    try:
+        api_key = await build_budget_service(db).authenticate_end_user_token(token, config)
+    except EndUserTokenRefusedError as exc:
+        record_auth_failure(exc.reason)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key") from exc
+    except DATABASE_ERRORS as exc:
+        record_auth_failure("db_error")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable, please retry",
+        ) from exc
+    refusal = _refusal(api_key)
+    if refusal is not None:
+        record_auth_failure(f"end_user_token_{refusal[0]}")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    await _record_use(api_key)
     return api_key
+
+
+async def _verify_credential(request: Request, db: AsyncSession, token: str, config: GatewayConfig) -> APIKey:
+    """Verify a presented credential as an API key: a signed end-user token by its prefix, else a key secret."""
+    if is_end_user_token(token):
+        return await _verify_end_user_token(db, token, config)
+    return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
 
 
 def _issuer_usable(parent: APIKey | None) -> bool:
@@ -527,7 +556,7 @@ async def verify_api_key(
 ) -> APIKey:
     """Verify API key from the credential headers.
 
-    ``config`` is not consulted, but stays in the signature: like its sibling
+    ``config`` says whether signed end-user tokens are accepted. Like its sibling
     ``verify_api_key_or_master_key``, this is called directly (not only via
     ``Depends``) by downstream deployments, so the three-argument shape is API.
 
@@ -544,7 +573,7 @@ async def verify_api_key(
 
     """
     token = extract_credential_token(request)
-    return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
+    return await _verify_credential(request, db, token, config)
 
 
 async def verify_service_key(api_key: Annotated[APIKey, Depends(verify_api_key)]) -> APIKey:
@@ -702,7 +731,7 @@ async def verify_api_key_or_master_key(
     if await is_valid_master_key(token, config, db):
         return None, True
 
-    api_key = await _verify_and_update_api_key(db, token, _api_key_format(request, db))
+    api_key = await _verify_credential(request, db, token, config)
     return api_key, False
 
 
@@ -846,7 +875,7 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
 
 def build_api_key_service(uow: UnitOfWork) -> ApiKeyService:
     """Build the api-keys service on a Unit of Work, for a request or a worker job."""
-    return ApiKeyService(ApiKeyRepository(uow), uow)
+    return ApiKeyService(ApiKeyRepository(uow), uow, SigningKeyRepository(uow))
 
 
 def build_trace_service(uow: UnitOfWork) -> TraceService:
@@ -965,6 +994,14 @@ def get_unit_of_work_if_needed(
 
 
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
+
+
+def get_api_key_service(uow: UnitOfWorkDep) -> ApiKeyService:
+    """Build the request's api-keys service on the request's Unit of Work."""
+    return build_api_key_service(uow)
+
+
+ApiKeyServiceDep = Annotated[ApiKeyService, Depends(get_api_key_service)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:

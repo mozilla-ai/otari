@@ -6,7 +6,9 @@ key's id. The operator's routes under ``/keys/{key_id}/end-users`` still reach
 any key's end users.
 
 A service key with ``max_child_ttl_sec`` also mints keys bound to one of its
-end users under ``/end-user-keys``, for jobs it does not trust with its own.
+end users under ``/end-user-keys``, for jobs it does not trust with its own,
+and, where the deployment turns signed end-user tokens on, registers the public
+keys its control plane signs such tokens with under ``/end-user-signing-keys``.
 
 An end user is named in the path, ``/end-users/{external_id}``, or by the
 ``external_id`` query parameter on ``/end-users`` itself. An id may contain
@@ -20,7 +22,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 
-from gateway.api.deps import ApiKeyFormatPortDep, BudgetServiceDep, ServiceKey, get_config, verify_service_key
+from gateway.api.deps import (
+    ApiKeyFormatPortDep,
+    ApiKeyServiceDep,
+    BudgetServiceDep,
+    ServiceKey,
+    get_config,
+    verify_service_key,
+)
 from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
@@ -32,6 +41,8 @@ from gateway.schemas.budgets import (
     EndUserKeyUpdate,
     EndUserPublic,
     EndUserPut,
+    EndUserSigningKeyCreate,
+    EndUserSigningKeyPublic,
     EndUserUpdate,
 )
 from gateway.services.budgets import BudgetService, check_path_external_id
@@ -48,6 +59,7 @@ router = APIRouter(prefix="/end-users", tags=["end-users"], dependencies=_GATES)
 budgets_router = APIRouter(prefix="/end-user-budgets", tags=["end-users"], dependencies=_GATES)
 # A sibling of ``/end-users`` rather than under it, where ``/end-users/{external_id:path}`` would match it.
 keys_router = APIRouter(prefix="/end-user-keys", tags=["end-users"], dependencies=_GATES)
+signing_keys_router = APIRouter(prefix="/end-user-signing-keys", tags=["end-users"], dependencies=_GATES)
 
 ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]
 ExternalIdParam = Annotated[
@@ -60,6 +72,13 @@ ExternalIdParam = Annotated[
 ExternalIdFilter = Annotated[
     str | None,
     Query(min_length=1, description="Only the end user the service names with this `user` value: zero or one."),
+]
+JtiFilter = Annotated[
+    str | None,
+    Query(
+        min_length=1,
+        description="Only the key the signed end-user token with this jti was materialized as: zero or one.",
+    ),
 ]
 
 
@@ -210,6 +229,7 @@ async def list_end_user_keys(
     api_key: ServiceKey,
     budgets: BudgetServiceDep,
     external_id: ExternalIdFilter = None,
+    jti: JtiFilter = None,
     include_inactive: Annotated[
         bool, Query(description="Also list keys that were revoked or have expired and not been swept yet.")
     ] = False,
@@ -218,10 +238,11 @@ async def list_end_user_keys(
 ) -> list[EndUserKeyPublic]:
     """List the keys the calling service key minted, oldest first.
 
-    Requires a service key. Only keys that still work are listed unless ``include_inactive`` is set.
+    Requires a service key. Only keys that still work are listed unless ``include_inactive`` is set. A key a signed
+    end-user token was materialized as is listed too, and ``jti`` finds it, so it can be revoked like any other.
     """
     return await budgets.list_end_user_keys(
-        api_key=api_key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit
+        api_key=api_key, external_id=external_id, include_inactive=include_inactive, skip=skip, limit=limit, jti=jti
     )
 
 
@@ -235,6 +256,42 @@ async def revoke_end_user_key(
     user, with what it spent, stays. A key this service key did not mint answers 404.
     """
     return await budgets.revoke_end_user_key(api_key=api_key, key_id=key_id)
+
+
+@signing_keys_router.post("", status_code=status.HTTP_201_CREATED)
+async def register_end_user_signing_key(
+    request: EndUserSigningKeyCreate,
+    api_key: ServiceKey,
+    api_keys: ApiKeyServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> EndUserSigningKeyPublic:
+    """Register an Ed25519 public key the calling service key's control plane signs end-user tokens with.
+
+    Requires a service key with ``max_child_ttl_sec`` (else 403) on a deployment with ``end_user_tokens_enabled``
+    (else 403). Only the public key is sent; a private key is refused with 400. The response's ``kid`` is what a
+    token names in its header. A key holds at most five at once (409 past that), so a rotation registers the new key,
+    moves signing to it, and deletes the old one.
+    """
+    created = await api_keys.register_signing_key(
+        api_key, public_key=request.public_key, name=request.name, enabled=config.end_user_tokens_enabled
+    )
+    return EndUserSigningKeyPublic.from_model(created)
+
+
+@signing_keys_router.get("")
+async def list_end_user_signing_keys(api_key: ServiceKey, api_keys: ApiKeyServiceDep) -> list[EndUserSigningKeyPublic]:
+    """List the public keys the calling service key signs end-user tokens with, oldest first."""
+    return [EndUserSigningKeyPublic.from_model(key) for key in await api_keys.list_signing_keys(api_key)]
+
+
+@signing_keys_router.delete("/{kid}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_end_user_signing_key(kid: str, api_key: ServiceKey, api_keys: ApiKeyServiceDep) -> None:
+    """Delete a signing key of the calling service key, refusing every token it signed from then on.
+
+    The keys those tokens were materialized as are revoked with it, and their end users, with what they spent, stay.
+    A kid this service key does not hold answers 404.
+    """
+    await api_keys.delete_signing_key(api_key, kid)
 
 
 async def _put(

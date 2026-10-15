@@ -4,13 +4,19 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Uuid, false, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 
 # How many budgets one key may list for its end users.
 MAX_END_USER_BUDGETS = 100
+
+# How many public keys one service key may hold for signing end-user tokens at once,
+# enough for a rotation with an overlap and a spare.
+MAX_SIGNING_KEYS_PER_KEY = 5
+# The longest ``jti`` an end-user token may carry.
+MAX_TOKEN_JTI_LENGTH = 128
 
 
 class APIKey(Base):
@@ -173,3 +179,41 @@ class APIKey(Base):
             "config_name": self.config_name,
             "metadata": self.metadata_,
         }
+
+
+class EndUserSigningKey(Base):
+    """An Ed25519 public key a service key registered to sign end-user tokens with.
+
+    Only the public half is ever here. Deleting the row refuses every token it signed.
+    """
+
+    __tablename__ = "api_key_signing_keys"
+
+    # The ``kid`` a token names in its header. Assigned here, never by the caller.
+    id: Mapped[str] = mapped_column(primary_key=True)
+    api_key_id: Mapped[str] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"), index=True)
+    # The SubjectPublicKeyInfo PEM, as re-serialized after parsing.
+    public_key: Mapped[str] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(String(128), default=None)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(UTC))
+
+
+class EndUserTokenRedemption(Base):
+    """The first use of an end-user token, and the key it was materialized as.
+
+    Keyed by the service key and the token's ``jti``, so concurrent first uses converge on one row. It outlives the
+    key it names (``child_key_id`` goes NULL), so a token whose key was deleted is refused rather than materialized
+    again.
+    """
+
+    __tablename__ = "api_key_token_redemptions"
+
+    parent_key_id: Mapped[str] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"), primary_key=True)
+    jti: Mapped[str] = mapped_column(String(MAX_TOKEN_JTI_LENGTH), primary_key=True)
+    child_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
+    # The kid that signed it, kept after that signing key is deleted, which is why it is no foreign key.
+    signing_key_id: Mapped[str] = mapped_column(index=True)
+    # SHA-256 over the token's verified claims, so a second token reusing the jti must carry the same ones.
+    claims_digest: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(UTC))
