@@ -10399,7 +10399,9 @@ export interface components {
          *
          *     Omitting the rates means the deployment serves the model at whatever the
          *     price ladder already answers: a stored deployment price, else the community
-         *     default, which the offer stores as the deployment's own rate.
+         *     default, which the offer stores as the deployment's own rate. ``unit`` is
+         *     what the rates are per, as on ``POST /pricing``: a request or image rate is
+         *     still stored per million.
          * @example {
          *       "input_price_per_million": 2.5,
          *       "model": "gpt-4o",
@@ -10417,6 +10419,8 @@ export interface components {
             model: string;
             /** Output Price Per Million */
             output_price_per_million?: number | null;
+            /** Unit */
+            unit?: ("tokens" | "requests" | "images") | null;
         };
         /**
          * HostedModelPublic
@@ -10425,8 +10429,10 @@ export interface components {
          *     ``price_source`` says which rung of the deployment's ladder answered:
          *     ``deployment`` for a rate an operator set, ``defaults`` for the
          *     community-maintained rate, whether this surface stored it or the fallback
-         *     supplies it, and None when nothing prices the model yet. ``enabled`` is the
-         *     serving switch; a model offered without a discoverable price starts off.
+         *     supplies it, and None when nothing prices the model yet. ``unit`` says what
+         *     the rates are per, so a per-request rate is not read as a per-token one.
+         *     ``enabled`` is the serving switch; a model offered without a discoverable
+         *     price starts off.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -10455,6 +10461,8 @@ export interface components {
             price_source?: ("organization" | "deployment" | "defaults") | null;
             /** Provider */
             provider: string;
+            /** Unit */
+            unit?: string | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -10465,8 +10473,9 @@ export interface components {
          *     A price is the input/output pair or nothing: sending the pair writes a new
          *     pricing version, and the cache rates then follow ``POST /pricing``'s own
          *     semantics (a field the caller omits inherits the most recent stored value,
-         *     an explicit null clears it). ``enabled`` travels alone freely, so a toggle
-         *     never re-sends rates it did not change.
+         *     an explicit null clears it). An omitted ``unit`` carries the stored one
+         *     forward. ``enabled`` travels alone freely, so a toggle never re-sends rates
+         *     it did not change.
          * @example {
          *       "enabled": false
          *     }
@@ -10482,6 +10491,8 @@ export interface components {
             input_price_per_million?: number | null;
             /** Output Price Per Million */
             output_price_per_million?: number | null;
+            /** Unit */
+            unit?: ("tokens" | "requests" | "images") | null;
         };
         /**
          * HostedModelsPublic
@@ -10523,6 +10534,8 @@ export interface components {
          *     ``client_args`` is whatever the provider's SDK client needs beyond the key
          *     (Bedrock's region and IAM pair), the same shape an organization provider
          *     key takes. Values under credential-shaped names come back masked.
+         *     ``restricted_to_organization_id`` keeps the provider to one organization;
+         *     every other one is served as if it were not configured.
          * @example {
          *       "api_key": "sk-live-...",
          *       "provider": "openai"
@@ -10544,6 +10557,8 @@ export interface components {
             enabled: boolean;
             /** Provider */
             provider: string;
+            /** Restricted To Organization Id */
+            restricted_to_organization_id?: string | null;
         };
         /**
          * HostedProviderPublic
@@ -10576,6 +10591,8 @@ export interface components {
             id: string;
             /** Provider */
             provider: string;
+            /** Restricted To Organization Id */
+            restricted_to_organization_id?: string | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -10588,6 +10605,8 @@ export interface components {
          *     leaves the stored credential untouched, so a toggle never re-sends a secret
          *     the caller does not have. ``client_args`` omitted is left alone; an explicit
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
+         *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
+         *     restriction, null lifts it.
          * @example {
          *       "enabled": false
          *     }
@@ -10603,6 +10622,8 @@ export interface components {
             } | null;
             /** Enabled */
             enabled?: boolean | null;
+            /** Restricted To Organization Id */
+            restricted_to_organization_id?: string | null;
         };
         /**
          * HostedProvidersPublic

@@ -55,6 +55,7 @@ from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationGuardrailDefinitionRepository,
     OrganizationMemberRepository,
+    OrganizationRepository,
     OrgProviderKeyRepository,
     WorkspaceRepository,
     ids_in_organization,
@@ -1561,6 +1562,7 @@ def get_hosted_provider_service(
             uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
+        organization_exists=OrganizationRepository(uow).exists,
     )
 
 

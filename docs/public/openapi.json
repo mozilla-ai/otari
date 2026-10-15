@@ -7711,7 +7711,7 @@
         "type": "object"
       },
       "HostedModelCreateRequest": {
-        "description": "Offer a model on a hosted provider, optionally at a custom price.\n\nOmitting the rates means the deployment serves the model at whatever the\nprice ladder already answers: a stored deployment price, else the community\ndefault, which the offer stores as the deployment's own rate.",
+        "description": "Offer a model on a hosted provider, optionally at a custom price.\n\nOmitting the rates means the deployment serves the model at whatever the\nprice ladder already answers: a stored deployment price, else the community\ndefault, which the offer stores as the deployment's own rate. ``unit`` is\nwhat the rates are per, as on ``POST /pricing``: a request or image rate is\nstill stored per million.",
         "example": {
           "input_price_per_million": 2.5,
           "model": "gpt-4o",
@@ -7771,6 +7771,22 @@
               }
             ],
             "title": "Output Price Per Million"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "tokens",
+                  "requests",
+                  "images"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
           }
         },
         "required": [
@@ -7780,7 +7796,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``enabled`` is the\nserving switch; a model offered without a discoverable price starts off.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -7864,6 +7880,17 @@
             "title": "Provider",
             "type": "string"
           },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -7888,7 +7915,7 @@
         "type": "object"
       },
       "HostedModelUpdateRequest": {
-        "description": "Reprice an offered model, toggle whether it is served, or both.\n\nA price is the input/output pair or nothing: sending the pair writes a new\npricing version, and the cache rates then follow ``POST /pricing``'s own\nsemantics (a field the caller omits inherits the most recent stored value,\nan explicit null clears it). ``enabled`` travels alone freely, so a toggle\nnever re-sends rates it did not change.",
+        "description": "Reprice an offered model, toggle whether it is served, or both.\n\nA price is the input/output pair or nothing: sending the pair writes a new\npricing version, and the cache rates then follow ``POST /pricing``'s own\nsemantics (a field the caller omits inherits the most recent stored value,\nan explicit null clears it). An omitted ``unit`` carries the stored one\nforward. ``enabled`` travels alone freely, so a toggle never re-sends rates\nit did not change.",
         "example": {
           "enabled": false
         },
@@ -7951,6 +7978,22 @@
               }
             ],
             "title": "Output Price Per Million"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "tokens",
+                  "requests",
+                  "images"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
           }
         },
         "title": "HostedModelUpdateRequest",
@@ -8025,7 +8068,7 @@
         "type": "object"
       },
       "HostedProviderCreateRequest": {
-        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.",
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.",
         "example": {
           "api_key": "sk-live-...",
           "provider": "openai"
@@ -8071,6 +8114,18 @@
             "minLength": 1,
             "title": "Provider",
             "type": "string"
+          },
+          "restricted_to_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restricted To Organization Id"
           }
         },
         "required": [
@@ -8135,6 +8190,18 @@
             "title": "Provider",
             "type": "string"
           },
+          "restricted_to_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restricted To Organization Id"
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -8158,7 +8225,7 @@
         "type": "object"
       },
       "HostedProviderUpdateRequest": {
-        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` is immutable: changing it is a delete plus a create, because\nthe key belongs to the provider it was issued by. Omitting ``api_key``\nleaves the stored credential untouched, so a toggle never re-sends a secret\nthe caller does not have. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.",
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` is immutable: changing it is a delete plus a create, because\nthe key belongs to the provider it was issued by. Omitting ``api_key``\nleaves the stored credential untouched, so a toggle never re-sends a secret\nthe caller does not have. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it.",
         "example": {
           "enabled": false
         },
@@ -8210,6 +8277,18 @@
               }
             ],
             "title": "Enabled"
+          },
+          "restricted_to_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restricted To Organization Id"
           }
         },
         "title": "HostedProviderUpdateRequest",
