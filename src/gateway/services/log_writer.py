@@ -11,7 +11,9 @@ from typing import Protocol
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, create_log_session
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter, Gauge, Histogram
-from gateway.models.usage import UsageLog
+from gateway.models.money import to_usd_or_none
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
+from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.services.traces import LlmCall, RequestTraces
 
 QUEUE_DEPTH = Gauge(
@@ -299,3 +301,78 @@ def _llm_call(log: UsageLog) -> LlmCall:
         selection_reason=log.selection_reason,
         attempt_position=log.attempt_position,
     )
+
+
+class SignalingLogWriter:
+    """A usage log writer that also tells ``UsageSignalPort`` about each row it was handed.
+
+    Wraps whichever writer the deployment runs and changes nothing about how a
+    row is written: the row goes to the wrapped writer first, and only then is
+    the port told, so a port that fails or is slow never decides whether the
+    row is kept.
+    """
+
+    def __init__(self, inner: LogWriter, signal: UsageSignalPort) -> None:
+        self._inner = inner
+        self._signal = signal
+
+    async def put(self, log: UsageLog) -> None:
+        # The row is the billing record and the port is an overlay's: neither
+        # building the facts nor whatever the adapter raises may reach settlement.
+        # Built before the row is handed over, because a batch writer flushes it
+        # from another task and the facts should not depend on how far it got.
+        usage: RecordedUsage | None = None
+        try:
+            usage = _recorded_usage(log)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+        await self._inner.put(log)
+        if usage is None:
+            return
+        try:
+            await self._signal.usage_recorded(usage)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+
+    async def start(self) -> None:
+        await self._inner.start()
+
+    async def stop(self) -> None:
+        await self._inner.stop()
+
+
+def _recorded_usage(log: UsageLog) -> RecordedUsage:
+    # Unset on a row the request path built, until the column default fills it at flush.
+    source = log.source if log.source is not None else SERVED_HERE_SLUG
+    return RecordedUsage(
+        usage_id=log.id,
+        request_group_id=log.request_group_id,
+        timestamp=log.timestamp,
+        workspace_id=log.workspace_id,
+        user_id=log.user_id,
+        api_key_id=log.api_key_id,
+        provider=log.provider,
+        model=log.model,
+        endpoint=log.endpoint,
+        source=source,
+        status=log.status,
+        status_code=log.status_code,
+        prompt_tokens=log.prompt_tokens,
+        completion_tokens=log.completion_tokens,
+        total_tokens=log.total_tokens,
+        cost=to_usd_or_none(log.cost),
+        latency_ms=log.latency_ms,
+        integration_traffic=_integration_traffic(source, log.endpoint),
+    )
+
+
+def _integration_traffic(source: str, endpoint: str) -> bool:
+    """Whether a row was served here from somebody's own code rather than from the Playground.
+
+    The setup guide's test, ``_integration_traffic`` in
+    ``services/tenancy/workspace_activation_service``, applied to one row. That
+    one also excludes rows billed to the credential a hosted control plane
+    forwards its Playground under, but those rows are written from a data-plane
+    gateway's usage report and never pass through this writer.
+    """
+    return source == SERVED_HERE_SLUG and endpoint != PLAYGROUND_USAGE_ENDPOINT

@@ -46,7 +46,9 @@ Completion requests follow this order:
 5. Apply organization, policy, and request guardrails.
 6. Resolve MCP and gateway-run tool policy.
 7. Dispatch through any-llm.
-8. Record usage and reconcile or refund reservations.
+8. Record usage and reconcile or refund reservations. Each usage row handed to
+   the writer is also reported to `UsageSignalPort` (`SignalingLogWriter` in
+   `services/log_writer.py`), a Null Object unless an overlay binds one.
 
 Chat, Messages, and Responses share the pipeline in
 `api/routes/_pipeline.py`; hybrid attempt reporting lives in `_platform.py`,

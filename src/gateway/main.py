@@ -51,6 +51,7 @@ from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.rate_limit import RateLimiter, RateLimitGrantMiddleware, RateLimitRules, UserRateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
@@ -63,7 +64,13 @@ from gateway.services.dashboard_session_service import revoke_sessions_on_master
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
 from gateway.services.inference import close_decision_client, run_idempotency_sweeper
-from gateway.services.log_writer import LogWriter, NoopLogWriter, TracingLogWriter, create_log_writer
+from gateway.services.log_writer import (
+    LogWriter,
+    NoopLogWriter,
+    SignalingLogWriter,
+    TracingLogWriter,
+    create_log_writer,
+)
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
     clear_catalog_cache,
@@ -798,8 +805,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # vendor handshake.
             await load_guardrail_runner_at_startup()
             await load_provider_endpoints_at_startup()
-            log_writer = create_log_writer(config.log_writer_strategy)
             container: Container = app.state.container
+            # Only here: a hybrid gateway writes no usage rows, so it has none to report.
+            log_writer = SignalingLogWriter(
+                create_log_writer(config.log_writer_strategy), container.resolve(UsageSignalPort, None)
+            )
             # The retention sweep below resolves this same port, so both it and
             # the request path use whatever store this build bound.
             app.state.file_store = _resolve_file_store(config, container)
