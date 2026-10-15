@@ -159,7 +159,26 @@ def test_one_identity_cannot_be_given_to_two_keys(client: TestClient, master_key
     second = _key(client, master_key_header, "second")
 
     assert _rule(client, master_key_header, first, email=EMAIL).status_code == 201
+    assert _rule(client, master_key_header, first, email=EMAIL).status_code == 409
     assert _rule(client, master_key_header, second, email=EMAIL).status_code == 409
+
+
+def test_a_rule_overlapping_another_keys_rule_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    first = _key(client, master_key_header, "first")
+    second = _key(client, master_key_header, "second")
+    assert _rule(client, master_key_header, first, subject=SUBJECT, email=EMAIL).status_code == 201
+
+    # Each would match every token the first key's rule matches.
+    by_email = _rule(client, master_key_header, second, email=EMAIL)
+    by_subject = _rule(client, master_key_header, second, subject=SUBJECT)
+    # Another subject with the same email, or another audience, matches a different set of tokens.
+    other_subject = _rule(client, master_key_header, second, subject="another-subject", email=EMAIL)
+    other_audience = _rule(client, master_key_header, second, audience="https://elsewhere.example.com", email=EMAIL)
+
+    assert by_email.status_code == 409
+    assert by_subject.status_code == 409
+    assert other_subject.status_code == 201
+    assert other_audience.status_code == 201
 
 
 def test_rules_are_managed_by_the_operator_only(client: TestClient, master_key_header: dict[str, str]) -> None:

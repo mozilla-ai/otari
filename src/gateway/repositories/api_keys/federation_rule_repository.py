@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from typing import Never
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, false, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -44,15 +44,30 @@ class FederationRuleRepository(BaseRepository[APIKeyFederationRule, Never, Never
         )
         return result.scalar_one_or_none()
 
-    async def find_identical(
-        self, *, issuer: str, audience: str, subject: str | None, email: str | None
+    async def find_conflicting(
+        self, *, api_key_id: str, issuer: str, audience: str, subject: str | None, email: str | None
     ) -> APIKeyFederationRule | None:
-        """Return a rule on any key that names exactly this identity, or None."""
-        statement = select(APIKeyFederationRule).where(
-            APIKeyFederationRule.issuer == issuer,
-            APIKeyFederationRule.audience == audience,
-            APIKeyFederationRule.subject.is_(None) if subject is None else APIKeyFederationRule.subject == subject,
-            APIKeyFederationRule.email.is_(None) if email is None else APIKeyFederationRule.email == email,
+        """Return a rule that names this identity, or None.
+
+        That is a rule on any key with the same issuer, audience, subject and email, or a rule on another key with
+        the same issuer and audience that shares a subject or an email with this one and contradicts it in neither.
+        """
+        rule = APIKeyFederationRule
+        same_subject = rule.subject.is_(None) if subject is None else rule.subject == subject
+        same_email = rule.email.is_(None) if email is None else rule.email == email
+        compatible_subject = true() if subject is None else or_(rule.subject.is_(None), rule.subject == subject)
+        compatible_email = true() if email is None else or_(rule.email.is_(None), rule.email == email)
+        shared = or_(
+            false() if subject is None else rule.subject == subject,
+            false() if email is None else rule.email == email,
+        )
+        statement = select(rule).where(
+            rule.issuer == issuer,
+            rule.audience == audience,
+            or_(
+                and_(same_subject, same_email),
+                and_(rule.api_key_id != api_key_id, compatible_subject, compatible_email, shared),
+            ),
         )
         result = await self.db.execute(statement.limit(1))
         return result.scalar_one_or_none()

@@ -114,7 +114,12 @@ curl -X POST "https://otari.example.com/api/v1/keys/$KEY_ID/federation-rules" \
 A rule names a `subject`, an `email`, or both; an issuer and audience alone are
 refused, because anyone with a Google account can mint a token for any
 audience. The issuer must be on `federation_issuers`, and one identity cannot
-be given to two keys. `GET /api/v1/keys/{key_id}/federation-rules` lists a
+be given to two keys: a rule that shares a subject or an email with another
+key's rule for the same issuer and audience, and contradicts it in neither,
+answers `409`. Otari cannot tell whether a rule naming only a subject and
+another naming only an email are the same account, so it accepts both, and a
+token matching both authenticates as neither.
+`GET /api/v1/keys/{key_id}/federation-rules` lists a
 key's rules and `DELETE /api/v1/keys/{key_id}/federation-rules/{rule_id}`
 removes one, effective with the next request. Deleting the key deletes its
 rules. These routes need the deployment operator's standing, like the rest of

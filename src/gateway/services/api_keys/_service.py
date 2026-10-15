@@ -82,16 +82,21 @@ class ApiKeyService:
     ) -> FederationRulePublic:
         """Let tokens matching ``rule`` authenticate as the key.
 
-        The issuer must be one of ``allowed_issuers``. A rule naming exactly the identity of an existing rule, on
-        this key or another, is refused, and so is one past the per-key limit.
+        The issuer must be one of ``allowed_issuers``. A rule naming the identity of an existing rule is refused, and
+        so is one past the per-key limit: the same identity on this key, or on another key a subject or an email in
+        common and no contradicting value, since a token matching rules of two keys authenticates as neither.
         """
         if rule.issuer not in allowed_issuers:
             raise FederationIssuerNotAllowedError(rule.issuer)
         async with self._uow:
             if await self._federation_rules.count_for_key(api_key_id) >= MAX_FEDERATION_RULES_PER_KEY:
                 raise FederationRuleLimitError(MAX_FEDERATION_RULES_PER_KEY)
-            existing = await self._federation_rules.find_identical(
-                issuer=rule.issuer, audience=rule.audience, subject=rule.subject, email=rule.email
+            existing = await self._federation_rules.find_conflicting(
+                api_key_id=api_key_id,
+                issuer=rule.issuer,
+                audience=rule.audience,
+                subject=rule.subject,
+                email=rule.email,
             )
             if existing is not None:
                 raise FederationRuleExistsError

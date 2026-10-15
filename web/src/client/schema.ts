@@ -2009,7 +2009,9 @@ export interface paths {
          *
          *     The issuer must be one of the deployment's ``federation_issuers``, else 400. A token authenticates when it is
          *     signed by that issuer, its ``aud`` contains ``audience``, and it carries the rule's ``subject`` and verified
-         *     ``email``, whichever the rule sets. A rule naming exactly the identity of another rule, on any key, answers 409.
+         *     ``email``, whichever the rule sets. A rule naming the identity of an existing rule answers 409: the same issuer,
+         *     audience, subject and email on this key, or on another key the same issuer and audience with a subject or email
+         *     in common and no contradicting value.
          */
         post: operations["keys-create_federation_rule"];
         delete?: never;
