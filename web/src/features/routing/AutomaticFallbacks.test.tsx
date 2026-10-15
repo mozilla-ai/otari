@@ -1,4 +1,5 @@
 import { screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 
 import type { AutomaticFallback, FallbackOffering } from "@/client"
@@ -53,7 +54,7 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).queryByText(/No backup/)).not.toBeInTheDocument()
   })
 
-  it("keeps the short label for a mixed provider and details both on hover", async () => {
+  it("keeps the short label for a mixed provider and opens both owners on press", async () => {
     const gpt: AutomaticFallback = {
       ...SONNET,
       id: "openai/gpt-x",
@@ -67,13 +68,14 @@ describe("AutomaticFallbacks", () => {
         offering("bedrock:openai.gpt-x", [], ["web_search"]),
       ],
     }
+    const user = userEvent.setup()
     await renderWithRouter(<AutomaticFallbacks fallbacks={[gpt]} />)
 
     const row = await rowOf("GPT X")
-    expect(within(row).getByText("Own tools")).toHaveAttribute(
-      "title",
-      "Own: search, code · Otari's: fetch",
-    )
+    await user.click(within(row).getByRole("button", { name: "Own tools" }))
+    expect(
+      await screen.findByText("Own: search, code · Otari's: fetch"),
+    ).toBeInTheDocument()
   })
 
   it("names each provider once, and Bedrock without Amazon", async () => {
