@@ -69,8 +69,9 @@ providers:
 
 Precedence from lowest to highest is the config file, structured environment
 config, then `OTARI_<FIELD>` values: the scalar fields, and
-`OTARI_HOSTED_PROVIDERS` as JSON. A non-scalar setting replaces the lower
-layer's value whole rather than merging into it. Stored runtime settings override
+`OTARI_HOSTED_PROVIDERS` as JSON. A top-level key of the structured config, and
+`OTARI_HOSTED_PROVIDERS`, replace the lower layer's value whole rather than
+merging into it. Stored runtime settings override
 the corresponding startup value after the database is available.
 
 ## Common settings

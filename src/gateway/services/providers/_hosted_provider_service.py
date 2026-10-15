@@ -119,8 +119,9 @@ class HostedProviderService:
         """Bind the unit of work and the collaborators this service composes.
 
         ``sources`` is the merged view of the stored rows and the configured
-        entries, read over ``providers``. Rates are read and written through ``pricing``, the pricing domain's
-        service on the same unit of work. ``live_byo_pairs`` answers which
+        entries, read over ``providers``. Rates are read and written through
+        ``pricing``, the pricing domain's service on the same unit of work.
+        ``live_byo_pairs`` answers which
         organizations hold a live key for each of the given providers, and
         ``organization_exists`` whether the deployment holds an organization a
         restriction names; callables, because the rows they read are another
