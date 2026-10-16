@@ -256,10 +256,11 @@ are percent-decoded, so `note=a%2Cb` records `a,b`. A non-ASCII character must
 be percent-encoded as UTF-8 (`caf%C3%A9`), and a header sent more than once is
 read as one comma-joined list. Header tags are the base and the body's tags
 override them on the same key; the bounds apply to the merged set. A raw
-non-ASCII character, a pair without `=`, a key given twice, a value that does
-not decode to UTF-8, or tags past the bounds is refused with a 422 whose `detail` locates the
-error at `["header", "Otari-Tags"]`, as a malformed `metadata` is refused. The
-header is never forwarded to the provider.
+non-ASCII character, a pair without `=`, a `%` that does not start a two-digit
+hex escape, a key given twice, a value that does not decode to UTF-8, or tags
+past the bounds are refused with a 422 whose `detail` locates the error at
+`["header", "Otari-Tags"]`, as a malformed `metadata` is refused. The header is
+never forwarded to the provider.
 
 What reaches the provider depends on the surface. Chat Completions and Messages
 never forward the caller's `metadata`. On Messages, `metadata.user_id` names the

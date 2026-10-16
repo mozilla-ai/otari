@@ -14,6 +14,7 @@ values up to 512.
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any
 from urllib.parse import unquote
 
@@ -30,6 +31,10 @@ MAX_TAG_VALUE_LENGTH = 512
 # LiteLLM's key for spend-log attribution. The gateway consumes it, so it never
 # reaches a provider, which would reject a nested object in ``metadata``.
 LITELLM_SPEND_LOGS_KEY = "spend_logs_metadata"
+
+# A ``%`` that does not start a two-digit hex escape, which ``unquote`` would
+# keep verbatim rather than refuse.
+_BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 REQUEST_METADATA_DESC = (
     "Tags for cost attribution, recorded on the request's usage rows and filterable in the usage API: "
@@ -142,9 +147,9 @@ TAGS_HEADER_DESC = (
 def header_tags(value: str | None) -> dict[str, str] | None:
     """Return the tags an ``Otari-Tags`` header value carries, or None when it carries none.
 
-    Raises ``ValueError`` on a non-ASCII character, a pair without ``=``, a key
-    given twice, a value that does not percent-decode to UTF-8, or anything past
-    the bounds.
+    Raises ``ValueError`` on a non-ASCII character, a pair without ``=``, a
+    malformed percent escape, a key given twice, a value that does not
+    percent-decode to UTF-8, or anything past the bounds.
     """
     if not value or not value.strip():
         return None
@@ -161,6 +166,9 @@ def header_tags(value: str | None) -> dict[str, str] | None:
         raw_key, sep, raw_value = item.partition("=")
         if not sep:
             msg = f"{TAGS_HEADER}: each tag must be key=value"
+            raise ValueError(msg)
+        if _BAD_ESCAPE.search(item):
+            msg = f"{TAGS_HEADER}: a % must start a two-digit hex escape"
             raise ValueError(msg)
         try:
             key = unquote(raw_key.strip(), errors="strict")
