@@ -30,9 +30,11 @@ HARNESS_SESSION_HEADERS: Mapping[str, str] = {"x-claude-code-session-id": "claud
 # session id and works inside the parent's turn, so the task it was handed is no new prompt.
 HARNESS_SUBAGENT_HEADERS = frozenset({"x-claude-code-agent-id"})
 
-# Codex sends its thread id as ``session-id``. That name is generic, so it names a
-# session only on a request whose ``originator`` or ``User-Agent`` starts with ``codex``.
-_CODEX_SESSION_HEADER = "session-id"
+# Codex sends its thread id as ``thread-id`` and its root thread's id as ``session-id``.
+# The thread is the session, so a subagent gets one of its own; ``session-id`` is read
+# only without a ``thread-id``. Both names are generic, so they count only on a request
+# whose ``originator`` or ``User-Agent`` starts with ``codex``.
+_CODEX_SESSION_HEADERS = ("thread-id", "session-id")
 _CODEX_MARKER_HEADERS = ("originator", "user-agent")
 
 # ``User-Agent`` product names a harness is known by, where it differs from the name shown.
@@ -80,8 +82,10 @@ def resolve_session(
     for header in HARNESS_SESSION_HEADERS:
         if (key := _clean(headers.get(header))) is not None:
             return SessionRef(source="harness", key=key)
-    if _is_codex(headers) and (key := _clean(headers.get(_CODEX_SESSION_HEADER))) is not None:
-        return SessionRef(source="harness", key=key)
+    if _is_codex(headers):
+        for header in _CODEX_SESSION_HEADERS:
+            if (key := _clean(headers.get(header))) is not None:
+                return SessionRef(source="harness", key=key)
     return None
 
 
