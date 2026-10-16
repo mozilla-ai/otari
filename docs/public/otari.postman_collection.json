@@ -2731,7 +2731,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_key\": \"sk-live-...\",\n  \"provider\": \"openai\"\n}"
+              "raw": "{\n  \"api_key\": \"<your OpenAI API key>\",\n  \"provider\": \"openai\"\n}"
             },
             "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error.",
             "header": [

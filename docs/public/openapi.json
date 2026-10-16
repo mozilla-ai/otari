@@ -8070,7 +8070,7 @@
       "HostedProviderCreateRequest": {
         "description": "Configure a provider this deployment will serve hosted inference on.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.",
         "example": {
-          "api_key": "sk-live-...",
+          "api_key": "<your OpenAI API key>",
           "provider": "openai"
         },
         "properties": {

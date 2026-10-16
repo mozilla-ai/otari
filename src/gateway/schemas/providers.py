@@ -357,7 +357,7 @@ class HostedProviderCreateRequest(SQLModel):
     every other one is served as if it were not configured.
     """
 
-    model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "sk-live-..."}}}
+    model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
 
     provider: str = Field(min_length=1, max_length=64)
     api_key: str = Field(min_length=1, max_length=1024)

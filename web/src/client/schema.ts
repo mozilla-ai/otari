@@ -10539,7 +10539,7 @@ export interface components {
          *     ``restricted_to_organization_id`` keeps the provider to one organization;
          *     every other one is served as if it were not configured.
          * @example {
-         *       "api_key": "sk-live-...",
+         *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
          *     }
          */
