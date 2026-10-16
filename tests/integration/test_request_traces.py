@@ -238,3 +238,35 @@ def test_requests_of_one_harness_session_on_messages_share_one_trace(
     with db_session_factory() as session:
         trace = session.scalars(select(Trace).where(Trace.trace_id == trace_id)).one()
     assert (trace.session_source, trace.harness, trace.step_count) == ("harness", "claude-code", 2)
+
+
+def test_a_claude_code_subagent_continues_its_parents_turn(
+    client: TestClient, api_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """A subagent shares its parent's session id; only its agent header tells its task from a new prompt."""
+    parent = api_key_header | {"x-claude-code-session-id": "b57732d4", "user-agent": "claude-cli/2.1.291"}
+    subagent = parent | {"x-claude-code-agent-id": "a1b2c3"}
+    system = {"role": "system", "content": [{"type": "text", "text": "x"}]}
+    prompt = [{"role": "user", "content": [{"type": "text", "text": "x"}] * 3}, system]
+    tool_result = [
+        *prompt,
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "x"}]},
+        system,
+    ]
+    with patch("gateway.api.routes.messages.amessages", return_value=_message()):
+        for headers, messages in ((parent, prompt), (subagent, prompt), (subagent, tool_result)):
+            response = client.post(
+                f"{API_ROOT}/messages",
+                json={"model": MODEL_NAME, "max_tokens": 64, "messages": messages},
+                headers=headers,
+            )
+            assert response.status_code == 200
+
+    trace_id = _only_trace_id(db_session_factory)
+    spans = _wait_for_spans(db_session_factory, trace_id, 7)
+
+    steps = sorted((span for span in spans if span.kind == "step"), key=lambda span: span.start_time or 0)
+    assert [step.opens_turn for step in steps] == [True, False, False]
+    [tool] = [span for span in spans if span.kind == "tool"]
+    assert (tool.tool_name, tool.tool_type, tool.outcome) == ("Bash", "client", "ok")
