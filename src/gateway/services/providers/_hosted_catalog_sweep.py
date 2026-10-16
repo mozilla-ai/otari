@@ -27,7 +27,7 @@ from gateway.services.provider_kwargs import split_selector
 from gateway.services.providers._hosted_catalog import CATALOG_SAMPLE, classify_priced_keys, kept_groups
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_offers import HostedOffers
-from gateway.services.providers._hosted_sources import HostedSources
+from gateway.services.providers._hosted_sources import HostedSource, HostedSources
 
 # A provider, the connection it serves on, and the models configuration
 # declares for it when it cannot list them.
@@ -91,9 +91,8 @@ class HostedCatalogSweep:
         async with self.uow:
             serving = [
                 (
-                    source.provider,
+                    source,
                     source.credential(),
-                    source.declared_models,
                     await self.models.names_for_provider(source.provider),
                 )
                 for source in await self.sources.all()
@@ -101,14 +100,11 @@ class HostedCatalogSweep:
             ]
 
         # One provider at a time, each bounded by the discovery timeout.
-        dialed = [
-            await self._dial_one(provider, credential, declared, offered)
-            for provider, credential, declared, offered in serving
-        ]
+        dialed = [await self._dial_one(source, credential, offered) for source, credential, offered in serving]
         defaults: dict[str, dict[str, ModelPricing]] = {}
         if apply:
-            for (provider, _, _, offered), answer in zip(serving, dialed, strict=True):
-                defaults[provider] = await self.offers.defaults_for(provider, [*answer.added, *offered])
+            for (source, _, offered), answer in zip(serving, dialed, strict=True):
+                defaults[source.provider] = await self.offers.defaults_for(source.provider, [*answer.added, *offered])
 
         async with self.uow:
             # Read again rather than carried across: a provider removed while
@@ -200,21 +196,23 @@ class HostedCatalogSweep:
         ]
 
     async def _dial_one(
-        self, provider: str, credential: ResolvedHostedProvider | None, declared: tuple[str, ...], offered: set[str]
+        self, source: HostedSource, credential: ResolvedHostedProvider | None, offered: set[str]
     ) -> HostedCatalogProviderRefreshPublic:
         """Ask one provider what it serves, reporting a refusal rather than raising."""
+        provider = source.provider
         if credential is None:
             return HostedCatalogProviderRefreshPublic(
-                provider=provider, added=[], error=UNDECRYPTABLE, credential_unreadable=True
+                provider=provider, added=[], error=UNDECRYPTABLE, credential_unreadable=True, source=source.source
             )
-        discovery = await self.dial(provider, credential, declared)
+        discovery = await self.dial(provider, credential, source.declared_models)
         if discovery.error is not None or discovery.discovery_unsupported:
             return HostedCatalogProviderRefreshPublic(
                 provider=provider,
                 added=[],
                 error=discovery.error,
                 discovery_unsupported=discovery.discovery_unsupported,
+                source=source.source,
             )
         return HostedCatalogProviderRefreshPublic(
-            provider=provider, added=sorted({model.id for model in discovery.models} - offered)
+            provider=provider, added=sorted({model.id for model in discovery.models} - offered), source=source.source
         )

@@ -104,6 +104,8 @@ export interface CatalogFailure {
    * deleting would be the wrong advice: a provider with no model listing serves
    * requests perfectly well and simply cannot be asked what it offers, and a
    * key this process cannot decrypt wants re-entering rather than destroying.
+   * Never for a provider defined in configuration, which no delete reaches;
+   * the sweep says which it is, so the answer does not hang on the list page.
    */
   offerRemoval: boolean
 }
@@ -119,6 +121,9 @@ export function catalogRefreshFailures(
       message: provider.error
         ? `${provider.provider}: ${provider.error}`
         : `${provider.provider} cannot list its models, so nothing new was offered.`,
-      offerRemoval: Boolean(provider.error) && !provider.credential_unreadable,
+      offerRemoval:
+        Boolean(provider.error) &&
+        !provider.credential_unreadable &&
+        provider.source !== "config",
     }))
 }

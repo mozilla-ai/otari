@@ -665,6 +665,9 @@ class HostedCatalogProviderRefreshPublic(SQLModel):
     # so the page does not offer to remove a provider whose credential merely
     # needs re-entering.
     credential_unreadable: bool = False
+    # Where the provider is defined, so the page offers to remove only one it
+    # can delete: a provider from configuration is changed there.
+    source: Literal["database", "config"] = "database"
 
 
 class HostedCatalogKeptGroupPublic(SQLModel):

@@ -7653,6 +7653,15 @@
             },
             "title": "Repriced",
             "type": "array"
+          },
+          "source": {
+            "default": "database",
+            "enum": [
+              "database",
+              "config"
+            ],
+            "title": "Source",
+            "type": "string"
           }
         },
         "required": [

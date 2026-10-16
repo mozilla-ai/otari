@@ -63,11 +63,9 @@ import {
  */
 function CatalogSweepReport({
   result,
-  isRemovable,
   onRemoveProvider,
 }: {
   result: HostedCatalogRefresh
-  isRemovable: (provider: string) => boolean
   onRemoveProvider: (provider: string) => void
 }) {
   const failures = catalogRefreshFailures(result)
@@ -96,7 +94,7 @@ function CatalogSweepReport({
       {failures.map((failure) => (
         <div key={failure.provider} className="mt-1 text-caption">
           <p>{failure.message}</p>
-          {failure.offerRemoval && isRemovable(failure.provider) ? (
+          {failure.offerRemoval ? (
             // Offered rather than done: a delete destroys the stored key.
             <p className="mt-1 flex flex-wrap items-center gap-2">
               <span>This provider serves nothing until it answers again.</span>
@@ -241,8 +239,6 @@ function HostedProvidersContent() {
   }
 
   const rows = providers.data?.data ?? []
-  const fromConfig = (provider: string) =>
-    rows.some((row) => row.provider === provider && row.source === "config")
   const deleting = rows.find((row) => row.provider === pendingDelete)
   const editing = rows.find((row) => row.provider === editingProvider)
   const expanded = rows.find((row) => row.provider === modelsFor)
@@ -399,7 +395,6 @@ function HostedProvidersContent() {
       {sweep.data ? (
         <CatalogSweepReport
           result={sweep.data}
-          isRemovable={(provider) => !fromConfig(provider)}
           onRemoveProvider={setPendingDelete}
         />
       ) : null}

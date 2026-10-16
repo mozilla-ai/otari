@@ -320,6 +320,7 @@ async def test_a_roster_outliving_its_entry_serves_nothing_and_the_sweep_removes
     assert await after.resolve("openai", "o3", organization_id=None) is None
     assert "openai" not in await after.serveable_models(organization_id=None)
     assert preview.orphaned_rosters == ["openai"]
+    assert [(answer.provider, answer.source) for answer in preview.providers] == [("anthropic", "config")]
     assert "openai:o3" in preview.removed
     assert "anthropic:claude-x" not in preview.removed
 

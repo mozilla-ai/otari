@@ -10412,6 +10412,12 @@ export interface components {
             provider: string;
             /** Repriced */
             repriced?: string[];
+            /**
+             * Source
+             * @default database
+             * @enum {string}
+             */
+            source: "database" | "config";
         };
         /**
          * HostedCatalogRefreshPublic

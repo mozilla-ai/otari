@@ -59,6 +59,7 @@ const provider = (
   error: null,
   discovery_unsupported: false,
   credential_unreadable: false,
+  source: "database",
   ...patch,
 })
 
@@ -152,6 +153,21 @@ describe("catalogRefreshFailures", () => {
         provider: "nebius",
         message: "nebius: The key was refused.",
         offerRemoval: true,
+      },
+    ])
+  })
+
+  it("does not offer removal for a provider defined in configuration", () => {
+    // No delete reaches it, whatever page of the provider list it is on.
+    const result = sweep({
+      providers: [provider({ error: "The key was refused.", source: "config" })],
+    })
+
+    expect(catalogRefreshFailures(result)).toEqual([
+      {
+        provider: "nebius",
+        message: "nebius: The key was refused.",
+        offerRemoval: false,
       },
     ])
   })
