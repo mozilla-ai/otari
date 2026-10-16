@@ -12,7 +12,15 @@ from any_llm.exceptions import ContextLengthExceededError
 from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, CompletionUsage
 from any_llm.types.responses import Response, ResponseStreamEvent
 from fastapi.testclient import TestClient
-from openai.types.responses import ResponseCreatedEvent, ResponseTextDeltaEvent
+from openai.types.responses import (
+    ResponseCompletedEvent,
+    ResponseCreatedEvent,
+    ResponseFailedEvent,
+    ResponseIncompleteEvent,
+    ResponseTextDeltaEvent,
+    ResponseUsage,
+)
+from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -512,7 +520,7 @@ def test_a_chat_stream_with_several_choices_is_complete_only_when_each_finishes(
         assert '"error"' not in response.text
 
 
-def _response_snapshot(status: str) -> Response:
+def _response_snapshot(status: str, usage: ResponseUsage | None = None) -> Response:
     return Response(
         id="resp_cut",
         created_at=0.0,
@@ -523,6 +531,7 @@ def _response_snapshot(status: str) -> Response:
         parallel_tool_calls=False,
         tool_choice="auto",
         tools=[],
+        usage=usage,
     )
 
 
@@ -575,3 +584,37 @@ def test_a_responses_stream_the_provider_ends_before_its_terminal_event_is_an_in
         "code": "provider_stream_interrupted",
     }
     assert _usage_row(db_session_factory).status == "error"
+
+
+@pytest.mark.parametrize(
+    ("event_class", "status"),
+    [
+        (ResponseCompletedEvent, "completed"),
+        (ResponseIncompleteEvent, "incomplete"),
+        (ResponseFailedEvent, "failed"),
+    ],
+    ids=["completed", "incomplete", "failed"],
+)
+def test_a_responses_stream_that_reaches_its_terminal_event_ends_cleanly(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    event_class: type[ResponseCompletedEvent | ResponseIncompleteEvent | ResponseFailedEvent],
+    status: str,
+) -> None:
+    """Each event the Responses API ends a response with completes the stream, whatever the response's status."""
+    usage = ResponseUsage(
+        input_tokens=45,
+        input_tokens_details=InputTokensDetails(cached_tokens=0),
+        output_tokens=3,
+        output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
+        total_tokens=48,
+    )
+    terminal = event_class(
+        type=cast(Any, f"response.{status}"), response=_response_snapshot(status, usage), sequence_number=2
+    )
+
+    response = _stream_responses(client, master_key_header, [*_RESPONSES_OPENING_EVENTS, terminal])
+
+    assert response.status_code == 200, response.text
+    assert "event: error" not in response.text
+    assert response.text.rstrip().endswith("data: [DONE]")
