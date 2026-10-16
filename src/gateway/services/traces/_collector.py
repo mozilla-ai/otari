@@ -19,7 +19,7 @@ from decimal import Decimal
 from gateway.log_config import logger
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._turns import TurnFacts
-from gateway.types.traces import SpanRecord, TraceWrite, is_identifier
+from gateway.types.traces import SpanRecord, TraceWrite, is_endpoint, is_identifier
 
 # The settled status of an attempt a later candidate made up for, and of one that served.
 _ABSORBED = "absorbed"
@@ -129,6 +129,11 @@ class RequestTrace:
         """
         ended = call.ended
         started = ended - timedelta(milliseconds=call.latency_ms) if call.latency_ms is not None else None
+        if started is not None:
+            # Latency is rounded to the millisecond, so a call that began with its
+            # step can read as starting a fraction of one before it. The start never
+            # moves past the call's own end, whatever the wall clock did meanwhile.
+            started = max(started, min(self.started_at, ended))
         attributes: dict[str, str | int | float | bool] = {}
         if (policy := identifier_or_none(call.policy_name)) is not None:
             attributes["otari.routing.policy"] = policy
@@ -266,7 +271,7 @@ class RequestTrace:
             span_id=self.request_id,
             kind="step",
             origin="gateway",
-            name=identifier_or_none(self.endpoint) or "request",
+            name=self.endpoint if is_endpoint(self.endpoint) else "request",
             opens_turn=self.turn is not None and self.turn.opens_turn and not self.subagent,
             outcome="ok" if ok else "error",
             error_class=error_class,

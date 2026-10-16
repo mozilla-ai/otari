@@ -24,7 +24,7 @@ from gateway.log_config import logger
 from gateway.services.traces._collector import identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
-from gateway.types.traces import SpanRecord, TraceWrite, is_identifier
+from gateway.types.traces import LIST_SEPARATOR, SpanRecord, TraceWrite, is_identifier, is_identifier_list
 
 # ``gen_ai.operation.name`` values, by the span kind they are.
 _LLM_OPERATIONS = frozenset({"chat", "text_completion", "generate_content", "embeddings"})
@@ -106,6 +106,23 @@ def _int(attributes: Mapping[str, Any], key: str) -> int | None:
     return min(value, _INT32_MAX)
 
 
+def _joined(attributes: Mapping[str, Any], key: str) -> str | None:
+    """An array-of-strings attribute joined for storage, or None unless every element is an identifier.
+
+    A bare string is read as an array of one.
+    """
+    value = attributes.get(key)
+    items = (value,) if isinstance(value, str) else value
+    if not isinstance(items, list | tuple) or not items or not all(isinstance(item, str) for item in items):
+        return None
+    stripped = [item.strip() for item in items]
+    # Each element is checked before the join, which would split one that held the separator.
+    if not all(is_identifier(item) for item in stripped):
+        return None
+    joined = LIST_SEPARATOR.join(stripped)
+    return joined if is_identifier_list(joined) else None
+
+
 def _kind(operation: str | None) -> str:
     if operation in _LLM_OPERATIONS:
         return "llm"
@@ -153,6 +170,13 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
     duration = (
         min(round((end - start).total_seconds() * 1000), _INT32_MAX) if start is not None and end is not None else None
     )
+    projected: dict[str, str | int | float | bool] = {}
+    if span.failed and error_type:
+        projected["error.type"] = error_type
+    if (finish_reasons := _joined(attributes, "gen_ai.response.finish_reasons")) is not None:
+        projected["gen_ai.response.finish_reasons"] = finish_reasons
+    if (max_tokens := _int(attributes, "gen_ai.request.max_tokens")) is not None:
+        projected["gen_ai.request.max_tokens"] = max_tokens
     return SpanRecord(
         span_id=_span_id(span.trace_id, span.span_id),
         parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
@@ -174,7 +198,7 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
         tool_call_id=identifier_or_none(_str(attributes, "gen_ai.tool.call.id")),
         otel_trace_id=span.trace_id[:64],
         otel_span_id=span.span_id[:64],
-        attributes={"error.type": error_type} if span.failed and error_type else {},
+        attributes=projected,
     )
 
 

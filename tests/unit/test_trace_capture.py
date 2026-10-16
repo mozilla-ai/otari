@@ -8,6 +8,7 @@ what it writes.
 import asyncio
 import uuid
 from collections.abc import MutableMapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -170,6 +171,41 @@ def test_the_step_ends_with_what_the_client_got(
     step = write.spans[0]
     assert (step.kind, step.span_id, step.outcome, step.error_class) == ("step", "req-1", outcome, error_class)
     assert (write.trace_id, write.session_source) == ("req-1", "none")
+
+
+def test_a_step_is_named_for_the_endpoint_that_served_it() -> None:
+    write = _trace().finish(status_code=200, completed=True)
+
+    assert write.spans[0].name == "/v1/chat/completions"
+
+
+def test_a_step_whose_endpoint_is_not_an_endpoint_label_is_still_recorded() -> None:
+    write = replace(_trace(), endpoint="/Users/alice/notes.txt").finish(status_code=200, completed=True)
+
+    assert write.spans[0].name == "request"
+
+
+def test_an_llm_call_never_starts_before_its_step() -> None:
+    """Latency is rounded to the millisecond, so a call measured from the step's start can reach back past it."""
+    trace = _trace()
+    # Ended 2,900.4 ms after the step started, with its latency rounded up to 2,901 ms.
+    trace.record_llm_call(_llm_call(_usage_row(timestamp=_T0 + timedelta(microseconds=2_900_400), latency_ms=2901)))
+
+    step, llm = trace.finish(status_code=200, completed=True).spans
+
+    assert step.start_time is not None and llm.start_time is not None
+    assert llm.start_time >= step.start_time
+
+
+def test_an_llm_call_that_ended_before_its_step_began_never_starts_after_it_ends() -> None:
+    """A wall clock stepped back between the two readings must not turn the span inside out."""
+    trace = _trace()
+    trace.record_llm_call(_llm_call(_usage_row(timestamp=_T0 - timedelta(seconds=1), latency_ms=500)))
+
+    [llm] = trace.spans
+
+    assert llm.start_time is not None and llm.end_time is not None
+    assert llm.start_time <= llm.end_time
 
 
 # ---------------------------------------------------------------------------

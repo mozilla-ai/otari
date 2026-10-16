@@ -83,6 +83,48 @@ def test_prose_in_a_trace_id_is_refused() -> None:
         )
 
 
+def test_a_gateway_step_is_named_for_its_endpoint() -> None:
+    assert _span(name="/v1/chat/completions").name == "/v1/chat/completions"
+
+
+@pytest.mark.parametrize(
+    ("kind", "origin", "name"),
+    [
+        ("llm", "otlp", "/v1/chat/completions"),
+        ("step", "otlp", "/v1/chat/completions"),
+        ("tool", "gateway", "/v1/chat/completions"),
+        ("step", "gateway", "/etc/passwd"),
+        ("step", "gateway", "/v1/notes.txt"),
+    ],
+)
+def test_a_path_is_a_name_only_for_a_gateway_step_and_only_when_it_is_an_endpoint(
+    kind: str, origin: str, name: str
+) -> None:
+    """The endpoint shape is the gateway's own; a span an exporter named still meets the identifier rule."""
+    with pytest.raises(InvalidSpanError, match="name"):
+        _span(kind=kind, origin=origin, name=name)
+
+
+def test_finish_reasons_are_kept_as_identifiers_joined_by_a_comma() -> None:
+    span = _span(kind="llm", origin="otlp", attributes={"gen_ai.response.finish_reasons": "stop,length"})
+
+    assert span.attributes == {"gen_ai.response.finish_reasons": "stop,length"}
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("gen_ai.response.finish_reasons", "stop,the model gave up"),
+        ("gen_ai.response.finish_reasons", "stop,"),
+        ("gen_ai.response.finish_reasons", "x" * 100 + "," + "y" * 100),
+        ("error.type", "timeout,retry"),
+    ],
+)
+def test_a_list_is_kept_only_in_a_list_attribute_and_only_of_identifiers(key: str, value: str) -> None:
+    with pytest.raises(InvalidSpanError, match="identifier-shaped"):
+        _span(kind="llm", origin="otlp", attributes={key: value})
+
+
 def test_prose_in_an_attribute_string_is_refused() -> None:
     with pytest.raises(InvalidSpanError, match="identifier-shaped"):
         _span(attributes={"error.type": "connection reset by peer"})
