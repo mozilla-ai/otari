@@ -9,7 +9,12 @@ from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
 from gateway.services.web_retrieval_network import truncate_utf8
-from gateway.services.web_retrieval_policy import WebURLValidationError, canonicalize_web_url
+from gateway.services.web_retrieval_policy import (
+    MAX_WEB_URL_LENGTH,
+    CanonicalWebURL,
+    WebURLValidationError,
+    canonicalize_web_url,
+)
 
 # A search result's recency, collapsed to one line and length-capped before it goes
 # on the wire. Same rendering hygiene the text formatter applies: the value is
@@ -44,6 +49,24 @@ def hits_to_show(results: Iterable[Mapping[str, Any]]) -> Iterator[tuple[str, st
         url = str(result.get("url") or "").strip()
         if url:
             yield url, hit_title(result.get("title"), url), hit_date(result.get("published_date"))
+
+
+def fetched_url(value: str) -> CanonicalWebURL | None:
+    """A fetched page's URL in canonical form, ``None`` when it does not parse.
+
+    Not held to the request's length limit again: the URL was accepted, and
+    percent-encoding can lengthen its canonical form past that limit.
+    """
+    try:
+        return canonicalize_web_url(value, max_length=max(MAX_WEB_URL_LENGTH, len(value)))
+    except WebURLValidationError:
+        return None
+
+
+def fetched_display_url(value: str) -> str:
+    """A fetched page's URL without its query or fragment, empty when it does not parse."""
+    canonical = fetched_url(value)
+    return canonical.display_url if canonical is not None else ""
 
 
 def fetch_display_url(value: object) -> str:
