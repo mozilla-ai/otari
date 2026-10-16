@@ -27482,6 +27482,13 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Every check slot on this gateway was busy; nothing was recorded. Try again shortly. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     "workspace-member-budget-policies-list_workspace_budget_defaults": {

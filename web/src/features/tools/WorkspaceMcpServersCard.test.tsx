@@ -477,6 +477,32 @@ describe("WorkspaceMcpServersCard", () => {
     expect(screen.getByText("Not checked")).toBeVisible()
   })
 
+  it("opens what to fix from the health label, not only on hover", async () => {
+    const servers = [
+      workspaceMcpServer({
+        health: health({
+          status: "failing",
+          error: "unauthorized",
+          http_status: 401,
+          tool_count: null,
+        }),
+      }),
+    ]
+    mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "TOKEN REJECTED" }))
+
+    const detail = await screen.findByRole("dialog", {
+      name: "Last check of github",
+    })
+    expect(
+      within(detail).getByText(/Check the authorization token/),
+    ).toBeVisible()
+    expect(within(detail).getByText(/^Checked /)).toBeVisible()
+  })
+
   it("keeps the add form open on the stored server when its check fails", async () => {
     // Save and warn: the server is stored either way, so the form turns into
     // an edit of it rather than inviting a second add of the same name.

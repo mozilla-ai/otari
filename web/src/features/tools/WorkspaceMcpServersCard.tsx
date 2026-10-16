@@ -12,6 +12,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Popover } from "@/design-system/overlays/Popover"
 import { canManageWorkspace } from "@/features/organization/roles"
 import {
   McpServerDialog,
@@ -65,8 +66,9 @@ function tokenChip(server: WorkspaceMcpServer) {
   )
 }
 
-// The last connection check, as of when it ran: the label in the cell, and the
-// sentence and the time on its title for whoever wants the detail.
+// The last connection check, as of when it ran. The label is the cell; the
+// sentence saying what to fix and when it was checked open from it, as a
+// pressable rather than a title, so a keyboard or a finger reaches them too.
 function healthCell(server: WorkspaceMcpServer) {
   const health = server.health
   if (health === null) {
@@ -79,13 +81,22 @@ function healthCell(server: WorkspaceMcpServer) {
         ? "bg-warning"
         : "bg-success"
   return (
-    <span
-      className="flex items-center gap-2 text-mono-caption text-muted"
-      title={`${healthDetail(health)} Checked ${formatDateTime(health.checked_at)}.`}
+    <Popover
+      label={`Last check of ${server.name}`}
+      trigger={
+        <Button className="gap-2">
+          <Dot className={dot} />
+          {healthLabel(health)}
+        </Button>
+      }
     >
-      <Dot className={dot} />
-      {healthLabel(health)}
-    </span>
+      <div className="flex max-w-xs flex-col gap-1">
+        <p className="text-sm">{healthDetail(health)}</p>
+        <p className="text-caption">
+          Checked {formatDateTime(health.checked_at)}
+        </p>
+      </div>
+    </Popover>
   )
 }
 

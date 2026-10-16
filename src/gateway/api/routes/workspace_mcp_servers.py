@@ -109,7 +109,14 @@ async def update_workspace_mcp_server(
     )
 
 
-@router.post("/{server_id}/check")
+@router.post(
+    "/{server_id}/check",
+    responses={
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "description": "Every check slot on this gateway was busy; nothing was recorded. Try again shortly."
+        }
+    },
+)
 async def check_workspace_mcp_server(
     service: WorkspaceMcpServerServiceDep,
     current_identity: CurrentIdentity,

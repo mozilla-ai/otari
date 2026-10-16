@@ -44761,6 +44761,9 @@
               }
             },
             "description": "Validation Error"
+          },
+          "429": {
+            "description": "Every check slot on this gateway was busy; nothing was recorded. Try again shortly."
           }
         },
         "security": [
