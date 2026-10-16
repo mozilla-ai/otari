@@ -988,6 +988,34 @@ async def test_a_sweep_offers_nothing_on_a_provider_removed_while_it_dialed(
     assert await _offered(async_db, "openai") == {}
 
 
+async def test_a_preview_drops_what_a_provider_switched_off_mid_dial_listed_as_the_apply_does(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Otherwise the preview keeps a price on the strength of a listing the apply discards."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "claude": ("3", "15")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+    _discovery(monkeypatch, "claude")
+    await service.create_provider(HostedProviderCreateRequest(provider="anthropic", api_key=KEY))
+    await _price(async_db, "openai:gpt-5", "3", "12")
+
+    async def _dial_and_switch_off(impl_name: str, **_: object) -> ProviderDiscovery:
+        if impl_name == "openai":
+            await service.update_provider("openai", HostedProviderUpdateRequest(enabled=False))
+        return ProviderDiscovery(
+            provider=impl_name, models=[Model(id="gpt-5", object="model", created=0, owned_by=impl_name)]
+        )
+
+    monkeypatch.setattr(DIAL, _dial_and_switch_off)
+    preview = await service.refresh_catalog(apply=False)
+    applied = await service.refresh_catalog(apply=True)
+
+    openai = next(answer for answer in preview.providers if answer.provider == "openai")
+    assert (openai.added, openai.error is not None) == ([], True)
+    assert "openai:gpt-5" in preview.removed
+    assert preview.removed == applied.removed
+
+
 async def test_a_sweep_refuses_while_nothing_is_offered(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

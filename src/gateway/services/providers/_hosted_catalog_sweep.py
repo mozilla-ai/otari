@@ -115,13 +115,14 @@ class HostedCatalogSweep:
             # out, say), and serves nothing; it is not offered, and an apply
             # removes it with the prices it was keeping.
             orphaned = sorted(await self.models.rostered_providers() - defined)
-            if apply:
-                present = {source.provider for source in sources if source.enabled}
-                for answer in dialed:
-                    if answer.provider not in present:
-                        answer.added = []
-                        answer.error = REMOVED_MID_SWEEP
-                        continue
+            # Both paths drop what a provider removed or switched off mid-dial
+            # listed, so the preview classifies the prices exactly as the apply.
+            present = {source.provider for source in sources if source.enabled}
+            for answer in dialed:
+                if answer.provider not in present:
+                    answer.added = []
+                    answer.error = REMOVED_MID_SWEEP
+                elif apply:
                     answer.repriced = await self.offers.reseed(answer.provider, defaults[answer.provider])
                     await self.offers.offer(answer.provider, answer.added, defaults[answer.provider])
             offered_keys = await self.models.offered_keys(defined)
