@@ -223,13 +223,13 @@ def test_container_database_is_an_absolute_sqlite_path() -> None:
     assert smoke.CONTAINER_DATABASE_URL.startswith("sqlite:////")
 
 
-def test_mock_binds_loopback_by_default_and_is_dialled_there() -> None:
+def test_mock_binds_loopback_by_default_and_is_dialed_there() -> None:
     with smoke.mock_provider("key") as server:
         assert server.server_address[0] == smoke.LOOPBACK
         assert smoke.peer_base_url(server, smoke.LOOPBACK) == f"http://{smoke.LOOPBACK}:{server.server_address[1]}"
 
 
-def test_mock_is_dialled_through_the_host_alias_when_bound_for_a_container() -> None:
+def test_mock_is_dialed_through_the_host_alias_when_bound_for_a_container() -> None:
     """A container has its own loopback, so the mock must be reachable by name."""
     with smoke.mock_provider("key", smoke.ALL_INTERFACES) as server:
         url = smoke.peer_base_url(server, smoke.ALL_INTERFACES)

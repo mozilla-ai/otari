@@ -110,6 +110,8 @@ SCRUBBED_ENV_PREFIXES = ("OTARI_",)
 SCRUBBED_ENV_VARS = frozenset({"DATABASE_URL"})
 
 HEALTH_TIMEOUT_SECONDS = 90
+# A bound on each docker call, so a daemon that stops answering cannot hang the smoke.
+DOCKER_TIMEOUT_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 60
 
 # Where the mock provider binds, and the host the gateway reaches it on. They
@@ -466,18 +468,16 @@ def gateway_container(
     name = f"otari-oss-smoke-{secrets.token_hex(4)}"
     log(f"Starting the OSS edition from {image}")
     env_flags = [flag for variable in secrets_env for flag in ("--env", variable)]
-    started = subprocess.run(
+    started = _docker(
         [
-            "docker",
             "run",
-            "--rm",
             "--detach",
             "--name",
             name,
             "--add-host",
             f"{CONTAINER_HOST_ALIAS}:host-gateway",
             "--publish",
-            f"{port}:{CONTAINER_PORT}",
+            f"127.0.0.1:{port}:{CONTAINER_PORT}",
             *env_flags,
             "--volume",
             f"{config_path}:{CONTAINER_CONFIG_PATH}:ro",
@@ -488,30 +488,42 @@ def gateway_container(
             CONTAINER_CONFIG_PATH,
         ],
         env={**os.environ, **secrets_env},
-        capture_output=True,
-        check=False,
-        text=True,
     )
+    if started is None:
+        _docker(["rm", "--force", name])
+        raise SmokeFailure(f"'docker run' did not answer within {DOCKER_TIMEOUT_SECONDS}s")
     if started.returncode != 0:
         raise SmokeFailure(f"'docker run' exited {started.returncode}: {started.stderr.strip()}")
     try:
         _await_container_health(name, base_url)
         yield
     finally:
-        # Captured before the container goes, so a failure still has its log.
-        logs = subprocess.run(["docker", "logs", name], capture_output=True, check=False, text=True)
-        log_path.write_text(logs.stdout + logs.stderr, encoding="utf-8")
-        subprocess.run(["docker", "rm", "--force", name], capture_output=True, check=False)
+        # No --rm on the run, so a container that exited early still has its log here.
+        logs = _docker(["logs", name])
+        log_path.write_text(
+            logs.stdout + logs.stderr if logs is not None else "'docker logs' timed out\n", encoding="utf-8"
+        )
+        _docker(["rm", "--force", name])
+
+
+def _docker(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str] | None:
+    """Run one docker command, or return ``None`` if it does not finish within the bound."""
+    try:
+        return subprocess.run(
+            ["docker", *args],
+            env=env,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=DOCKER_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None
 
 
 def _container_is_running(name: str) -> bool:
-    probe = subprocess.run(
-        ["docker", "inspect", "--format", "{{.State.Running}}", name],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    return probe.returncode == 0 and probe.stdout.strip() == "true"
+    probe = _docker(["inspect", "--format", "{{.State.Running}}", name])
+    return probe is not None and probe.returncode == 0 and probe.stdout.strip() == "true"
 
 
 def _await_container_health(name: str, base_url: str) -> None:
