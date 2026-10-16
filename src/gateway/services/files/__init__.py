@@ -2,7 +2,7 @@
 
 from gateway.services.files._attachment_uploads import uploads_attachments
 from gateway.services.files._metadata import expiry_for, guess_mime_type
-from gateway.services.files._provider_files import produced_files_for
+from gateway.services.files._provider_files import produced_files_for, store_inline_outputs
 from gateway.services.files._provider_uploads import provider_holds_copies
 from gateway.services.files._sandbox_bridge import SandboxFileBridge
 from gateway.services.files._service import (
@@ -46,5 +46,6 @@ __all__ = [
     "provider_holds_copies",
     "run_file_sweeper",
     "sandbox_path_for",
+    "store_inline_outputs",
     "uploads_attachments",
 ]
