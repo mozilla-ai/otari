@@ -316,6 +316,7 @@ POST /api/v1/admin/users/{user_id}/password-link                # dashboard-only
 POST /api/v1/organizations                                      # dashboard-only
 GET /api/v1/organizations/me                                    # dashboard-only
 PATCH /api/v1/organizations/me                                  # dashboard-only
+DELETE /api/v1/organizations/me                                 # dashboard-only
 GET /api/v1/organizations/me/memberships                        # dashboard-only
 POST /api/v1/organizations/me/switch                            # dashboard-only
 GET /api/v1/organizations/me/members                            # dashboard-only

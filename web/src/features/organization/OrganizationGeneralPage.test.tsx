@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationContext } from "@/client"
 import { OrganizationGeneralPage } from "@/features/organization/OrganizationGeneralPage"
 import { API_ROOT } from "@/shared/api/client"
-import { organizationContext } from "@/tests/fixtures"
+import { organization, organizationContext } from "@/tests/fixtures"
 
 interface Request {
   url: string
@@ -165,7 +165,7 @@ describe("OrganizationGeneralPage", () => {
     )
   })
 
-  it("leaves creating and switching to the scope switcher, and offers no delete", async () => {
+  it("leaves creating and switching to the scope switcher", async () => {
     mockApi()
     renderPage(<OrganizationGeneralPage />)
 
@@ -177,12 +177,64 @@ describe("OrganizationGeneralPage", () => {
       screen.queryByRole("button", { name: /Create organization/ }),
     ).toBeNull()
     expect(screen.queryByRole("button", { name: "Switch" })).toBeNull()
-    // Delete is the one with no endpoint anywhere, so a control for it would be
-    // a 404 waiting to happen.
+  })
+
+  it("deletes the organization through the active-organization endpoint once confirmed", async () => {
+    const requests = mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationGeneralPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Delete organization" }),
+    )
+    const dialog = within(await screen.findByRole("alertdialog"))
+    expect(dialog.getByText(/Default Organization is deleted/)).toBeVisible()
+    await user.click(
+      dialog.getByRole("button", { name: "Delete organization" }),
+    )
+
+    const deleted = requests.find((request) => request.method === "DELETE")
+    expect(deleted?.url).toBe(`${API_ROOT}/organizations/me`)
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  })
+
+  it("reports a refused delete in the dialog", async () => {
+    const user = userEvent.setup()
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if ((init?.method ?? "GET").toUpperCase() === "DELETE") {
+        return jsonResponse(
+          { detail: "Only an organization with no usage can be deleted." },
+          409,
+        )
+      }
+      return jsonResponse(organizationContext())
+    })
+    renderPage(<OrganizationGeneralPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Delete organization" }),
+    )
+    const dialog = within(await screen.findByRole("alertdialog"))
+    await user.click(
+      dialog.getByRole("button", { name: "Delete organization" }),
+    )
+
+    expect(await dialog.findByRole("alert")).toHaveTextContent(
+      "Only an organization with no usage can be deleted.",
+    )
+  })
+
+  it("offers no delete for the deployment's default organization", async () => {
+    // The gateway refuses it, so a control for it would only lead to a refusal.
+    mockApi(
+      organizationContext({ organization: organization({ slug: "default" }) }),
+    )
+    renderPage(<OrganizationGeneralPage />)
+
+    await screen.findByText("Default Organization")
     expect(
-      screen.queryByRole("button", { name: /Delete organization/ }),
+      screen.queryByRole("button", { name: "Delete organization" }),
     ).toBeNull()
-    expect(screen.queryByText("Danger zone")).toBeNull()
   })
 
   it("offers no rename to a caller who cannot manage the organization", async () => {
@@ -194,6 +246,9 @@ describe("OrganizationGeneralPage", () => {
     ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Change organization name" }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Delete organization" }),
     ).toBeNull()
   })
 

@@ -3677,6 +3677,26 @@
           }
         },
         {
+          "name": "Delete Active Organization",
+          "request": {
+            "description": "Delete the caller's active organization, if it has no usage, and move the caller out of it.\n\nOwners and admins only. Its workspaces, memberships, invitations and\norganization-level settings go with it. Refused for the deployment's default\norganization, for the only organization the caller belongs to, and for one\nwhose workspaces still hold usage, API keys, aliases or routing policies, so\na deletion never takes spend history with it.\n\nAnswers with the caller's context in the organization they are moved to,\ntheir oldest other one.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me"
+            }
+          }
+        },
+        {
           "name": "List Active Organization Domains",
           "request": {
             "description": "List the caller's organization's email-domain claims. Owners and admins only.",

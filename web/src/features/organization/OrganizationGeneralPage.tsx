@@ -1,12 +1,14 @@
 import { useState } from "react"
 import { Button } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import {
+  useDeleteOrganization,
   useOrganizationContext,
   useUpdateOrganization,
 } from "@/shared/api/organizations"
@@ -14,15 +16,17 @@ import {
 import { RenameOrganizationDialog } from "./RenameOrganizationDialog"
 import { canManage } from "./roles"
 
-// The organization this deployment is, and the one thing an operator does to
-// it: rename it.
+// The organization this deployment is, and the two things an operator does to
+// it: rename it, and delete it while it has no usage.
 //
 // Creating an organization and moving between them live in the scope switcher
 // above the rail, not here: they are about which organization you are looking
-// at, where this page is about the one you are in. Deleting one is nowhere,
-// because the gateway mounts no endpoint for it (every historical attribution
-// resolves through rows hanging off an organization). The roster is its own page
+// at, where this page is about the one you are in. The roster is its own page
 // (Members), which is how otari.ai splits the same surface.
+
+// First boot's organization, which the gateway refuses to delete
+// (`DEFAULT_ORGANIZATION_SLUG` in `provisioning_service.py`).
+const DEFAULT_ORGANIZATION_SLUG = "default"
 
 /**
  * The detail band: a rule above it, a rule below it, and a third rule dividing
@@ -85,10 +89,43 @@ function OrganizationDetails({
   )
 }
 
+/**
+ * Its own band below the details, so the delete is never the button beside the
+ * rename. Says up front what the gateway will refuse, since a used organization
+ * is the common case and the refusal otherwise arrives only after the confirm.
+ */
+function DeleteOrganizationSection({ onDelete }: { onDelete: () => void }) {
+  return (
+    <Section
+      aria-labelledby="delete-organization-title"
+      className="border-b border-border py-5"
+      contentClassName="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="flex min-w-0 flex-col gap-1">
+        <h2 id="delete-organization-title" className="text-title">
+          Delete organization
+        </h2>
+        <p className="text-muted">
+          Only an organization with no usage, API keys, aliases or routing
+          policies can be deleted.
+        </p>
+      </div>
+      <Button variant="ghost" className="shrink-0" onPress={onDelete}>
+        Delete organization
+      </Button>
+    </Section>
+  )
+}
+
 export function OrganizationGeneralPage() {
   const context = useOrganizationContext()
   const update = useUpdateOrganization()
+  const remove = useDeleteOrganization()
   const [isRenaming, setIsRenaming] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  // Held from the open, because a delete that lands moves the context to the
+  // next organization while the dialog is still animating out.
+  const [deletingName, setDeletingName] = useState("")
   // Bumped on every open and used as the dialog's key, so the draft is seeded
   // on the way in rather than reset on the way out.
   const [renameCount, setRenameCount] = useState(0)
@@ -134,6 +171,29 @@ export function OrganizationGeneralPage() {
           setRenameCount((count) => count + 1)
           setIsRenaming(true)
         }}
+      />
+
+      {canEdit && organization.slug !== DEFAULT_ORGANIZATION_SLUG ? (
+        <DeleteOrganizationSection
+          onDelete={() => {
+            remove.reset()
+            setDeletingName(organization.name)
+            setIsDeleting(true)
+          }}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        isOpen={isDeleting}
+        onOpenChange={setIsDeleting}
+        heading="Delete organization"
+        body={`${deletingName} is deleted with its workspaces, memberships and settings, and you move to your next organization. This cannot be undone.`}
+        confirmLabel="Delete organization"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() =>
+          remove.mutate(undefined, { onSuccess: () => setIsDeleting(false) })
+        }
       />
 
       <RenameOrganizationDialog

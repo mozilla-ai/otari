@@ -2096,7 +2096,20 @@ export interface paths {
         get: operations["organizations-get_active_organization_context"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Active Organization
+         * @description Delete the caller's active organization, if it has no usage, and move the caller out of it.
+         *
+         *     Owners and admins only. Its workspaces, memberships, invitations and
+         *     organization-level settings go with it. Refused for the deployment's default
+         *     organization, for the only organization the caller belongs to, and for one
+         *     whose workspaces still hold usage, API keys, aliases or routing policies, so
+         *     a deletion never takes spend history with it.
+         *
+         *     Answers with the caller's context in the organization they are moved to,
+         *     their oldest other one.
+         */
+        delete: operations["organizations-delete_active_organization"];
         options?: never;
         head?: never;
         /**
@@ -20492,6 +20505,53 @@ export interface operations {
             };
             /** @description The caller is an active member of no organization. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+        };
+    };
+    "organizations-delete_active_organization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
+                };
+            };
+            /** @description It is the deployment's default organization, or the only one the caller belongs to. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+            /** @description The caller is not an owner or admin of the organization. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+            /** @description The organization still holds usage, API keys, aliases or routing policies. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

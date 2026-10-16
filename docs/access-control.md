@@ -66,6 +66,15 @@ The API key that authenticates a request determines its workspace. A caller
 cannot select another workspace with a header. Master-key inference uses the
 default workspace.
 
+An owner or admin can delete their active organization from Organization →
+General (`DELETE /api/v1/organizations/me`) while it has no usage: the gateway
+refuses an organization whose workspaces still hold usage, API keys, aliases or
+routing policies, so a deletion never takes spend history with it. The
+deployment's default organization and the only organization the caller belongs
+to cannot be deleted either. Its workspaces, memberships and organization-level
+settings go with it, and everyone whose active organization it was moves to
+another organization they belong to.
+
 ## Users and identities
 
 Otari maintains identities for dashboard sign-in and user records for request
