@@ -83,3 +83,49 @@ class FederationRulePublic(BaseModel):
             email=row.email,
             created_at=row.created_at,
         )
+
+
+class FederationTokenRequest(BaseModel):
+    """An RFC 7523 ``jwt-bearer`` token request, as the Anthropic SDKs and Claude Code send it.
+
+    Every field is optional here so that a missing one is answered in the RFC 6749 error shape rather than as a
+    validation error. Fields the request does not use are ignored.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": "<identity token>",
+                "federation_rule_id": "7d0c7a52-9a2e-4b55-8f3a-2f1f6c0d2a11",
+                "organization_id": "5b3f8e0e-1c2d-4e7f-9a8b-0c1d2e3f4a5b",
+            }
+        },
+    )
+
+    grant_type: str | None = Field(default=None, description="urn:ietf:params:oauth:grant-type:jwt-bearer")
+    assertion: str | None = Field(default=None, description="The identity token.")
+    federation_rule_id: str | None = Field(
+        default=None, description="The id of the federation rule the identity token must match."
+    )
+    organization_id: str | None = Field(
+        default=None, description="When set, the UUID of the organization of the rule's key."
+    )
+    workspace_id: str | None = Field(default=None, description="When set, the UUID of the rule's key's workspace.")
+    service_account_id: str | None = Field(default=None, description="When set, the id of the rule's key.")
+
+
+class FederationTokenResponse(BaseModel):
+    """An access token, as RFC 6749 section 5.1 shapes it. Present it as a bearer token in place of the key."""
+
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in: int = Field(description="Seconds until the access token expires.")
+
+
+class OAuthErrorResponse(BaseModel):
+    """A refused token request, as RFC 6749 section 5.2 shapes it."""
+
+    error: str = Field(description="invalid_request, unsupported_grant_type, invalid_grant or temporarily_unavailable")
+    error_description: str

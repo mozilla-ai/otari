@@ -7291,6 +7291,116 @@
         "title": "FederationRulePublic",
         "type": "object"
       },
+      "FederationTokenRequest": {
+        "description": "An RFC 7523 ``jwt-bearer`` token request, as the Anthropic SDKs and Claude Code send it.\n\nEvery field is optional here so that a missing one is answered in the RFC 6749 error shape rather than as a\nvalidation error. Fields the request does not use are ignored.",
+        "example": {
+          "assertion": "<identity token>",
+          "federation_rule_id": "7d0c7a52-9a2e-4b55-8f3a-2f1f6c0d2a11",
+          "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+          "organization_id": "5b3f8e0e-1c2d-4e7f-9a8b-0c1d2e3f4a5b"
+        },
+        "properties": {
+          "assertion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The identity token.",
+            "title": "Assertion"
+          },
+          "federation_rule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The id of the federation rule the identity token must match.",
+            "title": "Federation Rule Id"
+          },
+          "grant_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "title": "Grant Type"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the UUID of the organization of the rule's key.",
+            "title": "Organization Id"
+          },
+          "service_account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the id of the rule's key.",
+            "title": "Service Account Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the UUID of the rule's key's workspace.",
+            "title": "Workspace Id"
+          }
+        },
+        "title": "FederationTokenRequest",
+        "type": "object"
+      },
+      "FederationTokenResponse": {
+        "description": "An access token, as RFC 6749 section 5.1 shapes it. Present it as a bearer token in place of the key.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "Seconds until the access token expires.",
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token_type": {
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_in"
+        ],
+        "title": "FederationTokenResponse",
+        "type": "object"
+      },
       "GateResultResponse": {
         "properties": {
           "detail": {
@@ -10719,6 +10829,26 @@
           "state"
         ],
         "title": "OAuthCallbackRequest",
+        "type": "object"
+      },
+      "OAuthErrorResponse": {
+        "description": "A refused token request, as RFC 6749 section 5.2 shapes it.",
+        "properties": {
+          "error": {
+            "description": "invalid_request, unsupported_grant_type, invalid_grant or temporarily_unavailable",
+            "title": "Error",
+            "type": "string"
+          },
+          "error_description": {
+            "title": "Error Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "error_description"
+        ],
+        "title": "OAuthErrorResponse",
         "type": "object"
       },
       "OAuthSessionResponse": {
@@ -30993,6 +31123,86 @@
         "summary": "Create Moderation",
         "tags": [
           "moderations"
+        ]
+      }
+    },
+    "/api/v1/oauth/token": {
+      "post": {
+        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must verify against an issuer on ``federation_issuers`` and match the federation rule\n``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must\nbe the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as\nthat key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+        "operationId": "oauth-exchange_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_request or unsupported_grant_type"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_grant"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "temporarily_unavailable"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Exchange Token",
+        "tags": [
+          "oauth"
         ]
       }
     },

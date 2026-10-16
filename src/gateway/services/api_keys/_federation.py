@@ -63,12 +63,16 @@ class _FetchError(Exception):
 
 @dataclass(frozen=True)
 class FederatedIdentity:
-    """What a verified token says about its bearer. ``email`` is set only when the token marks it verified."""
+    """What a verified token says about its bearer. ``email`` is set only when the token marks it verified.
+
+    ``expires_at`` is the token's ``exp``, in seconds since the epoch.
+    """
 
     issuer: str
     audiences: tuple[str, ...]
     subject: str
     email: str | None
+    expires_at: int
 
 
 @dataclass(frozen=True)
@@ -282,6 +286,7 @@ def _identity(issuer: str, claims: dict[str, Any]) -> FederatedIdentity:
         audiences=tuple(audiences),
         subject=subject,
         email=email.strip().lower() if verified and isinstance(email, str) and email.strip() else None,
+        expires_at=int(claims["exp"]),
     )
 
 

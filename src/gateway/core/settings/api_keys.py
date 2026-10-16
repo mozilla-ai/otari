@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from gateway.auth.models import API_KEY_PREFIX, MIN_API_KEY_LENGTH
-from gateway.core.settings_view import OMITTED, SECRET
+from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.models.api_keys import MAX_END_USER_BUDGETS
 from gateway.models.budgets import BUDGET_ID_PATTERN
 
@@ -172,6 +172,16 @@ class ApiKeySettings(BaseModel):
             "when they match one of the key's federation rules. Each entry is an https issuer URL or a mapping "
             "with 'issuer' and an optional 'jwks_uri'. Empty, the default, turns workload identity off. "
             "Standalone and hosted modes only."
+        ),
+    )
+
+    federation_access_token_ttl_sec: Annotated[int, Shown(SettingsGroup.GENERAL)] = Field(
+        default=600,
+        ge=60,
+        le=3600,
+        description=(
+            "How long an access token from POST /api/v1/oauth/token lasts, in seconds, and never past the identity "
+            "token it was exchanged for. Between 60 and 3600."
         ),
     )
 

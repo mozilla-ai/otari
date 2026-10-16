@@ -1,4 +1,5 @@
 import secrets
+import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
@@ -69,11 +70,20 @@ from gateway.repositories.traces import TracesRepositories
 from gateway.repositories.usage_and_telemetry import UsageLogRepository
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import (
+    JWT_BEARER_GRANT,
+    AccessTokenClaims,
     ApiKeyService,
     FederatedTokenVerifier,
+    FederationGrantError,
     FederationRefusedError,
     FederationUnavailableError,
+    access_token_expiry,
+    grant_names_key,
+    is_access_token,
     match_federation_rules,
+    mint_access_token,
+    read_access_token,
+    rule_matches,
     unverified_issuer,
 )
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
@@ -102,6 +112,7 @@ from gateway.services.providers import (
 )
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import RoutingService, clear_router_backend_cache
+from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     InvitationClaimSettings,
@@ -399,11 +410,165 @@ async def _verify_federated_token(request: Request, db: AsyncSession, token: str
     return await _admit_api_key(api_key)
 
 
+async def _verify_access_token(db: AsyncSession, token: str) -> APIKey:
+    """Authenticate an access token from ``POST /oauth/token`` as the key of the rule it names.
+
+    The rule and the key are reloaded on every request, so deleting the rule or deactivating the key ends the
+    token at once. Refusals answer the same 401 as an unknown key.
+    """
+    try:
+        claims = read_access_token(token, configured_secret_keys(), now=time.time())
+        rule = await FederationRuleRepository(db).get(claims.rule_id)
+        if rule is None or rule.api_key_id != claims.api_key_id:
+            raise FederationRefusedError("federation_rule_gone")
+        api_key = await ApiKeyRepository(db).get(claims.api_key_id)
+    except FederationRefusedError as exc:
+        record_auth_failure(exc.reason)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key") from exc
+    except DATABASE_ERRORS as exc:
+        record_auth_failure("db_error")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable, please retry",
+        ) from exc
+    if api_key is None or api_key.internal_secret is not None:
+        record_auth_failure("federation_rule_gone")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    return await _admit_api_key(api_key)
+
+
 async def _verify_credential(request: Request, db: AsyncSession, token: str, config: GatewayConfig) -> APIKey:
-    """Verify a presented credential as an API key: an identity token when federation is on, else a key secret."""
-    if config.federation_issuers and unverified_issuer(token) is not None:
-        return await _verify_federated_token(request, db, token, config)
+    """Verify a presented credential as an API key.
+
+    With federation on, the prefix of an access token or the shape of a JWT routes it before anything is parsed:
+    an access token, then a raw identity token. Everything else is a key secret.
+    """
+    if config.federation_issuers:
+        if is_access_token(token):
+            return await _verify_access_token(db, token)
+        if unverified_issuer(token) is not None:
+            return await _verify_federated_token(request, db, token, config)
     return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
+
+
+_INVALID_GRANT = "The identity token does not match the federation rule."
+
+
+def _invalid_grant(reason: str) -> FederationGrantError:
+    return FederationGrantError(
+        "invalid_grant", _INVALID_GRANT, status_code=status.HTTP_401_UNAUTHORIZED, reason=reason
+    )
+
+
+def _grant_unavailable(reason: str) -> FederationGrantError:
+    return FederationGrantError(
+        "temporarily_unavailable",
+        "The token exchange is temporarily unavailable, please retry.",
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        reason=reason,
+    )
+
+
+@dataclass
+class FederationTokenExchange:
+    """Exchange a verified identity token, naming one federation rule, for a short-lived access token.
+
+    The RFC 7523 ``jwt-bearer`` grant behind ``POST /oauth/token``. The identity token must verify and match the
+    named rule, the rule's key must pass every check its secret would, and any organization, workspace or service
+    account the request names must be that key's own. Nothing is written on a refusal.
+    """
+
+    request: Request
+    db: AsyncSession
+    config: GatewayConfig
+
+    async def exchange(
+        self,
+        *,
+        grant_type: str | None,
+        assertion: str | None,
+        federation_rule_id: str | None,
+        organization_id: str | None,
+        workspace_id: str | None,
+        service_account_id: str | None,
+    ) -> tuple[str, int]:
+        """Return the access token and its lifetime in seconds.
+
+        Raises:
+            FederationGrantError: the request is refused.
+        """
+        if grant_type != JWT_BEARER_GRANT:
+            raise FederationGrantError(
+                "unsupported_grant_type",
+                f"Only the {JWT_BEARER_GRANT} grant is supported.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                reason="federation_grant_unsupported",
+            )
+        if not assertion or not federation_rule_id:
+            raise FederationGrantError(
+                "invalid_request",
+                "The request needs an assertion and a federation_rule_id.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                reason="federation_grant_invalid",
+            )
+        secrets_ = configured_secret_keys()
+        if not secrets_:
+            raise _grant_unavailable("federation_no_secret_key")
+        if unverified_issuer(assertion) is None:
+            raise _invalid_grant("federation_invalid_token")
+        try:
+            identity = await _federated_token_verifier(self.request, self.config).verify(assertion)
+            rule = await FederationRuleRepository(self.db).get(federation_rule_id)
+            if rule is None or not rule_matches(rule, identity):
+                raise FederationRefusedError("federation_no_rule")
+            api_key = await ApiKeyRepository(self.db).get(rule.api_key_id)
+            if api_key is None or api_key.internal_secret is not None:
+                raise FederationRefusedError("federation_no_rule")
+            workspace = await WorkspaceRepository(self.db).get(api_key.workspace_id)
+            if workspace is None or not grant_names_key(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                service_account_id=service_account_id,
+                key_organization_id=workspace.organization_id,
+                key_workspace_id=api_key.workspace_id,
+                api_key_id=api_key.id,
+            ):
+                raise FederationRefusedError("federation_grant_mismatch")
+        except FederationUnavailableError as exc:
+            raise _grant_unavailable("federation_unavailable") from exc
+        except FederationRefusedError as exc:
+            raise _invalid_grant(exc.reason) from exc
+        except DATABASE_ERRORS as exc:
+            raise _grant_unavailable("db_error") from exc
+        try:
+            await _admit_api_key(api_key)
+        except HTTPException as exc:
+            raise _invalid_grant("federation_key_refused") from exc
+        now = time.time()
+        expires_at = access_token_expiry(
+            now=now, ttl_seconds=self.config.federation_access_token_ttl_sec, identity_expires_at=identity.expires_at
+        )
+        if expires_at - now < 1:
+            raise _invalid_grant("federation_expired")
+        token = mint_access_token(
+            AccessTokenClaims(rule_id=rule.id, api_key_id=api_key.id, expires_at=expires_at), secrets_
+        )
+        logger.debug(
+            "Exchanged an identity token from %s for rule %s of API key %s", identity.issuer, rule.id, api_key.id
+        )
+        return token, int(expires_at - now)
+
+
+def get_federation_token_exchange(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> FederationTokenExchange:
+    """The token exchange for this request."""
+    return FederationTokenExchange(request, db, config)
+
+
+FederationTokenExchangeDep = Annotated[FederationTokenExchange, Depends(get_federation_token_exchange)]
 
 
 async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:

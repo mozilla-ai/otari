@@ -21,6 +21,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from gateway.core.config import GatewayConfig
+from gateway.core.settings.api_keys import FederationIssuer
 from gateway.main import create_app
 
 
@@ -36,15 +37,17 @@ def generate_openapi_spec() -> dict[str, object]:
         config = GatewayConfig(
             database_url=database_url,
             bootstrap_api_key=False,
-            # Placeholders, so the conditionally mounted web-search backend route
-            # is in the published contract. It is mounted only where a provider
-            # and a backend token are both configured, and the spec has to
-            # describe every route this app can serve, not only the ones a bare
-            # default config happens to reach. Nothing is called during
+            # Placeholders, so the conditionally mounted routes are in the
+            # published contract: the web-search backend route, mounted only where
+            # a provider and a backend token are both configured, and the token
+            # exchange, mounted only where a federation issuer is trusted. The spec
+            # has to describe every route this app can serve, not only the ones a
+            # bare default config happens to reach. Nothing is called during
             # generation; these values are never used to authenticate anything.
             web_search_provider="tavily",
             web_search_provider_api_key="openapi-generation-placeholder",
             web_search_backend_token="openapi-generation-placeholder",
+            federation_issuers=[FederationIssuer(issuer="https://openapi-generation-placeholder.invalid")],
         )
         app = create_app(config)
         return cast(dict[str, object], app.openapi())

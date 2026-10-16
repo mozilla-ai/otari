@@ -142,6 +142,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "auth_webauthn.router": _PUBLIC_AUTH,
     "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
+    "oauth.router": "the identity token in the body is the credential, verified in the token exchange",
     "bootstrap.router": "unauthenticated on purpose: how a browser learns which mode it reached",
     "health.router": "unauthenticated liveness and readiness",
     "web_search_backend.router": "its own X-Gateway-Token, checked in the handler",

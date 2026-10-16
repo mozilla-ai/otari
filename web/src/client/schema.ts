@@ -2320,6 +2320,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oauth/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange Token
+         * @description Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).
+         *
+         *     The identity token must verify against an issuer on ``federation_issuers`` and match the federation rule
+         *     ``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must
+         *     be the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as
+         *     that key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.
+         *
+         *     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
+         */
+        post: operations["oauth-exchange_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations": {
         parameters: {
             query?: never;
@@ -10267,6 +10294,69 @@ export interface components {
             /** Subject */
             subject: string | null;
         };
+        /**
+         * FederationTokenRequest
+         * @description An RFC 7523 ``jwt-bearer`` token request, as the Anthropic SDKs and Claude Code send it.
+         *
+         *     Every field is optional here so that a missing one is answered in the RFC 6749 error shape rather than as a
+         *     validation error. Fields the request does not use are ignored.
+         * @example {
+         *       "assertion": "<identity token>",
+         *       "federation_rule_id": "7d0c7a52-9a2e-4b55-8f3a-2f1f6c0d2a11",
+         *       "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+         *       "organization_id": "5b3f8e0e-1c2d-4e7f-9a8b-0c1d2e3f4a5b"
+         *     }
+         */
+        FederationTokenRequest: {
+            /**
+             * Assertion
+             * @description The identity token.
+             */
+            assertion?: string | null;
+            /**
+             * Federation Rule Id
+             * @description The id of the federation rule the identity token must match.
+             */
+            federation_rule_id?: string | null;
+            /**
+             * Grant Type
+             * @description urn:ietf:params:oauth:grant-type:jwt-bearer
+             */
+            grant_type?: string | null;
+            /**
+             * Organization Id
+             * @description When set, the UUID of the organization of the rule's key.
+             */
+            organization_id?: string | null;
+            /**
+             * Service Account Id
+             * @description When set, the id of the rule's key.
+             */
+            service_account_id?: string | null;
+            /**
+             * Workspace Id
+             * @description When set, the UUID of the rule's key's workspace.
+             */
+            workspace_id?: string | null;
+        };
+        /**
+         * FederationTokenResponse
+         * @description An access token, as RFC 6749 section 5.1 shapes it. Present it as a bearer token in place of the key.
+         */
+        FederationTokenResponse: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Expires In
+             * @description Seconds until the access token expires.
+             */
+            expires_in: number;
+            /**
+             * Token Type
+             * @default Bearer
+             */
+            token_type: string;
+        };
         /** GateResultResponse */
         GateResultResponse: {
             /** Detail */
@@ -11899,6 +11989,19 @@ export interface components {
              * @default false
              */
             terms_accepted: boolean;
+        };
+        /**
+         * OAuthErrorResponse
+         * @description A refused token request, as RFC 6749 section 5.2 shapes it.
+         */
+        OAuthErrorResponse: {
+            /**
+             * Error
+             * @description invalid_request, unsupported_grant_type, invalid_grant or temporarily_unavailable
+             */
+            error: string;
+            /** Error Description */
+            error_description: string;
         };
         /**
          * OAuthSessionResponse
@@ -21613,6 +21716,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-exchange_token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FederationTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationTokenResponse"];
+                };
+            };
+            /** @description invalid_request or unsupported_grant_type */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+            /** @description invalid_grant */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description temporarily_unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
                 };
             };
         };

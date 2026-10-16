@@ -144,7 +144,10 @@ async def test_a_valid_token_yields_its_identity() -> None:
 
     identity = await verifier.verify(_token(email=EMAIL.upper(), aud=[AUDIENCE, "other"]))
 
-    assert identity == FederatedIdentity(issuer=ISSUER, audiences=(AUDIENCE, "other"), subject=SUBJECT, email=EMAIL)
+    assert identity == FederatedIdentity(
+        issuer=ISSUER, audiences=(AUDIENCE, "other"), subject=SUBJECT, email=EMAIL, expires_at=identity.expires_at
+    )
+    assert identity.expires_at > time.time()
 
 
 @pytest.mark.asyncio
@@ -432,7 +435,8 @@ def _rule(
     )
 
 
-IDENTITY = FederatedIdentity(issuer=ISSUER, audiences=(AUDIENCE,), subject=SUBJECT, email=EMAIL)
+EXP = 2_000_000_000
+IDENTITY = FederatedIdentity(issuer=ISSUER, audiences=(AUDIENCE,), subject=SUBJECT, email=EMAIL, expires_at=EXP)
 
 
 def test_a_rule_naming_the_email_matches() -> None:
@@ -444,16 +448,16 @@ def test_a_rule_naming_subject_and_email_needs_both() -> None:
 
     assert match_federation_rules([rule], IDENTITY).api_key_id == "key-1"
     with pytest.raises(FederationRefusedError, match="federation_no_rule"):
-        match_federation_rules([rule], FederatedIdentity(ISSUER, (AUDIENCE,), "another-subject", EMAIL))
+        match_federation_rules([rule], FederatedIdentity(ISSUER, (AUDIENCE,), "another-subject", EMAIL, EXP))
 
 
 @pytest.mark.parametrize(
     "identity",
     [
-        FederatedIdentity(ISSUER, (AUDIENCE,), SUBJECT, None),
-        FederatedIdentity(ISSUER, (AUDIENCE,), SUBJECT, "someone@project.iam.gserviceaccount.com"),
-        FederatedIdentity(ISSUER, ("https://elsewhere.example.com",), SUBJECT, EMAIL),
-        FederatedIdentity("https://other-issuer.example.com", (AUDIENCE,), SUBJECT, EMAIL),
+        FederatedIdentity(ISSUER, (AUDIENCE,), SUBJECT, None, EXP),
+        FederatedIdentity(ISSUER, (AUDIENCE,), SUBJECT, "someone@project.iam.gserviceaccount.com", EXP),
+        FederatedIdentity(ISSUER, ("https://elsewhere.example.com",), SUBJECT, EMAIL, EXP),
+        FederatedIdentity("https://other-issuer.example.com", (AUDIENCE,), SUBJECT, EMAIL, EXP),
     ],
     ids=["unverified-email", "other-email", "other-audience", "other-issuer"],
 )
@@ -465,7 +469,7 @@ def test_a_mismatch_matches_nothing(identity: FederatedIdentity) -> None:
 def test_a_subject_rule_does_not_match_another_subject() -> None:
     with pytest.raises(FederationRefusedError, match="federation_no_rule"):
         match_federation_rules(
-            [_rule(subject="another", email=None)], FederatedIdentity(ISSUER, (AUDIENCE,), SUBJECT, EMAIL)
+            [_rule(subject="another", email=None)], FederatedIdentity(ISSUER, (AUDIENCE,), SUBJECT, EMAIL, EXP)
         )
 
 
