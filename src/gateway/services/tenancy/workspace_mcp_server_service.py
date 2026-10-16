@@ -324,10 +324,10 @@ async def _check(server: WorkspaceMcpServer) -> ServerCheck:
 
 
 def _health(allowed_tools: list[str] | None, check: ServerCheck) -> WorkspaceMcpServerHealth:
-    """Read a check against an allow-list. A falsy allow-list admits every tool, as the tool loop reads it."""
+    """Read a check against an allow-list: ``None`` admits every tool and ``[]`` none, as the tool loop reads it."""
     offered = list(dict.fromkeys(name for name in check.tool_names if len(name) <= MAX_TOOL_NAME_LENGTH))
     failed = check.failure is not None
-    allowed = list(dict.fromkeys(allowed_tools)) if allowed_tools else None
+    allowed = None if allowed_tools is None else list(dict.fromkeys(allowed_tools))
     return WorkspaceMcpServerHealth(
         status="failing" if failed else "healthy",
         checked_at=datetime.now(UTC).isoformat(),

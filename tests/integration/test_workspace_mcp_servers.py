@@ -1424,3 +1424,19 @@ async def test_a_test_is_for_managers_and_refused_when_the_gateway_is_busy(
     check.busy = True
     with pytest.raises(WorkspaceMcpServerCheckBusyError):
         await service.check_connection(user=owner, workspace_id=workspace.id, request=request)
+
+
+async def test_an_empty_allow_list_admits_no_tools(async_db: AsyncSession, check: _FakeCheck) -> None:
+    """``[]`` is a deny-all in the tool loop, so health counts none rather than every tool."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    check.result = ServerCheck(tool_names=["list_issues", "get_issue"])
+
+    created = await WorkspaceMcpServerService(async_db).create_server(
+        user=owner, workspace_id=workspace.id, request=_create(allowed_tools=[])
+    )
+
+    assert created.health is not None
+    assert created.health.tool_count == 0
+    assert created.health.tools == ["list_issues", "get_issue"]

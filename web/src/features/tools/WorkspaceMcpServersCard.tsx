@@ -275,10 +275,11 @@ export function WorkspaceMcpServersCard({
       // all there is to say. The names would be an unbounded column (the list
       // runs to hundreds), so they live in the Health popover and the dialog.
       cell: (row) => {
+        // `[]` counts as a list here, admitting none, as the tool loop reads it.
+        const counted = toolCountLabel(row.health, row.allowed_tools !== null)
+        if (counted) return <span className="whitespace-nowrap">{counted}</span>
         const hasAllowList =
           row.allowed_tools !== null && row.allowed_tools.length > 0
-        const counted = toolCountLabel(row.health, hasAllowList)
-        if (counted) return <span className="whitespace-nowrap">{counted}</span>
         return hasAllowList ? (
           <span>{row.allowed_tools?.length} allowed</span>
         ) : (
