@@ -16,7 +16,9 @@ from openai.types.responses import (
     ResponseCompletedEvent,
     ResponseCreatedEvent,
     ResponseFailedEvent,
+    ResponseFunctionToolCall,
     ResponseIncompleteEvent,
+    ResponseOutputItemAddedEvent,
     ResponseTextDeltaEvent,
     ResponseUsage,
 )
@@ -549,24 +551,36 @@ _RESPONSES_OPENING_EVENTS: list[ResponseStreamEvent] = [
 ]
 
 
-def _stream_responses(client: TestClient, headers: dict[str, str], events: list[ResponseStreamEvent]) -> Any:
-    """Stream a Responses request whose provider sends ``events`` and then closes the stream."""
-    created = client.post(f"{API_ROOT}/users", json={"user_id": _STREAM_USER}, headers=headers)
-    assert created.status_code == 200, created.text
+def _scripted_aresponses(*rounds: list[ResponseStreamEvent]) -> Callable[..., Any]:
+    """A provider that answers each call with the next round's events and then closes the stream."""
+    remaining = iter(rounds)
 
     async def _aresponses(**_kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        events = next(remaining)
+
         async def _stream() -> AsyncIterator[ResponseStreamEvent]:
             for event in events:
                 yield event
 
         return _stream()
 
-    with patch("gateway.api.routes.responses.aresponses", new=_aresponses):
-        return client.post(
-            f"{API_ROOT}/responses",
-            json={"model": "openai:gpt-4o-mini", "input": "hi", "user": _STREAM_USER, "stream": True},
-            headers=headers,
-        )
+    return _aresponses
+
+
+def _post_responses_stream(client: TestClient, headers: dict[str, str], **fields: Any) -> Any:
+    created = client.post(f"{API_ROOT}/users", json={"user_id": _STREAM_USER}, headers=headers)
+    assert created.status_code == 200, created.text
+    return client.post(
+        f"{API_ROOT}/responses",
+        json={"model": "openai:gpt-4o-mini", "input": "hi", "user": _STREAM_USER, "stream": True, **fields},
+        headers=headers,
+    )
+
+
+def _stream_responses(client: TestClient, headers: dict[str, str], events: list[ResponseStreamEvent]) -> Any:
+    """Stream a Responses request whose provider sends ``events`` and then closes the stream."""
+    with patch("gateway.api.routes.responses.aresponses", new=_scripted_aresponses(events)):
+        return _post_responses_stream(client, headers)
 
 
 def test_a_responses_stream_the_provider_ends_before_its_terminal_event_is_an_interrupted_stream_error(
@@ -618,3 +632,59 @@ def test_a_responses_stream_that_reaches_its_terminal_event_ends_cleanly(
     assert response.status_code == 200, response.text
     assert "event: error" not in response.text
     assert response.text.rstrip().endswith("data: [DONE]")
+
+
+class _LookupPool:
+    """An MCP pool whose server owns ``lookup``, so the gateway runs that tool itself."""
+
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> "_LookupPool":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "lookup", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "lookup"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        return "found"
+
+
+def test_a_responses_tool_loop_round_cut_after_an_incomplete_round_is_an_interrupted_stream_error(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Round one asks for ``lookup`` and ends in ``response.incomplete``; the round after the gateway ran it is cut."""
+    lookup = ResponseFunctionToolCall(type="function_call", call_id="call_lookup", name="lookup", arguments="{}")
+    first_round: list[ResponseStreamEvent] = [
+        ResponseOutputItemAddedEvent(type="response.output_item.added", item=lookup, output_index=0, sequence_number=0),
+        ResponseIncompleteEvent(
+            type="response.incomplete", response=_response_snapshot("incomplete"), sequence_number=1
+        ),
+    ]
+
+    with (
+        patch("gateway.api.routes._pipeline.MCPClientPool", new=_LookupPool),
+        patch(
+            "gateway.services.mcp_loop_responses.aresponses",
+            new=_scripted_aresponses(first_round, _RESPONSES_OPENING_EVENTS[1:]),
+        ),
+    ):
+        response = _post_responses_stream(
+            client, master_key_header, mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}]
+        )
+
+    assert response.status_code == 200, response.text
+    assert _error_event(response.text)["error"]["code"] == "provider_stream_interrupted"
+    assert _usage_row(db_session_factory).status == "error"
