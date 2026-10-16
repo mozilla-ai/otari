@@ -1,8 +1,10 @@
 """The ``Otari-Request-ID`` a completion is answered under, on an error as on a success.
 
-FastAPI copies the headers of the response it injects into a route only onto a
-response the route returns. An exception the route raises is rendered from the
-exception alone, so the id is also kept on the ASGI scope, where the exception
+FastAPI copies the headers of the response it injects into a route only onto the
+response it builds from the route's return value. A Response the route returns
+itself never gets them, so a streamed completion passes the header to its
+StreamingResponse. Nor does an exception the route raises, which is rendered from
+the exception alone, so the id is also kept on the ASGI scope, where the exception
 handler finds it.
 """
 
@@ -16,7 +18,6 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
-# Namespaced ASGI scope key holding the id the request is answered under.
 _SCOPE_KEY = "otari.request_id"
 
 
