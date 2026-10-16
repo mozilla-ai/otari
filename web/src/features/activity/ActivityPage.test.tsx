@@ -758,8 +758,6 @@ describe("ActivityPage", () => {
   })
 
   it("offers no row selection, even to an operator over imported rows", async () => {
-    // Imported rows were the one thing a selection could act on, through bulk
-    // delete and reprice; those are API-only now, so no row is selectable.
     mockApi({
       rows: [entry({ counts_toward_budget: false, source: "claude_code" })],
       deploymentOperator: true,
