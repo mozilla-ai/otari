@@ -215,7 +215,7 @@ def test_bare_keyed_entry_warns_although_its_variable_is_set(
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     config = GatewayConfig(**yaml.safe_load("providers:\n  openai:\n"))
     text = _validate_capturing_warnings(config, caplog)
-    assert "api_key: ${OPENAI_API_KEY}" in text
+    assert "OPENAI_API_KEY" in text and "api_key" in text
     assert "sk-from-env" not in text
 
 

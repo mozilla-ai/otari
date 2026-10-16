@@ -2113,11 +2113,12 @@ class GatewayConfig(
             return
         logger.warning(
             "providers.%s has no settings and no credential: that provider needs an API key, which the entry "
-            "must name (api_key: ${%s}). A keyless local backend (ollama, llamacpp, llamafile) is configured this "
-            "way on purpose; otherwise this looks like a truncated config entry, and requests to it will fail.",
+            "must name as api_key, reading one of %s (api_key: ${VAR}). A keyless local backend (ollama, "
+            "llamacpp, llamafile) is configured this way on purpose; otherwise this looks like a truncated "
+            "config entry, and requests to it will fail.",
             instance,
             # codeql[py/clear-text-logging-sensitive-data]
-            env_names[0],
+            ", ".join(env_names),
         )
 
     @field_validator("providers", mode="before")

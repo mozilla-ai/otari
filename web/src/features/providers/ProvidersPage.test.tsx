@@ -1078,7 +1078,7 @@ describe("ProvidersPage", () => {
     await user.click(await screen.findByRole("option", { name: /OpenAI/ }))
 
     // A stored provider never reads OPENAI_API_KEY, so the key stays required.
-    await screen.findByText(/endpoint is built in/)
+    await screen.findByText(/just add your key/)
     expect(screen.queryByText(/is set on the server/)).not.toBeInTheDocument()
     const submit = within(screen.getByRole("dialog")).getByRole("button", {
       name: "Add provider",

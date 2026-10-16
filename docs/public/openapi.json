@@ -9056,7 +9056,7 @@
           },
           "env_key_present": {
             "default": false,
-            "description": "True when env_key is already set on the server, so a pasted key is optional (env fallback).",
+            "description": "True when env_key is set on the server. Informational: a stored provider never reads it, so a key the provider requires must still be supplied.",
             "title": "Env Key Present",
             "type": "boolean"
           },
@@ -9071,7 +9071,7 @@
             "type": "string"
           },
           "requires_api_key": {
-            "description": "False for keyless local backends (Ollama, llama.cpp).",
+            "description": "False for providers that need no key: keyless local backends (Ollama, llama.cpp) and ambient cloud credentials (Bedrock, Vertex AI).",
             "title": "Requires Api Key",
             "type": "boolean"
           }

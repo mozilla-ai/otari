@@ -383,7 +383,9 @@ def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
     Such a variable serves no request, which an operator upgrading from a release
     that fell back to it would otherwise learn only from refused requests. An
     entry reads it when its ``api_key`` holds the variable's value, which is what
-    ``${VAR}`` interpolation leaves behind. Only the ``<PROVIDER>_API_KEY``
+    ``${VAR}`` interpolation leaves behind. It is a match on values, because the
+    loader keeps no record of which variable filled an entry, so the same key
+    pasted in literally also counts as read. Only the ``<PROVIDER>_API_KEY``
     spelling is checked, because confirming any other name means importing every
     provider's SDK. Names only, never values.
     """

@@ -11020,7 +11020,7 @@ export interface components {
             env_key?: string | null;
             /**
              * Env Key Present
-             * @description True when env_key is already set on the server, so a pasted key is optional (env fallback).
+             * @description True when env_key is set on the server. Informational: a stored provider never reads it, so a key the provider requires must still be supplied.
              * @default false
              */
             env_key_present: boolean;
@@ -11036,7 +11036,7 @@ export interface components {
             name: string;
             /**
              * Requires Api Key
-             * @description False for keyless local backends (Ollama, llama.cpp).
+             * @description False for providers that need no key: keyless local backends (Ollama, llama.cpp) and ambient cloud credentials (Bedrock, Vertex AI).
              */
             requires_api_key: boolean;
         };
