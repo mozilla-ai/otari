@@ -5,7 +5,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValue
 
+from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
 from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
@@ -122,7 +124,7 @@ def test_text_in_a_span_name_or_attribute_never_reaches_the_document() -> None:
 
 @pytest.mark.parametrize(
     ("reasons", "stored"),
-    [(["stop"], "stop"), (("tool_calls",), "tool_calls"), (["stop", "length"], "stop,length")],
+    [(["stop"], "stop"), (("tool_calls",), "tool_calls"), (["stop", "length"], "stop,length"), ("stop", "stop")],
 )
 def test_finish_reasons_sent_as_an_array_are_kept(reasons: Any, stored: str) -> None:
     [write] = _project(
@@ -131,6 +133,34 @@ def test_finish_reasons_sent_as_an_array_are_kept(reasons: Any, stored: str) -> 
 
     [span] = write.spans
     assert span.attributes == {"gen_ai.response.finish_reasons": stored}
+
+
+@pytest.mark.parametrize(
+    "reasons",
+    [
+        ["stop", "the model ran out of room"],
+        ["stop", 1],
+        ["stop", None],
+        [],
+        ["x" * 100, "y" * 100],
+        {"first": "stop"},
+    ],
+)
+def test_finish_reasons_that_are_not_all_identifiers_are_dropped_and_the_span_kept(reasons: Any) -> None:
+    [write] = _project(
+        _span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.response.finish_reasons": reasons}),
+    )
+
+    [span] = write.spans
+    assert span.attributes == {}
+
+
+def test_an_array_attribute_is_read_only_where_a_trace_asks_for_it() -> None:
+    reasons = AnyValue(array_value=ArrayValue(values=[AnyValue(string_value="stop")]))
+    received = [KeyValue(key="gen_ai.response.finish_reasons", value=reasons)]
+
+    assert _attributes(received) == {"gen_ai.response.finish_reasons": None}
+    assert _attributes(received, arrays=True) == {"gen_ai.response.finish_reasons": ("stop",)}
 
 
 def test_a_span_with_no_ids_is_skipped() -> None:
