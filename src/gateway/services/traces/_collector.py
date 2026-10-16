@@ -129,6 +129,11 @@ class RequestTrace:
         """
         ended = call.ended
         started = ended - timedelta(milliseconds=call.latency_ms) if call.latency_ms is not None else None
+        if started is not None:
+            # Latency is rounded to the millisecond, so a call that began with its
+            # step can read as starting a fraction of one before it. The start never
+            # moves past the call's own end, whatever the wall clock did meanwhile.
+            started = max(started, min(self.started_at, ended))
         attributes: dict[str, str | int | float | bool] = {}
         if (policy := identifier_or_none(call.policy_name)) is not None:
             attributes["otari.routing.policy"] = policy
