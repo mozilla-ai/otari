@@ -6,7 +6,9 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 - `otari_web_search`, a search backend
 - `otari_web_fetch`, a bounded public-web fetcher
 
-Code execution and Search need separate backends. Fetch runs in the gateway.
+Code execution needs a sandbox (`sandbox_url` or `sandbox_provider`) and Search
+a search provider (`web_search_provider` or `web_search_url`). Fetch runs in the
+gateway.
 One request may declare any of them together, and MCP servers beside them: see
 [Combining tools](#combining-tools).
 
@@ -185,7 +187,8 @@ and MCP calls are not reported there, so Chat Completions returns only the final
 assistant message for them. Calls for tools the client must execute are preserved.
 The dashboard Playground's own completion route is the one exception: its stream
 also reports every gateway-run call and its result in an `otari_tool_activity`
-field beside each chunk's `choices`, so the page can show them.
+field, on a chunk of its own before and after each call, so the page can show
+them.
 
 For gateway-run MCP activity in Messages streams, see
 [Messages streaming activity](mcp.md#messages-streaming-activity).
@@ -369,11 +372,12 @@ instead, running the code on the sandbox unless every model runs it natively.
 [Hybrid mode](#who-runs-a-tool) skips no attempt.
 
 An `anthropic-beta` header travels only as far as it can be honored: against a
-provider with no Messages API of its own it is dropped rather than refused, and
-so is a `context_management` field, which configures one of those betas,
-because a beta names an Anthropic feature that provider was never going to
-serve, and refusing it would make the request fail purely because its model
-changed. On Responses a claimed `code_interpreter` is answered with a
+model its provider serves with no Messages API of its own (any non-Claude model
+on Bedrock, say, or a Bedrock Claude request that sets `output_format`) it is
+dropped rather than refused, and so is a `context_management` field, which
+configures one of those betas, because a beta names an Anthropic feature that
+model was never going to serve, and refusing it would make the request fail
+purely because its model changed. On Responses a claimed `code_interpreter` is answered with a
 `code_interpreter_call` item per run, in the order the calls ran among the
 gateway's other native items (a `web_search_call`, say). Chat Completions has no
 native shape, so a claimed declaration there resolves inside the tool loop and
@@ -401,7 +405,8 @@ others; the header wins over the deployment default:
    request where the workspace has not pinned. A value outside that vocabulary
    is a 400.
 
-With no `sandbox_url` there is nothing to bring the code to, so a provider
+With no sandbox (neither `sandbox_url` nor `sandbox_provider`) there is nothing
+to bring the code to, so a provider
 declaration is always forwarded and no policy is read for it. Asking for `otari`
 without a sandbox is a 400. The explicit `otari_code_execution` type is always
 run by Otari, whatever the executor says. When a claimed declaration runs on the
@@ -421,9 +426,10 @@ files the code produces come back as stored files, announced in Anthropic's
 `public_base_url` where it is set, otherwise under the address the request
 arrived on; any other produced file is listed and downloadable by id). A file the *provider's* own sandbox produced is copied
 into Otari's store under the provider's own ID. See
-[Files and code execution](files.md#files-and-code-execution). A sandbox
-session still lives for one request, so a `container` id from a previous turn
-addresses the provider's container, not the sandbox.
+[Files and code execution](files.md#files-and-code-execution). A `container` id
+the provider issued addresses the provider's container, not the sandbox; to keep
+Otari's sandbox across turns, see
+[Reusing a sandbox across requests](#reusing-a-sandbox-across-requests).
 
 In hybrid mode a workspace the control plane has not enabled still has a
 declaration its provider runs natively served by that provider. A route with a
