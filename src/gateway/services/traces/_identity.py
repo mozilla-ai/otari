@@ -30,6 +30,11 @@ HARNESS_SESSION_HEADERS: Mapping[str, str] = {"x-claude-code-session-id": "claud
 # session id and works inside the parent's turn, so the task it was handed is no new prompt.
 HARNESS_SUBAGENT_HEADERS = frozenset({"x-claude-code-agent-id"})
 
+# Codex sends its thread id as ``session-id``. That name is generic, so it names a
+# session only on a request whose ``originator`` or ``User-Agent`` starts with ``codex``.
+_CODEX_SESSION_HEADER = "session-id"
+_CODEX_MARKER_HEADERS = ("originator", "user-agent")
+
 # ``User-Agent`` product names a harness is known by, where it differs from the name shown.
 _HARNESS_PRODUCTS: Mapping[str, str] = {"claude-cli": "claude-code"}
 
@@ -57,6 +62,10 @@ def _clean(value: str | None) -> str | None:
     return value[:_MAX_KEY_LENGTH] if value else None
 
 
+def _is_codex(headers: Mapping[str, str]) -> bool:
+    return any((headers.get(header) or "").strip().lower().startswith("codex") for header in _CODEX_MARKER_HEADERS)
+
+
 def resolve_session(
     headers: Mapping[str, str], *, session_label: str | None, tags: Mapping[str, str] | None
 ) -> SessionRef | None:
@@ -71,6 +80,8 @@ def resolve_session(
     for header in HARNESS_SESSION_HEADERS:
         if (key := _clean(headers.get(header))) is not None:
             return SessionRef(source="harness", key=key)
+    if _is_codex(headers) and (key := _clean(headers.get(_CODEX_SESSION_HEADER))) is not None:
+        return SessionRef(source="harness", key=key)
     return None
 
 
@@ -84,11 +95,14 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
 
     Only the product name is kept, mapped to the name the harness is known by, and
     only when it is identifier-shaped. A request a harness marked with its own
-    session header is that harness whatever its ``User-Agent`` says.
+    session header is that harness whatever its ``User-Agent`` says, and one
+    Codex marked as its own is ``codex`` whichever Codex client sent it.
     """
     for header, harness in HARNESS_SESSION_HEADERS.items():
         if headers.get(header):
             return harness
+    if _is_codex(headers):
+        return "codex"
     agent = (headers.get("user-agent") or "").strip()
     if not agent:
         return None
