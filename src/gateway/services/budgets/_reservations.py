@@ -412,9 +412,10 @@ def estimate_cost(
     Output tokens default to the
     request's declared max, falling back to ``default_output_tokens`` when the
     caller leaves the output unbounded. When Anthropic cache creation is
-    requested, the input is conservatively reserved at the cache-write rate,
-    since any prompt token could become a cache write. The estimate is
-    reconciled to actual usage on completion.
+    requested, the input is conservatively reserved at the rate a write on the
+    requested TTL bills at (a ``1h`` request also covers its 5m writes), since
+    any prompt token could become a cache write. The estimate is reconciled to
+    actual usage on completion.
     """
     if pricing is None:
         return ZERO
