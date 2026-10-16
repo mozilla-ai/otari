@@ -22,10 +22,19 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.services.tenancy import org_provider_key_service as org_store
 from gateway.services.tenancy.org_provider_key_service import KeyOffer
+
+from .conftest import shared_test_config
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so a bare selector reaches the organization's key."""
+    return shared_test_config(postgres_url, {})
+
 
 _MESSAGES = [{"role": "user", "content": "hi"}]
 

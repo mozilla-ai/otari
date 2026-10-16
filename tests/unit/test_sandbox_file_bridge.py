@@ -167,6 +167,7 @@ def _bridge(
     **config: Any,
 ) -> SandboxFileBridge:
     uow = uow if uow is not None else _CommittingUnitOfWork(_FakeDb())
+    config.setdefault("providers", {"anthropic-eu": {"provider_type": "anthropic", "api_key": "sk-ant-test"}})
     settings = GatewayConfig(**config)
     backends = FileBackends(storage=store, provider_files=cast(ProviderFilePort, _PROVIDER_FILES))
     return SandboxFileBridge(
@@ -316,7 +317,6 @@ def _stub_provider(
     delay: float = 0.0,
 ) -> _StubProviderClient:
     client = _StubProviderClient(files, delay)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setattr(_PROVIDER_FILES, "client", client)
     return client
 
@@ -521,11 +521,21 @@ async def test_a_copy_whose_stamp_is_uncertain_keeps_its_blob(monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_no_credential_copies_nothing_and_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_provider(monkeypatch, {"file_01a": b"a"})
-    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-environment")
     store = _MemoryStore()
 
-    await _copy(_bridge(store), "file_01a")
+    await _copy(_bridge(store, providers={"anthropic-eu": {"provider_type": "anthropic"}}), "file_01a")
+
+    assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_instance_never_copies_on_the_providers_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_provider(monkeypatch, {"file_01a": b"a"})
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-environment")
+    store = _MemoryStore()
+
+    await _copy(_bridge(store, providers={}), "file_01a")
 
     assert store.blobs == {}
 

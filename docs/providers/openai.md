@@ -4,7 +4,7 @@ Route requests to OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) thro
 
 ## What you'll set up
 
-An OpenAI provider entry in your `config.yml` (or a single environment variable), then a first request that Otari routes to OpenAI.
+An OpenAI provider entry in your `config.yml` that reads your key from `OPENAI_API_KEY` (or the key stored on the dashboard's Providers page), then a first request that Otari routes to OpenAI.
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ providers:
 export OPENAI_API_KEY=sk-...
 ```
 
-> Otari routes through [any-llm](https://pypi.org/project/any-llm-sdk/), so a standard `OPENAI_API_KEY` in the environment is picked up automatically even if you don't list the provider explicitly.
+> `OPENAI_API_KEY` alone is not enough, and neither is a bare `openai:` entry: Otari reads the variable only where an entry names it, as the `api_key: ${OPENAI_API_KEY}` line above does. The dashboard's Providers page and an organization's own key work too. Otari logs a warning at startup when the variable is set and no entry reads it.
 
 ### Optional settings
 

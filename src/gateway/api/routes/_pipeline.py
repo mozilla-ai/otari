@@ -52,7 +52,13 @@ from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Proto
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
-from any_llm.exceptions import AnyLLMError, ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
+from any_llm.exceptions import (
+    AnyLLMError,
+    ContextLengthExceededError,
+    InvalidRequestError,
+    MissingApiKeyError,
+    UnsupportedParameterError,
+)
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -284,11 +290,13 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import (
+    MissingCredential,
     ResolvedProvider,
     hosted_lookup,
     keyless_placeholder_api_key,
     missing_credential,
     provider_key,
+    require_declared_credential,
     resolve_provider_selector,
     with_failover_retries,
 )
@@ -1727,6 +1735,39 @@ async def _funding_unavailable(
     return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
 
 
+async def _missing_credential_refusal(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    exc: MissingApiKeyError,
+    *,
+    adapter: FormatAdapter[Any, Any],
+) -> HTTPException:
+    """Release the reservation, record the refusal, and return the 424 ``exc`` maps to."""
+    missing = MissingCredential.from_error(exc)
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=resolved.model,
+        provider=resolved.instance,
+        endpoint=adapter.endpoint,
+        detail=missing.detail,
+        status_code=missing.status_code,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+    )
+    public = missing.behind_alias(resolved.alias)
+    return adapter.error(
+        public.status_code,
+        public.detail,
+        error_kind_for_status(public.status_code),
+        headers=error_headers(public.code),
+    )
+
+
 async def _warn_if_hosted_upstream_is_unpriced(
     ctx: RequestContext,
     resolved: ResolvedProvider,
@@ -1800,23 +1841,31 @@ async def _serve_from_hosted_credential(
     port documents as possibly differing from the public name the caller asked
     for), and carries that credential alone: the ladder produced nothing to
     merge with.
+
+    A candidate the port does not serve either answers the ``MissingApiKeyError``
+    :func:`require_declared_credential` raised for it, as a 424.
     """
-    if ctx.organization_id is None:
-        # The port keys its access decision on the organization alone, so a
-        # request with no organization (no workspace resolved for it) has
-        # nothing to ask about.
-        return resolved
     if ctx.plan is not None and len(ctx.plan.attempts) > 1:
         # A multi-candidate plan dispatches from ``ctx.plan.attempts``, whose
         # kwargs the routing compiler built; what this function returns is not
         # what those candidates are called with. Asking anyway would meter a
         # resolve that never serves, so a routed chain keeps the ladder's own
-        # answer for now. Reaching the port from the compiler is separate work:
+        # answer for now, and the walk refuses each candidate it leaves
+        # uncredentialed. Reaching the port from the compiler is separate work:
         # the compiler is synchronous and documented as doing no I/O.
         return resolved
-    lookup = hosted_lookup(resolved.provider, resolved.kwargs, configured=resolved.instance in ctx.config.providers)
-    if lookup is None:
+    try:
+        require_declared_credential(ctx.config, resolved.instance, resolved.provider, resolved.kwargs)
+    except MissingApiKeyError as exc:
+        missing = exc
+    else:
         return resolved
+    lookup = hosted_lookup(resolved.provider)
+    if ctx.organization_id is None:
+        # The port keys its access decision on the organization alone, so a
+        # request with no organization (no workspace resolved for it) has
+        # nothing to ask about.
+        raise await _missing_credential_refusal(ctx, resolved, missing, adapter=adapter)
 
     try:
         credential = await port.resolve_hosted_credential(
@@ -1832,8 +1881,6 @@ async def _serve_from_hosted_credential(
             model=resolved.model,
         )
     except HostedAccessDeniedError as exc:
-        if lookup.own_name_only:
-            return resolved
         # The port owns this refusal precisely so a caller need not name the
         # adapter that raised it, and the adapter's own wording is internal, so
         # the response carries the same detail an organization-scoped model
@@ -1870,14 +1917,6 @@ async def _serve_from_hosted_credential(
         )
         raise adapter.error(403, denied_detail, ErrorKind.PERMISSION) from exc
     except Exception as exc:
-        if lookup.own_name_only:
-            logger.warning(
-                "ModelProviderPort failed for %s:%s, which is served as configured: %s",
-                resolved.instance,
-                resolved.model,
-                describe_database_error(exc),
-            )
-            return resolved
         # Everything an adapter can fail at that is not its own refusal. Resolving
         # a hosted credential is expected to be a network call (that is what an
         # overlay binds this port to do), so a timeout, a connection reset or a
@@ -1924,10 +1963,7 @@ async def _serve_from_hosted_credential(
     if credential is None and not lookup.own_name_only:
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
-        # This build has no hosted path for the candidate. The candidate is
-        # genuinely unserved, which is what it already was, so it goes to
-        # any-llm uncredentialed and fails there exactly as it does today.
-        return resolved
+        raise await _missing_credential_refusal(ctx, resolved, missing, adapter=adapter)
 
     try:
         upstream = LLMProvider(credential.response_provider)
@@ -1976,7 +2012,7 @@ async def _serve_from_hosted_credential(
 
     # A keyless backend's credential carries no key, so it takes the placeholder
     # a keyless ``config.yml`` instance takes.
-    api_key = credential.api_key or keyless_placeholder_api_key(upstream, credential.api_base, None)
+    api_key = credential.api_key or keyless_placeholder_api_key(credential.api_base, None)
     kwargs: dict[str, Any] = {} if api_key is None else {"api_key": api_key}
     if credential.api_base is not None:
         kwargs["api_base"] = credential.api_base
@@ -2942,7 +2978,7 @@ async def resolve_request_context(
         if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
             await refund_reservation(db, reservation)
             refusal = await unpriced_model_refusal(
-                model, resolved_provider, plan=plan, hosted=model_provider, organization_id=organization_id
+                config, model, resolved_provider, plan=plan, hosted=model_provider, organization_id=organization_id
             )
             # Record the rejection after the refund, so an operator who flipped
             # require_pricing on can see that live traffic is being dropped.
@@ -5852,15 +5888,18 @@ def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
 
 
 def _failover_kwargs(
-    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext
+    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, config: GatewayConfig
 ) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
     """Builds each candidate's kwargs for a plan that can fall over, from the request fields its tools need.
 
     Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
-    so the walk skips it before admitting it.
+    so the walk skips it before admitting it, and any-llm's ``MissingApiKeyError`` for a
+    candidate nothing declares a credential for, so the walk passes it over as it does
+    any candidate missing a key.
     """
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
+        require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
         fields = tool_ctx.request_fields_for(attempt.provider.value, base_request_fields)
         return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
 
@@ -5985,7 +6024,7 @@ async def run_single_attempt_stream(
                     run_attempt=_open_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter, tool_ctx),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx.config),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
@@ -6807,7 +6846,7 @@ async def run_standalone_non_stream(
                     run_attempt=_run_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter, tool_ctx),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx.config),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,

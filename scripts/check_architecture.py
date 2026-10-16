@@ -765,7 +765,7 @@ MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_
 MODE_FUNCTION = "deployment_for"
 # The services that still read the deployment's mode.
 # An entry that stops reading it fails the check until it is removed, so the list only shrinks.
-SERVICE_MODE_READ_BASELINE = ("gateway/services/provider_kwargs.py",)
+SERVICE_MODE_READ_BASELINE: tuple[str, ...] = ()
 
 
 def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:

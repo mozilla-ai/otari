@@ -87,7 +87,7 @@ class _NoHostedCredential:
 @pytest.mark.asyncio
 async def test_resolve_dispatch_provider_returns_cached() -> None:
     """When ctx.resolved_provider is set it is returned without calling resolve_provider_selector."""
-    cached = MagicMock(owned_endpoint=None, deployment_paid=False)
+    cached = MagicMock(owned_endpoint=None, deployment_paid=False, kwargs={"api_key": "sk-test"})
     ctx = _make_ctx(resolved_provider=cached)
     with patch("gateway.api.routes._pipeline.resolve_provider_selector") as mock_rps:
         result = await resolve_dispatch_provider(
@@ -148,7 +148,7 @@ async def test_resolve_dispatch_provider_unknown_provider_raises_400() -> None:
 async def test_resolve_dispatch_provider_fresh_resolution_succeeds() -> None:
     """When ctx.resolved_provider is None and selector is valid, returns resolved."""
     ctx = _make_ctx(resolved_provider=None)
-    fresh = MagicMock(owned_endpoint=None, deployment_paid=False)
+    fresh = MagicMock(owned_endpoint=None, deployment_paid=False, kwargs={"api_key": "sk-test"})
     with patch(
         "gateway.api.routes._pipeline.resolve_provider_selector",
         return_value=fresh,

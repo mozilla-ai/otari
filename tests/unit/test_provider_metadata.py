@@ -214,3 +214,12 @@ def test_provider_detail_keyless_backend_never_present() -> None:
 def test_provider_detail_unknown_id_is_none() -> None:
     """An unknown provider id yields None (the route maps this to a 404)."""
     assert known_provider_detail("definitely-not-a-provider") is None
+
+
+@pytest.mark.parametrize("provider_id", ["vllm", "lmstudio", "llamacpp", "bedrock", "sagemaker"])
+def test_provider_detail_declaring_a_variable_it_never_insists_on_needs_no_key(provider_id: str) -> None:
+    """These name a key variable, but a declared entry serves without one, so the form must not demand it."""
+    detail = known_provider_detail(provider_id)
+
+    assert detail is not None
+    assert detail.requires_api_key is False

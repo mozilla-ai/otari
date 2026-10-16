@@ -43,7 +43,9 @@ its spec in full.
 candidate fails before its answer starts, whatever the provider's error: an
 outage, a rate limit, or a request it refuses as invalid (400) all move on.
 A candidate whose provider has no credential configured fails that way too, so
-the policy moves on to the next. When no candidate has a credential, the request is
+the policy moves on to the next; a provider nothing declares has none, keyless
+local backends included, and an entry that names no key has none, whatever the
+provider's own environment variable holds. When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the

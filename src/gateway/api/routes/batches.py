@@ -10,7 +10,7 @@ from typing import Annotated, Any
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.api import acancel_batch, acreate_batch, alist_batches, aretrieve_batch, aretrieve_batch_results
-from any_llm.exceptions import AnyLLMError, BatchNotCompleteError, UnsupportedProviderError
+from any_llm.exceptions import AnyLLMError, BatchNotCompleteError, MissingApiKeyError, UnsupportedProviderError
 from any_llm.types.batch import Batch
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -57,7 +57,12 @@ from gateway.services.model_access import (
     resolve_request_allowlist,
 )
 from gateway.services.pricing_service import find_model_pricing
-from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
+from gateway.services.provider_kwargs import (
+    MissingCredential,
+    get_provider_kwargs,
+    require_declared_credential,
+    resolve_provider_selector,
+)
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -194,7 +199,20 @@ def _resolve_batch_provider(
         impl = LLMProvider(config.provider_instance_type(provider))
         return impl, get_provider_kwargs(config, impl, instance=provider)
     impl = _parse_provider(provider)
-    return impl, get_provider_kwargs(config, impl, workspace_id=workspace_id)
+    kwargs = get_provider_kwargs(config, impl, workspace_id=workspace_id)
+    _refuse_undeclared(config, impl.value, impl, kwargs)
+    return impl, kwargs
+
+
+def _refuse_undeclared(config: GatewayConfig, instance: str, provider: LLMProvider, kwargs: dict[str, Any]) -> None:
+    """Answer the ``MissingApiKeyError`` :func:`require_declared_credential` raises as a 424."""
+    try:
+        require_declared_credential(config, instance, provider, kwargs)
+    except MissingApiKeyError as exc:
+        missing = MissingCredential.from_error(exc)
+        raise HTTPException(
+            status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code)
+        ) from exc
 
 
 async def _lifecycle_workspace_id(db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None) -> uuid.UUID:
@@ -427,6 +445,7 @@ async def create_batch(
         )
 
     provider_kwargs = resolved.kwargs
+    _refuse_undeclared(config, resolved.instance, provider, provider_kwargs)
 
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
     # into users.spend, at create time and again when results are accounted.

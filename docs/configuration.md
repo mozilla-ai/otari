@@ -46,8 +46,9 @@ export OTARI_DEFAULT_PRICING=true
 
 Provider credentials come from the environment through `${VAR}` references
 in the `providers` map (see [Provider configuration](#provider-configuration)).
-Setting a provider's native variable, such as `OPENAI_API_KEY`, without
-declaring the provider is deprecated; see [Models](models.md#configuring-a-provider).
+A provider's native variable, such as `OPENAI_API_KEY`, is never read on its
+own: name it in the entry (`api_key: ${OPENAI_API_KEY}`); see
+[Models](models.md#configuring-a-provider).
 
 Booleans accept `true`, `false`, `1`, `0`, `yes`, `no`, `on`, and
 `off`, without regard to case.
@@ -363,13 +364,23 @@ deployment that declares a key does not mint and print one.
 
 ## Provider configuration
 
-The `providers` map is keyed by provider instance. A standard provider needs
-only its credential:
+The `providers` map is keyed by provider instance. Only a provider it declares
+(or the Providers page, or an organization's key) serves requests. A standard
+provider needs only its credential, which the entry names:
 
 ```yaml
 providers:
   anthropic:
     api_key: ${ANTHROPIC_API_KEY}
+```
+
+A keyless local backend or a provider authenticating from ambient cloud
+credentials is declared with a bare entry:
+
+```yaml
+providers:
+  ollama:
+  bedrock:
 ```
 
 A custom or self-hosted endpoint can use a named instance:
@@ -864,7 +875,7 @@ instance inherits from `web_search_url`. Provider options and request filters
 are covered in [Built-in tools](tools.md).
 
 An instance takes its key only from its own `api_key`, such as
-`"${EXA_API_KEY}"` above. Unlike an LLM provider, it never falls back to the
+`"${EXA_API_KEY}"` above. Unlike an LLM provider's `providers:` entry, it never falls back to the
 provider's environment variable, so an entry for a provider that needs a key and
 carries none stops startup. A tool carrying an `api_key` must use an HTTPS
 `api_base`; a keyless local SearXNG endpoint may use HTTP.

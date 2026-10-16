@@ -498,6 +498,8 @@ class HostedProviderService:
             api_key=credential.api_key,
             api_base=credential.api_base,
             client_args=credential.client_args,
+            # A hosted provider is the deployment's own declaration.
+            declared=True,
             timeout=self.config.model_discovery_timeout_seconds,
         )
         if declared and discovery.discovery_unsupported:

@@ -108,6 +108,7 @@ from gateway.services.pricing_refresh_service import (
     run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
+from gateway.services.provider_kwargs import warn_about_ignored_provider_variables
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
     reset_provider_cache,
@@ -831,6 +832,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # provider added at runtime is visible to everything that reads
                 # config.providers (pricing seeding, discovery, dispatch).
                 await load_providers_at_startup(session, config)
+                # After the stored providers, which declare a provider as config.yml does.
+                warn_about_ignored_provider_variables(config)
                 # Organization-scoped provider keys (otari-ai#1748, otari#643):
                 # a disjoint overlay from the one above, keyed by
                 # (workspace_id, provider) rather than instance name. Empty on

@@ -67,8 +67,9 @@ def test_a_provider_withheld_from_the_callers_organization_lists_none_of_its_pri
     ("model_key", "env", "withheld"),
     [
         pytest.param("anthropic:claude-x", None, True, id="nothing-serves-it"),
-        pytest.param("anthropic:claude-x", "ANTHROPIC_API_KEY", False, id="its-own-environment-variable"),
-        pytest.param("ollama:llama3", None, False, id="needs-no-key"),
+        # A variable serves nothing on its own, and a keyless backend serves only when declared.
+        pytest.param("anthropic:claude-x", "ANTHROPIC_API_KEY", True, id="its-own-environment-variable"),
+        pytest.param("ollama:llama3", None, True, id="undeclared-needing-no-key"),
         pytest.param("not-a-provider:model", None, True, id="no-such-provider"),
         pytest.param("home_lab:gpt-4o", None, False, id="configured-instance"),
         pytest.param("openai:gpt-4o", None, False, id="reached-on-the-callers-own-key"),

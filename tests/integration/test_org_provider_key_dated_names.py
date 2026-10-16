@@ -25,7 +25,14 @@ from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy.org_provider_key_service import reset_org_provider_cache
 
-from .conftest import build_test_client
+from .conftest import build_test_client, shared_test_config
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so a bare selector reaches the organization's key."""
+    return shared_test_config(postgres_url, {})
+
 
 _MASTER_HEADER = {API_KEY_HEADER: "Bearer test-master-key"}
 _KEYS = f"{API_ROOT}/organizations/me/provider-keys"

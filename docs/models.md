@@ -40,10 +40,32 @@ providers:
     api_key: ${OPENAI_API_KEY}
 ```
 
-A provider that is not declared is still called when its native variable (such
-as `OPENAI_API_KEY`) is set, but its models are not listed. That fallback is
-deprecated: the gateway logs a warning naming the provider, and a future
-release will refuse the request.
+A key reaches a provider only from where a declaration names it: an entry's own
+`api_key` (a `${VAR}` reference included), a key stored on the Providers page, or
+an organization's own provider key, which declares the provider for that
+organization's requests. A provider's native variable (such as `OPENAI_API_KEY`)
+is never read for it otherwise, so an entry with no `api_key`, or one carrying
+only `client_args`, has no credential. A request it cannot serve is refused with
+a `424` and the `provider_not_configured` code. Otherwise a variable present on
+the server would serve every caller that has no credential of its own.
+
+Keyless local backends (`ollama`, `llamacpp`, `llamafile`, `lmstudio`, `vllm`)
+and providers authenticating from ambient cloud credentials (`bedrock`,
+`sagemaker`, `vertexai`) need a declaration too, but no key: a bare entry
+declares one. Undeclared, they are refused like any other provider, because the
+local server and the cloud role belong to the deployment.
+
+```yaml
+providers:
+  ollama:
+  bedrock:
+```
+
+The one exception is a build whose extension serves the request on a credential
+the deployment owns (`ModelProviderPort`, asked only after every other source
+missed); a plain deployment has none. The gateway logs a warning at startup
+naming each `<PROVIDER>_API_KEY` variable that is set and that no entry's
+`api_key` reads, and ignores an entry for a keyed provider that names no key.
 
 Provider support is endpoint-specific. A provider that supports chat may not
 support Responses, images, audio, rerank, or batches. Unsupported combinations

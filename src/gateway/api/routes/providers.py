@@ -174,10 +174,18 @@ class KnownProviderSchema(BaseModel):
     name: str = Field(description="Human-friendly display name.")
     env_key: str | None = Field(default=None, description="Env var the SDK reads this provider's key from.")
     default_api_base: str | None = Field(default=None, description="Built-in endpoint; blank means the SDK's default.")
-    requires_api_key: bool = Field(description="False for keyless local backends (Ollama, llama.cpp).")
+    requires_api_key: bool = Field(
+        description=(
+            "False for providers that need no key: keyless local backends (Ollama, llama.cpp) and ambient "
+            "cloud credentials (Bedrock, Vertex AI)."
+        )
+    )
     env_key_present: bool = Field(
         default=False,
-        description="True when env_key is already set on the server, so a pasted key is optional (env fallback).",
+        description=(
+            "True when env_key is set on the server. Informational: a stored provider never reads it, "
+            "so a key the provider requires must still be supplied."
+        ),
     )
 
 
@@ -530,6 +538,8 @@ async def test_provider_connection(
         api_key=request.api_key,
         api_base=request.api_base,
         client_args=request.client_args,
+        # What this form saves is a stored ``providers:`` entry.
+        declared=True,
         timeout=config.model_discovery_timeout_seconds,
     )
     return TestProviderResponse(

@@ -303,6 +303,20 @@ def _get_platform_token_from_env() -> str | None:
 # ``tests/unit/test_provider_instances.py``.
 KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"cascadia", "llamacpp", "lmstudio", "otari", "vllm"})
 
+# Providers authenticating from cloud SDK credentials this gateway cannot see:
+# an EC2 instance profile, an SSO session, or an ambient boto3 chain. They are
+# the same category as Vertex AI's application default credentials, which
+# ``docs/configuration.md`` already groups with Bedrock, and an entry naming one
+# with nothing configured is precisely the ambient case. Splitting the
+# category on whether any-llm happens to declare a variable name would be an
+# accident of upstream spelling rather than a difference in kind.
+#
+# Deliberately *not* here: gemini (raises ``MissingApiKeyError`` outright when no
+# key resolves, so it genuinely needs one) and azure/azureopenai (an Entra ID
+# deployment still needs an endpoint from config, so an empty ``kwargs`` means
+# nothing is configured and nothing can serve it anyway).
+AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
+
 
 def _is_keyless(provider_type: str) -> bool:
     """Whether a provider is served without a key: a keyless local or self-hosted backend."""
@@ -2085,9 +2099,9 @@ class GatewayConfig(
         into discovery, but the same shape under a keyed provider (``openai:``
         with nothing beneath it) is far more likely a truncated YAML edit than
         intent, and it used to fail the load outright as a type error. Warn rather
-        than raise: the entry is legitimate whenever the credential reaches
-        any-llm another way (its own environment variable, an instance role), so a
-        gateway that works today must keep booting.
+        than raise: the entry is ignored at startup, and the gateway keeps booting.
+        A provider authenticating from ambient cloud credentials needs no key, so
+        a bare entry is how one is declared.
 
         A settings-less entry has no ``provider_type`` to declare either, so the
         instance name is the implementation the credential question is asked of.
@@ -2095,17 +2109,15 @@ class GatewayConfig(
         env_names = provider_credential_env_names(instance)
         # Empty: a keyless backend, nothing to warn about. None: a provider we
         # cannot inspect, so we do not know that a credential is needed.
-        if not env_names or instance in KEYLESS_SELF_HOSTED_PROVIDERS:
-            return
-        if any(os.getenv(name) for name in env_names):
+        if not env_names or instance in KEYLESS_SELF_HOSTED_PROVIDERS or instance in AMBIENT_CREDENTIAL_PROVIDERS:
             return
         logger.warning(
-            "providers.%s has no settings and no credential: that provider needs an API key and none of %s is set. "
-            "A keyless local backend (ollama, llamacpp, llamafile) is configured this way on purpose; otherwise "
-            "this looks like a truncated config entry, and requests to it will fail.",
+            "providers.%s has no settings and no credential: that provider needs an API key, which the entry "
+            "must name (api_key: ${%s}). A keyless local backend (ollama, llamacpp, llamafile) is configured this "
+            "way on purpose; otherwise this looks like a truncated config entry, and requests to it will fail.",
             instance,
             # codeql[py/clear-text-logging-sensitive-data]
-            ", ".join(env_names),
+            env_names[0],
         )
 
     @field_validator("providers", mode="before")

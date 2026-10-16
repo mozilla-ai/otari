@@ -737,5 +737,7 @@ class OrgProviderModelService:
             api_key=api_key if isinstance(api_key, str) else None,
             api_base=key.api_base,
             client_args=dict(key.client_args) if key.client_args else None,
+            # An organization's key never borrows the deployment's own credentials.
+            declared=False,
             timeout=timeout,
         )

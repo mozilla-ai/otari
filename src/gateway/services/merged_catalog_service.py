@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from any_llm import LLMProvider
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +46,6 @@ from gateway.services.pricing_service import (
     resolve_organization_override,
 )
 from gateway.services.provider_kwargs import (
-    credential_ladder_exhausted,
     is_deployment_instance_key,
     normalize_pricing_key,
     split_selector,
@@ -497,24 +495,12 @@ def withheld_as_unadvertised(config: GatewayConfig, scope: CatalogScope, model_k
     if provider in scope.withheld_providers:
         return True
     if provider not in scope.hosted_models:
-        return scope.withhold_unserved and not _served_without_a_key_of_its_own(provider)
+        # Nothing reaches an undeclared provider without a key of its own.
+        return scope.withhold_unserved
     advertised = scope.hosted_models[provider]
     if advertised is None:
         return False
     return model not in advertised
-
-
-def _served_without_a_key_of_its_own(provider: str) -> bool:
-    """Whether dispatch reaches ``provider`` with no configured, organization or hosted key.
-
-    True for a provider that needs no key and for one whose own environment
-    variable is set; false for a name any-llm does not know, which nothing serves.
-    """
-    try:
-        implementation = LLMProvider(provider)
-    except ValueError:
-        return False
-    return not credential_ladder_exhausted(implementation, {})
 
 
 async def hosted_providers_withheld_from(

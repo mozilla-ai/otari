@@ -1054,8 +1054,8 @@ describe("ProvidersPage", () => {
     expect(submit).toBeEnabled()
   })
 
-  it("lets a key-requiring provider submit without a key when its env var is already set", async () => {
-    const fetchMock = mockApi({
+  it("requires the key although the provider's env var is set on the server", async () => {
+    mockApi({
       stored: [storedProvider("anthropic", "0000")],
       catalog: [
         {
@@ -1076,32 +1076,17 @@ describe("ProvidersPage", () => {
 
     await user.type(screen.getByPlaceholderText("Search providers…"), "OpenAI")
     await user.click(await screen.findByRole("option", { name: /OpenAI/ }))
-    // No Escape here any more. Picking an option closes the combo box's own
-    // popover, so the keystroke would reach the dialog instead and arm its
-    // unsaved-changes guard, which swaps the submit out of the footer.
 
-    // The field is optional and the copy explains the env fallback. The hint
-    // arrives once the selected provider's detail loads, so wait for it.
-    await screen.findByText(/OPENAI_API_KEY is set on the server/)
-    expect(screen.getByLabelText("API key (optional)")).toBeInTheDocument()
-
-    // Submit with no key: the server stores none and any-llm reads OPENAI_API_KEY.
+    // A stored provider never reads OPENAI_API_KEY, so the key stays required.
+    await screen.findByText(/endpoint is built in/)
+    expect(screen.queryByText(/is set on the server/)).not.toBeInTheDocument()
     const submit = within(screen.getByRole("dialog")).getByRole("button", {
       name: "Add provider",
     })
-    expect(submit).toBeEnabled()
-    await user.click(submit)
+    expect(submit).toBeDisabled()
 
-    const post = fetchMock.mock.calls.find(
-      ([u, init]) =>
-        String(u).endsWith(`${API_ROOT}/provider-credentials`) &&
-        (init?.method ?? "") === "POST",
-    )
-    expect(post).toBeDefined()
-    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
-      instance: "openai",
-      api_key: null,
-    })
+    await user.type(screen.getByLabelText("API key"), "sk-live-xxxx")
+    expect(submit).toBeEnabled()
   })
 
   it("replaces the welcome onboarding with the add form", async () => {
