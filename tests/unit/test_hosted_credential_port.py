@@ -297,16 +297,22 @@ async def test_a_keyless_provider_is_served_on_the_deployments_own_hosted_provid
     assert result.kwargs == {"api_key": "otari-no-key-required", "api_base": "http://vllm.internal:8000/v1"}
 
 
-@pytest.mark.parametrize("error", [HostedAccessDeniedError("no"), RuntimeError("down")])
+@pytest.mark.parametrize("error", [HostedAccessDeniedError("no"), RuntimeError("down at password=hunter2"), None])
 @pytest.mark.asyncio
-async def test_a_keyless_provider_is_left_as_it_was_when_the_port_refuses_or_fails(error: Exception) -> None:
-    """The request worked before the port was asked, so nothing the port does can break it."""
+async def test_a_keyless_provider_is_left_as_it_was_when_the_port_refuses_or_fails(
+    error: Exception | None, gateway_logs: pytest.LogCaptureFixture
+) -> None:
+    """The request worked before the port was asked, so nothing the port does can break it.
+
+    ``None`` is a port that declines, as one does for a model its roster does not switch on.
+    """
     port = RecordingPort(error=error)
     resolved = resolve_provider_selector(GatewayConfig(), "ollama:llama3")
 
     result = await _dispatch(_ctx(resolved_provider=resolved), port, selector="ollama:llama3")
 
     assert result is resolved
+    assert "hunter2" not in gateway_logs.text
 
 
 @pytest.mark.parametrize(

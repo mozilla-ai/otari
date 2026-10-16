@@ -1880,7 +1880,7 @@ async def _serve_from_hosted_credential(
                 "ModelProviderPort failed for %s:%s, which is served as configured: %s",
                 resolved.instance,
                 resolved.model,
-                exc,
+                describe_database_error(exc),
             )
             return resolved
         # Everything an adapter can fail at that is not its own refusal. Resolving
