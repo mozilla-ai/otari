@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -133,21 +134,40 @@ def test_no_prompt_text_reaches_the_trace(
     assert "Acme" not in stored
 
 
+_FAILING_ENDPOINTS: dict[str, tuple[str, str, dict[str, Any]]] = {
+    "chat": ("chat/completions", "gateway.api.routes.chat.acompletion", {"model": MODEL_NAME, "messages": _MESSAGES}),
+    "messages": (
+        "messages",
+        "gateway.api.routes.messages.amessages",
+        {"model": "anthropic:claude-3-5-sonnet", "messages": _MESSAGES, "max_tokens": 64},
+    ),
+    "responses": (
+        "responses",
+        "gateway.api.routes.responses.aresponses",
+        {"model": "openai:gpt-4o-mini", "input": _MESSAGES},
+    ),
+}
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["unary", "streamed"])
+@pytest.mark.parametrize("endpoint", list(_FAILING_ENDPOINTS))
 def test_a_failed_provider_call_is_an_error_step_and_an_error_llm_call(
-    client: TestClient, api_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+    client: TestClient,
+    api_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    endpoint: str,
+    stream: bool,
 ) -> None:
-    with patch("gateway.api.routes.chat.acompletion", side_effect=RuntimeError("provider down")):
-        response = client.post(
-            f"{API_ROOT}/chat/completions", json={"model": MODEL_NAME, "messages": _MESSAGES}, headers=api_key_header
-        )
+    path, provider_call, body = _FAILING_ENDPOINTS[endpoint]
+    with patch(provider_call, side_effect=RuntimeError("provider down")):
+        response = client.post(f"{API_ROOT}/{path}", json={**body, "stream": stream}, headers=api_key_header)
     assert response.status_code >= 500
-    # An error response carries no request id header; the database holds this test's trace alone.
-    request_id = _only_trace_id(db_session_factory)
+    request_id = response.headers[REQUEST_ID_HEADER]
 
     spans = _by_kind(_wait_for_spans(db_session_factory, request_id, 2))
 
-    assert spans["step"].outcome == "error"
-    assert spans["step"].error_class == f"status_{response.status_code}"
+    step = spans["step"]
+    assert (step.span_id, step.outcome, step.error_class) == (request_id, "error", f"status_{response.status_code}")
     assert spans["llm"].outcome == "error"
 
 
