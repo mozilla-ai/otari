@@ -356,16 +356,6 @@ class SearchToolNotFoundError(TenancyNotFoundError):
         super().__init__(f"No search or fetch instance '{name}'.")
 
 
-class SearchToolUntestableError(TenancyValidationError):
-    """``builtin_fetch`` has no connection test until web fetch runs on the fetch instances."""
-
-    def __init__(self, name: str):
-        super().__init__(
-            f"{name}, the built-in fetcher, has no connection test yet: it arrives when web fetch runs on the "
-            "fetch instances."
-        )
-
-
 class SearchToolMisconfiguredError(TenancyValidationError):
     """A search instance nothing can run as it stands, such as a ``searxng`` one with no address to search."""
 
@@ -455,7 +445,6 @@ __all__ = [
     "SearchToolNotFoundError",
     "SearchToolRefusedError",
     "SearchToolSelectionError",
-    "SearchToolUntestableError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",

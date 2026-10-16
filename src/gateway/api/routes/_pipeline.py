@@ -51,6 +51,7 @@ from functools import reduce
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
 from urllib.parse import ParseResult, urlparse
 
+import httpx
 from any_llm import LLMProvider
 from any_llm.exceptions import (
     AnyLLMError,
@@ -3242,6 +3243,7 @@ class ToolContext:
         web_fetch_policy: DomainPolicy | None = None,
         sandbox_files: SandboxFileBridge | None = None,
         shared: SharedToolUse | None = None,
+        web_provider_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.config = config
         self.mcp_server_configs = mcp_server_configs
@@ -3284,6 +3286,9 @@ class ToolContext:
         self.use_web_fetch = use_web_fetch
         self.web_fetch_tool_entry = web_fetch_tool_entry
         self.web_fetch_policy = web_fetch_policy or DomainPolicy()
+        # The app's client, which a provider fetch instance is called through. None outside
+        # a route, where a provider opens its own for each call.
+        self.web_provider_client = web_provider_client
         self.remaining_user_tools = remaining_user_tools
         self.max_tool_iterations = max_tool_iterations
         self.tools_header = tools_header
@@ -3479,6 +3484,7 @@ class ToolContext:
             config=self.config,
             tally=self.tally,
             trace=self.trace,
+            web_provider_client=self.web_provider_client,
         )
 
 
@@ -3857,6 +3863,7 @@ async def prepare_gateway_tools(
             trace=ctx.trace,
             sandbox_files=backends.sandbox_files,
             shared=shared,
+            web_provider_client=backends.ports.web_provider_client,
         )
 
     contexts = {claimed: _tool_context(answer) for claimed, answer in admitted.items()}

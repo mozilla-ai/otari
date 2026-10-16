@@ -540,12 +540,15 @@ model-facing function accepts exactly one field:
 Otari retrieves one public HTTP or HTTPS URL, validates every redirect, and
 extracts HTML, textual formats (including Markdown, JSON, XML, and JavaScript),
 or text-bearing PDF content. Private, loopback, link-local, and otherwise unsafe
-destinations are rejected. Anthropic's own fetch keyword is passed through
+destinations are rejected. This is the built-in fetcher, `builtin_fetch`, which
+serves the tool unless `web_fetch_default_tool` names a fetch instance of a
+[fetch provider](#fetch-providers). Anthropic's own fetch keyword is passed through
 unchanged unless the request [asks Otari to run it](#anthropics-web-fetch).
 
-The tool result contains the display-safe source URL, the content type, an
-optional requested URL when redirects changed the destination, extracted
-content, and a warning that fetched content is untrusted. URL query strings and
+The tool result contains the display-safe source URL, the content type (left out
+when a fetch provider does not report one), an optional requested URL when
+redirects changed the destination, extracted content, and a warning that fetched
+content is untrusted. URL query strings and
 fragments are omitted from the displayed metadata. The complete result is
 limited to 50 KiB of valid UTF-8; the downloaded body is limited to 5 MiB and
 PDF extraction is also bounded by page, time, memory, and intermediate-output
@@ -571,9 +574,17 @@ is unacceptable.
 ### Fetch providers
 
 A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
-names a provider for `otari_web_fetch` and for enriching search results. Neither
-runs on fetch instances yet, so the built-in fetcher above still does both;
-`POST /api/v1/search-tools/{name}/test` with a `url` tries one.
+names a provider for `otari_web_fetch` and for enriching search results.
+`web_fetch_default_tool` names the instance the fetch tool runs on. Enrichment
+does not run on fetch instances yet, so the built-in fetcher above still enriches
+search results. `POST /api/v1/search-tools/{name}/test` with a `url` tries an
+instance.
+
+On a fetch instance, Otari checks the requested URL's host against the domain
+policy before the call; the provider fetches the page and follows its redirects
+on its own side. A provider's failure reaches the model as
+`[tool error] <provider> fetch failed (<tag>)`, with the HTTP status when there is
+one, and never with the provider's own message.
 
 - **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
   reports what each fetch costs (`costDollars.total`).
