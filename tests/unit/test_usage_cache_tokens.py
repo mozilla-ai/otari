@@ -122,6 +122,21 @@ def test_chat_non_stream_captures_cached_tokens() -> None:
     assert usage.cache_write_tokens == 0
 
 
+def test_chat_captures_a_cache_write_reported_on_prompt_tokens_details() -> None:
+    """Gemini's context caches and Anthropic both report a write here on Chat Completions."""
+    details = PromptTokensDetails(cached_tokens=0, cache_write_tokens=4096)
+    usage = CompletionUsage(prompt_tokens=5000, completion_tokens=20, total_tokens=5020, prompt_tokens_details=details)
+
+    non_stream = _ChatAdapter().extract_usage(ChatCompletion.model_construct(usage=usage))
+    stream = _ChatAdapter().extract_stream_usage(ChatCompletionChunk.model_construct(usage=usage))
+
+    assert cache_write_tokens_of(usage) == 4096
+    for captured in (non_stream, stream):
+        assert isinstance(captured, GatewayUsage)
+        assert captured.cache_write_tokens == 4096
+        assert captured.cache_tokens_in_prompt is True
+
+
 def test_chat_stream_captures_cached_tokens() -> None:
     chunk = ChatCompletionChunk.model_construct(
         usage=CompletionUsage(

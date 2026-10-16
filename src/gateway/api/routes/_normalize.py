@@ -28,6 +28,7 @@ from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import (
     AttachedFilesNotReadError,
+    InlineAttachmentsTooLargeError,
     NoCandidateHoldsCopiesError,
     ProviderAttachmentError,
     ProviderAttachmentRefusedError,
@@ -39,6 +40,7 @@ from gateway.services.content_normalizer import (
     NormalizationStats,
     WireFormat,
     has_container_blocks,
+    inline_limit_for,
     name_container_copies,
     normalize_messages,
 )
@@ -192,6 +194,8 @@ async def normalize_request_messages(
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
+    candidates: Sequence[LLMProvider | None] = (),
+    credential_workspace_id: uuid.UUID | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
 
@@ -204,13 +208,21 @@ async def normalize_request_messages(
     recorded on ``NormalizationStats.container_inputs``, and a block naming none
     refuses the request.
 
+    ``candidates`` is every provider the request may dispatch to, head first, and
+    ``credential_workspace_id`` the workspace it dispatches under. Together they
+    decide whether attachments past the provider's inline limit are moved to its
+    own storage (see ``inline_limit_for``).
+
     An attachment the model reads never fails the request, because this runs
     after the budget reservation and a refusal here would lose it.
     The input is returned untouched instead, which is also the answer where file
     understanding is off or the provider could not be parsed.
+    The exception is an attachment past an inline limit that could not be moved,
+    which the provider would refuse anyway, so the request is refused here first.
 
     Raises:
         ProviderAttachmentError: only where ``provider_container`` is set.
+        InlineAttachmentsTooLargeError: the attachments pass the provider's inline limit and could not be moved.
     """
     if provider_container and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
         # Nothing below would examine the blocks, so a `container_upload` would
@@ -220,7 +232,16 @@ async def normalize_request_messages(
         return messages, NormalizationStats()
     try:
         caps = resolve_capabilities(config, provider, model, instance=instance)
-        return await normalize_messages(
+        inline_limit = inline_limit_for(
+            config,
+            provider,
+            fmt,
+            files=files,
+            candidates=candidates or (provider,),
+            instance=instance,
+            workspace_id=credential_workspace_id,
+        )
+        normalized, stats = await normalize_messages(
             messages,
             config=config,
             caps=caps,
@@ -230,8 +251,9 @@ async def normalize_request_messages(
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
+            inline_limit=inline_limit,
         )
-    except ProviderAttachmentError:
+    except (ProviderAttachmentError, InlineAttachmentsTooLargeError):
         raise
     except Exception as exc:  # noqa: BLE001 - never fail the request or leak the reservation
         if provider_container:
@@ -242,6 +264,7 @@ async def normalize_request_messages(
             raise ProviderUploadFailedError from exc
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)
         return messages, NormalizationStats()
+    return normalized, stats
 
 
 def container_copies_step(

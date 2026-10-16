@@ -11,6 +11,8 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
+``with_typed_code_execution_tool`` reads Gemini's own code-execution declaration as the bare keyword, and
+``provider_attempt_kwargs`` gives it back to each attempt that goes to Gemini.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
 ``search_provider_catalog`` lists the providers a search or fetch tool may name.
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
@@ -44,8 +46,11 @@ from gateway.services.tools._code_execution_declarations import (
     first_provider_code_execution_tool,
     native_code_execution_dialect,
     parse_code_execution_header,
+    provider_attempt_kwargs,
     provider_runs_code_natively,
     resolve_code_executor_preference,
+    with_native_code_execution_tool,
+    with_typed_code_execution_tool,
 )
 from gateway.services.tools._code_execution_policy import (
     WorkspaceCodeExecutionPolicies,
@@ -183,6 +188,7 @@ __all__ = [
     "native_code_execution_dialect",
     "native_rendering",
     "parse_code_execution_header",
+    "provider_attempt_kwargs",
     "provider_runs_code_natively",
     "provider_tools",
     "read_web_declarations",
@@ -190,6 +196,8 @@ __all__ = [
     "read_web_search_max_uses",
     "refuse_shadowed_builtin_tools",
     "resolve_code_executor_preference",
+    "with_native_code_execution_tool",
+    "with_typed_code_execution_tool",
     "validate_web_declarations",
     "web_search_declaration_forms",
     "web_search_intercept_enabled",
