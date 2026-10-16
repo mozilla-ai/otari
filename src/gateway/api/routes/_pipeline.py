@@ -1783,12 +1783,14 @@ async def _serve_from_hosted_credential(
         # ``Exception`` and not ``BaseException``: ``asyncio.CancelledError`` is a
         # disconnected client rather than a failed lookup, and swallowing it would
         # both mislabel the outcome and mark a cancelled task as handled.
+        #
+        # Named by class, as a BillingPort failure is: an adapter's message, or a
+        # database error's DETAIL, can carry the row it was reading.
         logger.error(
             "ModelProviderPort failed to resolve a credential for %s:%s: %s",
             resolved.instance,
             resolved.model,
-            exc,
-            exc_info=True,
+            describe_port_error(exc),
         )
         await release_reservation(ctx)
         await log_gateway_rejection(
@@ -2006,10 +2008,10 @@ async def move_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) ->
         ) from exc
     except DATABASE_ERRORS as exc:
         logger.error(
-            "Could not move the reservation for candidate %s:%s; stopping the chain",
+            "Could not move the reservation for candidate %s:%s; stopping the chain: %s",
             attempt.instance,
             attempt.model,
-            exc_info=True,
+            describe_database_error(exc),
         )
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=BUDGETS_UNAVAILABLE_DETAIL) from exc
 

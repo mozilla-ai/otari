@@ -16,6 +16,7 @@ are stubbed, so what is pinned is the decision logic: when the hold grows, by ho
 much, when it does not, and which failure the caller sees.
 """
 
+import logging
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
@@ -31,6 +32,7 @@ from gateway.api.routes._attempts import CandidateCannotServe
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
 from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
+from gateway.log_config import logger as gateway_logger
 from gateway.services import pricing_service
 from gateway.services.budgets import EstimateInputs, ReservationHandle
 from gateway.types.attempt import Attempt
@@ -301,3 +303,23 @@ async def test_a_database_failure_during_a_move_stops_the_chain(budgets: _Budget
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == pipeline.BUDGETS_UNAVAILABLE_DETAIL
+
+
+@pytest.mark.asyncio
+async def test_a_database_failure_during_a_move_is_logged_without_its_message(
+    budgets: _Budgets, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A database error's message can carry the row it touched, so it is described, not logged."""
+    budgets.error = OperationalError("UPDATE scoped_budgets", {}, Exception("DETAIL: Failing row contains (secret)"))
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.ERROR, logger="gateway")
+    try:
+        with pytest.raises(HTTPException):
+            await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [record] = [r for r in caplog.records if "Could not move the reservation" in r.getMessage()]
+    assert record.getMessage().endswith(": OperationalError Exception")
+    assert record.exc_info is None
+    assert "Failing row" not in caplog.text

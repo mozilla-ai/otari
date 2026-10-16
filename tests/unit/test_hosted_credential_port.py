@@ -538,6 +538,23 @@ async def test_an_adapter_failure_refunds_and_becomes_a_502(
 
 
 @pytest.mark.asyncio
+async def test_an_adapter_failure_is_logged_by_class_alone(
+    monkeypatch: pytest.MonkeyPatch, gateway_logs: pytest.LogCaptureFixture
+) -> None:
+    """An adapter's message can carry the row it was reading, so neither it nor the traceback is logged."""
+    _capture_settlement(monkeypatch)
+    port = RecordingPort(error=RuntimeError("credential row sk-live-do-not-log"))
+
+    with pytest.raises(HTTPException):
+        await _dispatch(_ctx(resolved_provider=_uncredentialed()), port)
+
+    [record] = [r for r in gateway_logs.records if "ModelProviderPort failed" in r.getMessage()]
+    assert record.getMessage().endswith(": RuntimeError")
+    assert record.exc_info is None
+    assert "sk-live-do-not-log" not in gateway_logs.text
+
+
+@pytest.mark.asyncio
 async def test_cancellation_is_not_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
     """A cancelled request stays cancelled: it is not a hosted-inference failure.
 
