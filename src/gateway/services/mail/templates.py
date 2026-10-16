@@ -140,7 +140,7 @@ def render_email(
     unescaped (it is a header, not markup) and stripped of CR/LF, which is what
     keeps a free-text organization name in a subject line from being either a
     ``HeaderParseError`` at send time or, on a mail stack that tolerates it, a
-    header-injection vector. ``preheader`` is filled the same way.
+    header-injection vector. ``preheader`` is filled from the same values and HTML-escaped.
 
     ``asset_root`` is where this deployment's dashboard serves its static
     files (``Mailer.asset_root``). The header's mark and the brand fonts load

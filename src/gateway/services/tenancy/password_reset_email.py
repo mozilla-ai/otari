@@ -9,7 +9,7 @@ from gateway.services.mail import MailMessage, render_email
 from gateway.services.tenancy.tokens import format_expiry
 
 
-def render_password_reset_email(*, reset_link: str, expiry_hours: int, asset_root: str | None = None) -> MailMessage:
+def render_password_reset_email(*, reset_link: str, expiry_hours: int, asset_root: str | None) -> MailMessage:
     """Render the password-reset message for one recipient."""
     return render_email(
         "password_reset",
@@ -24,7 +24,7 @@ def render_password_reset_email(*, reset_link: str, expiry_hours: int, asset_roo
 
 
 def render_account_exists_email(
-    *, sign_in_link: str, has_password: bool, provider: str | None, asset_root: str | None = None
+    *, sign_in_link: str, has_password: bool, provider: str | None, asset_root: str | None
 ) -> MailMessage:
     """Render the notice that the address already has an account, saying how it signs in.
 

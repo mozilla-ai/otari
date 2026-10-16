@@ -38,7 +38,7 @@ def render_invitation_email(
     role: str,
     accept_link: str,
     expiry_hours: int,
-    asset_root: str | None = None,
+    asset_root: str | None,
 ) -> MailMessage:
     """Render the invitation message for one recipient."""
     return render_email(

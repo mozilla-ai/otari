@@ -9,7 +9,7 @@ from gateway.services.mail import MailMessage, render_email
 from gateway.services.tenancy.tokens import format_expiry
 
 
-def render_verification_email(*, verify_link: str, expiry_hours: int, asset_root: str | None = None) -> MailMessage:
+def render_verification_email(*, verify_link: str, expiry_hours: int, asset_root: str | None) -> MailMessage:
     """Render the email-verification message for one recipient."""
     return render_email(
         "verify_email",

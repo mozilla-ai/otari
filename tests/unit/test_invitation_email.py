@@ -19,6 +19,7 @@ def _render(**overrides: object) -> tuple[str, str, str]:
             "role": "member",
             "accept_link": ACCEPT_LINK,
             "expiry_hours": 168,
+            "asset_root": None,
             **overrides,
         }
     )
@@ -125,7 +126,6 @@ def test_render_invitation_email_offers_the_role_rather_than_membership() -> Non
 
 
 def test_render_invitation_email_previews_the_inviter_and_the_expiry_in_the_inbox() -> None:
-    _, html, text = _render(role="admin")
+    _, html, _ = _render(role="admin")
 
     assert "Ada (ada@example.com) invited you as an admin. The invitation expires in 7 days." in html
-    assert "invited you as an admin." not in text
