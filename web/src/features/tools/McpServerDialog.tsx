@@ -247,7 +247,10 @@ export function McpServerDialog({
     editing && url.trim() === editing.url && tokenField === undefined
       ? editing.health
       : null
-  const listed = [tested, stored].find((health) => health?.status === "healthy")
+  // Once a test has answered for this connection, it alone decides: a failed
+  // test hides the stored catalog rather than showing it beside the failure.
+  const latest = testIsCurrent ? tested : stored
+  const listed = latest?.status === "healthy" ? latest : undefined
   const allowed = parseAllowedTools(allowedTools) ?? []
   const toggleTool = (name: string) => {
     const next = allowed.includes(name)

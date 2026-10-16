@@ -46222,6 +46222,9 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "description": "The URL failed the SSRF or TLS check; nothing was sent to it."
+          },
           "422": {
             "content": {
               "application/json": {

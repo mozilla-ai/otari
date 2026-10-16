@@ -579,6 +579,28 @@ describe("WorkspaceMcpServersCard", () => {
     expect(screen.getByText(/HTTP 404/)).toBeVisible()
   })
 
+  it("hides the stored catalog once a test of the same connection fails", async () => {
+    const servers = [workspaceMcpServer({ health: health() })]
+    mockApi({
+      servers,
+      tested: health({
+        status: "failing",
+        error: "timeout",
+        tool_count: null,
+        tools: [],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    expect(screen.getByText(/The server offers 2 tools/)).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    expect(await screen.findByText(/The test failed\./)).toBeVisible()
+    expect(screen.queryByText(/The server offers/)).not.toBeInTheDocument()
+  })
+
   it("tests an edit with the stored token unless a new one is typed", async () => {
     const servers = [workspaceMcpServer({ has_token: true })]
     const calls = mockApi({ servers })

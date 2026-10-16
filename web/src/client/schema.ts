@@ -28529,6 +28529,13 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceMcpServerHealth"];
                 };
             };
+            /** @description The URL failed the SSRF or TLS check; nothing was sent to it. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {

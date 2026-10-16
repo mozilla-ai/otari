@@ -87,7 +87,11 @@ function healthCell(server: WorkspaceMcpServer) {
       trigger={
         <Button className="gap-2">
           <Dot className={dot} />
-          {healthLabel(health)}
+          {/* The cell's own type, so the label reads like the Token and
+              Status cells beside it rather than like a button. */}
+          <span className="text-mono-caption text-muted">
+            {healthLabel(health)}
+          </span>
         </Button>
       }
     >
@@ -271,7 +275,7 @@ export function WorkspaceMcpServersCard({
         const hasAllowList =
           row.allowed_tools !== null && row.allowed_tools.length > 0
         const counted = toolCountLabel(row.health, hasAllowList)
-        if (counted) return <span>{counted}</span>
+        if (counted) return <span className="whitespace-nowrap">{counted}</span>
         return hasAllowList ? (
           <span>{row.allowed_tools?.length} allowed</span>
         ) : (

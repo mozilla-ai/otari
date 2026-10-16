@@ -138,9 +138,10 @@ async def check_workspace_mcp_server(
 @router.post(
     "/check",
     responses={
+        status.HTTP_400_BAD_REQUEST: {"description": "The URL failed the SSRF or TLS check; nothing was sent to it."},
         status.HTTP_429_TOO_MANY_REQUESTS: {
             "description": "Every check slot on this gateway was busy. Try again shortly."
-        }
+        },
     },
 )
 async def check_workspace_mcp_server_connection(
