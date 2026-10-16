@@ -534,8 +534,10 @@ def estimate_metered_cost(
 
     Every estimated prompt token is billed as exactly one of fresh input, a
     cache read, or a cache write, so the upper bound for the input side is the
-    token count times the dearest of those three rates. Every one of them is
-    considered, including the cache-read rate: it is normally a discount, but
+    token count times the dearest rate any of them bills at. A ``1h`` TTL means
+    at least one block asked for a 1h write, so the others may still write for
+    5m, and both write rates are candidates. Every rate is considered,
+    including the cache-read rate: it is normally a discount, but
     nothing in the schema requires that, and assuming it made the estimate an
     under-bound for a rate card that priced a cache read above fresh input. An
     under-bound is a budget hole rather than a rounding difference, because the
@@ -553,22 +555,16 @@ def estimate_metered_cost(
     output_tokens = max(estimated_output_tokens, 0)
     rates = effective_rates(pricing, input_tokens)
 
-    cache_write_rate: Decimal | None
-    if cache_write_ttl == "1h" and rates.cache_write_1h_price_per_million is not None:
-        cache_write_rate = rates.cache_write_1h_price_per_million
-    elif cache_write_ttl is not None:
-        cache_write_rate = rates.cache_write_price_per_million
-    else:
-        cache_write_rate = None
-
     # An unpriced meter bills at the input rate (its tokens stay in the fresh
     # bucket), so the input rate is the floor and every configured rate a prompt
     # token could attract raises it.
     candidate_rates = [rates.input_price_per_million]
     if rates.cache_read_price_per_million is not None:
         candidate_rates.append(rates.cache_read_price_per_million)
-    if cache_write_rate is not None:
-        candidate_rates.append(cache_write_rate)
+    if cache_write_ttl is not None and rates.cache_write_price_per_million is not None:
+        candidate_rates.append(rates.cache_write_price_per_million)
+    if cache_write_ttl == "1h" and rates.cache_write_1h_price_per_million is not None:
+        candidate_rates.append(rates.cache_write_1h_price_per_million)
     per_input_token_rate = max(candidate_rates)
 
     estimate = meter_cost(input_tokens, per_input_token_rate) + meter_cost(
