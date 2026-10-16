@@ -117,6 +117,9 @@ RESPONSES_STREAM_FORMAT = StreamFormat(
     keepalive=_SSE_COMMENT_KEEPALIVE,
 )
 
+# The events a Responses stream ends a response with.
+RESPONSES_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed"})
+
 ANTHROPIC_STREAM_FORMAT = StreamFormat(
     done_marker="event: done\ndata: {}\n\n",
     error_payload=f"event: error\ndata: {_ANTHROPIC_ERROR}\n\n",

@@ -94,7 +94,7 @@ from gateway.services.tools import (
     ToolUseBudget,
 )
 from gateway.services.traces import read_turn
-from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
+from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 
@@ -251,17 +251,14 @@ def _usage_to_completion_usage(
     )
 
 
-_TERMINAL_STREAM_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed"})
-
-
 def _ends_a_response(chunk: Any) -> bool:
     """Whether ``chunk`` is an event that ends a response.
 
-    A stream is complete only while its latest chunk is one: the gateway's tool loop
-    forwards a round's ``response.incomplete`` or ``response.failed`` and can go on to
-    another round, which the provider may cut.
+    A stream is complete when its last chunk is one: a provider sends nothing after
+    it, and the gateway's tool loop forwards only its final round's, after
+    everything else.
     """
-    return getattr(chunk, "type", None) in _TERMINAL_STREAM_EVENTS
+    return getattr(chunk, "type", None) in RESPONSES_TERMINAL_EVENTS
 
 
 def _ensure_provider_supports_responses(provider: LLMProvider) -> None:
