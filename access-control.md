@@ -2,7 +2,7 @@
 
 Otari separates deployment administration, human identity, workload credentials,
 and spend limits. This page explains how those pieces relate. The generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.27.0/docs/public/openapi.json) is the source of truth for endpoint
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.28.0/docs/public/openapi.json) is the source of truth for endpoint
 schemas.
 
 ## Deployment-wide account administration
@@ -96,9 +96,10 @@ General (`DELETE /api/v1/organizations/me`) while it has no usage: the gateway
 refuses an organization whose workspaces still hold usage, API keys, aliases or
 routing policies, so a deletion never takes spend history with it. The
 deployment's default organization and the only organization the caller belongs
-to cannot be deleted either. Its workspaces, memberships and organization-level
-settings go with it, and everyone whose active organization it was moves to
-another organization they belong to.
+to cannot be deleted either. Its workspaces, memberships, pending invitations
+and organization-level settings go with it. Everyone whose active organization
+it was moves to the oldest other organization they belong to; someone who
+belongs to no other organization is left with none until they join one.
 
 ## Users and identities
 
