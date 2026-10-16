@@ -93,7 +93,7 @@ class ModelPricingInfo(BaseModel):
     # do, so a rule tightened later would turn old rows into a 500 on the listing.
     #
     # Deliberately left on pydantic's smart union, unlike the charge lines in
-    # _billing_schemas, which pin `union_mode="left_to_right"`. Smart mode takes
+    # schemas/usage_and_telemetry.py, which pin `union_mode="left_to_right"`. Smart mode takes
     # the dict arm for a stored tier, which is what keeps the wire format clean.
     # Do not "make it consistent" by adding left_to_right here: PricingTier is
     # not one of the defaulted shapes, so it would write four null price keys per

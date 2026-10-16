@@ -24,7 +24,6 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.api.routes._request_tags import MAX_TAG_KEY_LENGTH
 from gateway.core.config import GatewayConfig
@@ -44,6 +43,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
+from gateway.schemas.usage_and_telemetry import ChargeLine, MeterMap
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
     ExternalIngestResult,
@@ -208,7 +208,7 @@ class UsageEntry(BaseModel):
     cache_write_1h_tokens: int | None
     # A subset of completion_tokens; null on rows written before it was recorded.
     reasoning_tokens: int | None = None
-    # Precise shapes with a permissive fallback arm; see _billing_schemas for why
+    # Precise shapes with a permissive fallback arm; see schemas/usage_and_telemetry.py for why
     # the fallback is what keeps a row written by an older gateway renderable.
     billing_meters: MeterMap | None
     pricing_breakdown: Sequence[ChargeLine] | None
