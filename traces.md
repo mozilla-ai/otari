@@ -20,6 +20,7 @@ Otari never guesses that two requests belong together from their content.
 | The `session_label` request field | `"session_label": "chat-42"` | `client` |
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | The agent harness's own session id | Claude Code's `x-claude-code-session-id`, sent on every request | `harness` |
+| An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
 
 A request that names no session is a trace of its own. To group a custom
@@ -27,6 +28,39 @@ client's requests, send one of the signals above.
 
 A session belongs to the user whose API key sent it: two people who choose the
 same label get two sessions, and a session id never reaches another workspace.
+
+## Sessions from your own agent
+
+Claude Code is recognized on its own. An agent or harness of your own needs two
+things on its requests to read well as a trace.
+
+**Send one session id on every request of a run.** The `Otari-Conversation-Id`
+header is the one to use: it works the same on every completion endpoint, and it
+leaves `session_label` free for whatever you report spend by. Send it on each
+request of the run, including the follow-ups that hand tool results back and any
+retries, since a request without it starts a trace of its own.
+
+- When more than one signal is present, the header wins, then `session_label`,
+  then the `session_id` tag, then a harness's own id. A label you set per
+  customer or per automation for spend therefore groups every run under it into
+  one session, unless each run also sends its own header.
+- The value is any string up to 512 characters. Otari hashes it into the trace
+  id and does not store it, so an internal id is fine to send.
+- Give each run its own id rather than reusing one for days: after
+  `trace_session_max_age_days` a reused id starts a new trace anyway.
+- Give a subagent an id of its own. Under its parent's id, the task it was handed
+  reads as a new turn of the parent's session.
+
+**Name the harness in `User-Agent`.** The first product token is shown as the
+session's harness: `my-agent/1.4.0` shows `my-agent`. An SDK's default
+(`OpenAI/Python 1.x`, `Anthropic/Python 0.x`) shows the SDK's name instead.
+
+Turns and the tools your agent runs are read from each request's input, so they
+need nothing extra when the request carries the conversation as usual: the
+user's message last when a turn starts, the tool results last when the model's
+tool calls are answered, each with the call id the model gave it. A Responses
+request that continues with `previous_response_id` carries only the new items,
+so its tools are recorded without a name.
 
 ## Turns, steps and tools
 

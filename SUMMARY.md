@@ -38,6 +38,7 @@
   * [Files](api-endpoints/files.md)
   * [Health](api-endpoints/health.md)
   * [Hooks](api-endpoints/hooks.md)
+  * [Hosted providers](api-endpoints/hosted-providers.md)
   * [Images](api-endpoints/images.md)
   * [Invitations](api-endpoints/invitations.md)
   * [Keys](api-endpoints/keys.md)

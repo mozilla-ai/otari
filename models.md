@@ -102,6 +102,11 @@ does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
+A [hosted provider](modes.md#hosted-providers-and-byo-credentials) lists its
+roster, the models switched on under it, rather than everything its upstream
+lists. The operator's `GET /api/v1/models/discoverable` and provider health
+dial it on its stored key beside the configured instances.
+
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
 caller's organization's own override, `configured` for the deployment's stored
@@ -325,6 +330,22 @@ null where the caller has no such spelling for it.
 
 In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it. In hybrid mode, the control plane decides which offerings a request may try.
 
+The Routing page's "Automatic fallback" section, read from
+`GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
+organization sent requests to in the last 30 days, most requested first, with
+its offerings in the order a request sent by catalog id tries them for your
+organization. Beside each it counts the requests (an absorbed attempt is not one), the
+successful ones a later offering served, and the ones that named one offering
+or a policy rather than the catalog id and so had no automatic fallback. Under
+each offering it says who runs the built-in tools: the provider's own where it
+runs them itself, Otari's where it does not. That assumes a caller who declares
+the tools in the provider's own words and sends no `Otari-*` executor header,
+so the deployment's code execution executor and web search interception decide;
+a workspace's code execution pin is not reflected. The order is the catalog's,
+before a key's allow-list or a missing credential leaves an offering out of a
+request's plan. An owner or admin reads every workspace in the organization,
+anyone else the workspaces they belong to.
+
 The dashboard's Models page is this catalog: one card per model, with a rail
 of filters beside it, and a page per model with its facts and every offering
 compared in a table. "Use this model" opens a drawer beside the table with
@@ -348,6 +369,15 @@ signup is closed), and the dashboard reopens that model on their first sign-in.
 curl http://localhost:8000/api/v1/models \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
+
+On a deployment that hosts at least one provider, an organization API key is
+shown a priced model only where something would
+serve it from the key's workspace: a configured instance, the organization's own
+provider key, a hosted provider the deployment serves the organization, or the
+provider's own environment variable. A hosted provider the operator switched
+off or deleted leaves its rates on the price list, and its models leave this
+listing. The master key and an operator session still list the whole price
+list.
 
 ## HuggingFace provider routing
 

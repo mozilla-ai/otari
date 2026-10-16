@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.26.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.27.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -68,7 +68,10 @@ providers:
 ```
 
 Precedence from lowest to highest is the config file, structured environment
-config, then scalar `OTARI_<FIELD>` values. Stored runtime settings override
+config, then `OTARI_<FIELD>` values: the scalar fields, and
+`OTARI_HOSTED_PROVIDERS` as JSON. A top-level key of the structured config, and
+`OTARI_HOSTED_PROVIDERS`, replace the lower layer's value whole rather than
+merging into it. Stored runtime settings override
 the corresponding startup value after the database is available.
 
 ## Common settings
@@ -448,6 +451,84 @@ run the provider and search-tool re-encryption endpoints, then remove the old
 key. Losing every configured encryption key makes stored credentials
 unrecoverable.
 
+### Hosted providers in config.yml
+
+A hosted provider is a credential the deployment serves requests on when
+nothing else credentials them (see [Modes](modes.md#hosted-providers-and-byo-credentials)).
+Besides the Hosted providers page, a standalone or hosted deployment can declare
+them in a `hosted_providers:` block, keyed by any-llm implementation, with the
+fields the `/api/v1/hosted-providers` body takes:
+
+```yaml
+hosted_providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    restricted_to_organization_id: 4f1c2a7e-0b9d-4c55-9a0e-2d6f8b3c1e90
+  vllm:
+    api_base: http://vllm.internal:8000/v1
+    models: [qwen3-32b]
+```
+
+| Field | Meaning |
+|---|---|
+| `api_key` | The key the provider is served on. Required unless the provider needs none (listed below). |
+| `api_base` | An endpoint other than the provider's default. |
+| `client_args` | What the provider's SDK client needs beyond the key, such as Bedrock's region. |
+| `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
+| `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
+| `models` | Model ids a refresh offers when the provider cannot list its own. |
+
+A key may be left out for these providers only: the self-hosted backends
+`vllm`, `ollama`, `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`,
+which are called with a placeholder key when they have an `api_base`, and
+`vertexai` and `vertexaianthropic`, which authenticate through the Google Cloud
+credentials in the gateway's own environment. Every other provider, Bedrock
+included, needs `api_key`. As for any hosted provider, a request is served on one
+only when no organization key, `providers:` instance or provider environment
+variable (such as `VLLM_API_KEY`) answers for it first.
+
+Reference the key as `${VAR}` rather than writing it into the file: it is
+resolved from the environment as every `${VAR}` in the file is, so the key stays
+in your secret store. The whole block can instead be set as JSON through
+`OTARI_HOSTED_PROVIDERS`, where `${VAR}` resolves the same way:
+
+```bash
+OTARI_HOSTED_PROVIDERS='{"openai": {"api_key": "${OPENAI_API_KEY}"}}'
+```
+
+When it is set, it replaces the `hosted_providers:` block of the file (and of
+`OTARI_CONFIG_YAML`) whole: a provider only the file names is not served, and
+the two are never merged per provider. An empty value leaves the file's block
+in place.
+
+The block is validated at load: an unknown implementation, a `provider_type`
+key (a named instance belongs in `providers:`), an unknown field, or a missing
+`api_key` for a provider that needs one fails the start. With
+`OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`, an `api_base` that resolves to a
+private address fails it too, as it is refused for a provider stored through the
+page; that check runs at boot, because it resolves the host. The block is never
+shown by `/api/v1/settings`.
+
+A configured entry is never written to the database or encrypted. The Hosted
+providers page lists it with a `config.yml` badge and the API marks it
+`source: "config"` with no `id`; changing or deleting it through the API answers
+`409`, so change it in the configuration and restart. Its models, their serving
+switches and their prices are managed on the page as any hosted provider's are.
+An entry starts with no models and serves only the ones switched on under it,
+so refresh its models or add them before it serves a request.
+A provider stored through the page or the API under the same name wins over the
+entry, and the start logs each entry it shadows; deleting the stored provider
+serves the entry again on the same models. Taking an entry out of the
+configuration leaves its models in the database, serving nothing and offered
+in no catalog; they come back if the entry does, and the next catalog sweep on
+the Hosted providers page (`POST /api/v1/hosted-providers/refresh`) deletes
+them and their prices, naming the provider in `orphaned_rosters`. Where no
+hosted provider offers a model at all, the sweep deletes those models and leaves
+every price in place. A hybrid
+gateway ignores the block.
+
 ### Provider copies
 
 A request that asks a provider's own code execution to run over an attached file
@@ -487,15 +568,17 @@ signed-in member's.
 | Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
 | Anthropic, including Azure and Vertex AI | `metadata.user_id` |
 | Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model |
+| Gemini API | the `safety_identifier` label, cut to the 63 characters a label value allows, on chat completions and Messages |
+| Meta | `safety_identifier` on chat completions |
 | Any other provider with a native Messages API, on Messages | `metadata.user_id` |
 
 Bedrock's abuse detection reads no end-user identifier, but `requestMetadata`,
 like the request body that carries `metadata.user_id`, lands in the account's
 invocation logs, which is where the prompt ids in an AWS abuse report are traced
 back to a user. Every other provider gets nothing: some have no such field
-(Gemini, Vertex AI, Mistral), some run your own models, and for the rest an
-unknown field can fail the call. A Responses or Messages request
-served as a chat completion gets that provider's chat field.
+(Vertex AI, whose labels are for billing only, and Mistral), some run your own
+models, and for the rest an unknown field can fail the call. A Responses or
+Messages request served as a chat completion gets that provider's chat field.
 
 Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
 characters (`openssl rand -base64 32`) to key the digest. Without it the digest
@@ -608,8 +691,9 @@ every restart is distinguishable from one set in the dashboard.
 `public_catalog: true` serves `GET /api/v1/catalog/models` and the dashboard's
 Models page to a visitor with no credential, so a deployment can show what it
 serves before anyone signs up. A visitor sees the configured `providers:`
-instances and any hosted models the deployment serves, priced at the
-deployment's rates, and never an organization's
+instances and any hosted models the deployment serves to every organization,
+priced at the deployment's rates, and never a hosted provider restricted to one
+organization, an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
 served as that caller, valid or not. The setting is off by default, off in
 hybrid mode, and can be changed at runtime.
@@ -1091,7 +1175,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.26.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.27.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback
