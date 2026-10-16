@@ -93,9 +93,10 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   provider, an MCP server, a search service and a code-execution sandbox, asserting on the requests the fakes recorded
   (resolve bodies, tokens, usage reports) as well as the responses. Same rules:
   standard library only, run under `--no-dev`, and no database, because a hybrid
-  gateway runs none. `--image <tag>` runs the same walk against the built
-  container instead of the source checkout, which `otari-docker-build.yml` does
-  after its liveness check: the image pins `OTARI_HOST`/`OTARI_PORT` as env, and
+  gateway runs none. Both smokes take `--image <tag>`, which runs the same walk
+  against the built container instead of the source checkout (the OSS one on a
+  SQLite file inside it), and `otari-docker-build.yml` runs both after its
+  liveness check: the image pins `OTARI_HOST`/`OTARI_PORT` as env, and
   env beats a mounted config file, so an image that boots but cannot serve a
   request fails only there. A streamed leg covers SSE end to end and the `ttft_ms`
   only a streamed attempt reports, and a streamed tool loop runs an MCP tool
