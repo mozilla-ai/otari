@@ -8,6 +8,7 @@ what it writes.
 import asyncio
 import uuid
 from collections.abc import MutableMapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -176,6 +177,12 @@ def test_a_step_is_named_for_the_endpoint_that_served_it() -> None:
     write = _trace().finish(status_code=200, completed=True)
 
     assert write.spans[0].name == "/v1/chat/completions"
+
+
+def test_a_step_whose_endpoint_is_not_an_endpoint_label_is_still_recorded() -> None:
+    write = replace(_trace(), endpoint="/Users/alice/notes.txt").finish(status_code=200, completed=True)
+
+    assert write.spans[0].name == "request"
 
 
 def test_an_llm_call_never_starts_before_its_step() -> None:
