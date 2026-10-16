@@ -553,6 +553,11 @@ describe("WorkspaceMcpServersCard", () => {
     )
     await user.click(screen.getByRole("button", { name: "get_issue" }))
     expect(screen.getByLabelText("Allowed tools")).toHaveValue("close_issue")
+    // Taking the last name off would leave the list blank, which allows every
+    // tool, so the picker refuses; clearing the field is the deliberate way.
+    expect(screen.getByRole("button", { name: "close_issue" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "close_issue" }))
+    expect(screen.getByLabelText("Allowed tools")).toHaveValue("close_issue")
   })
 
   it("says why a test failed", async () => {

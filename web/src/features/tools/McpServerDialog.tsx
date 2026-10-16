@@ -101,11 +101,16 @@ function ToolPicker({
         >
           {tools.map((name) => {
             const isAllowed = allowed.includes(name)
+            // An empty allow-list exposes every tool, so taking the last name
+            // off would widen it to all of them. Clearing the field is how an
+            // operator asks for that, deliberately.
+            const isLast = isAllowed && allowed.length === 1
             return (
               <li key={name}>
                 <Button
                   size="sm"
                   aria-pressed={isAllowed}
+                  isDisabled={isLast}
                   onPress={() => onToggle(name)}
                   className="gap-1"
                 >
@@ -256,7 +261,7 @@ export function McpServerDialog({
     const next = allowed.includes(name)
       ? allowed.filter((entry) => entry !== name)
       : [...allowed, name]
-    setAllowedTools(next.join(", "))
+    if (next.length > 0) setAllowedTools(next.join(", "))
   }
   const runTest = () => {
     setTestedConnection(connection)
