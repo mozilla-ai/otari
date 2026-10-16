@@ -85,7 +85,10 @@ function healthCell(server: WorkspaceMcpServer) {
     <Popover
       label={`Last check of ${server.name}`}
       trigger={
-        <Button className="gap-2">
+        // Pulled left by the ghost button's 16px inset (1px edge, 15px
+        // padding), so the dot lines up with the column header and the cells
+        // beside it rather than sitting a padding's width in.
+        <Button className="-ms-4 gap-2">
           <Dot className={dot} />
           {/* The cell's own type, so the label reads like the Token and
               Status cells beside it rather than like a button. */}
