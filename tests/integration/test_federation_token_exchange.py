@@ -16,9 +16,9 @@ import anthropic
 import httpx
 import jwt
 import pytest
+from anthropic.lib.credentials import WorkloadIdentityCredentials, WorkloadIdentityError
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
-from anthropic.lib.credentials import WorkloadIdentityCredentials, WorkloadIdentityError
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
@@ -223,7 +223,10 @@ def test_workspace_and_service_account_are_accepted_when_they_are_the_keys(
     assert exchanged.status_code == 200, exchanged.text
 
 
-_INVALID_GRANT = {"error": "invalid_grant", "error_description": "The identity token does not match the federation rule."}
+_INVALID_GRANT = {
+    "error": "invalid_grant",
+    "error_description": "The identity token does not match the federation rule.",
+}
 
 
 @pytest.mark.parametrize(
@@ -527,7 +530,9 @@ def test_the_anthropic_sdk_exchanges_and_calls_messages(client: TestClient, fede
         organization_id=federated.organization_id,
         http_client=_sdk_http(transport),
     )
-    sdk = anthropic.Anthropic(base_url="http://localhost/api", credentials=credentials, http_client=_sdk_http(transport))
+    sdk = anthropic.Anthropic(
+        base_url="http://localhost/api", credentials=credentials, http_client=_sdk_http(transport)
+    )
     reply = MessageResponse(
         id="msg_1",
         type="message",

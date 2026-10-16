@@ -109,16 +109,12 @@ WORKSPACE = uuid.uuid4()
 def _names(**requested: str | None) -> bool:
     scope: dict[str, str | None] = {"organization_id": None, "workspace_id": None, "service_account_id": None}
     scope.update(requested)
-    return grant_names_key(
-        **scope, key_organization_id=ORGANIZATION, key_workspace_id=WORKSPACE, api_key_id="key-1"
-    )
+    return grant_names_key(**scope, key_organization_id=ORGANIZATION, key_workspace_id=WORKSPACE, api_key_id="key-1")
 
 
 def test_a_grant_naming_nothing_or_the_keys_own_scope_is_accepted() -> None:
     assert _names()
-    assert _names(
-        organization_id=str(ORGANIZATION).upper(), workspace_id=WORKSPACE.hex, service_account_id="key-1"
-    )
+    assert _names(organization_id=str(ORGANIZATION).upper(), workspace_id=WORKSPACE.hex, service_account_id="key-1")
 
 
 @pytest.mark.parametrize(

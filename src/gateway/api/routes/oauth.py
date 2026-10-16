@@ -22,7 +22,10 @@ _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
     "/token",
     response_model=FederationTokenResponse,
     responses={
-        status.HTTP_400_BAD_REQUEST: {"model": OAuthErrorResponse, "description": "invalid_request or unsupported_grant_type"},
+        status.HTTP_400_BAD_REQUEST: {
+            "model": OAuthErrorResponse,
+            "description": "invalid_request or unsupported_grant_type",
+        },
         status.HTTP_401_UNAUTHORIZED: {"model": OAuthErrorResponse, "description": "invalid_grant"},
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": OAuthErrorResponse, "description": "temporarily_unavailable"},
     },
