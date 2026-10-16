@@ -144,12 +144,30 @@ def test_finish_reasons_sent_as_an_array_are_kept(reasons: Any, stored: str) -> 
         [],
         ["x" * 100, "y" * 100],
         {"first": "stop"},
+        ["stop,length"],
+        "stop,length",
     ],
 )
 def test_finish_reasons_that_are_not_all_identifiers_are_dropped_and_the_span_kept(reasons: Any) -> None:
     [write] = _project(
         _span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.response.finish_reasons": reasons}),
     )
+
+    [span] = write.spans
+    assert span.attributes == {}
+
+
+@pytest.mark.parametrize(("sent", "stored"), [(1024, 1024), ("1024", 1024), (10**12, _INT32_MAX)])
+def test_the_requested_max_tokens_is_kept(sent: Any, stored: int) -> None:
+    [write] = _project(_span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.request.max_tokens": sent}))
+
+    [span] = write.spans
+    assert span.attributes == {"gen_ai.request.max_tokens": stored}
+
+
+@pytest.mark.parametrize("sent", [-1, 1.5, True, "lots"])
+def test_a_max_tokens_that_is_not_a_count_is_dropped_and_the_span_kept(sent: Any) -> None:
+    [write] = _project(_span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.request.max_tokens": sent}))
 
     [span] = write.spans
     assert span.attributes == {}
