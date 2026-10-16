@@ -688,3 +688,79 @@ def test_a_responses_tool_loop_round_cut_after_an_incomplete_round_is_an_interru
     assert response.status_code == 200, response.text
     assert _error_event(response.text)["error"]["code"] == "provider_stream_interrupted"
     assert _usage_row(db_session_factory).status == "error"
+
+
+class _WebSearchBackend:
+    """The gateway's web retrieval backend, answering every search from memory."""
+
+    def __init__(self, **_kwargs: Any) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def __aenter__(self) -> "_WebSearchBackend":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "web_search", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "web_search"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        self.calls.append((name, arguments))
+        return "[1] Result\nhttps://example.com"
+
+    def take_last_results(self) -> list[dict[str, Any]]:
+        return [{"url": "https://example.com", "title": "Example"}]
+
+
+def test_a_responses_tool_loop_round_that_ends_incomplete_after_the_gateway_searched_ends_cleanly(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One round asks for the gateway's search and the caller's own tool, then ends in ``response.incomplete``.
+
+    The loop runs the search and announces it as a ``web_search_call`` before handing
+    the caller its tool, and the round's terminal event still comes last.
+    """
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    search = ResponseFunctionToolCall(
+        type="function_call", call_id="call_search", name="web_search", arguments='{"query": "otari"}'
+    )
+    caller_tool = ResponseFunctionToolCall(type="function_call", call_id="call_caller", name="lookup", arguments="{}")
+    mixed_round: list[ResponseStreamEvent] = [
+        ResponseOutputItemAddedEvent(type="response.output_item.added", item=search, output_index=0, sequence_number=0),
+        ResponseOutputItemAddedEvent(
+            type="response.output_item.added", item=caller_tool, output_index=1, sequence_number=1
+        ),
+        ResponseIncompleteEvent(
+            type="response.incomplete", response=_response_snapshot("incomplete"), sequence_number=2
+        ),
+    ]
+    backend = _WebSearchBackend()
+
+    with (
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=lambda **_kwargs: backend),
+        patch("gateway.services.mcp_loop_responses.aresponses", new=_scripted_aresponses(mixed_round)),
+    ):
+        response = _post_responses_stream(
+            client,
+            {**master_key_header, "Otari-Web-Search": "otari"},
+            tools=[
+                {"type": "web_search"},
+                {"type": "function", "name": "lookup", "parameters": {"type": "object", "properties": {}}},
+            ],
+        )
+
+    assert response.status_code == 200, response.text
+    assert "event: error" not in response.text
+    events = [line.removeprefix("event: ") for line in response.text.splitlines() if line.startswith("event: ")]
+    assert events[-2:] == ["response.output_item.done", "response.incomplete"], response.text
+    assert backend.calls == [("web_search", {"query": "otari"})]
