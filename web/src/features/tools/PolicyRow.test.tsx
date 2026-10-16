@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { ceilingParser, parsePhrase } from "@/features/tools/PolicyRow"
+import { ceilingParser } from "@/features/tools/PolicyRow"
 
 // The row itself is exercised through both policy cards, which drive it against
 // a real mutation. What is worth asserting here is the parsing, because it is
@@ -38,18 +38,5 @@ describe("ceilingParser", () => {
     expect(ceilingParser(60, "seconds")("600").error).toBe(
       "A whole number of seconds from 1 to 60.",
     )
-  })
-})
-
-describe("parsePhrase", () => {
-  it("trims what it stores", () => {
-    expect(parsePhrase("  show your working  ")).toEqual({
-      value: "show your working",
-      error: "",
-    })
-  })
-
-  it("clears the stored phrase when the field is emptied", () => {
-    expect(parsePhrase("   ")).toEqual({ value: null, error: "" })
   })
 })

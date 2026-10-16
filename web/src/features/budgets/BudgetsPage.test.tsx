@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useLocation } from "@tanstack/react-router"
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
@@ -14,6 +15,7 @@ import { BudgetsPage } from "@/features/budgets/BudgetsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 function testUser(user_id: string): User {
   return {
@@ -865,9 +867,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    expect(
-      within(row).getByText("Owned by an organization"),
-    ).toBeInTheDocument()
+    expect(within(row).getByText("Organization")).toBeInTheDocument()
 
     await user.click(within(row).getByRole("button", { name: "Edit" }))
     expect(
@@ -883,7 +883,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    expect(within(row).queryByText("Owned by an organization")).toBeNull()
+    expect(within(row).queryByText("Organization")).toBeNull()
 
     await user.click(within(row).getByRole("button", { name: "Edit" }))
     expect(
@@ -967,33 +967,30 @@ describe("BudgetsPage", () => {
     expect(screen.queryByText("11111111")).not.toBeInTheDocument()
   })
 
-  it("bulk-deletes the selected budgets after a confirm", async () => {
-    const fetchMock = mockApi({
+  it("withholds Delete on a budget an organization owns", async () => {
+    // /api/v1/budgets refuses to delete a tenant's budget.
+    mockApi({
       budgets: [
         budget({ budget_id: "b1", name: "Team monthly" }),
-        budget({ budget_id: "b2", name: "Trial cap" }),
+        budget({
+          budget_id: "b2",
+          name: "Tenant cap",
+          organization_id: "99999999-8888-7777-6666-555555555555",
+        }),
       ],
     })
-    const user = userEvent.setup()
     renderPage(<BudgetsPage />)
 
-    const row = (await screen.findByText("Team monthly")).closest("tr")!
-    await user.click(within(row).getByRole("checkbox"))
+    const tenantRow = (await screen.findByText("Tenant cap")).closest("tr")!
+    expect(
+      within(tenantRow).queryByRole("button", { name: "Delete" }),
+    ).toBeNull()
 
-    const bar = (await screen.findByText("1 selected")).closest("div")!
-    await user.click(within(bar).getByRole("button", { name: "Delete" }))
-
-    const dialog = await screen.findByRole("alertdialog")
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
-
-    await vi.waitFor(() => {
-      const del = fetchMock.mock.calls.find(
-        ([u, init]) =>
-          String(u).includes(`${API_ROOT}/budgets/b1`) &&
-          (init?.method ?? "").toUpperCase() === "DELETE",
-      )
-      expect(del).toBeTruthy()
-    })
+    const ownRow = screen.getByText("Team monthly").closest("tr")!
+    expect(
+      within(ownRow).getByRole("button", { name: "Delete" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("checkbox")).toBeNull()
   })
 
   it("gives an organization admin their own budgets, not the deployment's", async () => {
@@ -1038,4 +1035,40 @@ describe("BudgetsPage", () => {
       screen.queryByRole("grid", { name: "Organization budgets" }),
     ).toBeNull()
   })
+
+  it("sends a caller with no organization to the index, not the operator page", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith(`${API_ROOT}/organizations/me`)
+        ? jsonResponse({ detail: "Organization not found" }, 404)
+        : jsonResponse([]),
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <DeploymentProvider value={bootstrap()}>
+        <QueryClientProvider client={client}>
+          <BudgetsPage />
+        </QueryClientProvider>
+      </DeploymentProvider>,
+      {
+        wrapper: withRouter({
+          url: "/budgets",
+          routes: [{ path: "/", element: <LocationProbe /> }],
+        }),
+      },
+    )
+
+    expect(await screen.findByTestId("loc")).toHaveTextContent(/^\/$/)
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some(([input]) => String(input).includes("/budgets")),
+    ).toBe(false)
+  })
 })
+
+/** Reports where a navigation landed. */
+function LocationProbe() {
+  return <div data-testid="loc">{useLocation().pathname}</div>
+}

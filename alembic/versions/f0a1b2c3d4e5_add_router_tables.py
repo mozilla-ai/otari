@@ -42,9 +42,7 @@ def upgrade() -> None:
     # A routed request with a task label filters on all three, and the seed gate
     # counts the same partition, so both queries walk this index instead of every
     # record the user has for the embedding model.
-    op.create_index(
-        "ix_routing_memory_user_model_task", "routing_memory", ["user_id", "embedding_model", "task_id"]
-    )
+    op.create_index("ix_routing_memory_user_model_task", "routing_memory", ["user_id", "embedding_model", "task_id"])
 
     op.create_table(
         "router_preferences",

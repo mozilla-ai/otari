@@ -1,20 +1,24 @@
-import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { DeploymentBootstrap } from "@/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap } from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
 
 // The cluster holds a router Link, so it needs a real router; `renderWithRouter`
 // mounts it at "/" and resolves the first location before the assertions run.
-function renderActions(overrides: Partial<DeploymentBootstrap> = {}) {
+function renderActions(
+  overrides: Partial<DeploymentBootstrap> = {},
+  onOpenFeedback?: () => void,
+) {
   return renderWithRouter(
     <AppProviders>
       <DeploymentProvider value={bootstrap(overrides)}>
-        <TopBarActions />
+        <TopBarActions onOpenFeedback={onOpenFeedback} />
       </DeploymentProvider>
     </AppProviders>,
   )
@@ -23,10 +27,27 @@ function renderActions(overrides: Partial<DeploymentBootstrap> = {}) {
 const cluster = async () =>
   (await screen.findByRole("link", { name: "Documentation" })).parentElement
 
+// Playground waits on the membership read like every rail row, so a case that
+// counts the cluster waits for it first.
+const settledCluster = async () => {
+  await screen.findByRole("link", { name: "Playground" })
+  return cluster()
+}
+
 describe("TopBarActions", () => {
+  // A member, so Playground's membership gate has an answer to settle on.
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(organizationContext()),
+    )
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("places the local Playground immediately before Documentation", async () => {
     await renderActions()
-    const link = screen.getByRole("link", { name: "Playground" })
+    const link = await screen.findByRole("link", { name: "Playground" })
     expect(link).toHaveAttribute("href", "/playground")
     expect(link.nextElementSibling).toBe(
       screen.getByRole("link", { name: "Documentation" }),
@@ -41,6 +62,21 @@ describe("TopBarActions", () => {
     expect(await cluster()).toHaveTextContent("Documentation")
   })
 
+  it("omits Playground for a caller with no organization", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    await renderActions()
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("link", { name: "Playground" }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(await cluster()).toHaveTextContent("Documentation")
+    vi.restoreAllMocks()
+  })
+
   it("contributes nothing where the balance goes", async () => {
     await renderActions()
 
@@ -48,7 +84,7 @@ describe("TopBarActions", () => {
     // none, so the seam is mounted and empty. Asserting the cluster's whole
     // membership rather than the absence of one chip is what would catch a
     // placeholder growing here later.
-    expect((await cluster())?.children).toHaveLength(2)
+    expect((await settledCluster())?.children).toHaveLength(2)
   })
 
   it("renders the slot module's own empty default", () => {
@@ -63,7 +99,7 @@ describe("TopBarActions", () => {
     await renderActions({ management_url: "https://otari.ai/" })
 
     // A management URL does not retarget the local Playground.
-    expect((await cluster())?.children).toHaveLength(2)
+    expect((await settledCluster())?.children).toHaveLength(2)
   })
 
   it("points Documentation at the bundled guide when no docs site is configured", async () => {
@@ -85,5 +121,28 @@ describe("TopBarActions", () => {
     // app, where the bundled guide is a page inside it.
     expect(link).toHaveAttribute("target", "_blank")
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
+  })
+
+  it("places Feedback immediately after Documentation and opens it", async () => {
+    const onOpenFeedback = vi.fn()
+    await renderActions({ feedback_enabled: true }, onOpenFeedback)
+    const button = screen.getByRole("button", { name: "Feedback" })
+    expect(
+      screen.getByRole("link", { name: "Documentation" }).nextElementSibling,
+    ).toBe(button)
+    // The same class as the links beside it, so it reads as one of them.
+    expect(button.className).toContain(
+      screen.getByRole("link", { name: "Documentation" }).className,
+    )
+    await userEvent.setup().click(button)
+    expect(onOpenFeedback).toHaveBeenCalledOnce()
+  })
+
+  it("offers no Feedback when the deployment has it off", async () => {
+    await renderActions({ feedback_enabled: false }, vi.fn())
+    expect(await cluster()).toHaveTextContent("Documentation")
+    expect(
+      screen.queryByRole("button", { name: "Feedback" }),
+    ).not.toBeInTheDocument()
   })
 })

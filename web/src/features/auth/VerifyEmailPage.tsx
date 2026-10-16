@@ -1,61 +1,69 @@
-import { useEffect, useRef } from "react"
+import { Button } from "@heroui/react"
+import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { useVerifyEmail } from "@/shared/api/auth"
+import { useMailedLinkStatus, useVerifyEmail } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
+import { AuthPasswordField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
+import { rememberSignInAddress } from "./signInAddress"
+import { CheckingLinkPanel, UnusableLinkPanel } from "./UnusableLinkPanel"
 
 /**
  * `#/verify-email?token=…`: the page the mailed verification link lands on.
  *
- * It verifies on arrival rather than behind a button, which is what the link
- * in the message already promised the recipient would happen. Safe to do
- * without a confirmation for the reason the accept-invitation page needs one
- * and this does not: accepting joins an organization, while this only confirms
- * an address the recipient's own mailbox already proved they hold.
+ * It asks for the password chosen at signup before verifying. Anyone can sign
+ * up with an address they do not hold, and the link then reaches the
+ * address's real owner: verifying on arrival would let that owner's click
+ * activate a stranger's password. The gateway refuses a mismatch without
+ * spending the link, so a typo costs nothing. Arrival only asks whether the
+ * link can still be used, which does not use it.
  *
- * Verifying on arrival is what makes `useVerifyEmail` a query rather than a
- * mutation: the token is single-use, so the call has to happen exactly once
- * per token, and the query cache is what guarantees that through StrictMode's
- * development-only remount. See the hook for the rest.
- *
- * The one effect here records the outcome and does nothing else. The page has
- * no other moment to record from: the verification runs on arrival rather than
- * behind a control, so there is no handler, and TanStack Query v5 dropped the
- * `onSuccess` a query used to carry. It fires once per mounted page, which the
- * ref is what guarantees: the remount StrictMode performs in development runs
- * effects a second time against the already-settled cache, and a funnel counted
- * twice in development is a funnel nobody can read.
+ * Only the first signup's password verifies, so someone who signed up twice is
+ * told to use the one they chose first. Whoever forgot it, or never signed up,
+ * is pointed at a password reset, which is how they take the address back.
  */
 export function VerifyEmailPage({ hash }: { hash: string }) {
   const token = tokenFromHash(hash)
-  const verify = useVerifyEmail(token ?? "")
+  const verify = useVerifyEmail()
+  const linkStatus = useMailedLinkStatus("verify", token ?? "")
   const { recordEvent } = useTelemetry()
+  const [password, setPassword] = useState("")
 
-  const outcome = verify.data ? "verified" : verify.error ? "refused" : null
-  const status =
-    verify.error instanceof ApiError ? verify.error.status : undefined
-  const recorded = useRef(false)
-  useEffect(() => {
-    if (outcome === null || recorded.current) {
+  const clearError = () => {
+    if (verify.isPending) {
       return
     }
-    recorded.current = true
-    if (outcome === "verified") {
-      recordEvent(TELEMETRY_EVENTS.EMAIL_VERIFICATION_SUCCESS)
+    verify.reset()
+  }
+
+  const submit = () => {
+    if (token === null || password === "" || verify.isPending) {
       return
     }
-    // The gateway's wording is not recorded, only its status: a single-use
-    // token that had already been spent and one that never existed answer the
-    // same way, and neither sentence is this event's business.
-    recordEvent(TELEMETRY_EVENTS.EMAIL_VERIFICATION_FAILED, {
-      error_code: "verification_rejected",
-      status,
-    })
-  }, [outcome, status, recordEvent])
+    verify.mutate(
+      { token, password },
+      {
+        onSuccess: (verified) => {
+          // So the sign-in screen this page points to opens on the address.
+          rememberSignInAddress(verified.email)
+          recordEvent(TELEMETRY_EVENTS.EMAIL_VERIFICATION_SUCCESS)
+        },
+        // The gateway's wording is not recorded, only its status: it tells a
+        // spent link from a wrong password for the person, and neither
+        // sentence is this event's business.
+        onError: (error) => {
+          recordEvent(TELEMETRY_EVENTS.EMAIL_VERIFICATION_FAILED, {
+            error_code: "verification_rejected",
+            status: error instanceof ApiError ? error.status : undefined,
+          })
+        },
+      },
+    )
+  }
 
   if (token === null) {
     return (
@@ -88,30 +96,69 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
     )
   }
 
-  if (verify.error) {
+  if (linkStatus.isLoading) {
+    return <CheckingLinkPanel title="Verify your email" />
+  }
+
+  // A check that failed leaves the form up: submitting still gets the
+  // gateway's own answer.
+  if (linkStatus.data === "expired" || linkStatus.data === "invalid") {
     return (
-      <PublicAuthLayout
-        title="Verification failed"
-        description="A verification link is single-use and expires. Request a fresh one and open the newest message."
-        footer={
-          <>
-            <PublicAuthLink to="#/resend-verification">
-              Send a new verification link
-            </PublicAuthLink>
-            <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
-          </>
-        }
-      >
-        <ErrorBanner error={verify.error} />
-      </PublicAuthLayout>
+      <UnusableLinkPanel
+        status={linkStatus.data}
+        renew={{
+          to: "#/resend-verification",
+          label: "Send a new verification link",
+        }}
+      />
     )
   }
 
   return (
-    <PublicAuthLayout title="Verify your email">
-      <p role="status" className="text-sm text-muted">
-        Confirming your address…
-      </p>
+    <PublicAuthLayout
+      isBusy={verify.isPending}
+      title="Verify your email"
+      description="Enter the password you chose when you signed up to confirm this address. If you signed up more than once, use the password you chose first."
+      footer={
+        <>
+          <PublicAuthLink to="#/recover-password">
+            Forgot that password, or didn't sign up? Set a new one
+          </PublicAuthLink>
+          <PublicAuthLink to="#/resend-verification">
+            Send a new verification link
+          </PublicAuthLink>
+          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          submit()
+        }}
+      >
+        <AuthPasswordField
+          label="Password"
+          value={password}
+          onChange={(next) => {
+            setPassword(next)
+            clearError()
+          }}
+          autoComplete="current-password"
+          canReveal
+        />
+        <ErrorBanner error={verify.error} />
+        <Button
+          type="submit"
+          variant="primary"
+          fullWidth
+          isPending={verify.isPending}
+          isDisabled={password === ""}
+        >
+          Verify email
+        </Button>
+      </form>
     </PublicAuthLayout>
   )
 }

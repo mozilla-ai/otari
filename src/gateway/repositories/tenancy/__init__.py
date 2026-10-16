@@ -29,7 +29,11 @@ from gateway.repositories.tenancy.organization_guardrail_definition_repository i
 from gateway.repositories.tenancy.organization_member_repository import OrganizationMemberRepository
 from gateway.repositories.tenancy.organization_repository import OrganizationRepository
 from gateway.repositories.tenancy.user_repository import UserRepository, user_alphabetical_order
-from gateway.repositories.tenancy.workspace_repository import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.repositories.tenancy.workspace_repository import (
+    WorkspaceMemberRepository,
+    WorkspaceRepository,
+    ids_in_organization,
+)
 
 __all__ = [
     "Candidate",
@@ -44,6 +48,7 @@ __all__ = [
     "WorkspaceProviderKeyOverrideRepository",
     "WorkspaceProviderModelRestrictionRepository",
     "WorkspaceRepository",
+    "ids_in_organization",
     "resolve_active_key",
     "user_alphabetical_order",
 ]

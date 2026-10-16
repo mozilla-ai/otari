@@ -7,6 +7,8 @@ resolver behind the same port.
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.ports.entitlement_port import EntitlementPort
+
 # The capabilities Otari's base build ships and therefore entitles.
 #
 # **Empty, because nothing in the base is gated on a capability yet.** That is
@@ -23,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 BASE_CAPABILITIES: frozenset[str] = frozenset()
 
 
-class BaseEntitlementAdapter:
+class BaseEntitlementAdapter(EntitlementPort):
     """Entitlement adapter granting the fixed base capability set.
 
     The set is per deployment, so the request's database session is unused.

@@ -76,7 +76,6 @@ def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -
 OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]
 
 
-
 # ==============================================================================
 # Organization-scoped keys
 # ==============================================================================
@@ -258,9 +257,7 @@ async def refresh_org_provider_key_models(
     rate this surface seeded and nobody has changed moves to today's default.
     Organization owners and admins only.
     """
-    return await service.refresh_models(
-        user=current_identity, key_id=key_id
-    )
+    return await service.refresh_models(user=current_identity, key_id=key_id)
 
 
 @org_router.post("/{key_id}/pricing/refresh")
@@ -294,9 +291,7 @@ async def list_org_provider_key_available_models(
     leaves the process; only model names come back. Organization owners and
     admins only.
     """
-    return await service.available_models(
-        user=current_identity, key_id=key_id
-    )
+    return await service.available_models(user=current_identity, key_id=key_id)
 
 
 # ==============================================================================

@@ -37,6 +37,20 @@ export function accountLockoutReason(
   return undefined
 }
 
+/**
+ * Why a password link cannot be issued for this account, or `undefined` when it can.
+ *
+ * The two the row already shows. The gateway refuses more (an account that
+ * signs in only with a provider, which the row does not carry), and says why.
+ */
+export function passwordLinkBlockedReason(
+  account: DeploymentUser,
+): string | undefined {
+  if (!account.is_active) return "Reactivate this account first"
+  if (!account.email) return "This account has no email address to sign in with"
+  return undefined
+}
+
 /** How the account is named in a row, a control's label, and a confirmation. */
 export function accountLabel(account: DeploymentUser): string {
   return account.full_name?.trim() || account.email || account.id

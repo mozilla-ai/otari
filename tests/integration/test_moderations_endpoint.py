@@ -1,18 +1,22 @@
 """Tests for the POST /api/v1/moderations endpoint."""
 
 import logging
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
+from gateway.models.usage import UsageLog
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
-    reset_price_cache,
 )
 from gateway.types.moderation import ModerationResponse, ModerationResult
 
@@ -196,11 +200,12 @@ def test_moderations_unsupported_provider_returns_400(
     assert resp.json() == {"detail": "Provider anthropic does not support moderation"}
 
 
-def test_moderations_generic_not_implemented_returns_502(
+def test_moderations_generic_not_implemented_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """Generic NotImplementedError (without locked phrasing) returns 502."""
+    """any-llm raises NotImplementedError for a feature the provider lacks, so
+    without the locked phrasing it is still a refusal, as on the completion routes."""
     with patch(
         "gateway.api.routes.moderations.amoderation",
         new_callable=AsyncMock,
@@ -211,8 +216,8 @@ def test_moderations_generic_not_implemented_returns_502(
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
-    assert resp.status_code == 502
-    assert "could not be completed" in resp.json()["detail"].lower()
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "some internal implementation gap"
 
 
 def test_moderations_logs_usage(
@@ -445,12 +450,12 @@ def test_moderations_no_warning_when_pricing_missing(
     assert offending == []
 
 
-def test_moderations_ignores_genai_prices_defaults(
+def test_moderations_ignores_models_dev_defaults(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """Default (genai-prices) rates never price moderations, even with default_pricing on.
+    """Default (models.dev) rates never price moderations, even with default_pricing on.
 
     Those rates are USD per million tokens, but moderation bills per request, so
     honoring one would charge a token rate as a request rate. The dataset has no
@@ -463,7 +468,6 @@ def test_moderations_ignores_genai_prices_defaults(
         results=[ModerationResult(flagged=False, categories={}, category_scores={})],
     )
     configure_default_pricing(True)
-    reset_price_cache()
     try:
         # Pin the premise: without a dataset entry to ignore, the assertions below
         # would pass for the wrong reason and stop guarding anything.
@@ -477,7 +481,6 @@ def test_moderations_ignores_genai_prices_defaults(
         assert resp.status_code == 200
     finally:
         configure_default_pricing(False)
-        reset_price_cache()
 
     usage_resp = client.get(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
@@ -487,3 +490,47 @@ def test_moderations_ignores_genai_prices_defaults(
     assert latest["cost"] == 0.0
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
+
+
+def test_moderations_priced_row_records_its_rate_provenance(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A priced pass-through row names the rate that priced it, as a completion's row does."""
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:omni-moderation-latest",
+            "input_price_per_million": 2.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+
+    with patch(
+        "gateway.api.routes.moderations.amoderation",
+        new_callable=AsyncMock,
+        return_value=_mock_moderation_response(),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/moderations",
+            json={"model": "openai:omni-moderation-latest", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+
+    deadline = time.monotonic() + 3.0
+    while True:
+        with db_session_factory() as db:
+            row = db.execute(select(UsageLog).where(UsageLog.endpoint == "/v1/moderations")).scalar_one_or_none()
+        if row is not None:
+            break
+        assert time.monotonic() < deadline, "the usage row was never written"
+        time.sleep(0.1)
+    assert row.cost is not None
+    assert (row.pricing_source, row.pricing_reference) == ("deployment", "openai:omni-moderation-latest")
+    assert row.pricing_effective_at is not None
+    assert row.calculated_at == row.timestamp

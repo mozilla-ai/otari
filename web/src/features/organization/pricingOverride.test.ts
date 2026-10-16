@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
 
 import type { ModelObject, OrganizationPricingOverride } from "@/client"
+import { isValidModelKey } from "@/features/models/modelKey"
 
 import {
   deploymentManagedPrefixes,
   findOverlapping,
-  isValidModelKey,
   managedModelReason,
   overrideStatus,
   parseRate,
@@ -27,7 +27,6 @@ function override(
     output_price_per_million: 5,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     pricing_tiers: [],
     unit: "tokens",
     effective_from: new Date(NOW - HOUR).toISOString(),

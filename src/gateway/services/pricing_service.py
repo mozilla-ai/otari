@@ -1,31 +1,33 @@
 """Shared pricing lookup utilities."""
 
 import uuid
-from collections.abc import Callable, Iterable, Sequence
-from datetime import UTC, date, datetime
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import NamedTuple
 
-from genai_prices import Usage, calc_price
-from genai_prices.types import PriceCalculation, TieredPrices
-from sqlalchemy import case, distinct, func, or_, select, true
+from sqlalchemy import case, distinct, func, inspect, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
-from gateway.core.metered_pricing import meter_cost, quantize_cost, to_decimal
+from gateway.core.metered_pricing import priced_per_request, quantize_cost
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
-
-# A zero-token usage is enough to resolve a model's per-million rates from
-# genai-prices without depending on real token counts.
-_ZERO_USAGE = Usage(input_tokens=0, output_tokens=0)
+from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
+from gateway.services.pricing import (
+    ModelsDevPrice,
+    active_timeline,
+    billed_search_units,
+    request_rate,
+    resolve_as_of,
+)
 
 # Bound on the model keys named in one ``IN()`` list, so a batched override load
 # stays under SQLite's default limit of 999 bind parameters in a statement.
 _KEY_CHUNK = 500
 
 
-# Process-wide toggle for the genai-prices default fallback, set once at startup
+# Process-wide toggle for the models.dev default fallback, set once at startup
 # from ``GatewayConfig.default_pricing`` (see ``configure_default_pricing``). It
 # mirrors the module-level engine/session pattern in ``core.database``: pricing
 # lookups happen deep in request/budget code that does not carry the config
@@ -42,7 +44,7 @@ def configure_default_pricing(enabled: bool) -> None:
 
 
 def default_pricing_enabled() -> bool:
-    """Whether the genai-prices default fallback is consulted on a DB miss."""
+    """Whether the models.dev default fallback is consulted on a DB miss."""
 
     return _default_pricing_enabled
 
@@ -84,66 +86,6 @@ def _provider_implementation(instance: str | None) -> str | None:
     return implementation
 
 
-def _flat_rate(value: Decimal | TieredPrices) -> Decimal:
-    """Collapse a genai-prices rate to a single USD-per-million amount.
-
-    Tiered models (threshold "cliff" pricing) are flattened to their ``base``
-    rate, the price that applies below the first tier, which is the right default
-    for the typical request that never crosses a tier boundary.
-
-    genai-prices publishes its rates as ``Decimal`` already, so they are carried
-    rather than narrowed: a rate that reached the cost core through ``float``
-    would arrive as a binary approximation of the published price.
-    """
-
-    if isinstance(value, TieredPrices):
-        return value.base
-    return value
-
-
-def _rate_at(value: Decimal | TieredPrices | None, threshold: int) -> Decimal | None:
-    if value is None:
-        return None
-    if not isinstance(value, TieredPrices):
-        return value
-    rate = value.base
-    for tier in value.tiers:
-        if tier.start <= threshold:
-            rate = tier.price
-        else:
-            break
-    return rate
-
-
-def _pricing_tiers(price: object) -> list[dict[str, float | int]]:
-    fields = {
-        "input_price_per_million": getattr(price, "input_mtok"),
-        "output_price_per_million": getattr(price, "output_mtok"),
-        "cache_read_price_per_million": getattr(price, "cache_read_mtok"),
-        "cache_write_price_per_million": getattr(price, "cache_write_mtok"),
-    }
-    thresholds = sorted(
-        {tier.start for value in fields.values() if isinstance(value, TieredPrices) for tier in value.tiers}
-    )
-    # A tier rate is a ``float`` where a base rate is a ``Decimal``, because the
-    # two live in different columns: base rates are exact NUMERIC, tiers are
-    # JSON, and JSON has no decimal. Nothing is lost, because the cost core
-    # reads a tier override through ``to_decimal``, which converts a float
-    # through its shortest decimal representation, and every published rate is a
-    # short decimal.
-    return [
-        {
-            "min_input_tokens": threshold,
-            **{
-                field: float(rate)
-                for field, value in fields.items()
-                if (rate := _rate_at(value, threshold)) is not None
-            },
-        }
-        for threshold in thresholds
-    ]
-
-
 def normalize_effective_at(value: datetime | None) -> datetime:
     """Normalize a datetime to an aware UTC timestamp, defaulting to now."""
 
@@ -153,222 +95,95 @@ def normalize_effective_at(value: datetime | None) -> datetime:
     return normalized.astimezone(UTC)
 
 
-# genai-prices rates and metadata are date-granular (period boundaries fall on
-# dates, not times), so a model resolves to the same calculation for any instant
-# within a day. Memoize by (provider, model, day) so a single GET /v1/models,
-# which resolves each model twice (context window in one phase, default price in
-# another), and repeated same-day billing lookups do not re-walk the dataset each
-# time. Bounded by clearing at a cap; the distinct key count is roughly
-# providers x models x recent days, so the cap is a backstop, not a normal path.
-_PRICE_CACHE_MAX = 16384
-_price_cache: dict[tuple[str | None, str | None, str, date], PriceCalculation | None] = {}
+def _resolve_default(provider: str | None, model: str, as_of: datetime) -> ModelsDevPrice | None:
+    """The models.dev entry pricing ``model`` at ``as_of``, or ``None`` on a miss.
 
+    A date no generation covers is a miss too, so callers degrade to unpriced.
 
-class _TransientFailure:
-    """A genai-prices lookup raised rather than missing cleanly.
-
-    Distinguishes a transient dataset/API hiccup from a genuine ``LookupError``
-    miss: a miss is cached for the day, but a transient failure must be retried on
-    the next request instead of pinning the model to unpriced until the date rolls.
+    Matching rules live in ``ModelsDevPriceIndex.resolve``. The any-llm
+    implementation behind an instance is looked up per call because it is
+    registered state: re-typing an instance in the dashboard takes effect at once.
     """
-
-
-_TRANSIENT_FAILURE = _TransientFailure()
-
-
-def reset_price_cache() -> None:
-    """Clear the memoized genai-prices resolutions (used by tests)."""
-
-    _price_cache.clear()
-
-
-def _resolve_genai_price(provider: str | None, model: str, as_of: datetime) -> PriceCalculation | None:
-    """Resolve a genai-prices calculation for a model, or ``None`` on a miss.
-
-    Memoized per (provider, implementation, model, day); see
-    ``_resolve_genai_price_uncached`` for the matching rules. The implementation is
-    part of the key because it is registered state rather than a function of the
-    provider name, so re-typing an instance in the dashboard must not keep serving
-    the resolution made under its old ``provider_type`` for the rest of the day.
-    """
-    implementation = _provider_implementation(provider)
-    key = (provider, implementation, model, as_of.date())
-    if key in _price_cache:
-        return _price_cache[key]
-    result = _resolve_genai_price_uncached(provider, model, as_of, implementation)
-    if isinstance(result, _TransientFailure):
-        # A transient failure is not memoized: the next request retries rather
-        # than inheriting a stale "unpriced" for the rest of the day.
-        return None
-    if len(_price_cache) >= _PRICE_CACHE_MAX:
-        _price_cache.clear()
-    _price_cache[key] = result
-    return result
-
-
-def _vendor_prefixed_attempts(model: str) -> list[tuple[str | None, str]]:
-    """Split a vendor-prefixed model id into ``(vendor, model)`` candidates.
-
-    Aggregating providers name a model after the vendor that built it
-    (``anthropic.claude-sonnet-5`` on Bedrock, ``openai.gpt-oss-120b``), sometimes
-    behind a region or routing prefix (``us.anthropic.claude-sonnet-5-v1:0``).
-    genai-prices files those ids under the *serving* provider, so a serving
-    provider it does not recognize leaves them unpriced: the provider-agnostic
-    fallback matches a provider on the vendor's name appearing in the model
-    (``claude`` selects ``anthropic``) and then finds no such dotted model id
-    there, which no amount of retrying that lookup can fix.
-
-    Each dot boundary is offered in turn, so a region prefix is skipped once it
-    fails to name a provider. Pricing under the vendor is an approximation of the
-    serving provider's rate, which is why this is tried only after every lookup
-    that could be exact; a name with no vendor prefix (``gpt-4.1``,
-    ``claude-3.5-sonnet``) yields candidates whose provider does not resolve, so it
-    is unaffected.
-    """
-
-    attempts: list[tuple[str | None, str]] = []
-    head, separator, rest = model.partition(".")
-    while separator and rest:
-        attempts.append((head, rest))
-        head, separator, rest = rest.partition(".")
-    return attempts
-
-
-def _resolve_genai_price_uncached(
-    provider: str | None, model: str, as_of: datetime, implementation: str | None = None
-) -> PriceCalculation | None | _TransientFailure:
-    """Resolve a genai-prices calculation for a model, or ``None`` on a miss.
-
-    Shared by pricing and by metadata lookups (e.g. context window) so both apply
-    the same model matching: HuggingFace pinned-backend selectors, a
-    provider-scoped lookup, the backing implementation, then two fallbacks.
-    """
-
-    # Build the genai-prices lookups to try, most specific first:
-    #   1. HuggingFace pinned-backend selectors (`huggingface:<model>:<backend>`,
-    #      see docs/models.md) map to genai-prices' per-backend provider ids
-    #      (`huggingface_<backend>`), which is where HF rates live; a bare
-    #      `huggingface` provider has no rates. Auto/policy suffixes (`:cheapest`,
-    #      ...) simply fail to match and fall through to require_pricing.
-    #   2. The provider-scoped lookup. Note this is scoped to the *instance* name,
-    #      which is what pricing keys on and is only sometimes a provider id
-    #      genai-prices knows.
-    #   3. The any-llm implementation backing that instance, so an instance named
-    #      anything else (`aws-prod` over `provider_type: bedrock`) still resolves.
-    #      Rates differ per serving provider, so this must precede any fallback:
-    #      Bedrock's Sonnet is not priced like Anthropic's.
-    #   4. A provider-agnostic match, so a model under a provider id genai-prices
-    #      does not recognize still gets priced when its name is unambiguous.
-    #   5. Vendor-prefixed model ids, which the agnostic match cannot resolve.
-    attempts: list[tuple[str | None, str]] = []
-    if provider == "huggingface" and ":" in model:
-        base_model, backend = model.rsplit(":", 1)
-        attempts.append((f"huggingface_{backend}", base_model))
-    attempts.append((provider, model))
-    if implementation is not None:
-        attempts.append((implementation, model))
-    if provider is not None:
-        attempts.append((None, model))
-    attempts.extend(_vendor_prefixed_attempts(model))
-
-    for provider_id, model_ref in attempts:
-        try:
-            return calc_price(_ZERO_USAGE, model_ref=model_ref, provider_id=provider_id, genai_request_timestamp=as_of)
-        except LookupError:
-            continue
-        except Exception:
-            # genai-prices runs on the per-request hot path; a data/API hiccup
-            # must degrade to "unpriced"/"unknown" rather than turn into a request
-            # error for that model. Signal a transient failure so the caller does
-            # not memoize it (the next request retries).
-            logger.warning("genai-prices lookup failed for model_ref=%r provider_id=%r", model_ref, provider_id)
-            return _TRANSIENT_FAILURE
-
-    return None
+    return resolve_as_of(active_timeline(), as_of, provider, model, _provider_implementation(provider))
 
 
 def model_context_window(provider: str | None, model: str, as_of: datetime | None = None) -> int | None:
-    """Context-window token limit for a model from genai-prices, or ``None``.
+    """Context-window token limit for a model from models.dev, or ``None``.
 
     Metadata, not pricing: this is resolved regardless of the ``default_pricing``
-    toggle (a context window is not a cost), and many models in the dataset simply
-    have no value, in which case ``None`` is returned.
+    toggle (a context window is not a cost), and some catalog entries carry no
+    value, in which case ``None`` is returned.
     """
 
-    calc = _resolve_genai_price(provider, model, normalize_effective_at(as_of))
-    if calc is None:
-        return None
-    return calc.model.context_window
+    entry = _resolve_default(provider, model, normalize_effective_at(as_of))
+    return None if entry is None else entry.context_window
 
 
 def default_pricing_reference(provider: str | None, model: str, as_of: datetime | None = None) -> str | None:
-    """Which genai-prices entry :func:`default_model_pricing` would price a model from.
+    """Which models.dev entry :func:`default_model_pricing` would price a model from.
 
-    ``provider_id:model_id`` in the dataset's own spelling, or ``None`` on a miss.
-    The resolution walks five fallbacks, so the entry that answers is often not
-    the one the selector named (a Bedrock id priced under ``anthropic``, a bare
-    name matched provider-agnostically); saying which one is what lets a reader
-    judge whether the default is the right rate rather than a plausible one.
+    ``models.dev:<provider>/<model>`` in the catalog's own spelling, or ``None``
+    on a miss. The match walks several fallbacks, so the entry that answers is
+    often not the one the selector named (a Bedrock id priced under a geo-less
+    spelling, a bare name matched across providers); saying which one is what
+    lets a reader judge whether the default is the right rate rather than a
+    plausible one.
     """
-    calc = _resolve_genai_price(provider, model, normalize_effective_at(as_of))
-    if calc is None:
-        return None
-    return f"{calc.provider.id}:{calc.model.id}"
+    entry = _resolve_default(provider, model, normalize_effective_at(as_of))
+    return None if entry is None else entry.reference
 
 
 def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> ModelPricing | None:
-    """Resolve community-maintained default pricing for a model via genai-prices.
+    """Resolve default pricing for a model from the models.dev catalog.
 
     Returns a *transient* (unpersisted) ``ModelPricing`` carrying the per-million
-    input/output rates from the bundled ``genai-prices`` dataset, or ``None`` when
-    no matching model is found. The returned object is never added to a session:
-    it is a lookup result, not a stored price, so explicit config/API pricing
-    always wins (the DB is consulted first) and ``require_pricing`` still fails
-    closed for genuinely unknown models.
+    rates of the snapshot in force at ``as_of``, or ``None`` when no matching
+    model is found, no snapshot covers ``as_of``, or the match carries no input
+    or no output rate: a missing rate is never read as free. The returned object
+    is never added to a session: it is a lookup result, not a stored price, so
+    explicit config/API pricing always wins (the DB is consulted first) and
+    ``require_pricing`` still fails closed for genuinely unknown models.
 
     Whether this fallback runs at all is the caller's decision (the
     ``default_pricing`` config field, gating ``find_model_pricing``).
 
-    Tiered ("cliff") pricing retains its context thresholds. A provider-agnostic
-    match (below) may resolve an ambiguous model *name* to a different provider's
-    rate.
+    Context-tiered pricing keeps its thresholds. A provider-agnostic match may
+    resolve an ambiguous model *name* to a different provider's rate only when
+    every provider listing it agrees on the price.
     """
+    resolved = default_pricing_match(provider, model, as_of)
+    return None if resolved is None else resolved[0]
 
-    calc = _resolve_genai_price(provider, model, as_of)
-    if calc is None:
-        return None
 
-    price = calc.model_price
-    if price.input_mtok is None:
+def default_pricing_match(provider: str | None, model: str, as_of: datetime) -> tuple[ModelPricing, str] | None:
+    """:func:`default_model_pricing` with the reference of the entry that answered, from one resolution."""
+    entry = _resolve_default(provider, model, as_of)
+    if entry is None or entry.input is None or entry.output is None:
         return None
-    # Input-only models (embeddings, rerank) legitimately have no output rate;
-    # price output at 0 rather than rejecting the whole model.
-    output_rate = _flat_rate(price.output_mtok) if price.output_mtok is not None else Decimal(0)
-    cache_read_rate = _flat_rate(price.cache_read_mtok) if price.cache_read_mtok is not None else None
-    cache_write_rate = _flat_rate(price.cache_write_mtok) if price.cache_write_mtok is not None else None
 
     model_key = f"{provider}:{model}" if provider else model
     logger.debug(
-        "Using genai-prices default pricing for '%s' (matched %s/%s)",
+        "Using models.dev default pricing for '%s' (matched %s)",
+        # codeql[py/clear-text-logging-sensitive-data]
         model_key,
-        getattr(calc.provider, "id", None),
-        getattr(calc.model, "id", None),
+        entry.reference,
     )
-    return ModelPricing(
+    pricing = ModelPricing(
         model_key=model_key,
         effective_at=as_of,
-        input_price_per_million=_flat_rate(price.input_mtok),
-        output_price_per_million=output_rate,
-        cache_read_price_per_million=cache_read_rate,
-        cache_write_price_per_million=cache_write_rate,
-        pricing_tiers=_pricing_tiers(price),
+        input_price_per_million=entry.input,
+        output_price_per_million=entry.output,
+        cache_read_price_per_million=entry.cache_read,
+        cache_write_price_per_million=entry.cache_write,
+        pricing_tiers=entry.pricing_tiers(),
     )
+    return pricing, entry.reference
 
 
 def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricing:
     """Present an organization's override as a transient ``ModelPricing``.
 
-    The same trick :func:`default_model_pricing` uses for a genai-prices match,
+    The same trick :func:`default_model_pricing` uses for a models.dev match,
     and for the same reason: every caller of :func:`find_model_pricing`, and the
     whole cost-math core behind them, reads a ``ModelPricing``. Returning the
     override row itself would make the override the one pricing source that needs
@@ -390,7 +205,6 @@ def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricin
         output_price_per_million=override.output_price_per_million,
         cache_read_price_per_million=override.cache_read_price_per_million,
         cache_write_price_per_million=override.cache_write_price_per_million,
-        cache_write_1h_price_per_million=override.cache_write_1h_price_per_million,
         pricing_tiers=override.pricing_tiers or [],
         unit=override.unit or "tokens",
     )
@@ -401,8 +215,8 @@ async def _find_organization_override(
     organization_id: uuid.UUID,
     model_keys: list[str],
     as_of: datetime,
-) -> ModelPricing | None:
-    """An organization's rate for the first of ``model_keys`` that has one.
+) -> OrganizationModelPricing | None:
+    """An organization's override for the first of ``model_keys`` that has one.
 
     One statement over every candidate key, not one per key. This runs on the
     request path ahead of the deployment lookup, so an organization with no
@@ -444,8 +258,7 @@ async def _find_organization_override(
         .order_by(key_preference, OrganizationModelPricing.effective_from.desc())
         .limit(1)
     )
-    override = (await db.execute(stmt)).scalar_one_or_none()
-    return override_as_model_pricing(override) if override is not None else None
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 class OverridePeriod(NamedTuple):
@@ -492,9 +305,7 @@ async def load_organization_override_index(
             # end", where ``normalize_effective_at`` would read it as "ends now".
             effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
             index.setdefault(row.model_key, []).append(
-                OverridePeriod(
-                    normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row)
-                )
+                OverridePeriod(normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row))
             )
     for periods in index.values():
         periods.sort(key=lambda period: period.effective_from)
@@ -696,6 +507,11 @@ async def current_rates_page(
     return rows, count or 0
 
 
+def is_free_pricing(pricing: ModelPricing | None) -> bool:
+    """Whether a resolved rate charges nothing: zero for input and for output."""
+    return pricing is not None and pricing.input_price_per_million == 0 and pricing.output_price_per_million == 0
+
+
 async def find_model_pricing(
     db: AsyncSession,
     provider: str | None,
@@ -710,7 +526,7 @@ async def find_model_pricing(
     Resolution order: the requesting organization's own override (when
     ``organization_id`` is given), then the canonical ``provider:model`` key, then
     the legacy ``provider/model`` key, then (when default pricing is enabled)
-    community-maintained default pricing from genai-prices. Explicit pricing
+    community-maintained default pricing from models.dev. Explicit pricing
     stored in the database always takes precedence over defaults. The default
     fallback is gated by ``GatewayConfig.default_pricing`` via
     :func:`configure_default_pricing`.
@@ -725,7 +541,7 @@ async def find_model_pricing(
     ``use_defaults=False`` skips that fallback for any caller whose billable unit
     is not a token, because every dataset rate is quoted per million *tokens*.
     Two kinds of caller need it. A key that is not a model at all (a search tool,
-    a gateway-run tool): the genai-prices lookup falls back to a provider-agnostic
+    a gateway-run tool): the models.dev lookup falls back to a provider-agnostic
     match on the bare name, so a tool an operator happened to name after a real
     model would pick up that model's rate. And a real model billed under a
     non-token unit (audio and moderations per request, images per image):
@@ -747,10 +563,40 @@ async def find_model_pricing(
 
 
 class ResolvedPricing(NamedTuple):
-    """A resolved rate and which step of the lookup order supplied it."""
+    """A resolved rate, which step of the lookup order supplied it, and which entry.
+
+    ``reference`` names the entry within that source: an override's row id, the
+    stored ``model_key`` a deployment rate matched on (which may be the legacy
+    spelling), or the models.dev ``provider_id:model_id`` that answered.
+    ``effective_at`` is when that entry took effect, and is ``None`` for a
+    default, whose dataset carries no such date for the rate.
+    """
 
     pricing: ModelPricing
     source: PriceSource
+    reference: str | None = None
+    effective_at: datetime | None = None
+
+
+class PricingProvenance(NamedTuple):
+    """The usage-row columns that say which rate priced a row, in column order."""
+
+    source: PriceSource
+    reference: str | None
+    effective_at: datetime | None
+
+
+def pricing_provenance(resolved: ResolvedPricing) -> PricingProvenance:
+    """What a usage row priced at ``resolved`` records about the rate.
+
+    A model key is unbounded where the reference column is not, and an
+    oversized value would fail the row's insert on PostgreSQL rather than lose a
+    label, so a reference past the limit is recorded as unknown.
+    """
+    reference = resolved.reference
+    if reference is not None and len(reference) > PRICING_REFERENCE_MAX_LENGTH:
+        reference = None
+    return PricingProvenance(resolved.source, reference, resolved.effective_at)
 
 
 async def resolve_model_pricing(
@@ -771,99 +617,52 @@ async def resolve_model_pricing(
     if organization_id is not None:
         override = await _find_organization_override(db, organization_id, key_forms, lookup_time)
         if override is not None:
-            return ResolvedPricing(override, "organization")
+            pricing = override_as_model_pricing(override)
+            return ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
 
-    pricing = await _find_by_model_key(db, model_key, lookup_time)
+    stored = await _find_by_model_key(db, model_key, lookup_time)
 
     for legacy_key in legacy_keys:
-        if pricing is not None:
+        if stored is not None:
             break
-        pricing = await _find_by_model_key(db, legacy_key, lookup_time)
-    if pricing is not None:
-        return ResolvedPricing(pricing, "deployment")
+        stored = await _find_by_model_key(db, legacy_key, lookup_time)
+    if stored is not None:
+        return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
 
     if use_defaults and default_pricing_enabled():
-        default = default_model_pricing(provider, model, lookup_time)
-        if default is not None:
-            return ResolvedPricing(default, "defaults")
+        matched = default_pricing_match(provider, model, lookup_time)
+        if matched is not None:
+            return ResolvedPricing(matched[0], "defaults", matched[1])
 
     return None
 
 
-# ``ModelPricing`` only has per-million-token rate columns, so endpoints whose
-# billable unit is not a token overload ``input_price_per_million`` with a
-# different unit convention. Each convention gets a named helper below so the
-# unit is visible at the call site instead of an anonymous expression that can
-# be miscopied into a new route and misbill by a factor of a million. Dedicated
-# per-unit columns would need a schema migration (deferred; see issue #259).
-
-
-def _input_rate(pricing: ModelPricing) -> Decimal:
-    """The row's input rate, coerced the way the cost core coerces one.
-
-    A stored row hands back a ``Decimal`` and every construction site in the
-    tree now builds one, so this is defensive rather than load-bearing. It is
-    here because these three helpers are the only rate readers that do not go
-    through ``effective_rates``: without it, a transient row built from a JSON
-    number would raise ``TypeError`` deep in an arithmetic expression on a live
-    billing route, or (for :func:`per_image_cost`) return a ``float`` that
-    quietly contradicts the annotation.
-    """
-    rate = to_decimal(pricing.input_price_per_million)
-    if rate is None:
-        raise ValueError("Pricing carries no usable input rate")
-    return rate
-
-
-def input_token_cost(tokens: int, pricing: ModelPricing) -> Decimal:
-    """USD cost of ``tokens`` input tokens at the per-million-token rate.
-
-    The standard convention: ``input_price_per_million`` is USD per million
-    input tokens. Used by embeddings and rerank, which bill input tokens only.
-    """
-    return meter_cost(tokens, _input_rate(pricing))
+# ``ModelPricing`` only has per-million-token rate columns, so a rate in another
+# unit overloads ``input_price_per_million``. Which meter a rate prices, and how
+# it reads that column, is the pricing domain's rule (``gateway.services.pricing``);
+# these two read a per-request rate through it for the callers that only hold one.
 
 
 def flat_request_cost(pricing: ModelPricing | None) -> Decimal:
-    """Flat USD cost of one request for a model priced per request.
+    """USD for one request at a per-request rate, or zero when unpriced: USD per million requests, read once."""
+    return request_rate(pricing)
 
-    Moderations convention: ``input_price_per_million`` stores the per-request
-    rate scaled by 1e6 (USD per million requests), so one request costs the
-    stored rate divided by 1e6. Unpriced models are treated as free.
+
+def search_unit_cost(units: int, pricing: ModelPricing | None) -> Decimal:
+    """USD for ``units`` search units, each priced as one request is."""
+    return max(units, 0) * request_rate(pricing)
+
+
+def metered_search_units(pricing: ModelPricing | None, billed_units: Mapping[str, float] | None) -> int | None:
+    """The search units a rerank request was billed for, or ``None`` when it was not billed per unit.
+
+    Only a model priced per request bills search units, at the count
+    :func:`billed_search_units` derives from the provider's report, so this is
+    the count the request's ``search_units`` billing meter records.
     """
-    if pricing is None or not pricing.input_price_per_million:
-        return Decimal(0)
-    # An unreadable rate reads as unpriced here rather than raising: every route
-    # on this convention is exempt from ``require_pricing`` and settles an
-    # unpriced model at $0 by design.
-    rate = to_decimal(pricing.input_price_per_million)
-    return Decimal(0) if rate is None else meter_cost(1, rate)
-
-
-PerRequestMeters = tuple[dict[str, int], list[dict[str, float | int | str]]]
-
-
-def per_request_meters(cost: Decimal) -> PerRequestMeters | None:
-    """This request's billing meters and charge line, priced per request.
-
-    One request is one billed meter, so the per-request rate is the cost itself.
-    Charge lines carry ``unit_rate`` rather than ``rate_per_million``, the same
-    shape :func:`price_tool_calls` writes, which is what tells a reader and the
-    dashboard which unit convention applies.
-
-    Returns ``None`` when the request is free, the common case on these routes
-    since they are exempt from ``require_pricing`` and an unset or ``0.0`` rate
-    both settle at $0: a zero charge line would render in Activity as a billed
-    meter explaining a charge that never happened. Shared by every route billing
-    per request (audio transcription, audio speech, moderations) so the shape
-    cannot drift between them, for the reason the unit conventions above are
-    named helpers rather than inline expressions.
-    """
-    if not cost:
+    if not priced_per_request(pricing):
         return None
-    # ``float`` because the breakdown is a JSON column; the exact amount is the
-    # row's ``cost``. See ``ChargeLine`` in the cost core.
-    return {"requests": 1}, [{"meter": "request", "units": 1, "unit_rate": float(cost), "cost": float(cost)}]
+    return billed_search_units(billed_units)
 
 
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"
@@ -874,12 +673,44 @@ def gateway_tool_pricing_key(tool: str) -> str:
 
     ``model_key`` is a free-form ``provider:model`` string, so a tool the gateway
     runs itself is priced as ``otari:<tool>`` (for example ``otari:web_search``).
-    Note this is a different key from the one ``POST /v1/search`` uses for the same
-    search: that endpoint prices ``<search-provider>:<tool>`` because it knows which
-    commercial API it called, while the tool loop only knows the operator-configured
-    backend URL.
+    ``POST /v1/search`` prices a search on a configured tool under that tool's
+    ``<search-provider>:<tool>`` instead, and under this key only a search a
+    workspace's organization key served, whose provider the deployment cannot price.
     """
     return f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}"
+
+
+def _detach(row: object) -> None:
+    """Take an ORM row out of its session, keeping what it has loaded; anything else is left alone."""
+    state = inspect(row, raiseerr=False)
+    if state is not None and state.session is not None:
+        state.session.expunge(row)
+
+
+class RequestPrices:
+    """The rates one request has resolved, so each model it bills is priced once.
+
+    Admission, a fallover's top-up and settlement each price the model they are
+    about to bill. A request is short, so they share the first resolution rather
+    than reading the price list again; a rate that takes effect while a request
+    is in flight applies from the next request on.
+    """
+
+    def __init__(self, organization_id: uuid.UUID | None) -> None:
+        self.organization_id = organization_id
+        self._resolved: dict[tuple[str | None, str], ResolvedPricing | None] = {}
+
+    async def resolve(self, db: AsyncSession, provider: str | None, model: str) -> ResolvedPricing | None:
+        """:func:`resolve_model_pricing` for this request's organization, once per model."""
+        key = (provider, model)
+        if key not in self._resolved:
+            resolved = await resolve_model_pricing(db, provider, model, organization_id=self.organization_id)
+            # Detached, so a rollback between admission and settlement, which
+            # expires every instance in the session, cannot expire the rate too.
+            if resolved is not None:
+                _detach(resolved.pricing)
+            self._resolved[key] = resolved
+        return self._resolved[key]
 
 
 async def price_tool_calls(
@@ -902,7 +733,7 @@ async def price_tool_calls(
     A tool with no pricing row contributes units at a zero rate, so the work stays
     on the row and in the audit trail even when the operator has not priced it.
     Lookups pass ``use_defaults=False``: MCP tool names come from a caller-supplied
-    server, and the genai-prices fallback matches on a bare name, so a tool named
+    server, and the models.dev fallback matches on a bare name, so a tool named
     after a real model would otherwise be billed at that model's
     per-million-token rate divided by a million.
     """
@@ -944,7 +775,7 @@ async def _tool_rates(
     arranged to make that the right row: least-preferred key spelling first where
     both are in play, then oldest period first, so the survivor is the canonical
     spelling's newest applicable row. That is the same precedence
-    :func:`find_model_pricing` applies one key at a time. The genai-prices
+    :func:`find_model_pricing` applies one key at a time. The models.dev
     fallback is deliberately not consulted (see the note in
     :func:`price_tool_calls`).
     """
@@ -1025,15 +856,6 @@ async def _tool_rates(
     return found
 
 
-def per_image_cost(n_images: int, pricing: ModelPricing) -> Decimal:
-    """USD cost of ``n_images`` generated images.
-
-    Images convention: despite the name, ``input_price_per_million`` stores raw
-    USD per image (no scaling, no division).
-    """
-    return n_images * _input_rate(pricing)
-
-
 def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricing: bool) -> bool:
     """Return True when the request must be rejected for lacking pricing.
 
@@ -1052,12 +874,21 @@ def no_pricing_error_detail(model: str) -> str:
     """The 402 body for an unpriced model: what went wrong, why, and how to fix it.
 
     A new operator adding a provider in the dashboard hits this on their first
-    request; the cause and both fixes live only in a startup log they never see,
-    so spell them out in the response.
+    request; the cause and its fixes live only in a startup log they never see,
+    so spell them out in the response. With default pricing already on, the
+    bundled price list missed the name, most often because it is misspelled, so
+    that is named first and enabling the fallback is not offered again.
     """
+    cause = f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
+    if default_pricing_enabled():
+        return (
+            f"{cause}Default pricing is on, and its bundled price list has no entry for this model. "
+            f"Check the model name for a typo (GET {API_ROOT}/models lists the models this gateway serves), "
+            f"or add pricing for a model the list does not cover (POST {API_ROOT}/pricing, "
+            "or the pricing section of config.yml)."
+        )
     return (
-        f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
-        f"Fix it either way: add pricing (POST {API_ROOT}/pricing, or the pricing section of config.yml), "
+        f"{cause}Fix it either way: add pricing (POST {API_ROOT}/pricing, or the pricing section of config.yml), "
         f'or enable the default-pricing fallback (PATCH {API_ROOT}/settings {{"default_pricing": true}}) '
         "to meter with public list prices."
     )

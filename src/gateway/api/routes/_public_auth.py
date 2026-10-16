@@ -17,19 +17,48 @@ from gateway.services.mail import MailNotConfiguredError
 def throttle_public_auth(request: Request) -> None:
     """Throttle calls to a public auth route per client IP.
 
-    Unconditional, not just on failure, the same reasoning
-    ``invitations._throttle`` gives its own two routes: there is no legitimate
-    caller here at a rate worth exempting, only a client with an address or a
-    token it can retry from. Reuses the sign-in route's limiter/budget rather
-    than a separate one.
+    Unconditional, not just on failure: there is no legitimate caller here at a
+    rate worth exempting, only a client with an address or a code it can retry
+    from. The budget is ``public_auth_rate_limiter``, not the failed sign-in
+    one, so a few mistyped passwords do not lock the same person (or everyone
+    behind the same NAT) out of the link that would let them in.
     """
-    limiter = getattr(request.app.state, "login_rate_limiter", None)
+    limiter = getattr(request.app.state, "public_auth_rate_limiter", None)
     if limiter is None:
         return
     client_ip = request.client.host if request.client else None
     if client_ip is None:
         return
     limiter.check(client_ip)
+
+
+def refuse_exhausted_verification_attempts(request: Request) -> None:
+    """Refuse a verification from an IP that has used up its failed attempts, before any password is hashed.
+
+    A verification link is checked against the password chosen at signup, so
+    without this a held token would let a caller guess that password, and make
+    the gateway run bcrypt, at whatever rate it can manage. Only failures are
+    counted (``count_failed_verification``), so a person who opens their link
+    and types the right password is never held back by anybody else's traffic.
+    """
+    limiter = getattr(request.app.state, "verification_failure_rate_limiter", None)
+    client_ip = request.client.host if request.client else None
+    if limiter is None or client_ip is None:
+        return
+    limiter.require_room(client_ip)
+
+
+def count_failed_verification(request: Request) -> None:
+    """Count one refused verification against the calling IP."""
+    limiter = getattr(request.app.state, "verification_failure_rate_limiter", None)
+    client_ip = request.client.host if request.client else None
+    if limiter is None or client_ip is None:
+        return
+    try:
+        limiter.check(client_ip)
+    except HTTPException:
+        # The refusal being counted is the answer this call owes; the 429 is for the next one.
+        return
 
 
 def mail_unavailable(exc: MailNotConfiguredError) -> HTTPException:
@@ -45,4 +74,9 @@ def mail_unavailable(exc: MailNotConfiguredError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
 
 
-__all__ = ["mail_unavailable", "throttle_public_auth"]
+__all__ = [
+    "count_failed_verification",
+    "mail_unavailable",
+    "refuse_exhausted_verification_attempts",
+    "throttle_public_auth",
+]

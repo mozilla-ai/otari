@@ -1,15 +1,16 @@
 """Model metadata from the public models.dev catalog, fetched and cached.
 
-models.dev (https://models.dev, MIT licensed) publishes per-model metadata the
-bundled genai-prices data does not carry: input/output modalities, reasoning and
+models.dev (https://models.dev, MIT licensed) publishes per-model metadata beyond
+what pricing needs: input/output modalities, reasoning and
 tool-calling flags, structured-output and attachment support, knowledge cutoff,
 release date, and open-weights status. This module fetches its ``api.json`` once,
 caches it in-memory with a long TTL, and degrades to "no metadata" on any failure
 so an offline or unreachable models.dev never breaks the dashboard.
 
 The outbound call is gated by ``GatewayConfig.models_dev_metadata``; when that is
-false, or when the fetch fails, callers simply get an empty map and the UI falls
-back to what genai-prices already provides.
+false, or when the fetch fails, callers simply get an empty map and the UI shows
+the model without that enrichment. Prices and context windows come from the
+bundled or accepted snapshot (``services/pricing``), not from this fetch.
 """
 
 import asyncio
@@ -48,6 +49,8 @@ class ModelCatalogEntry:
     name: str | None = None
     description: str | None = None
     family: str | None = None
+    canonical_model_id: str | None = None
+    """models.dev's provider-independent id, ``vendor/model``: who made the model."""
     input_modalities: list[str] = field(default_factory=list)
     output_modalities: list[str] = field(default_factory=list)
     reasoning: bool = False
@@ -128,7 +131,12 @@ def _read_cache(ttl: int, *, serve_stale: bool = False, force: bool = False) -> 
     return _MISS
 
 
-async def _fetch() -> dict[str, Any] | None:
+class ModelsDevFetchError(Exception):
+    """The models.dev catalog could not be downloaded or was not a JSON object."""
+
+
+async def _download() -> dict[str, Any]:
+    """One bounded download of ``api.json``; every failure is a ``ModelsDevFetchError``."""
     try:
         async with (
             httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
@@ -140,17 +148,50 @@ async def _fetch() -> dict[str, Any] | None:
             async for chunk in resp.aiter_bytes():
                 total += len(chunk)
                 if total > _MAX_CATALOG_BYTES:
-                    logger.warning("models.dev catalog exceeded %d bytes; ignoring", _MAX_CATALOG_BYTES)
-                    return None
+                    raise ModelsDevFetchError(f"models.dev catalog exceeded {_MAX_CATALOG_BYTES} bytes")
                 chunks.append(chunk)
         data = json.loads(b"".join(chunks))
+    except ModelsDevFetchError:
+        raise
     except Exception as exc:
-        logger.warning("models.dev catalog fetch failed: %s", exc)
-        return None
+        raise ModelsDevFetchError(f"models.dev catalog fetch failed: {exc}") from exc
     if not isinstance(data, dict):
-        logger.warning("models.dev catalog was not a JSON object; ignoring")
-        return None
+        raise ModelsDevFetchError("models.dev catalog was not a JSON object")
     return data
+
+
+async def _fetch() -> dict[str, Any] | None:
+    try:
+        return await _download()
+    except ModelsDevFetchError as exc:
+        logger.warning("%s; ignoring", exc)
+        return None
+
+
+def _fresh_cached(reuse_within: float) -> dict[str, Any] | None:
+    if reuse_within > 0 and _cache.ok and (time.monotonic() - _cache.at) < reuse_within:
+        return _cache.data
+    return None
+
+
+async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bool = False) -> dict[str, Any]:
+    """Download ``api.json`` for a caller that needs it now, raising on failure.
+
+    The price refresh uses this, so it works whether or not
+    ``models_dev_metadata`` is on. A copy the metadata cache fetched within
+    ``reuse_within`` seconds is returned instead of downloading again, and a
+    download made here fills that cache when ``fill_cache`` is set (the caller
+    passes ``models_dev_metadata``), so the catalog refresher need not repeat it.
+    """
+    async with _lock:
+        if (reused := _fresh_cached(reuse_within)) is not None:
+            return reused
+        data = await _download()
+        if fill_cache:
+            _cache.data = data
+            _cache.ok = True
+            _cache.at = time.monotonic()
+        return data
 
 
 async def load_models_dev_catalog(
@@ -158,12 +199,15 @@ async def load_models_dev_catalog(
     *,
     serve_stale: bool = False,
     force: bool = False,
+    reuse_within: float = 0.0,
 ) -> dict[str, Any] | None:
     """Return the cached models.dev catalog, fetching it if stale.
 
     Returns ``None`` when metadata enrichment is disabled or the fetch failed.
     ``serve_stale`` answers from the cache at any age so a dashboard read never
-    waits on models.dev; ``force`` is the background refresher's fetch.
+    waits on models.dev; ``force`` is the background refresher's fetch, which
+    still skips the download when a copy newer than ``reuse_within`` seconds is
+    cached (the price refresh may have just fetched it).
     """
     if not config.models_dev_metadata:
         return None
@@ -179,6 +223,8 @@ async def load_models_dev_catalog(
         cached = _read_cache(ttl, serve_stale=serve_stale, force=force)
         if cached is not _MISS:
             return cached  # type: ignore[return-value]
+        if (reused := _fresh_cached(reuse_within)) is not None:
+            return reused
 
         data = await _fetch()
         _cache.data = data
@@ -220,16 +266,16 @@ async def run_catalog_refresher(config: GatewayConfig, interval: float | None = 
     without a restart.
     """
     while True:
+        # Recomputed per tick, not captured once, so a TTL changed at runtime
+        # takes effect on the next round.
+        delay = interval if interval is not None else _catalog_refresh_interval(config)
         try:
             if background_catalog_enabled(config):
-                await load_models_dev_catalog(config, force=True)
+                await load_models_dev_catalog(config, force=True, reuse_within=delay / 2)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.warning("models.dev catalog refresh failed; retrying on the next tick", exc_info=True)
-        # Recomputed per tick, not captured once, so a TTL changed at runtime
-        # takes effect on the next round.
-        delay = interval if interval is not None else _catalog_refresh_interval(config)
         await asyncio.sleep(delay)
 
 
@@ -237,8 +283,13 @@ def _as_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _as_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+def token_limit(value: Any) -> int | None:
+    """A token limit, or ``None`` for anything but a positive integer.
+
+    models.dev writes 0 for a limit it does not know, and a client would read
+    0 as no tokens at all.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def _as_float(value: Any) -> float | None:
@@ -268,6 +319,7 @@ def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
         name=_as_str(model.get("name")),
         description=_as_str(model.get("description")),
         family=_as_str(model.get("family")),
+        canonical_model_id=_as_str(model.get("canonical_model_id")),
         input_modalities=_str_list(modalities.get("input")),
         output_modalities=_str_list(modalities.get("output")),
         reasoning=bool(model.get("reasoning")),
@@ -275,8 +327,8 @@ def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
         structured_output=bool(model.get("structured_output")),
         attachment=bool(model.get("attachment")),
         temperature=bool(model.get("temperature")),
-        context_window=_as_int(limit.get("context")),
-        max_output_tokens=_as_int(limit.get("output")),
+        context_window=token_limit(limit.get("context")),
+        max_output_tokens=token_limit(limit.get("output")),
         knowledge_cutoff=_as_str(model.get("knowledge")),
         release_date=_as_str(model.get("release_date")),
         last_updated=_as_str(model.get("last_updated")),

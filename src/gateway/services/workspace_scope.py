@@ -95,9 +95,7 @@ async def lookup_default_workspace_id(db: AsyncSession) -> uuid.UUID | None:
     # ``created_at`` tie, which one transaction creating two workspaces produces,
     # so every process picks the same one rather than each picking its own.
     return (
-        await db.execute(
-            select(col(Workspace.id)).order_by(col(Workspace.created_at), col(Workspace.id)).limit(1)
-        )
+        await db.execute(select(col(Workspace.id)).order_by(col(Workspace.created_at), col(Workspace.id)).limit(1))
     ).scalar_one_or_none()
 
 

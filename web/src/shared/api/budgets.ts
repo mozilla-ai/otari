@@ -111,6 +111,65 @@ export function useScopedBudgets(enabled = true) {
   })
 }
 
+// The ceiling on one API key's own spend across every provider, or undefined
+// when it has none. Other ceilings can cap the same requests (its owner's
+// budget, its workspace's), so this is the key's own allowance and not the one
+// that binds. Gated like the list above, and keyed under it so a write to any
+// ceiling refreshes it.
+export function useApiKeyCeiling(keyId: string, enabled = true) {
+  return useQuery({
+    queryKey: [SCOPED_BUDGETS, "api_token", keyId],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        scope_type: "api_token",
+        scope_id: keyId,
+      })
+      return apiFetch<ScopedBudget[]>(`/scoped-budgets?${params}`)
+    },
+    // A key can also hold ceilings on single providers; the one naming no
+    // provider is the one over all of its spend.
+    select: (rows) => rows.find((row) => row.provider_key_id === null),
+    staleTime: 60_000,
+    enabled: enabled && keyId !== "",
+  })
+}
+
+/**
+ * Every API key's own ceiling over all of its spend, on either budget surface.
+ *
+ * The deployment's list filters by scope on the server; the organization's has
+ * no such filter, so it is walked and narrowed here. Keyed under each surface's
+ * list, so a write to any ceiling refreshes it.
+ */
+export function useApiKeyCeilings(
+  surface: "deployment" | "organization",
+  enabled = true,
+) {
+  const organizationId = useOrganizationContext().data?.organization?.id
+  return useQuery({
+    queryKey:
+      surface === "deployment"
+        ? [SCOPED_BUDGETS, "api_token"]
+        : [ORGANIZATION_SPEND_CEILINGS, organizationId ?? null, "api_token"],
+    queryFn: async (): Promise<(ScopedBudget | OrganizationSpendCeiling)[]> => {
+      const rows =
+        surface === "deployment"
+          ? await fetchAllRows<ScopedBudget>("/scoped-budgets", {
+              scope_type: "api_token",
+            })
+          : await fetchAllPaged<OrganizationSpendCeiling>(
+              "/organizations/me/spend-ceilings",
+            )
+      // As above: the one naming no provider is the one over all of its spend.
+      return rows.filter(
+        (row) => row.scope_type === "api_token" && row.provider_key_id === null,
+      )
+    },
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
 export function useCreateScopedBudget() {
   const queryClient = useQueryClient()
   return useMutation({

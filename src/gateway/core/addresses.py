@@ -9,18 +9,27 @@ can share a condition without either importing the other.
 
 import re
 
+_WHITESPACE = re.compile(r"\s")
+
+
 # Deliberately permissive (there is no useful regex for RFC 5322, and the SMTP
 # server is the real authority): it rejects the shapes that are certainly not
 # addresses, which is what an operator typing into a form needs, and nothing
 # more. Shared with tenancy's member and invitation addresses rather than kept
 # per caller, so "an address Otari will accept" has one answer.
-_ADDRESS_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
+# Not a regex: this runs on unauthenticated input, and a pattern for "a dot
+# inside the domain" backtracks quadratically on a long run of dots.
 def normalized_address(value: str) -> str | None:
     """Lower-case and trim an address, or return ``None`` if it cannot be one."""
     candidate = value.strip().lower()
-    return candidate if _ADDRESS_PATTERN.match(candidate) else None
+    local, at, domain = candidate.partition("@")
+    if not local or not at or "@" in domain or "." not in domain[1:-1]:
+        return None
+    # An empty label ("example.com.", "a..b") is refused: a mail server will not
+    # take one, and the send would fail where nobody sees it.
+    if "" in domain.split("."):
+        return None
+    return None if _WHITESPACE.search(candidate) else candidate
 
 
 __all__ = ["normalized_address"]

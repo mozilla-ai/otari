@@ -97,6 +97,7 @@ export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
     cache_read_tokens: 0,
     cache_write_tokens: 0,
     cache_write_1h_tokens: 0,
+    reasoning_tokens: 0,
     billed_input_tokens: 0,
     billed_output_tokens: 0,
     request_count: 0,
@@ -132,7 +133,6 @@ export function pricingResponse(
     output_price_per_million: 0,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     pricing_tiers: [],
     unit: "tokens",
     origin: "api",
@@ -145,7 +145,7 @@ export function pricingResponse(
 // The surface names a standalone gateway hosts, kept in step with
 // STANDALONE_SURFACES in src/gateway/api/routes/bootstrap.py. A test that wants
 // a surface hidden overrides `surfaces` rather than editing this.
-const STANDALONE_SURFACES = [
+export const STANDALONE_SURFACES = [
   "admin",
   "budgets",
   "keys",
@@ -205,9 +205,14 @@ export function bootstrap(
     // account-menu tests set them.
     terms_url: null,
     privacy_url: null,
+    // No public website: the public catalog's logo links to the catalog.
+    site_url: null,
     // Not frozen, because a fixture describes a deployment somebody can sign
     // in to; the maintenance-mode tests override it.
     maintenance_mode: false,
+    // On, the setting default: the tests about a deployment that switched
+    // passkeys off say so.
+    passkeys_enabled: true,
     // Off by default, matching a deployment that has not set public_base_url:
     // the passkey tests turn it on rather than every other test turning it off.
     passkeys_ready: false,
@@ -216,6 +221,7 @@ export function bootstrap(
     // clearing a list it does not care about.
     oauth_providers: [],
     mail_ready: false,
+    feedback_enabled: true,
     // Off by default, matching the config default; the public-catalog tests
     // turn it on.
     public_catalog: false,
@@ -506,6 +512,9 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     allowed_models: null,
     exclude_from_budget: false,
     reject_user_mismatch: null,
+    is_service_key: false,
+    end_user_budget_id: null,
+    end_user_budget_ids: [],
     metadata: {},
     ...overrides,
   }
@@ -708,7 +717,6 @@ export function organizationPricingOverride(
     output_price_per_million: 10,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     pricing_tiers: [],
     unit: "tokens",
     effective_from: "2026-01-01T00:00:00Z",
@@ -738,9 +746,9 @@ export function orgProviderModel(
     output_price_per_million: 10,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     price_source: "defaults",
     pricing_id: null,
+    unit: "tokens",
     enabled: true,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
@@ -765,6 +773,9 @@ export function orgProviderKey(
     // The default is a key this deployment can actually read. A test wanting the
     // other case says so, because that is the state the dashboard has to show.
     usable: true,
+    // Never refreshed: the key offers no rows and is unnarrowed.
+    offered_count: 0,
+    serving_count: 0,
     archived_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
@@ -801,6 +812,8 @@ export function workspaceCodeExecutionPolicy(
     // policy: nothing configured, nothing narrowed.
     configured: false,
     sandbox_configured: true,
+    // What no policy means on this deployment: on, as on a default one.
+    default_enabled: true,
     // The default deployment has curated no images, so a workspace may pin
     // none. `available_tools` is what this deployment's sandbox serves, which
     // is one tool today, not the wider vocabulary a policy may be written in.
@@ -828,6 +841,8 @@ export function workspaceWebSearchConfig(
     // one: nothing configured, nothing narrowed.
     configured: false,
     web_search_configured: true,
+    // What no row means on this deployment: on, as on a default one.
+    default_enabled: true,
     enabled: true,
     max_results: null,
     purpose_hint: null,

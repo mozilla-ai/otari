@@ -1,22 +1,22 @@
-"""Normalize file/image content blocks for the target model.
+"""Rewriting a request's non-text content blocks for whoever will read them.
 
-For each non-text content block in the request messages, decide — based on the
-resolved :class:`~gateway.services.model_capabilities.Capabilities` — whether to:
+A block reaches one of three readers, and the reader decides what the block
+becomes.
+The model reads it as it stands where the provider serves that kind natively, or
+as text where the model is text-only.
+The gateway's code-execution sandbox reads it from the store, and the model is
+told only that the file is there.
+The provider's own code-execution container reads it under an ID that provider
+issued, so the block carries the ID of a copy rather than Otari's own.
 
-* **pass through** to a natively-capable provider (resolving any ``file_id`` to
-  inline bytes first, since the upstream provider doesn't know our file ids), or
-* **extract to text** for a text-only model: documents via markitdown, images
-  via a vision side-call / OCR, scanned PDFs via rasterize-then-describe, or
-* **stage into the code-execution sandbox** when the request runs one: an
-  Anthropic ``container_upload`` block names a file for the sandbox rather than
-  the model, so it is recorded on the stats for the sandbox backend to seed and
-  replaced by a short text marker telling the model the file is there.
+A block the model reads never fails the request.
+The original block is left in place instead, because one unreadable attachment
+is not worth refusing a request over.
 
-The normalizer is format-aware (OpenAI chat, Anthropic messages, OpenAI
-Responses) because each wire shape names its blocks and its text block
-differently. It is defensive by construction: any per-block failure leaves the
-original block untouched and is logged — it must never turn a chat request into
-a 500.
+A block the provider's container reads does fail the request when it cannot be
+resolved, because the code would then run without the file it was given, and
+because a block Otari cannot resolve must not reach the provider carrying a file
+ID of the caller's choosing.
 """
 
 from __future__ import annotations
@@ -25,18 +25,17 @@ import base64
 import binascii
 import mimetypes
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from any_llm.types.completion import CompletionUsage
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
 from gateway.log_config import logger
-from gateway.ports.file_storage_port import FileStoragePort
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
-from gateway.services.file_service import StagedFile, fetch_file, read_file_bytes, sandbox_path_for
+from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.vision import describe_image
 
@@ -68,11 +67,21 @@ class NormalizationStats:
     # Uploads the request referenced for the code-execution sandbox, in message
     # order and without repeats. Only filled when the caller said a sandbox runs.
     sandbox_inputs: list[StagedFile] = field(default_factory=list)
-    # Bytes forwarded inline so far, attachments moved to provider storage, and
-    # attachments left inline past the provider's limit (see ``InlineLimit``).
+    # Uploads a ``container_upload`` block named for the provider's own
+    # container, in message order and without repeats. Only filled when the
+    # caller said the provider runs the code.
+    container_inputs: list[StagedFile] = field(default_factory=list)
+    # Bytes forwarded inline so far, as sent (base64), attachments moved to
+    # provider storage, and attachments left inline past the provider's limit
+    # (see ``InlineLimit``).
     inline_bytes: int = 0
     uploaded: int = 0
     oversized: int = 0
+
+    def hold_for_container(self, staged: StagedFile) -> None:
+        """Record ``staged`` as a file the provider's own container must be given."""
+        if all(existing.file_id != staged.file_id for existing in self.container_inputs):
+            self.container_inputs.append(staged)
 
     def stage(self, staged: StagedFile) -> StagedFile:
         """Record ``staged`` for the sandbox and return it under its session name.
@@ -103,15 +112,6 @@ class NormalizationStats:
             total_tokens=self.vision_prompt_tokens + self.vision_completion_tokens,
         )
 
-    def to_metadata(self) -> dict[str, Any]:
-        return {
-            "files_extracted": self.files_extracted,
-            "images_described": self.images_described,
-            "dropped": self.dropped,
-            "chars_added": self.chars_added,
-            **({"uploaded": self.uploaded} if self.uploaded else {}),
-        }
-
 
 # Uploads ``(data, mime, filename)`` to the provider's own file storage and
 # returns the URI a request can reference it by.
@@ -120,14 +120,14 @@ ProviderUpload = Callable[[bytes, str, str], Awaitable[str]]
 
 @dataclass(frozen=True)
 class InlineLimit:
-    """How many attachment bytes a provider accepts inline in one request.
+    """How many attachment bytes a provider accepts inline in one request, counted as sent (base64).
 
-    Gemini refuses a request whose inline data passes about 20 MB. Once the
-    attachments would pass ``max_bytes``, each further one goes through
-    ``upload`` and is referenced by URI instead. With no ``upload`` (a provider
-    without a Files API, or no credential to call it with) the block is left as
-    it was and counted on ``NormalizationStats.oversized``, so the caller can
-    refuse the request before the provider does.
+    Gemini refuses a request past 20 MB. Once the attachments would pass
+    ``max_bytes``, each further one goes through ``upload`` and is referenced by
+    URI instead. With no ``upload`` (a provider without a Files API, or no
+    credential to call it with) the block is left as it was and counted on
+    ``NormalizationStats.oversized``, so the caller can refuse the request before
+    the provider does.
     """
 
     max_bytes: int
@@ -156,6 +156,11 @@ def _text_block(fmt: WireFormat, text: str) -> dict[str, Any]:
     if fmt == "responses":
         return {"type": "input_text", "text": text}
     return {"type": "text", "text": text}
+
+
+def _sandbox_file_text(fmt: WireFormat, filename: str) -> dict[str, Any]:
+    """What the model is told in place of a file the sandbox holds."""
+    return _text_block(fmt, f"[File available in the code execution sandbox: {filename}]")
 
 
 def _decode_data_url(url: str) -> tuple[bytes | None, str]:
@@ -192,8 +197,7 @@ class _Resolved:
 async def _resolve_from_ref(
     ref: dict[str, Any],
     *,
-    db: AsyncSession | None,
-    file_store: FileStoragePort | None,
+    files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     read_bytes: bool = True,
@@ -206,17 +210,15 @@ async def _resolve_from_ref(
     """
     filename = ref.get("filename")
     file_id = ref.get("file_id")
-    if file_id and db is not None and file_store is not None:
-        record = await fetch_file(db, str(file_id), user_id, workspace_id=workspace_id)
-        if record is None:
-            logger.warning("content normalizer: file_id %s not found for user %s", file_id, user_id)
+    if file_id and files is not None:
+        # A request with no resolved user owns no file, so it resolves nothing.
+        scope = None if user_id is None else FileScope(user_id, workspace_id)
+        staged = None if scope is None else await files.staged_upload(str(file_id), scope)
+        if staged is None:
+            logger.warning("content normalizer: file_id %s not available to user %s", file_id, user_id)
             return None
-        if record.storage_ref is None:
-            logger.warning("content normalizer: file_id %s has no stored bytes", file_id)
-            return None
-        staged = StagedFile(record.id, record.filename, record.mime_type, record.storage_ref)
-        data = await read_file_bytes(file_store, record) if read_bytes else None
-        return _Resolved(data, record.mime_type, record.filename, staged)
+        data = await files.read_bytes(staged) if read_bytes else None
+        return _Resolved(data, staged.mime_type, staged.filename, staged)
 
     url = ref.get("file_data") or ref.get("url")
     if isinstance(url, str) and url.startswith("data:"):
@@ -230,11 +232,11 @@ async def _classify(
     block: dict[str, Any],
     fmt: WireFormat,
     *,
-    db: AsyncSession | None,
-    file_store: FileStoragePort | None,
+    files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
+    provider_container: bool = False,
 ) -> _Source | None:
     """Identify an image/document/container block and resolve its bytes, or return None."""
     btype = block.get("type")
@@ -245,11 +247,10 @@ async def _classify(
         # block falls back to being a document the model reads.
         resolved = await _resolve_from_ref(
             block,
-            db=db,
-            file_store=file_store,
+            files=files,
             user_id=user_id,
             workspace_id=workspace_id,
-            read_bytes=not sandbox_requested,
+            read_bytes=not sandbox_requested and not provider_container,
         )
         return resolved.source(_CONTAINER) if resolved else None
 
@@ -263,9 +264,7 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_IMAGE, data, src.get("media_type", "image/png"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(
-                    src, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
-                )
+                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
                 if resolved:
                     return resolved.source(_IMAGE)
             return _Source(_IMAGE, None, "image/png", None, src.get("url"))
@@ -273,9 +272,7 @@ async def _classify(
         image_url = block.get("image_url")
         url = image_url.get("url") if isinstance(image_url, dict) else image_url
         if block.get("file_id"):
-            resolved = await _resolve_from_ref(
-                block, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
-            )
+            resolved = await _resolve_from_ref(block, files=files, user_id=user_id, workspace_id=workspace_id)
             if resolved:
                 return resolved.source(_IMAGE)
         if isinstance(url, str):
@@ -295,16 +292,12 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_DOCUMENT, data, src.get("media_type", "application/pdf"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(
-                    src, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
-                )
+                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
                 if resolved:
                     return resolved.source(_DOCUMENT)
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
-        resolved = await _resolve_from_ref(
-            ref, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
-        )
+        resolved = await _resolve_from_ref(ref, files=files, user_id=user_id, workspace_id=workspace_id)
         if resolved:
             return resolved.source(_DOCUMENT)
         return None
@@ -347,13 +340,18 @@ def _uploaded_file_block(src: _Source, uri: str) -> dict[str, Any]:
     return {"type": "file", "file": {"file_data": uri, "filename": filename}}
 
 
+def _encoded_size(data: bytes) -> int:
+    """The bytes ``data`` takes on the wire, base64-encoded."""
+    return 4 * ((len(data) + 2) // 3)
+
+
 async def _within_inline_limit(
     block: dict[str, Any], src: _Source, limit: InlineLimit, stats: NormalizationStats
 ) -> dict[str, Any] | None:
     """``block`` moved to provider storage when it would pass ``limit``, else ``None`` to forward it inline."""
     if src.data is None:
         return None
-    size = len(src.data)
+    size = _encoded_size(src.data)
     if stats.inline_bytes + size <= limit.max_bytes:
         stats.inline_bytes += size
         return None
@@ -427,6 +425,80 @@ async def _describe_pdf_pages(src: _Source, config: GatewayConfig, stats: Normal
     return f"[Attached scanned file: {label}]\n" + "\n".join(descriptions) + f"\n[End of {label}]"
 
 
+def _is_native_document(src: _Source) -> bool:
+    """Whether a PDF-capable model may be sent ``src`` as a document part.
+
+    Only an upload Otari inlines itself is judged here: the provider's document
+    part takes PDFs (OpenAI accepts nothing else), so an uploaded Markdown or CSV
+    file is extracted instead. A block the caller wrote inline is forwarded as
+    written.
+    """
+    return not src.needs_inline or src.mime.split(";", 1)[0] == "application/pdf"
+
+
+def _is_container_block(block: dict[str, Any], fmt: WireFormat) -> bool:
+    """Whether ``block`` is Anthropic's block naming a file for a code-execution container.
+
+    Where the provider runs that code, such a block may not be forwarded as
+    written: its ``file_id`` would be one the caller chose, naming a file in the
+    deployment's provider account rather than one of theirs.
+    """
+    return fmt == "anthropic" and block.get("type") == _CONTAINER
+
+
+def name_container_copies(messages: list[dict[str, Any]], copies: Mapping[str, str]) -> list[dict[str, Any]]:
+    """``messages`` with each ``container_upload`` block naming the copy ``copies`` maps its upload to.
+
+    The messages passed in are left as they are, so one request can be named
+    for several accounts in turn.
+    """
+
+    def _named(block: Any) -> Any:
+        if isinstance(block, dict) and _is_container_block(block, "anthropic") and block.get("file_id") in copies:
+            return {**block, "file_id": copies[block["file_id"]]}
+        return block
+
+    return [
+        {**message, "content": [_named(block) for block in message["content"]]}
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
+def stage_container_blocks(messages: list[dict[str, Any]], staged: Sequence[StagedFile]) -> list[dict[str, Any]]:
+    """``messages`` with each ``container_upload`` block naming a ``staged`` upload told as the sandbox's file.
+
+    For the attempts that run the code on the sandbox when others of the same
+    request run it in the provider's container. The messages passed in are left as they are.
+    """
+    names = {file.file_id: file.filename for file in staged}
+
+    def _staged(block: Any) -> Any:
+        if isinstance(block, dict) and _is_container_block(block, "anthropic") and block.get("file_id") in names:
+            return _sandbox_file_text("anthropic", names[block["file_id"]])
+        return block
+
+    return [
+        {**message, "content": [_staged(block) for block in message["content"]]}
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
+def has_container_blocks(messages: Any, fmt: WireFormat) -> bool:
+    """Whether any message carries a block naming a file for a code-execution container."""
+    if not isinstance(messages, list):
+        return False
+    return any(
+        isinstance(block, dict) and _is_container_block(block, fmt)
+        for message in messages
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for block in message["content"]
+    )
+
+
 async def _normalize_block(
     block: Any,
     fmt: WireFormat,
@@ -434,11 +506,11 @@ async def _normalize_block(
     config: GatewayConfig,
     stats: NormalizationStats,
     *,
-    db: AsyncSession | None,
-    file_store: FileStoragePort | None,
+    files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
+    provider_container: bool = False,
     inline_limit: InlineLimit | None = None,
 ) -> Any:
     if not isinstance(block, dict):
@@ -447,26 +519,43 @@ async def _normalize_block(
         src = await _classify(
             block,
             fmt,
-            db=db,
-            file_store=file_store,
+            files=files,
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
+            provider_container=provider_container,
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
+        if provider_container and _is_container_block(block, fmt):
+            # The file may well exist. Saying it does not would blame the caller
+            # for a store or database failure, so this reads as an upstream fault.
+            raise ProviderUploadFailedError from exc
         return block
     if src is None:
+        if provider_container and _is_container_block(block, fmt):
+            raise AttachedFileUnavailableError
         return block
 
     staged = stats.stage(src.staged) if sandbox_requested and src.staged is not None else None
     if src.kind == _CONTAINER:
+        if provider_container and _is_container_block(block, fmt):
+            if src.staged is None:
+                # Resolved, but to no stored file, so there is nothing to copy.
+                # Falling back would show the model contents its code cannot open.
+                raise AttachedFileUnavailableError
+            # The block keeps naming the upload, because the account whose copy
+            # it must name is not known until a candidate is chosen. Where other
+            # candidates run the code on the sandbox, the upload is staged too and
+            # their block is rewritten by ``stage_container_blocks``.
+            stats.hold_for_container(src.staged)
+            return {**block, "file_id": src.staged.file_id}
         if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
-            return _text_block(fmt, f"[File available in the code execution sandbox: {staged.filename}]")
+            return _sandbox_file_text(fmt, staged.filename)
         src.kind = _DOCUMENT
 
-    native = caps.image if src.kind == _IMAGE else caps.pdf
+    native = caps.image if src.kind == _IMAGE else caps.pdf and _is_native_document(src)
     if native:
         if inline_limit is not None and (moved := await _within_inline_limit(block, src, inline_limit, stats)):
             return moved
@@ -516,11 +605,11 @@ async def normalize_messages(
     config: GatewayConfig,
     caps: Capabilities,
     fmt: WireFormat,
-    db: AsyncSession | None,
-    file_store: FileStoragePort | None,
+    files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
+    provider_container: bool = False,
     inline_limit: InlineLimit | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Return (possibly-rewritten messages, stats).
@@ -533,6 +622,16 @@ async def normalize_messages(
     sandbox. Every stored upload the messages reference is then also recorded on
     ``stats.sandbox_inputs`` for the sandbox to seed, and ``container_upload``
     blocks are staged instead of read.
+
+    ``provider_container`` says the provider runs the code in a container of its
+    own. A ``container_upload`` block then keeps naming the upload, which is
+    recorded on ``stats.container_inputs``, and a block naming no upload this
+    caller holds refuses the request rather than reaching the provider. With both
+    set, for a request whose candidates run the code in different places, the
+    block keeps naming the upload and the upload is staged as well.
+
+    ``inline_limit`` caps the attachment bytes the provider is sent inline (see
+    :class:`InlineLimit`).
 
     Messages whose ``content`` is a plain string are returned untouched (the
     common, zero-overhead path). Only list-content messages are walked, plus, on
@@ -553,11 +652,11 @@ async def normalize_messages(
             caps,
             config,
             stats,
-            db=db,
-            file_store=file_store,
+            files=files,
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
+            provider_container=provider_container,
             inline_limit=inline_limit,
         )
 

@@ -29,12 +29,13 @@ The docs are grouped by what you are trying to do.
 
 Running and managing a gateway.
 
-- [Deployment](deployment.md): Docker, Render, Railway, hybrid mode, and optional services.
+- [Deployment](deployment.md): Docker, Railway, hybrid mode, and optional services.
 - [Configuration](configuration.md): configuration sources, precedence, and common settings.
 - [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
 - [Models](models.md): selectors, providers, discovery, aliases, and capabilities.
-- [Routing policies](routing.md): failover, conditions, weighted and learned routing, and mandatory guardrails.
+- [Provider endpoints](provider-endpoints.md): model servers a workspace or a user brings, reached by name and kept out of budgets.
+- [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
 - [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
 
 ### For integrators
@@ -46,14 +47,18 @@ Calling the gateway from your own code.
 - [MCP](mcp.md): connect MCP servers to chat, messages, and responses requests,
   or drive them from your own application through the caller-orchestrated endpoints.
 - [Files](files.md): file uploads and document understanding for local models.
-- [Guardrails](guardrails.md): request-level checks like prompt-injection detection.
-- [Agent Gates](agent-gates.md): repo-owned policy checks against evidence a coding
-  agent's session reports. `otari hook` evaluates them locally by default, with
-  Otari's Hook Server (`POST /api/v1/hooks/check`) as an opt-in.
+- [Inference Guardrails](guardrails.md): request-level checks like prompt-injection detection.
+- [Agent Guardrails](agent-guardrails.md): repository-owned rules checked against what a
+  coding agent actually did to the working tree. `otari hook` runs beside Claude Code or
+  Codex and evaluates them locally, with no server and no credential.
+- [Agent Guardrails reference](agent-guardrails-reference.md): every gate type and field,
+  and what each harness can see at each event.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
 - [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API, or import its usage without routing.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
+- [Use with Pydantic AI](use-with-pydantic-ai.md), [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md): point an agent framework's model at Otari, with tools, structured output and streaming.
 - [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
+- [Agent traces](traces.md): see each agent session as turns, LLM calls and tool calls, with their timing and cost.
 - [Importing external usage](external-usage.md): bring subscription-backed usage (Claude Code, Codex, any OTLP app) into your analytics.
 - [SDK compatibility](sdk-compatibility.md): how the language SDKs are released and which SDK version works with which Otari version.
 
@@ -65,4 +70,5 @@ Calling the gateway from your own code.
 ### For contributors
 
 - [Architecture](../ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
-- [Backend domains](domains.md): every backend module assigned to one domain, and the layer shape each domain moves toward.
+- [Backend domains](../DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
+- [Load test](../loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.

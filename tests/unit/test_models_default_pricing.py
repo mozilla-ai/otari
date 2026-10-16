@@ -1,4 +1,4 @@
-"""Unit tests for surfacing the genai-prices default rate on model objects."""
+"""Unit tests for surfacing the models.dev default rate on model objects."""
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -56,10 +56,10 @@ def test_does_not_override_configured_price(default_pricing_on: None) -> None:
 def test_catalog_prices_a_bedrock_model_under_a_custom_instance(default_pricing_on: None) -> None:
     """The dashboard shows a rate for a Bedrock model behind a custom instance name.
 
-    The catalog keys its lookup on the instance, and genai-prices only files
-    ``anthropic.claude-sonnet-5`` under ``aws``, so before the implementation
-    fallback this listed as unpriced while the gateway happily billed the request at
-    the same (missing) rate.
+    The catalog keys its lookup on the instance, and models.dev files Bedrock
+    models under ``amazon-bedrock``, so without the implementation fallback this
+    listed as unpriced while the gateway billed the request at the same (missing)
+    rate.
     """
     config = GatewayConfig(providers={"aws-prod": {"provider_type": "bedrock"}})
     configure_provider_types(config.provider_pricing_implementation)
@@ -101,7 +101,11 @@ def _priced(model_key: str, input_rate: float, output_rate: float) -> ModelPrici
 
 def test_alias_reports_target_db_price_as_configured() -> None:
     obj = alias_model(
-        ALIAS_CONFIG, "fast-model", "openai:gpt-4o", {"openai:gpt-4o": _priced("openai:gpt-4o", 2.5, 10.0)}
+        ALIAS_CONFIG,
+        "fast-model",
+        "openai:gpt-4o",
+        {"openai:gpt-4o": _priced("openai:gpt-4o", 2.5, 10.0)},
+        models_dev=None,
     )
 
     assert obj.owned_by == "otari"
@@ -114,9 +118,9 @@ def test_alias_reports_target_db_price_as_configured() -> None:
 
 def test_alias_falls_back_to_target_default_price(default_pricing_on: None) -> None:
     # No DB row for the target. The gateway still bills this request at the
-    # genai-prices rate, so the catalog has to report that rate rather than
+    # models.dev rate, so the catalog has to report that rate rather than
     # claiming the model is unpriced.
-    obj = alias_model(ALIAS_CONFIG, "fast-model", "openai:gpt-4o", {})
+    obj = alias_model(ALIAS_CONFIG, "fast-model", "openai:gpt-4o", {}, models_dev=None)
 
     assert obj.pricing is not None
     assert obj.pricing.input_price_per_million > 0
@@ -124,11 +128,11 @@ def test_alias_falls_back_to_target_default_price(default_pricing_on: None) -> N
 
 
 def test_alias_never_priced_by_its_display_name(default_pricing_on: None) -> None:
-    # "gpt-4o" as a display name would resolve in genai-prices on its own. The
+    # "gpt-4o" as a display name would resolve in models.dev on its own. The
     # alias must be priced from its target, so a lookup keyed on the display name
     # would quietly report the wrong model's rate.
     config = GatewayConfig(aliases={"gpt-4o": "openai:gpt-4o-mini"})
-    obj = alias_model(config, "gpt-4o", "openai:gpt-4o-mini", {})
+    obj = alias_model(config, "gpt-4o", "openai:gpt-4o-mini", {}, models_dev=None)
     mini = ModelObject(id="openai:gpt-4o-mini", created=0, owned_by="openai")
     apply_default_pricing(mini)
 
@@ -139,7 +143,11 @@ def test_alias_never_priced_by_its_display_name(default_pricing_on: None) -> Non
 
 def test_alias_unpriced_when_target_has_no_price() -> None:
     obj = alias_model(
-        GatewayConfig(aliases={"a": "openai:nonexistent-model-xyz"}), "a", "openai:nonexistent-model-xyz", {}
+        GatewayConfig(aliases={"a": "openai:nonexistent-model-xyz"}),
+        "a",
+        "openai:nonexistent-model-xyz",
+        {},
+        models_dev=None,
     )
 
     assert obj.pricing is None

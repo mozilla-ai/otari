@@ -131,6 +131,22 @@ def test_load_config_treats_empty_otari_scalar_env_as_unset(tmp_path: Path, monk
     assert config.master_key is None
 
 
+@pytest.mark.parametrize("yaml_value", ["${OTARI_MASTER_KEY}", '"   "'])
+def test_load_config_reads_a_blank_yaml_master_key_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, yaml_value: str
+) -> None:
+    # Compose forwards an unset OTARI_MASTER_KEY as "", which the interpolated
+    # form in config.example.yml then resolves to.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(f"master_key: {yaml_value}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_MASTER_KEY", "")
+
+    config = load_config(str(config_file))
+
+    assert config.master_key is None
+
+
 def test_load_config_ignores_legacy_gateway_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The GATEWAY_ prefix was removed after the Otari rename deprecation window;
     # it no longer configures anything, so a value set only under GATEWAY_ falls
@@ -317,6 +333,41 @@ def test_load_config_bridges_yaml_service_fields_into_env(tmp_path: Path, monkey
         assert otari_env("SANDBOX_URL") == "http://yaml-sandbox:9000"
         assert otari_env("MCP_ALLOW_LOOPBACK") == "false"
         assert otari_env("WEB_SEARCH_MAX_RESULTS") == "5"
+
+
+def test_the_web_tools_runtime_settings_load_from_env_and_bridge_from_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Bridged so that clearing a runtime value falls back to the YAML one: the
+    # in-loop reads take the field, else the environment, else the built-in default.
+    names = ("WEB_SEARCH_DEFAULT_TOOL", "WEB_FETCH_DEFAULT_TOOL", "WEB_SEARCH_MAX_CALLS")
+    for name in names:
+        monkeypatch.delenv(f"OTARI_{name}", raising=False)
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(
+        "search_tools:\n  exa: {provider: exa, api_key: k}\n"
+        "web_search_default_tool: exa\nweb_fetch_default_tool: builtin_fetch\nweb_search_max_calls: 4\n",
+        encoding="utf-8",
+    )
+    with mock.patch.dict(os.environ):
+        config = load_config(str(config_file))
+        assert (config.web_search_default_tool, config.web_fetch_default_tool, config.web_search_max_calls) == (
+            "exa",
+            "builtin_fetch",
+            4,
+        )
+        assert [otari_env(name) for name in names] == ["exa", "builtin_fetch", "4"]
+
+    empty = tmp_path / "empty.yml"
+    empty.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_DEFAULT_TOOL", "none")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_CALLS", "2")
+    config = load_config(str(empty))
+    assert (config.web_search_default_tool, config.web_fetch_default_tool, config.web_search_max_calls) == (
+        "none",
+        None,
+        2,
+    )
 
 
 def test_load_config_env_wins_over_yaml_for_bridged_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -739,3 +790,21 @@ def test_load_config_structured_env_non_mapping_fails_fast(tmp_path: Path, monke
 
     with pytest.raises(ValueError, match="must contain a YAML mapping"):
         load_config()
+
+
+@pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
+def test_feedback_env_overrides_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str, expected: bool
+) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(f"feedback_enabled: {str(not expected).lower()}\n")
+    monkeypatch.setenv("OTARI_FEEDBACK_ENABLED", value)
+    assert load_config(str(config_file)).feedback_enabled is expected
+
+
+def test_feedback_rejects_invalid_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("{}\n")
+    monkeypatch.setenv("OTARI_FEEDBACK_ENABLED", "maybe")
+    with pytest.raises(ValueError):
+        load_config(str(config_file))

@@ -5,15 +5,20 @@ from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+import openai
 import pytest
 from any_llm.exceptions import BatchNotCompleteError
 from any_llm.types.batch import BatchResult, BatchResultError, BatchResultItem
-from any_llm.types.completion import CompletionUsage, PromptTokensDetails
+from any_llm.types.completion import ChatCompletion, CompletionUsage, PromptTokensDetails
+from any_llm.utils.exception_handler import convert_exception
 from fastapi.testclient import TestClient
 from openai.types.batch import Batch
 from openai.types.batch_request_counts import BatchRequestCounts
 
+from gateway.api.routes._pipeline import PROVIDER_CREDENTIALS_DETAIL
 from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
 
 from .test_rate_limiting import _make_rate_limit_client
 
@@ -195,6 +200,70 @@ def test_create_batch_provider_error(
     assert resp.json()["detail"] == "LLM provider error"
 
 
+def _credential_rejected() -> Exception:
+    upstream = openai.AuthenticationError(
+        "Error code: 401 - Incorrect API key provided: sk-proj-AAAAAAAAAAAAAAAA",
+        response=httpx.Response(401, request=httpx.Request("POST", "https://api.openai.com/v1/batches")),
+        body=None,
+    )
+    return convert_exception(upstream, "openai")
+
+
+def _assert_credential_rejected(resp: Any) -> None:
+    assert resp.status_code == 424, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == PROVIDER_CREDENTIAL_REJECTED
+    assert resp.json()["detail"] == PROVIDER_CREDENTIALS_DETAIL
+    assert "sk-proj" not in resp.text
+
+
+def test_create_batch_rejected_credential_is_a_424(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    class _SupportsBatch:
+        SUPPORTS_BATCH = True
+
+    with (
+        patch("gateway.api.routes.batches.acreate_batch", new_callable=AsyncMock, side_effect=_credential_rejected()),
+        patch("gateway.api.routes.batches.AnyLLM.get_provider_class", return_value=_SupportsBatch),
+    ):
+        resp = client.post(f"{API_ROOT}/batches", json=_create_batch_body(), headers=api_key_header)
+    _assert_credential_rejected(resp)
+
+
+def test_list_batches_rejected_credential_is_a_424(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    with patch("gateway.api.routes.batches.alist_batches", new_callable=AsyncMock, side_effect=_credential_rejected()):
+        resp = client.get(f"{API_ROOT}/batches?provider=openai", headers=api_key_header)
+    _assert_credential_rejected(resp)
+
+
+def test_list_batches_answers_a_request_fault_403_with_the_providers_400(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """A 403 that rejects the request is the caller's to fix: neither a rejected credential nor a retryable 502."""
+    error = {"message": "This operation is not allowed for this request", "type": "invalid_request_error"}
+    upstream = openai.PermissionDeniedError(
+        f"Error code: 403 - {{'error': {error}}}",
+        response=httpx.Response(
+            403, request=httpx.Request("GET", "https://api.openai.com/v1/batches"), json={"error": error}
+        ),
+        body=error,
+    )
+    with patch(
+        "gateway.api.routes.batches.alist_batches",
+        new_callable=AsyncMock,
+        side_effect=convert_exception(upstream, "openai"),
+    ):
+        resp = client.get(f"{API_ROOT}/batches?provider=openai", headers=api_key_header)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == "This operation is not allowed for this request"
+    assert ERROR_CODE_HEADER not in resp.headers
+
+
 def test_create_batch_logs_usage(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -358,14 +427,30 @@ def test_retrieve_batch_results(
     api_key_header: dict[str, str],
 ) -> None:
     """GET /api/v1/batches/{batch_id}/results returns per-request results."""
-    mock_completion = MagicMock()
-    mock_completion.model = "gpt-4o-mini"
-    mock_completion.usage = None
-    mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
+    completion = ChatCompletion.model_validate(
+        {
+            "id": "chatcmpl-1",
+            "created": 1,
+            "model": "gpt-4o-mini",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "42",
+                        "reasoning": {"content": "Computed the answer."},
+                    },
+                }
+            ],
+            "provider_extension": {"request_id": "req-1"},
+        }
+    )
 
     mock_result = BatchResult(
         results=[
-            BatchResultItem(custom_id="req-1", result=mock_completion, error=None),
+            BatchResultItem(custom_id="req-1", result=completion, error=None),
             BatchResultItem(
                 custom_id="req-2", result=None, error=BatchResultError(code="rate_limit", message="Rate limit exceeded")
             ),
@@ -387,7 +472,9 @@ def test_retrieve_batch_results(
     assert "results" in data
     assert len(data["results"]) == 2
     assert data["results"][0]["custom_id"] == "req-1"
-    assert data["results"][0]["result"] == {"id": "chatcmpl-1", "choices": []}
+    assert data["results"][0]["result"] == completion.model_dump(mode="json")
+    assert data["results"][0]["result"]["choices"][0]["message"]["reasoning"] == "Computed the answer."
+    assert data["results"][0]["result"]["provider_extension"] == {"request_id": "req-1"}
     assert data["results"][0]["error"] is None
     assert data["results"][1]["custom_id"] == "req-2"
     assert data["results"][1]["result"] is None

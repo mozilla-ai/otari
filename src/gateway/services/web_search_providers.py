@@ -19,8 +19,9 @@ Two callers, and the difference between them is where the credential may sit:
   :mod:`gateway.api.routes.web_search_backend` over the same SearXNG shape, calls
   this module on the gateway's behalf, and the key stays where it was configured.
 
-The key is the deployment's, never a workspace's: nothing here reads tenancy,
-and no response carries a credential. ``options`` is the opaque
+The key is the caller's to pass: the deployment's, or the workspace's own
+organization key. Nothing here reads tenancy, and no response carries a
+credential. ``options`` is the opaque
 ``provider_options`` bag a workspace or a request may set, and each provider
 whitelists the keys it understands rather than forwarding the bag upstream, so
 an unrecognized key is dropped instead of becoming a provider request field
@@ -33,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from gateway.core.config import WEB_SEARCH_PROVIDERS
+from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -82,7 +83,27 @@ _TAVILY_OPTION_KEYS = ("max_results", "search_depth", "topic", "time_range", "in
 
 
 class WebSearchProviderError(RuntimeError):
-    """The search provider could not be reached or returned malformed data."""
+    """The search provider could not be reached or returned malformed data.
+
+    ``tag`` names the failure (``timeout``, ``network``, ``http_error``,
+    ``invalid_response``) and ``status`` is the provider's HTTP status when it
+    answered with one, for a caller that reports the failure without the message.
+    """
+
+    def __init__(self, message: str, *, tag: str = "provider_error", status: int | None = None) -> None:
+        """Carry the message for the log, and the tag and status for a caller that reports only those."""
+        super().__init__(message)
+        self.tag = tag
+        self.status = status
+
+
+def is_sendable_api_key(api_key: str) -> bool:
+    """Whether a key can go in a request header as is.
+
+    A key with whitespace or a control character is refused before it is sent, because the
+    HTTP client's own error for an illegal header value quotes the whole header.
+    """
+    return bool(api_key) and api_key.isprintable() and not any(char.isspace() for char in api_key)
 
 
 async def provider_search(
@@ -101,12 +122,16 @@ async def provider_search(
     is what lets ``WebSearchBackend`` skip its own fetch-and-extract pass.
 
     Raises:
-        WebSearchProviderError: If the provider refused the request, could not
-            be reached, or answered a shape this cannot read.
+        WebSearchProviderError: If the key cannot be sent in a header, or the
+            provider refused the request, could not be reached, or answered a
+            shape this cannot read.
         ValueError: If ``provider`` is not one of :data:`WEB_SEARCH_PROVIDERS`.
 
     """
     normalized = (provider or "").strip().lower()
+    if not is_sendable_api_key(api_key):
+        msg = f"{normalized or 'the'} search key contains whitespace or a control character"
+        raise WebSearchProviderError(msg)
     if normalized == TAVILY_PROVIDER:
         return await _search_tavily(api_key, query, options or {}, client, timeout_s)
     if normalized == BRAVE_PROVIDER:
@@ -199,6 +224,10 @@ async def _search_brave(
     freshness = _BRAVE_FRESHNESS.get(str(options.get("time_range") or "").strip().lower())
     if freshness is not None:
         params["freshness"] = freshness
+    # Brave reads a two-letter country code as is. Tavily is not sent one: it takes a country's full name.
+    country = options.get("country")
+    if isinstance(country, str) and len(country.strip()) == 2 and country.strip().isalpha():
+        params["country"] = country.strip().upper()
 
     payload = await _request(
         BRAVE_PROVIDER,
@@ -265,20 +294,25 @@ async def _request(
             headers=headers,
             timeout=timeout_s,
         )
+    except httpx.LocalProtocolError:
+        # Its message quotes the offending header, which may be the key itself.
+        msg = f"{provider} search request could not be built"
+        raise WebSearchProviderError(msg) from None
     except httpx.HTTPError as exc:
         msg = f"{provider} search could not be reached: {exc}"
-        raise WebSearchProviderError(msg) from exc
+        tag = "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
+        raise WebSearchProviderError(msg, tag=tag) from exc
 
     if response.status_code >= httpx.codes.BAD_REQUEST:
         msg = f"{provider} search returned HTTP {response.status_code}"
-        raise WebSearchProviderError(msg)
+        raise WebSearchProviderError(msg, tag="http_error", status=response.status_code)
 
     try:
         body = response.json()
     except ValueError as exc:
         msg = f"{provider} search returned a body that is not JSON"
-        raise WebSearchProviderError(msg) from exc
+        raise WebSearchProviderError(msg, tag="invalid_response") from exc
     if not isinstance(body, dict):
         msg = f"{provider} search returned a {type(body).__name__} body, expected an object"
-        raise WebSearchProviderError(msg)
+        raise WebSearchProviderError(msg, tag="invalid_response")
     return body

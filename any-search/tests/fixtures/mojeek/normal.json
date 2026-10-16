@@ -1,0 +1,82 @@
+{
+  "status": 200,
+  "body": {
+    "response": {
+      "status": "OK",
+      "head": {
+        "query": "latest stable python release",
+        "nword": 4,
+        "rankm": 168,
+        "dups": 0,
+        "nph": 0,
+        "more": 26033,
+        "words": [
+          {
+            "full": "latest",
+            "stem": "latest",
+            "plus": 1,
+            "hits": 401088369
+          },
+          {
+            "full": "stable",
+            "stem": "stabl",
+            "plus": 1,
+            "hits": 33409674
+          },
+          {
+            "full": "python",
+            "stem": "python",
+            "plus": 1,
+            "hits": 17280859
+          },
+          {
+            "full": "release",
+            "stem": "releas",
+            "plus": 1,
+            "hits": 253392201
+          }
+        ],
+        "timer": 0.1,
+        "start": 1,
+        "return": 3,
+        "exact": true,
+        "results": 231484
+      },
+      "results": [
+        {
+          "url": "https://www.python.org/downloads/windows/",
+          "title": "Python Releases for Windows | Python.org",
+          "desc": "Latest Python install manager ... Latest Python 3 Release - Python 3.14.7 ... Note that Python 3.13.15 cannot be used on Windows 7 or earlier.",
+          "image": {
+            "url": "https://www.python.org/static/opengraph-icon-200x200.png"
+          },
+          "timestamp": 1786192327,
+          "date": "Sat Aug 8 13:32:07 2026",
+          "mres": 6,
+          "score": 1.0754897594451904
+        },
+        {
+          "url": "https://www.python.org/downloads/release/python-390rc1/",
+          "title": "python.org/downloads/release/python-390rc1",
+          "desc": "",
+          "timestamp": 0,
+          "date": "Thu Jan 1 01:00:00 1970",
+          "mres": 0,
+          "score": 0.8577868938446045
+        },
+        {
+          "url": "https://www.python.org/downloads/release/python-3913/",
+          "title": "Python Release Python 3.9.13 | Python.org",
+          "desc": "We recommend upgrading to the latest Python release . ... Python 3.11 is now the latest feature release series of Python 3.",
+          "image": {
+            "url": "https://www.python.org/static/opengraph-icon-200x200.png"
+          },
+          "timestamp": 1769742027,
+          "date": "Fri Jan 30 03:00:27 2026",
+          "mres": 9,
+          "score": 0.8510742783546448
+        }
+      ]
+    }
+  }
+}

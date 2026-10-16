@@ -4,7 +4,7 @@ Every cost the gateway derives from a resolved rate row goes through this
 module: settlement, the reserve-time upper bound, repricing, and imported
 usage. It takes no database access and knows nothing about the pricing lookup
 chain (``services/pricing_service.py``), so one implementation of the
-arithmetic serves a stored rate, an organization override, a genai-prices
+arithmetic serves a stored rate, an organization override, a models.dev
 default, and a transient rate built in a test, and a second one cannot drift
 from it.
 
@@ -34,6 +34,10 @@ Rates are USD per million tokens. A rate of ``None`` means that meter is not
 priced separately, so its tokens stay in the fresh-input bucket and bill at the
 input rate: an absent cache rate is never a discount.
 
+A rate row whose ``unit`` is ``requests`` is the exception: its
+``input_price_per_million`` is USD per million requests, and a request costs
+that divided by a million whatever tokens it reported (:func:`price_request`).
+
 ``pricing`` is read structurally (``getattr``) rather than through a declared
 type, so a stored ``ModelPricing``, a transient rate row, and a test double all
 work without this module importing the ORM.
@@ -62,7 +66,6 @@ RATE_FIELDS: tuple[str, ...] = (
     "output_price_per_million",
     "cache_read_price_per_million",
     "cache_write_price_per_million",
-    "cache_write_1h_price_per_million",
 )
 
 # Key naming the lower bound of a threshold tier in a ``pricing_tiers`` entry.
@@ -105,11 +108,6 @@ class BillableUsage:
     cache_write_tokens: int
     cache_write_1h_tokens: int
 
-    @property
-    def cache_write_base_tokens(self) -> int:
-        """Cache writes on the default TTL, i.e. every write that is not a 1h write."""
-        return self.cache_write_tokens - self.cache_write_1h_tokens
-
 
 @dataclass(frozen=True)
 class Rates:
@@ -119,7 +117,6 @@ class Rates:
     output_price_per_million: Decimal
     cache_read_price_per_million: Decimal | None
     cache_write_price_per_million: Decimal | None
-    cache_write_1h_price_per_million: Decimal | None
 
 
 def to_decimal(value: typing.Any) -> Decimal | None:
@@ -321,7 +318,6 @@ def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
         output_price_per_million=output_rate,
         cache_read_price_per_million=values["cache_read_price_per_million"],
         cache_write_price_per_million=values["cache_write_price_per_million"],
-        cache_write_1h_price_per_million=values["cache_write_1h_price_per_million"],
     )
 
 
@@ -339,6 +335,49 @@ def _charge_line(meter: str, units: int, rate: Decimal, cost: Decimal) -> Charge
     return {"meter": meter, "units": units, "rate_per_million": float(rate), "cost": float(cost)}
 
 
+REQUESTS_UNIT = "requests"
+
+
+def priced_per_request(pricing: typing.Any) -> bool:
+    """Whether ``pricing`` charges a flat amount per request rather than per token.
+
+    A rate object without a ``unit`` (a transient row built for manual
+    repricing, a test double) reads as token pricing.
+    """
+    return getattr(pricing, "unit", None) == REQUESTS_UNIT
+
+
+def request_cost(pricing: typing.Any) -> Decimal:
+    """USD for one request at a per-request rate, exactly.
+
+    ``input_price_per_million`` is USD per million requests, so one request
+    costs a millionth of it.
+    """
+    rate = to_decimal(getattr(pricing, "input_price_per_million", None))
+    if rate is None:
+        raise ValueError("Pricing carries no usable per-request rate")
+    return meter_cost(1, rate)
+
+
+def request_charge_line(cost: Decimal) -> ChargeLine:
+    """The charge line for one request billed at ``cost``.
+
+    It carries ``unit_rate`` (USD per request) where a token line carries
+    ``rate_per_million``, which is what tells a reader which unit applies.
+    """
+    return {"meter": "request", "units": 1, "unit_rate": float(cost), "cost": float(cost)}
+
+
+def price_request(pricing: typing.Any) -> tuple[Decimal, dict[str, int], list[ChargeLine]]:
+    """Settle one request at a per-request rate: the cost, the meters, the charge lines.
+
+    A free request carries no charge line, so the breakdown never shows a
+    billed meter explaining a charge that did not happen.
+    """
+    cost = quantize_cost(request_cost(pricing))
+    return cost, {"requests": 1}, [request_charge_line(cost)] if cost else []
+
+
 def _price_meters(
     pricing: typing.Any,
     usage: BillableUsage,
@@ -349,26 +388,17 @@ def _price_meters(
     sub-amounts into one row can sum them exactly and round the row once.
 
     Each input token bills exactly once, under whichever meter it belongs to: a
-    cache read, a cache write on either TTL, or fresh input. A meter with no
+    cache read, a cache write on either TTL (one rate), or fresh input. A meter with no
     configured rate leaves its tokens in the fresh-input bucket, so an unpriced
     cache meter costs the input rate instead of nothing.
     """
     rates = effective_rates(pricing, usage.total_input_tokens)
 
-    # A 1h write with no dedicated rate bills as an ordinary cache write.
-    write_1h_rate = (
-        rates.cache_write_1h_price_per_million
-        if rates.cache_write_1h_price_per_million is not None
-        else rates.cache_write_price_per_million
-    )
-
     fresh_input_tokens = usage.total_input_tokens
     if rates.cache_read_price_per_million is not None:
         fresh_input_tokens -= usage.cache_read_tokens
     if rates.cache_write_price_per_million is not None:
-        fresh_input_tokens -= usage.cache_write_base_tokens
-    if write_1h_rate is not None:
-        fresh_input_tokens -= usage.cache_write_1h_tokens
+        fresh_input_tokens -= usage.cache_write_tokens
 
     meters = {
         "total_input_tokens": usage.total_input_tokens,
@@ -393,9 +423,7 @@ def _price_meters(
     if rates.cache_read_price_per_million is not None:
         charge("cache_read", usage.cache_read_tokens, rates.cache_read_price_per_million)
     if rates.cache_write_price_per_million is not None:
-        charge("cache_write_5m", usage.cache_write_base_tokens, rates.cache_write_price_per_million)
-    if write_1h_rate is not None:
-        charge("cache_write_1h", usage.cache_write_1h_tokens, write_1h_rate)
+        charge("cache_write", usage.cache_write_tokens, rates.cache_write_price_per_million)
     return cost, meters, lines
 
 
@@ -480,19 +508,17 @@ def estimate_metered_cost(
     exceed it. Threshold rates are selected from the estimated input, which
     approximates the request's billable total. The estimate is reconciled to
     actual usage on completion.
+
+    A rate priced per request is estimated at exactly one request, which is
+    what it settles at.
     """
+    if priced_per_request(pricing):
+        return quantize_cost(request_cost(pricing))
     input_tokens = max(estimated_input_tokens, 0)
     output_tokens = max(estimated_output_tokens, 0)
     rates = effective_rates(pricing, input_tokens)
 
-    if cache_write_ttl == "1h":
-        cache_write_rate = rates.cache_write_1h_price_per_million
-        if cache_write_rate is None:
-            cache_write_rate = rates.cache_write_price_per_million
-    elif cache_write_ttl == "5m":
-        cache_write_rate = rates.cache_write_price_per_million
-    else:
-        cache_write_rate = None
+    cache_write_rate = rates.cache_write_price_per_million if cache_write_ttl is not None else None
 
     # An unpriced meter bills at the input rate (its tokens stay in the fresh
     # bucket), so the input rate is the floor and every configured rate a prompt

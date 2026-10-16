@@ -36,6 +36,25 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("Success")).toBeInTheDocument()
   })
 
+  it("shows a skipped candidate's status as Skipped, not Absorbed", async () => {
+    mockApi({
+      rows: [
+        entry({
+          model: "gpt-4o-mini",
+          status: "absorbed",
+          status_code: 429,
+          error_message:
+            "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />)
+
+    const row = (await screen.findByText("gpt-4o-mini")).closest("tr")!
+    expect(within(row).getByText("Skipped")).toBeInTheDocument()
+    expect(within(row).queryByText("Absorbed")).not.toBeInTheDocument()
+  })
+
   it("shows the api key column, and an em-dash for master-key rows", async () => {
     mockApi({
       rows: [
@@ -246,6 +265,24 @@ describe("ActivityPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Close" }))
     expect(screen.queryByText("Request detail")).not.toBeInTheDocument()
+  })
+
+  it("shows the provider-reported compute time in the detail panel", async () => {
+    // provider_latency_ms is a diagnostic alongside Total time (otari#337); this
+    // asserts the row's value actually reaches the "Provider time" field rather
+    // than only being present in the fixture shape.
+    const user = userEvent.setup()
+    mockApi({
+      rows: [entry({ provider: "groq", provider_latency_ms: 156 })],
+    })
+    renderPage(<ActivityPage />)
+
+    await user.click((await screen.findByText("gpt-4o")).closest("tr")!)
+
+    const label = screen.getByText("Provider time", {
+      selector: "span.text-overline",
+    })
+    expect(label.parentElement?.textContent).toContain("156 ms")
   })
 
   it("sends the status filter to the API", async () => {
@@ -1039,6 +1076,53 @@ describe("ActivityPage", () => {
     expect(
       calls.some((c) => c.url.includes(`${API_ROOT}/usage/set-price`)),
     ).toBe(false)
+  })
+
+  it("prices a rerank model per request, entered per thousand", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({
+      rows: [
+        entry({
+          id: "search",
+          model: "rerank-v3.5",
+          provider: "cohere",
+          endpoint: "/v1/rerank",
+          cost: null,
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />)
+
+    const row = (await screen.findByText("rerank-v3.5")).closest("tr")!
+    await user.click(row)
+    await user.click(screen.getByRole("button", { name: "Price this model" }))
+
+    const dialog = await screen.findByRole("dialog")
+    // Opened in the unit the endpoint bills in, with no token fields to fill.
+    expect(
+      within(dialog).getByRole("radio", { name: "Requests" }),
+    ).toBeChecked()
+    expect(within(dialog).queryByLabelText("Output $ / 1M")).toBeNull()
+    await user.type(
+      within(dialog).getByLabelText("Price per 1,000 requests"),
+      "2",
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Price this model" }),
+    )
+
+    await waitFor(() => {
+      const call = calls.find(
+        (c) => c.url.includes(`${API_ROOT}/pricing`) && c.method === "POST",
+      )
+      expect(call).toBeTruthy()
+      expect(JSON.parse(call!.body!)).toMatchObject({
+        model_key: "cohere:rerank-v3.5",
+        input_price_per_million: 2000,
+        output_price_per_million: 0,
+        unit: "requests",
+      })
+    })
   })
 
   it("does not offer model pricing on a request that was costed", async () => {
@@ -2484,7 +2568,7 @@ describe("ActivityPage when the organization context fails", () => {
       const url = String(input)
       calls.push(url)
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse({ detail: "no active membership" }, 404)
+        return jsonResponse({ detail: "Internal server error" }, 500)
       }
       if (url.includes("/usage/in-flight")) {
         return jsonResponse({ requests: [], total: 0 })
@@ -2496,16 +2580,18 @@ describe("ActivityPage when the organization context fails", () => {
     })
     renderPage(<ActivityPage />)
 
-    // Falls back to the narrower surface, which is the safe direction: an
-    // operator reading their own organization understates, where the reverse
-    // would be a cross-tenant read.
+    // Takes the deployment-wide surface, as every operator gate does on a
+    // failed read (otari#876): an operator keeps their log, and the server
+    // refuses anyone else, so nothing crosses a tenant.
     await waitFor(() =>
-      expect(
-        calls.some((url) => url.includes(`${API_ROOT}/organizations/me/usage`)),
-      ).toBe(true),
+      expect(calls.some((url) => url.startsWith(`${API_ROOT}/usage`))).toBe(
+        true,
+      ),
     )
-    expect(calls.some((url) => url.startsWith(`${API_ROOT}/usage`))).toBe(false)
-    // And the refusal reaches the operator instead of an empty table.
+    expect(
+      calls.some((url) => url.includes(`${API_ROOT}/organizations/me/usage`)),
+    ).toBe(false)
+    // And the refusal reaches the caller instead of an empty table.
     expect(await screen.findByText(/context is gone/)).toBeInTheDocument()
   })
 })

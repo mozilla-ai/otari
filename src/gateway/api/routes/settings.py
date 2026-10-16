@@ -18,21 +18,29 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_session_identity, require_deployment_operator, verify_master_key
+from gateway.api.deps import (
+    IdentityServiceDep,
+    get_config,
+    get_db,
+    get_session_identity,
+    require_deployment_operator,
+    verify_master_key,
+)
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.settings_view import derive_view
 from gateway.core.surface import Surface
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
-    create_dashboard_session,
     record_session_key_marker,
     request_is_https,
     revoke_all_dashboard_sessions,
 )
+from gateway.services.identity import SignIn
 from gateway.services.master_key_service import (
     MasterKeyRotationConflictError,
     hash_master_key,
@@ -254,12 +262,9 @@ async def update_settings(
         except ValueError as exc:
             await db.rollback()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-        except SQLAlchemyError:
+        except DATABASE_ERRORS as exc:
             await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error",
-            ) from None
+            raise database_error("update settings", exc) from None
         # Apply only after the write has committed, so a failed commit never
         # leaves this worker metering or listing against an unpersisted value.
         for key, value in normalized.items():
@@ -276,6 +281,7 @@ async def rotate_master_key(
     config: Annotated[GatewayConfig, Depends(get_config)],
     authenticated_key: Annotated[str | None, Depends(verify_master_key)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    identities: IdentityServiceDep,
 ) -> RotateMasterKeyResponse:
     """Regenerate the database-backed master key and invalidate the old one.
 
@@ -307,8 +313,7 @@ async def rotate_master_key(
                 detail="The master key was already rotated. Reload and try again.",
             )
         current_hash = stored_hash
-    session_token: str | None = None
-    session_expires_at = None
+    reminted: SignIn | None = None
     try:
         token, hashed = await stage_generated_master_key_rotation(db, current_hash)
         await revoke_all_dashboard_sessions(db)
@@ -316,17 +321,18 @@ async def rotate_master_key(
         # rotation does not revoke the session re-minted below.
         await record_session_key_marker(db, hashed)
         if session_identity is not None:
-            session_token, session_expires_at = await create_dashboard_session(
-                db, config.dashboard_session_ttl_hours, user_id=session_identity.id
-            )
+            # NOTE: The identity service's block also commits the rotation staged above.
+            reminted = await identities.start_session(session_identity)
         await db.commit()
     except MasterKeyRotationConflictError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error("rotate master key", exc) from None
     config._master_key_hash = hashed
-    if session_token is not None and session_expires_at is not None:
-        apply_session_cookie(response, session_token, session_expires_at, secure=request_is_https(request))
+    if reminted is not None:
+        apply_session_cookie(
+            response, reminted.session_token, reminted.session_expires_at, secure=request_is_https(request)
+        )
     return RotateMasterKeyResponse(master_key=token)

@@ -50,7 +50,8 @@ export interface PolicySelectEntry {
   /** The fallthrough. Exactly one entry carries it, and it must come last. */
   default?: string
   /** A router backend that orders `candidates` per request: "weighted" to split
-   *  traffic by share, "knn" to learn which prompts a cheaper model handles. */
+   *  traffic by share, "knn" to learn which prompts a cheaper model handles,
+   *  "priority" to serve from the first candidate its rate limits leave room on. */
   router?: string
   /** The pool a `router` entry orders. Required there, meaningless elsewhere. */
   candidates?: string[]

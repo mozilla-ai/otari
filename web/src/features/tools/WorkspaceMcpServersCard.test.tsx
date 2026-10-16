@@ -153,6 +153,28 @@ describe("WorkspaceMcpServersCard", () => {
     expect(screen.getByText("DISABLED")).toBeVisible()
   })
 
+  it("shows each server's id truncated, with a copy of the whole id", async () => {
+    const servers = [
+      workspaceMcpServer({
+        id: "66666666-6666-6666-6666-666666666666",
+        name: "wiki",
+      }),
+    ]
+    mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    // The id is what a request names in `mcp_server_ids`, so the full value
+    // stays on the tooltip and the copy even though the cell shows a prefix.
+    const id = screen.getByText("66666666…")
+    expect(id).toBeVisible()
+    expect(id).toHaveAttribute("title", "66666666-6666-6666-6666-666666666666")
+    await user.click(screen.getByRole("button", { name: /Copy id for wiki/ }))
+    expect(await navigator.clipboard.readText()).toBe(
+      "66666666-6666-6666-6666-666666666666",
+    )
+  })
+
   it("reads an empty allow-list as every tool, the way the gateway does", async () => {
     // `mcp_client` takes a falsy `allowed_tools` as no allow-list at all, so a
     // row holding `[]` exposes every tool exactly as null does. "0 allowed"

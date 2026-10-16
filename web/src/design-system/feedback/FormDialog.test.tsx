@@ -505,4 +505,17 @@ describe("FormDialog", () => {
       Node.DOCUMENT_POSITION_FOLLOWING,
     )
   })
+
+  it("drops Cancel when hideCancel is set, and keeps the close control", () => {
+    render(
+      <FormDialog {...base} isOpen hideCancel>
+        {withField}
+      </FormDialog>,
+    )
+    const dialog = screen.getByRole("dialog")
+    expect(within(dialog).queryByRole("button", { name: "Cancel" })).toBeNull()
+    expect(
+      within(dialog).getByRole("button", { name: "Close" }),
+    ).toBeInTheDocument()
+  })
 })

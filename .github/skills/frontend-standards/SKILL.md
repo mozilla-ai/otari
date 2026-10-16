@@ -50,8 +50,8 @@ Build and check from the repo root:
 - `make dashboard` (installs from the lockfile if needed, then `pnpm --dir web run build`).
   Output goes to the gitignored `src/gateway/static/dashboard/`; there is nothing to commit.
   Build only when you need to run the dashboard locally; Docker builds it in its own Node stage.
-- `pnpm --dir web run lint` (Biome: formatting, recommended rules, layer boundaries; `lint:fix` writes)
-- `pnpm --dir web run typecheck`
+- `make lint-web` (Biome with its fixes applied: formatting, recommended rules, layer boundaries)
+- `make typecheck-web`
 - `pnpm --dir web test`
 - `pnpm --dir web run e2e` (behavioral) and `pnpm --dir web run e2e:screenshots` (visual)
 

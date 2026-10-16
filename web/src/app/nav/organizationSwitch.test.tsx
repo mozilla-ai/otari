@@ -45,6 +45,7 @@ function emptySummary(): UsageSummary {
     by_endpoint: [],
     by_provider: [],
     by_tool: [],
+    by_tag: [],
     errors_by_status_code: [],
     series: [],
   }
@@ -315,6 +316,27 @@ describe("switching organization", () => {
 
     expect(screen.getByText("10.0%")).toBeInTheDocument()
     expect(screen.queryByText("80.0%")).toBeNull()
+  })
+
+  it("does not ask for a workspace of the organization it left", async () => {
+    const requests = mockApi({ roleThere: "admin" })
+    renderShellOverPage()
+    await screen.findByText(/At-a-glance spend/)
+    expect(requests.some((r) => r.includes(WORKSPACE_HERE))).toBe(true)
+
+    await switchOrganization()
+
+    // The page reads again in the workspace it landed in, and the workspace
+    // it left is not asked for in the meantime: it is not the caller's to read
+    // any more, and the server answers 404.
+    await waitFor(() => {
+      expect(
+        afterSwitch(requests).some((r) => r.includes(WORKSPACE_THERE)),
+      ).toBe(true)
+    })
+    expect(
+      afterSwitch(requests).filter((r) => r.includes(WORKSPACE_HERE)),
+    ).toEqual([])
   })
 
   it("makes the gated read again where the role survives the switch", async () => {

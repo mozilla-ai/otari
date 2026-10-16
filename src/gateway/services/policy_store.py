@@ -39,7 +39,7 @@ import time
 import uuid
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -75,14 +75,22 @@ _default_workspace: uuid.UUID | None = None
 _cached_at: float | None = None
 
 
+async def list_stored_policies(
+    db: AsyncSession, *, workspaces: Select[tuple[uuid.UUID]], workspace_id: uuid.UUID | None
+) -> list[RoutingPolicy]:
+    """Return the stored routing policies in these workspaces, by name, narrowed to ``workspace_id`` when given."""
+    statement = select(RoutingPolicy).where(RoutingPolicy.workspace_id.in_(workspaces))
+    if workspace_id is not None:
+        statement = statement.where(RoutingPolicy.workspace_id == workspace_id)
+    return list((await db.execute(statement.order_by(RoutingPolicy.name))).scalars().all())
+
+
 def _scope(workspace_id: uuid.UUID | None) -> uuid.UUID | None:
     """The workspace a lookup reads, resolving "none given" to the default."""
     return workspace_id if workspace_id is not None else _default_workspace
 
 
-def cached_policies(
-    user_id: str | None = None, *, workspace_id: uuid.UUID | None = None
-) -> dict[str, PolicySpec]:
+def cached_policies(user_id: str | None = None, *, workspace_id: uuid.UUID | None = None) -> dict[str, PolicySpec]:
     """The stored policies this worker last loaded. Empty before the first load."""
     scope = _scope(workspace_id)
     if scope is None:

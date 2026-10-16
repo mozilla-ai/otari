@@ -25,11 +25,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.api.routes import auth_session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DOMAIN_VERIFICATION_TXT_PREFIX, OrganizationMember
-from gateway.services.dashboard_session_service import create_dashboard_session
+from gateway.repositories.identity import DashboardSessionRepository
 from gateway.services.tenancy import organization_domain_service as domain_service
 
 from .webauthn_helpers import SoftwareAuthenticator, challenge_of
@@ -147,7 +146,10 @@ def _claim_password(
     assert signed_up.status_code == 200, signed_up.text
     token = _TOKEN_IN_LINK.search(caplog.text)
     assert token, caplog.text
-    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1)}).status_code == 200
+    assert (
+        client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD}).status_code
+        == 200
+    )
 
 
 def _memberships(client: TestClient) -> list[dict[str, Any]]:
@@ -192,6 +194,36 @@ def test_a_password_sign_in_joins_the_organization_that_proved_the_domain(
     _assert_joined(client, signed_in, beta=claiming_organization, home=home)
 
 
+def test_an_address_claimed_through_an_invitation_link_does_not_auto_join(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    claiming_organization: str,
+) -> None:
+    """A link claim is the inviting organization vouching for the address, which any organization can do.
+
+    Otherwise an admin anywhere could invite ``anyone@acme.example``, choose its
+    password through the link they were handed back, and sign in to the
+    organization that proved ``acme.example``.
+    """
+    invited = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": ADDRESS, "role": "member"},
+        headers=master_key_header,
+    )
+    assert invited.status_code == 201, invited.text
+    token = _TOKEN_IN_LINK.search(invited.json()["accept_link"])
+    assert token
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token.group(1), "password": PASSWORD})
+    assert accepted.status_code == 200, accepted.text
+    client.cookies.clear()
+
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD})
+
+    assert signed_in.status_code == 200, signed_in.text
+    joined = {row["organization"]["id"] for row in _memberships(client)}
+    assert claiming_organization not in joined
+
+
 def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -199,7 +231,7 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     monkeypatch: pytest.MonkeyPatch,
     claiming_organization: str,
 ) -> None:
-    from gateway.services.oauth_service import OAuthIdentity
+    from gateway.models.identity import EmailAssertion, ProviderIdentity
 
     monkeypatch.setattr(test_config, "public_base_url", ORIGIN)
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
@@ -207,8 +239,14 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
 
     async def _exchange(
         _config: GatewayConfig, provider: str, *, code: str, state: str, flow_secret: str | None, db: Any
-    ) -> OAuthIdentity:
-        return OAuthIdentity(provider=provider, email=ADDRESS, full_name="Ada", email_verified=True)
+    ) -> ProviderIdentity:
+        return ProviderIdentity(
+            provider=provider,
+            subject="ada-subject",
+            email=ADDRESS,
+            full_name="Ada",
+            email_verified=EmailAssertion.VERIFIED,
+        )
 
     monkeypatch.setattr("gateway.api.routes.auth_oauth.exchange_code", _exchange)
     home = _active_organization(client, master_key_header)
@@ -280,13 +318,15 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
     # standing on.
     attempts = {"count": 0}
 
-    async def _fails_once(*args: Any, **kwargs: Any) -> Any:
+    add_session = DashboardSessionRepository.add
+
+    async def _fails_once(self: DashboardSessionRepository, **kwargs: Any) -> None:
         attempts["count"] += 1
         if attempts["count"] == 1:
             raise SQLAlchemyError("the session row could not be written")
-        return await create_dashboard_session(*args, **kwargs)
+        await add_session(self, **kwargs)
 
-    monkeypatch.setattr(auth_session, "create_dashboard_session", _fails_once)
+    monkeypatch.setattr(DashboardSessionRepository, "add", _fails_once)
     refused = client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD})
     assert refused.status_code == 500, refused.text
 

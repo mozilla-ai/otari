@@ -20,11 +20,13 @@ function user(user_id: string, alias: string | null = null): User {
 function member(
   attributionUserId: string,
   fullName: string,
+  email: string | null = null,
 ): OrganizationMember {
   return organizationMember({
     organization_member_id: attributionUserId,
     attribution_user_id: attributionUserId,
     full_name: fullName,
+    email,
   })
 }
 
@@ -88,8 +90,8 @@ describe("UserComboBox", () => {
     ).toBeInTheDocument()
   })
 
-  it("names a member by the roster, with their owner id as the second line", async () => {
-    mockRoster([member(UUID, "Alice Example")])
+  it("names a member by the roster, with their email as the second line", async () => {
+    mockRoster([member(UUID, "Alice Example", "alice@example.com")])
     renderBox(
       <UserComboBox
         value=""
@@ -100,17 +102,58 @@ describe("UserComboBox", () => {
 
     await userEvent.click(screen.getByRole("combobox"))
 
-    // The name leads and the id follows it as a muted line, which is what the
-    // row's accessible name carries too: without the roster this option read as
-    // "33333333-… (alice@example.com)", which nobody can pick out of a list.
+    // The email follows the name as a muted line and joins the row's accessible
+    // name. The owner id is a UUID nobody can read, so it is not shown.
     const row = await screen.findByRole("option", {
-      name: `Alice Example (${UUID})`,
+      name: "Alice Example (alice@example.com)",
     })
     expect(within(row).getByText("Alice Example")).toBeInTheDocument()
-    expect(within(row).getByText(UUID)).toBeInTheDocument()
+    expect(within(row).getByText("alice@example.com")).toBeInTheDocument()
+    expect(within(row).queryByText(UUID)).toBeNull()
     // A hand-made owner is already its own name, so it is left exactly as it was
     // rather than given a hint that repeats the label.
     expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
+  })
+
+  it("finds a member by the email shown under their name", async () => {
+    mockRoster([member(UUID, "Alice Example", "alice@example.com")])
+    renderBox(
+      <UserComboBox
+        value=""
+        onChange={() => {}}
+        users={[user(UUID), user("ci-bot")]}
+      />,
+    )
+
+    await userEvent.type(screen.getByRole("combobox"), "alice@example")
+
+    expect(
+      await screen.findByRole("option", {
+        name: "Alice Example (alice@example.com)",
+      }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "ci-bot" })).toBeNull()
+  })
+
+  it("shows no second line for a member without an email", async () => {
+    mockRoster([member(UUID, "Operator")])
+    renderBox(
+      <UserComboBox value="" onChange={() => {}} users={[user(UUID)]} />,
+    )
+
+    await userEvent.click(screen.getByRole("combobox"))
+
+    const row = await screen.findByRole("option", { name: "Operator" })
+    expect(within(row).queryByText(UUID)).toBeNull()
+  })
+
+  it("marks the field required when asked", async () => {
+    mockRoster([])
+    renderBox(
+      <UserComboBox value="" onChange={() => {}} users={[]} isRequired />,
+    )
+
+    expect(screen.getByRole("combobox")).toBeRequired()
   })
 
   it("finds a member by the id they are billed under, not only by name", async () => {
@@ -128,7 +171,7 @@ describe("UserComboBox", () => {
     // The id an operator pastes out of a log or an API response still reaches
     // the person, even though the row no longer leads with it.
     expect(
-      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
+      await screen.findByRole("option", { name: "Alice Example" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("option", { name: "ci-bot" })).toBeNull()
   })
@@ -174,13 +217,13 @@ describe("UserComboBox", () => {
     )
 
     await userEvent.click(screen.getByRole("combobox"))
-    await screen.findByRole("option", { name: `Zoe Example (${UUID})` })
+    await screen.findByRole("option", { name: "Zoe Example" })
 
     // Alphabetically "aaa-bot" wins; by relevance the member does, because a
-    // member is who someone means when issuing a key. The member's row reads as
-    // its two lines, name then id; the bot's is one line.
+    // member is who someone means when issuing a key. The member's row is
+    // the one that sorts first.
     const rows = screen.getAllByRole("option").map((o) => o.textContent)
-    expect(rows).toEqual([`Zoe Example${UUID}`, "aaa-bot"])
+    expect(rows).toEqual(["Zoe Example", "aaa-bot"])
   })
 
   it("submits the owner id, not the label shown for it", async () => {
@@ -196,7 +239,7 @@ describe("UserComboBox", () => {
 
     await userEvent.click(screen.getByRole("combobox"))
     await userEvent.click(
-      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
+      await screen.findByRole("option", { name: "Alice Example" }),
     )
 
     // The value that reaches POST /v1/keys has to be the id. Submitting the

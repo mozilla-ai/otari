@@ -1,6 +1,6 @@
-"""Unit tests for ``_compute_cost``, the standalone-mode cost calculation.
+"""Unit tests for the standalone-mode cost of a request, as ``calculate_metered_cost`` totals it.
 
-These pin the cache-token pricing model, which follows the genai-prices dataset
+These pin the cache-token pricing model, which follows the models.dev dataset
 this project already uses: the input/prompt token count is the grand total that
 *includes* cache reads and writes, and each physical token is charged once.
 
@@ -29,7 +29,7 @@ import pytest
 from any_llm.types.completion import CompletionUsage
 from pydantic import ValidationError
 
-from gateway.api.routes._pipeline import _compute_cost
+from gateway.core.metered_pricing import calculate_metered_cost
 from gateway.core.settings.pricing import PricingConfig, PricingTierConfig
 from gateway.core.usage import GatewayUsage
 from gateway.models.pricing import ModelPricing
@@ -38,6 +38,12 @@ from gateway.models.pricing import ModelPricing
 def _usd(tokens: int, rate_per_million: str) -> Decimal:
     """One meter's exact charge: tokens at a USD-per-million rate."""
     return Decimal(tokens) * Decimal(rate_per_million) / Decimal(1_000_000)
+
+
+def _compute_cost(pricing: ModelPricing, usage: CompletionUsage) -> Decimal:
+    """The settled total, without the meters and breakdown that come with it."""
+    cost, _, _ = calculate_metered_cost(pricing, usage)
+    return cost
 
 
 def _pricing(**overrides: float | None) -> ModelPricing:
@@ -296,9 +302,8 @@ def test_context_pricing_tier_is_a_whole_request_cliff() -> None:
     assert cost == _usd(150_000, "60.0") + _usd(1_000, "120.0") + _usd(100_000, "10.0")
 
 
-def test_anthropic_1h_cache_write_uses_its_own_rate() -> None:
+def test_anthropic_1h_cache_write_bills_at_the_cache_write_rate() -> None:
     pricing = _pricing(cache_write_price_per_million=3.75)
-    pricing.cache_write_1h_price_per_million = Decimal("6")
     usage = GatewayUsage(
         prompt_tokens=1_000,
         completion_tokens=0,
@@ -310,13 +315,11 @@ def test_anthropic_1h_cache_write_uses_its_own_rate() -> None:
 
     cost = _compute_cost(pricing, usage)
 
-    assert cost == _usd(1_000, "30.0") + _usd(200, "3.75") + _usd(100, "6.0")
+    assert cost == _usd(1_000, "30.0") + _usd(300, "3.75")
 
 
-def test_anthropic_1h_cache_write_allows_a_free_rate() -> None:
-    """A configured $0 1-hour rate must not fall back to the 5-minute rate."""
-    pricing = _pricing(cache_write_price_per_million=3.75)
-    pricing.cache_write_1h_price_per_million = Decimal(0)
+def test_anthropic_1h_cache_write_follows_a_free_cache_write_rate() -> None:
+    pricing = _pricing(cache_write_price_per_million=0)
     usage = GatewayUsage(
         prompt_tokens=1_000,
         completion_tokens=0,

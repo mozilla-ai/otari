@@ -27,9 +27,11 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import iter_route_contexts
 
 import gateway
 from gateway.api.routes import (
+    _passthrough,
     audio,
     batches,
     chat,
@@ -45,7 +47,6 @@ from gateway.api.routes import (
     search,
     web_search_backend,
 )
-from gateway.core import usage_source
 from gateway.core.config import API_ROOT, OTLP_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
 from gateway.main import (
     _COOKIE_AUTH_PREFIXES,
@@ -57,6 +58,7 @@ from gateway.main import (
 from gateway.main import (
     _under as _main_under,
 )
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 
 # App-level paths that deliberately stay at the origin root. Each has a reason
 # outside this repository's control; see the spec's D8.
@@ -80,9 +82,8 @@ def _config(postgres_url: str, mode: str | None, **overrides: Any) -> GatewayCon
 
 
 def _mounted(app: FastAPI) -> set[str]:
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
-    # A newer FastAPI may stop flattening nested routers into app.routes; an
-    # empty set here would make every assertion below pass vacuously.
+    paths = {route.path for route in iter_route_contexts(app.routes) if route.path}
+    # An empty set here would make every assertion below pass vacuously.
     assert paths, "app.routes carried no paths"
     return paths
 
@@ -317,6 +318,7 @@ FROZEN_LABELS = frozenset(
         batches.USAGE_ENDPOINT,
         batches.USAGE_ENDPOINT_RESULTS,
         chat.USAGE_ENDPOINT,
+        _passthrough.DECISIONS_ENDPOINT,
         embeddings.USAGE_ENDPOINT,
         images.USAGE_ENDPOINT,
         mcp.EXECUTE_ENDPOINT,
@@ -326,13 +328,16 @@ FROZEN_LABELS = frozenset(
         rerank.USAGE_ENDPOINT,
         responses.USAGE_ENDPOINT,
         search.SEARCH_ENDPOINT,
-        usage_source.PLAYGROUND_USAGE_ENDPOINT,
+        PLAYGROUND_USAGE_ENDPOINT,
         web_search_backend.SEARCH_ENDPOINT,
     }
 )
 # OpenAI's Batch API names the operation each line runs by OpenAI's own path,
 # so batches.py sends this to the provider. Provider contract, not ours.
 BATCH_WIRE_VALUES = frozenset({"/v1/chat/completions"})
+# TypeSafe's and llama-server's own path for a decision, which the decisions
+# client calls on them. Provider contract, not ours.
+DECISION_WIRE_VALUES = frozenset({"/v1/systemone"})
 
 _SPELLED_API_ROOT = re.compile(r"""["']/api/v1""")
 # The quoted value, up to the closing quote or the end of the line, so a
@@ -381,7 +386,7 @@ def test_no_gateway_source_spells_the_old_root() -> None:
     value. The OTLP module is read past whole, because OTel owns the
     ``/v1/{traces,logs,metrics}`` tail it declares.
     """
-    allowed = FROZEN_LABELS | BATCH_WIRE_VALUES
+    allowed = FROZEN_LABELS | BATCH_WIRE_VALUES | DECISION_WIRE_VALUES
     stray: list[str] = []
     for path, number, line in _source_lines(GATEWAY_SRC, (".py",)):
         if path == Path("api/routes/otlp.py"):

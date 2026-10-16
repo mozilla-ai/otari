@@ -12,27 +12,39 @@ plain build:
 - an overlay-bound adapter *is* reached, and its credential re-keys the dispatch
   onto ``response_provider``;
 - ``HostedAccessDeniedError`` becomes a 403 that names no adapter, and refunds;
-- an adapter naming an upstream any-llm does not implement becomes a 502.
+- an adapter naming an upstream any-llm does not implement becomes a 502;
+- a candidate the port served is deployment-paid: ``BillingPort`` gates it
+  before dispatch and arms the charge settlement makes, and no other candidate
+  ever reaches ``BillingPort``.
 """
 
 import asyncio
+import logging
 import uuid
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
+from decimal import Decimal
 from typing import Any, cast
 
 import pytest
 from any_llm import LLMProvider
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes import _pipeline as pipeline
-from gateway.api.routes import chat
+from gateway.api.routes import chat, messages, responses
 from gateway.container import build_container
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
+from gateway.log_config import logger as gateway_logger
+from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import (
     HostedAccessDeniedError,
     HostedCredential,
     HostedModels,
     ModelProviderPort,
 )
+from gateway.services.inference import DeploymentCharge
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -98,7 +110,12 @@ class RecordingPort:
 
 def _plain_build_port() -> ModelProviderPort:
     """The adapter a build with no overlay actually runs, via the composition root."""
-    return build_container().resolve(ModelProviderPort, None)
+    return build_container(workspace_listener=None).resolve(ModelProviderPort, None)
+
+
+def _plain_build_billing() -> BillingPort:
+    """The billing adapter a build with no overlay runs, via the composition root."""
+    return build_container(workspace_listener=None).resolve(BillingPort, None)
 
 
 def _ctx(
@@ -147,6 +164,7 @@ async def _dispatch(
         selector,
         adapter=chat._ADAPTER,
         model_provider=port,
+        billing=_plain_build_billing(),
     )
 
 
@@ -173,6 +191,7 @@ async def test_plain_build_leaves_a_credentialed_candidate_untouched() -> None:
         "openai:gpt-4o",
         adapter=chat._ADAPTER,
         model_provider=_plain_build_port(),
+        billing=_plain_build_billing(),
     )
     assert result is resolved
     assert result.kwargs == {"api_key": "sk-from-config"}
@@ -194,6 +213,7 @@ async def test_config_provider_key_is_not_asked_about() -> None:
         "openai:gpt-4o",
         adapter=chat._ADAPTER,
         model_provider=port,
+        billing=_plain_build_billing(),
     )
     assert result.kwargs == {"api_key": "sk-from-config"}
     assert port.calls == []
@@ -254,7 +274,7 @@ async def test_a_provider_needing_no_credential_is_not_asked_about(selector: str
     """
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     resolved = resolve_provider_selector(GatewayConfig(), selector)
-    assert resolved.kwargs == {}
+    assert set(resolved.kwargs) <= {"client_args"}
     result = await _dispatch(_ctx(resolved_provider=resolved), port, selector=selector)
     assert result is resolved
     assert port.calls == []
@@ -291,6 +311,7 @@ async def test_an_instance_with_no_usable_credential_still_reaches_the_port(
         "openai:gpt-4o",
         adapter=chat._ADAPTER,
         model_provider=port,
+        billing=_plain_build_billing(),
     )
 
     assert len(port.calls) == 1, f"the port was not asked despite {label}"
@@ -310,6 +331,7 @@ async def test_client_args_alone_does_not_shadow_a_real_key() -> None:
         "openai:gpt-4o",
         adapter=chat._ADAPTER,
         model_provider=port,
+        billing=_plain_build_billing(),
     )
 
     assert port.calls == []
@@ -404,6 +426,7 @@ async def test_alias_relabeling_survives_a_hosted_credential() -> None:
         "fast",
         adapter=chat._ADAPTER,
         model_provider=port,
+        billing=_plain_build_billing(),
     )
     assert result.alias == "fast"
     assert result.instance == "together"
@@ -470,6 +493,7 @@ async def test_a_refused_alias_does_not_spell_its_target(monkeypatch: pytest.Mon
             "fast",
             adapter=chat._ADAPTER,
             model_provider=port,
+            billing=_plain_build_billing(),
         )
 
     detail = str(exc_info.value.detail)
@@ -511,6 +535,23 @@ async def test_an_adapter_failure_refunds_and_becomes_a_502(
     assert str(failure) not in str(exc_info.value.detail)
     assert len(released) == 1
     assert [row["status_code"] for row in rejections] == [502]
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_failure_is_logged_by_class_alone(
+    monkeypatch: pytest.MonkeyPatch, gateway_logs: pytest.LogCaptureFixture
+) -> None:
+    """An adapter's message can carry the row it was reading, so neither it nor the traceback is logged."""
+    _capture_settlement(monkeypatch)
+    port = RecordingPort(error=RuntimeError("credential row sk-live-do-not-log"))
+
+    with pytest.raises(HTTPException):
+        await _dispatch(_ctx(resolved_provider=_uncredentialed()), port)
+
+    [record] = [r for r in gateway_logs.records if "ModelProviderPort failed" in r.getMessage()]
+    assert record.getMessage().endswith(": RuntimeError")
+    assert record.exc_info is None
+    assert "sk-live-do-not-log" not in gateway_logs.text
 
 
 @pytest.mark.asyncio
@@ -564,3 +605,304 @@ async def test_fresh_resolution_also_reaches_the_port() -> None:
 @pytest.mark.asyncio
 async def test_the_plain_build_serves_no_hosted_provider() -> None:
     assert await _plain_build_port().get_hosted_models(organization_id=ORGANIZATION_ID) == {}
+
+
+# ---------------------------------------------------------------------------
+# Deployment-paid: the funding gate before dispatch
+# ---------------------------------------------------------------------------
+
+
+class RecordingBilling:
+    """A stand-in for an overlay's billing adapter, recording what it was asked."""
+
+    def __init__(self, *, refuse: BaseException | None = None, charge_error: Exception | None = None) -> None:
+        self.refuse = refuse
+        self.charge_error = charge_error
+        self.calls: list[tuple[Any, ...]] = []
+
+    async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
+        self.calls.append(("apply_due_credit", organization_id))
+
+    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
+        self.calls.append(("require_funds_on_deposit", organization_id))
+        if self.refuse is not None:
+            raise self.refuse
+
+    async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
+        raise AssertionError("the completion path places no holds")
+
+    async def hold(self, *, organization_id: uuid.UUID, amount: Decimal) -> None:
+        raise AssertionError("the completion path places no holds")
+
+    async def release_hold(self, *, organization_id: uuid.UUID, amount: Decimal) -> None:
+        raise AssertionError("the completion path places no holds")
+
+    async def charge(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        amount: Decimal,
+        description: str | None = None,
+        actor_user_id: uuid.UUID | None = None,
+        api_key_id: str | None = None,
+    ) -> None:
+        self.calls.append(("charge", organization_id, amount, description, actor_user_id, api_key_id))
+        if self.charge_error is not None:
+            raise self.charge_error
+
+
+def _hosted_port() -> RecordingPort:
+    return RecordingPort(credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="openai"))
+
+
+async def _dispatch_billed(
+    ctx: pipeline.RequestContext,
+    port: ModelProviderPort,
+    billing: BillingPort,
+    *,
+    adapter: Any = chat._ADAPTER,
+    config: GatewayConfig | None = None,
+) -> ResolvedProvider:
+    return await pipeline.resolve_dispatch_provider(
+        ctx, config or GatewayConfig(), "openai:gpt-4o", adapter=adapter, model_provider=port, billing=billing
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_hosted_credential_is_gated_on_funds_and_armed_for_a_charge() -> None:
+    billing = RecordingBilling()
+    ctx = _ctx(resolved_provider=_uncredentialed())
+
+    result = await _dispatch_billed(ctx, _hosted_port(), cast(BillingPort, billing))
+
+    assert result.deployment_paid is True
+    # Any credit owed is granted before the organization's funds are judged.
+    assert billing.calls == [
+        ("apply_due_credit", ORGANIZATION_ID),
+        ("require_funds_on_deposit", ORGANIZATION_ID),
+    ]
+    assert ctx.deployment_charge is not None
+    assert ctx.deployment_charge.organization_id == ORGANIZATION_ID
+    assert ctx.deployment_charge.billing is billing
+
+
+@pytest.mark.asyncio
+async def test_a_credentialed_candidate_never_reaches_billing() -> None:
+    """A config, stored or organization key is paid for by its owner, so nothing is gated or charged."""
+    config = GatewayConfig(providers={"openai": {"api_key": "sk-from-config"}})
+    billing = RecordingBilling()
+    ctx = _ctx(resolved_provider=resolve_provider_selector(config, "openai:gpt-4o"))
+
+    result = await _dispatch_billed(ctx, _hosted_port(), cast(BillingPort, billing), config=config)
+
+    assert result.deployment_paid is False
+    assert billing.calls == []
+    assert ctx.deployment_charge is None
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_the_port_does_not_serve_never_reaches_billing() -> None:
+    billing = RecordingBilling()
+    ctx = _ctx(resolved_provider=_uncredentialed())
+
+    result = await _dispatch_billed(ctx, RecordingPort(credential=None), cast(BillingPort, billing))
+
+    assert result.deployment_paid is False
+    assert billing.calls == []
+    assert ctx.deployment_charge is None
+
+
+@pytest.mark.parametrize(
+    "adapter", [chat._ADAPTER, messages._ADAPTER, responses._ADAPTER], ids=["chat", "messages", "responses"]
+)
+@pytest.mark.asyncio
+async def test_insufficient_funds_refunds_and_becomes_a_402(monkeypatch: pytest.MonkeyPatch, adapter: Any) -> None:
+    released, rejections = _capture_settlement(monkeypatch)
+    billing = RecordingBilling(refuse=InsufficientFundsError(Decimal("0")))
+    ctx = _ctx(resolved_provider=_uncredentialed())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _dispatch_billed(ctx, _hosted_port(), cast(BillingPort, billing), adapter=adapter)
+
+    refusal = exc_info.value
+    detail: Any = refusal.detail
+    assert refusal.status_code == 402
+    assert (refusal.headers or {}).get(ERROR_CODE_HEADER) == INSUFFICIENT_FUNDS
+    message = "Insufficient funds ($0.00) to serve this request."
+    if adapter is messages._ADAPTER:
+        assert detail == {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
+    else:
+        assert detail == message
+    assert len(released) == 1
+    assert [(row["status_code"], row["provider"], row["model"]) for row in rejections] == [(402, "openai", "gpt-4o")]
+    assert ctx.deployment_charge is None
+
+
+@pytest.mark.asyncio
+async def test_a_billing_failure_refunds_and_becomes_a_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    released, rejections = _capture_settlement(monkeypatch)
+    billing = RecordingBilling(refuse=RuntimeError("wallet database is down"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _dispatch_billed(_ctx(resolved_provider=_uncredentialed()), _hosted_port(), cast(BillingPort, billing))
+
+    assert exc_info.value.status_code == 503
+    assert "wallet" not in str(exc_info.value.detail)
+    assert len(released) == 1
+    assert [row["status_code"] for row in rejections] == [503]
+
+
+@pytest.mark.asyncio
+async def test_an_admission_that_does_not_commit_becomes_a_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The commit lands any credit admission granted, so a request is not served on one that rolled back."""
+    released, rejections = _capture_settlement(monkeypatch)
+
+    async def _commit_failed(_session: object) -> bool:
+        return False
+
+    async def _no_pricing_check(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(pipeline, "release_session", _commit_failed)
+    # A session would otherwise send the unpriced-upstream warning to the database.
+    monkeypatch.setattr(pipeline, "_warn_if_hosted_upstream_is_unpriced", _no_pricing_check)
+    billing = RecordingBilling()
+    ctx = _ctx(resolved_provider=_uncredentialed())
+    ctx.db = cast(AsyncSession, object())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _dispatch_billed(ctx, _hosted_port(), cast(BillingPort, billing))
+
+    assert exc_info.value.status_code == 503
+    assert len(released) == 1
+    assert [row["status_code"] for row in rejections] == [503]
+    assert ctx.deployment_charge is None
+
+
+@pytest.mark.asyncio
+async def test_the_plain_build_gates_nothing() -> None:
+    """With the core's billing adapter a deployment-paid request is admitted as it always was."""
+    ctx = _ctx(resolved_provider=_uncredentialed())
+    result = await _dispatch_billed(ctx, _hosted_port(), _plain_build_billing())
+    assert result.deployment_paid is True
+    assert result.kwargs == {"api_key": "hosted-key"}
+
+
+# ---------------------------------------------------------------------------
+# Deployment-paid: the charge at settlement
+# ---------------------------------------------------------------------------
+
+
+class _SavepointSession:
+    """Just enough session for the charge: savepoints, counted by how they ended."""
+
+    def __init__(self) -> None:
+        self.released = 0
+        self.rolled_back = 0
+
+    @asynccontextmanager
+    async def begin_nested(self) -> AsyncIterator[None]:
+        try:
+            yield
+        except BaseException:
+            self.rolled_back += 1
+            raise
+        self.released += 1
+
+
+@pytest.fixture
+def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """The gateway logger does not propagate, so caplog sees it only with its handler attached."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def _charge(billing: RecordingBilling) -> DeploymentCharge:
+    return DeploymentCharge(
+        billing=cast(BillingPort, billing),
+        organization_id=ORGANIZATION_ID,
+        api_key_id="key-1",
+        actor_user_id=WORKSPACE_ID,
+        request_id="req-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_settled_cost_is_charged_in_a_savepoint() -> None:
+    billing = RecordingBilling()
+    db = _SavepointSession()
+
+    await pipeline.charge_deployment_paid(
+        _charge(billing), cast(Any, db), Decimal("0.0125"), provider="openai", model="gpt-4o", expects_cost=True
+    )
+
+    assert billing.calls == [("charge", ORGANIZATION_ID, Decimal("0.0125"), "openai:gpt-4o", WORKSPACE_ID, "key-1")]
+    assert db.released == 1
+
+
+@pytest.mark.parametrize("cost", [Decimal(0), Decimal("-1")])
+@pytest.mark.asyncio
+async def test_nothing_is_charged_for_no_cost(cost: Decimal) -> None:
+    billing = RecordingBilling()
+    await pipeline.charge_deployment_paid(
+        _charge(billing), cast(Any, _SavepointSession()), cost, provider="openai", model="gpt-4o", expects_cost=True
+    )
+    assert billing.calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_unpriced_settlement_is_not_charged_and_says_so(gateway_logs: pytest.LogCaptureFixture) -> None:
+    billing = RecordingBilling()
+
+    await pipeline.charge_deployment_paid(
+        _charge(billing), cast(Any, _SavepointSession()), None, provider="openai", model="gpt-4o", expects_cost=True
+    )
+
+    assert billing.calls == []
+    warnings = [r.getMessage() for r in gateway_logs.records if r.levelno == logging.WARNING]
+    assert any("gpt-4o" in message and "not charged" in message for message in warnings), warnings
+    # The provider is left out of the log line; the request id finds the usage row that names it.
+    assert all("openai" not in message for message in warnings), warnings
+
+
+@pytest.mark.asyncio
+async def test_a_settlement_owing_nothing_is_not_warned_about(gateway_logs: pytest.LogCaptureFixture) -> None:
+    """A provider failure with no usage settles at no cost, which is not a pricing gap."""
+    await pipeline.charge_deployment_paid(
+        _charge(RecordingBilling()),
+        cast(Any, _SavepointSession()),
+        None,
+        provider="openai",
+        model="gpt-4o",
+        expects_cost=False,
+    )
+    assert gateway_logs.records == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_charge_is_logged_and_does_not_raise(gateway_logs: pytest.LogCaptureFixture) -> None:
+    billing = RecordingBilling(charge_error=RuntimeError("ledger down"))
+    db = _SavepointSession()
+
+    await pipeline.charge_deployment_paid(
+        _charge(billing), cast(Any, db), Decimal("1"), provider="openai", model="gpt-4o", expects_cost=True
+    )
+
+    # Its savepoint is rolled back, so nothing it wrote reaches the settlement's commit.
+    assert db.rolled_back == 1
+    errors = [r.getMessage() for r in gateway_logs.records if r.levelno == logging.ERROR]
+    assert any(str(ORGANIZATION_ID) in message and "req-1" in message for message in errors), errors
+    assert all("ledger down" not in message for message in errors)
+
+
+@pytest.mark.asyncio
+async def test_a_request_that_is_not_deployment_paid_is_never_charged() -> None:
+    db = _SavepointSession()
+    await pipeline.charge_deployment_paid(
+        None, cast(Any, db), Decimal("1"), provider="openai", model="gpt-4o", expects_cost=True
+    )
+    assert db.released == 0

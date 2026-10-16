@@ -16,8 +16,11 @@ import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
+from gateway.exceptions.tools_exceptions import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.models.tenancy import Organization, User, Workspace
-from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.models.tools import ResolvedCodeExecutionPolicy, WorkspaceCodeExecutionPolicy
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -25,18 +28,15 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    SandboxImageNotAllowedError,
-    SandboxToolsUnrunnableError,
-    WorkspaceNotFoundError,
-)
-from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    SERVED_TOOL_NAMES,
+from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES, SERVED_TOOL_NAMES
+from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
+from gateway.services.tools import (
+    WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceCodeExecutionPolicyUpdate,
-    resolve_workspace_code_execution_policy,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -73,9 +73,24 @@ def _service(
     db: AsyncSession,
     *,
     sandbox_configured: bool = True,
+    default_enabled: bool = True,
     allowed_images: tuple[str, ...] = (),
 ) -> WorkspaceCodeExecutionPolicyService:
-    return WorkspaceCodeExecutionPolicyService(db, sandbox_configured=sandbox_configured, allowed_images=allowed_images)
+    uow = UnitOfWork(db)
+    return WorkspaceCodeExecutionPolicyService(
+        uow,
+        WorkspaceCodeExecutionPolicyRepository(uow),
+        WorkspaceAccess(
+            db, OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        ),
+        sandbox_configured=sandbox_configured,
+        default_enabled=default_enabled,
+        allowed_images=allowed_images,
+    )
+
+
+async def _resolve(db: AsyncSession, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
+    return await WorkspaceCodeExecutionPolicies(WorkspaceCodeExecutionPolicyRepository(db)).resolve(workspace_id)
 
 
 async def test_a_workspace_with_no_policy_reads_as_unconfigured_and_narrows_nothing(
@@ -93,7 +108,7 @@ async def test_a_workspace_with_no_policy_reads_as_unconfigured_and_narrows_noth
     assert policy.max_iterations is None
     assert policy.exec_timeout_s is None
     # And the request path sees the same thing: no row at all, so no narrowing.
-    assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None
+    assert await _resolve(async_db, workspace.id) is None
 
 
 async def test_set_then_read_round_trips_and_the_request_path_sees_it(async_db: AsyncSession) -> None:
@@ -120,7 +135,7 @@ async def test_set_then_read_round_trips_and_the_request_path_sees_it(async_db: 
     read_back = await _service(async_db).get_policy(user=owner, workspace_id=workspace.id)
     assert read_back.max_iterations == 3
 
-    resolved = await resolve_workspace_code_execution_policy(async_db, workspace.id)
+    resolved = await _resolve(async_db, workspace.id)
     assert resolved is not None
     assert resolved.enabled is True
     assert resolved.default_purpose_hint == "Prefer running code"
@@ -181,7 +196,7 @@ async def test_clearing_returns_the_workspace_to_the_deployment_default(async_db
 
     assert cleared.configured is False
     assert cleared.enabled is True
-    assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None
+    assert await _resolve(async_db, workspace.id) is None
 
     # Idempotent: clearing again is the state already asked for, not a 404.
     assert (await service.clear_policy(user=owner, workspace_id=workspace.id)).configured is False
@@ -354,7 +369,7 @@ async def test_deleting_the_workspace_takes_its_policy_with_it(async_db: AsyncSe
     await WorkspaceRepository(async_db).delete_workspace(workspace)
     await async_db.commit()
 
-    assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None
+    assert await _resolve(async_db, workspace.id) is None
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +393,7 @@ async def test_an_image_the_operator_curated_round_trips_to_the_request_path(asy
     assert stored.image == _IMAGE
     assert stored.tools == ["code_execution"]
 
-    resolved = await resolve_workspace_code_execution_policy(async_db, workspace.id)
+    resolved = await _resolve(async_db, workspace.id)
     assert resolved is not None
     assert resolved.image == _IMAGE
     assert resolved.tools == frozenset({"code_execution"})
@@ -399,7 +414,7 @@ async def test_an_image_the_operator_did_not_curate_is_refused(async_db: AsyncSe
 
     assert _IMAGE in str(excinfo.value), "the refusal names what is allowed instead"
     # And nothing was stored: the check runs before the row is touched.
-    assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None
+    assert await _resolve(async_db, workspace.id) is None
 
 
 async def test_a_deployment_that_curated_no_images_lets_a_workspace_pin_none(async_db: AsyncSession) -> None:
@@ -520,4 +535,4 @@ async def test_a_tool_list_this_deployment_cannot_run_is_refused_at_the_write(
         )
 
     assert "enabled=false" in str(excinfo.value), "the refusal points at the way to actually refuse"
-    assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None
+    assert await _resolve(async_db, workspace.id) is None

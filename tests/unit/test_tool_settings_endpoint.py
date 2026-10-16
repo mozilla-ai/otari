@@ -7,10 +7,13 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from gateway.api.routes import tool_settings
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
+from gateway.models.tools import SearchToolCredential
 
 AUTH = {"Authorization": "Bearer sk-test-master"}
 
@@ -43,6 +46,18 @@ def test_get_reports_effective_values(tmp_path: Path) -> None:
     assert fields["sandbox_url"]["type"] == "url"
     assert fields["web_search_max_results"]["value"] == 7
     assert fields["web_search_extract"]["type"] == "bool"
+
+
+def test_get_reports_the_sandbox_provider(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        body = client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json()
+    assert body["sandbox_provider"] == "protocol"
+
+
+def test_the_sandbox_provider_is_withheld_with_the_endpoints() -> None:
+    config = GatewayConfig.model_validate({"sandbox_provider": "E2B "})
+    assert tool_settings._current_fields(config).sandbox_provider == "e2b"
+    assert tool_settings._current_fields(config, include_urls=False).sandbox_provider is None
 
 
 def test_get_redacts_url_password(tmp_path: Path) -> None:
@@ -361,3 +376,98 @@ def test_the_executor_is_an_operator_setting_with_a_closed_vocabulary(tmp_path: 
         after = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
 
     assert after["code_execution_executor"]["value"] == "otari"
+
+
+def test_patch_accepts_defaults_that_name_instances(tmp_path: Path) -> None:
+    search_tools = {"exa": {"provider": "exa", "api_key": "k"}, "local": {"provider": "searxng"}}
+    fetch_tools = {"exa-fetch": {"provider": "exa", "api_key": "k"}}
+    with _client(tmp_path, search_tools=search_tools, fetch_tools=fetch_tools) as client:
+        for body in (
+            {"web_search_default_tool": "exa", "web_fetch_default_tool": "exa-fetch", "web_search_max_calls": 4},
+            {"web_search_default_tool": "none", "web_fetch_default_tool": "builtin_fetch"},
+            {"web_search_default_tool": None, "web_fetch_default_tool": None, "web_search_max_calls": None},
+        ):
+            resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json=body)
+            assert resp.status_code == 200, resp.text
+            fields = _fields(resp.json())
+            for key, value in body.items():
+                assert fields[key]["value"] == value
+                assert fields[key]["service"] == "web_search"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"web_search_default_tool": "gone"},
+        # The in-loop tool cannot search with a provider any-search has no adapter for.
+        {"web_search_default_tool": "local"},
+        {"web_fetch_default_tool": "exa"},
+        {"web_search_max_calls": 0},
+    ],
+)
+def test_patch_refuses_a_default_naming_no_instance(tmp_path: Path, body: dict[str, Any]) -> None:
+    search_tools = {"exa": {"provider": "exa", "api_key": "k"}, "local": {"provider": "searxng"}}
+    with _client(tmp_path, search_tools=search_tools) as client:
+        assert client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json=body).status_code == 422
+        # Nothing was stored or applied.
+        fields = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
+        assert all(fields[key]["value"] is None for key in body)
+
+
+def test_patch_accepts_a_default_naming_a_stored_search_tool(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        created = client.post(f"{API_ROOT}/search-tools", headers=AUTH, json={"name": "stored", "provider": "fake"})
+        assert created.status_code in (200, 201), created.text
+        resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_default_tool": "stored"})
+    assert resp.status_code == 200, resp.text
+    assert _fields(resp.json())["web_search_default_tool"]["value"] == "stored"
+
+
+def test_patch_stores_a_default_name_without_surrounding_spaces(tmp_path: Path) -> None:
+    with _client(tmp_path, search_tools={"exa": {"provider": "exa", "api_key": "k"}}) as client:
+        resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_default_tool": " exa "})
+    assert resp.status_code == 200, resp.text
+    assert _fields(resp.json())["web_search_default_tool"]["value"] == "exa"
+
+
+def test_patch_sees_a_search_tool_another_replica_stored(tmp_path: Path) -> None:
+    """The check reloads the stored search tools first, rather than trusting this worker's overlay."""
+    with _client(tmp_path) as client:
+        created = client.post(f"{API_ROOT}/search-tools", headers=AUTH, json={"name": "stored", "provider": "fake"})
+        assert created.status_code in (200, 201), created.text
+        # As on a replica whose overlay has not refreshed since the write.
+        client.app.state.config.search_tools = {}  # type: ignore[attr-defined]
+        resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_default_tool": "stored"})
+    assert resp.status_code == 200, resp.text
+
+
+def test_a_database_timeout_while_checking_a_default_is_a_clean_500(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare TimeoutError from the reload is a database error like any other: rolled back, nothing stored."""
+
+    async def _times_out(*_args: Any) -> set[str]:
+        raise TimeoutError
+
+    monkeypatch.setattr(tool_settings, "refresh_search_tool_cache", _times_out)
+    with _client(tmp_path, search_tools={"exa": {"provider": "exa", "api_key": "k"}}) as client:
+        resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_default_tool": "exa"})
+        assert resp.status_code == 500
+        assert resp.json()["detail"] == "Database error"
+        fields = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
+        assert fields["web_search_default_tool"]["value"] is None
+
+
+def test_patch_refuses_a_fetch_default_a_stored_search_tool_has_displaced(tmp_path: Path) -> None:
+    """A stored search tool of the same name leaves a fetch instance out, even one this worker has not seen yet."""
+    with _client(tmp_path, fetch_tools={"shared": {"provider": "fake"}}) as client:
+        # Stored before the configuration file named a fetch instance the same,
+        # since the API now refuses the name, and not yet seen by this worker.
+        engine = create_engine(f"sqlite:///{tmp_path / 'tool-settings-test.db'}")
+        try:
+            with Session(engine) as session, session.begin():
+                session.add(SearchToolCredential(name="shared", provider="fake", options={}))
+        finally:
+            engine.dispose()
+        resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_fetch_default_tool": "shared"})
+    assert resp.status_code == 422, resp.text

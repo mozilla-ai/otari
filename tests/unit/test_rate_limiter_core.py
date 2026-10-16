@@ -29,6 +29,21 @@ def test_rate_limiter_returns_rate_limit_info() -> None:
     assert info2.remaining == 3
 
 
+def test_require_room_counts_nothing_and_refuses_once_the_allowance_is_spent() -> None:
+    limiter = RateLimiter(rpm=2)
+    for _ in range(5):
+        limiter.require_room("ip-1")
+    limiter.check("ip-1")
+    limiter.require_room("ip-1")
+    limiter.check("ip-1")
+
+    with pytest.raises(HTTPException) as refused:
+        limiter.require_room("ip-1")
+    assert refused.value.status_code == 429
+    assert "Retry-After" in (refused.value.headers or {})
+    limiter.require_room("ip-2")
+
+
 def test_rate_limiter_reset_is_wall_clock() -> None:
     limiter = RateLimiter(rpm=5)
 
@@ -95,7 +110,7 @@ def test_rate_limiter_window_expiry() -> None:
 
 def test_rate_limiter_cleanup() -> None:
     limiter = RateLimiter(rpm=100)
-    limiter._CLEANUP_INTERVAL = 3
+    limiter._log._CLEANUP_INTERVAL = 3
 
     with patch("gateway.rate_limit.time") as mock_time:
         mock_time.monotonic.return_value = 1000.0
@@ -108,8 +123,8 @@ def test_rate_limiter_cleanup() -> None:
         mock_time.time.return_value = 1700000061.0
         limiter.check("active-user")
 
-        assert "stale-user" not in limiter._requests
-        assert "active-user" in limiter._requests
+        assert "stale-user" not in limiter._log._requests
+        assert "active-user" in limiter._log._requests
 
 
 def test_rate_limiter_uses_deque_buckets() -> None:
@@ -120,7 +135,7 @@ def test_rate_limiter_uses_deque_buckets() -> None:
         mock_time.time.return_value = 1700000000.0
         limiter.check("user-1")
 
-    assert isinstance(limiter._requests["user-1"], deque)
+    assert isinstance(limiter._log._requests["user-1"].entries, deque)
 
 
 def test_config_rejects_zero_rate_limit() -> None:

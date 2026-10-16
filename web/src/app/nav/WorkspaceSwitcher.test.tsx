@@ -12,7 +12,9 @@ import type {
 } from "@/client"
 import * as apiClient from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   callerOrganizationMembership,
   organization,
   organizationContext,
@@ -58,6 +60,8 @@ function mockApi(
     switchGate?: Promise<unknown>
     pendingInvitations?: PendingOrganizationInvitation[]
     pendingInvitationsFail?: boolean
+    /** The caller belongs to no organization, so the context read 404s. */
+    noOrganization?: boolean
   } = {},
 ) {
   const requests: Recorded[] = []
@@ -82,6 +86,9 @@ function mockApi(
       return workspace({ id: CREATED_WORKSPACE_ID, name: "Staging" }) as never
     }
     if (url === "/organizations/me") {
+      if (options.noOrganization) {
+        throw new apiClient.ApiError(404, "Organization not found")
+      }
       const base = organizationContext(options.context)
       if (!createdWorkspace) return base as never
       return {
@@ -130,12 +137,14 @@ function mockApi(
   return requests
 }
 
-function renderSwitcher() {
+function renderSwitcher(deployment = bootstrap()) {
   return renderWithRouter(
     <Provider>
-      <SelectedWorkspaceProvider>
-        <WorkspaceSwitcher isCollapsed={false} />
-      </SelectedWorkspaceProvider>
+      <DeploymentProvider value={deployment}>
+        <SelectedWorkspaceProvider>
+          <WorkspaceSwitcher isCollapsed={false} />
+        </SelectedWorkspaceProvider>
+      </DeploymentProvider>
     </Provider>,
   )
 }
@@ -411,14 +420,24 @@ function pendingHold() {
 }
 
 function renderSwitcherOnAPage(
-  options: { strict?: boolean; hold?: () => Promise<void> } = {},
+  options: {
+    strict?: boolean
+    hold?: () => Promise<void>
+    onNavigate?: () => void
+  } = {},
 ) {
   const shell = (
     <Provider>
-      <SelectedWorkspaceProvider>
-        <WorkspaceSwitcher isCollapsed={false} createHold={options.hold} />
-        <Outlet />
-      </SelectedWorkspaceProvider>
+      <DeploymentProvider value={bootstrap()}>
+        <SelectedWorkspaceProvider>
+          <WorkspaceSwitcher
+            isCollapsed={false}
+            createHold={options.hold}
+            onNavigate={options.onNavigate}
+          />
+          <Outlet />
+        </SelectedWorkspaceProvider>
+      </DeploymentProvider>
     </Provider>
   )
   return renderWithRouter(<div>USAGE PAGE</div>, {
@@ -545,8 +564,9 @@ describe("the workspace half of the scope switcher", () => {
   it("enters the workspace it just created", async () => {
     mockApi({ context: startedInAWorkspace })
     const beat = pendingHold()
+    const onNavigate = vi.fn()
     const user = userEvent.setup()
-    await renderSwitcherOnAPage({ hold: beat.hold })
+    await renderSwitcherOnAPage({ hold: beat.hold, onNavigate })
 
     const form = await fillCreateForm(user)
     // The label names the navigation, which is the only warning the operator
@@ -571,6 +591,8 @@ describe("the workspace half of the scope switcher", () => {
     // Both halves of "entering" it: the shell's scope moved to the new
     // workspace, and the flow ended on the page that scope reads.
     expect(await screen.findByText("OVERVIEW PAGE")).toBeInTheDocument()
+    // So the shell can close the mobile drawer over the page it landed on.
+    expect(onNavigate).toHaveBeenCalledTimes(1)
     expect(
       await screen.findByRole("button", {
         name: /^Switch workspace, currently Staging/,
@@ -660,6 +682,44 @@ describe("the workspace half of the scope switcher", () => {
   })
 })
 
+describe("the scope switcher for a caller with no organization", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.localStorage.clear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("points at the inbox instead of a create the server would refuse", async () => {
+    mockApi({ noOrganization: true, memberships: [] })
+    await renderSwitcher(bootstrap({ open_signup: false }))
+
+    const { menu } = await openMenu()
+
+    expect(within(menu).getByText("No organization")).toBeVisible()
+    expect(
+      within(menu).getByRole("button", { name: "Invitations" }),
+    ).toBeVisible()
+    expect(
+      within(menu).queryByRole("button", { name: "Create organization" }),
+    ).toBeNull()
+  })
+
+  it("offers to create one where signup is open", async () => {
+    mockApi({ noOrganization: true, memberships: [] })
+    await renderSwitcher(bootstrap({ open_signup: true }))
+
+    const { menu } = await openMenu()
+
+    expect(
+      within(menu).getByRole("button", { name: "Create organization" }),
+    ).toBeVisible()
+  })
+})
+
 /**
  * The invitee-side entry point (otari-ai#1999).
  *
@@ -691,8 +751,9 @@ describe("the invitations row in the scope switcher", () => {
 
   it("names how many are waiting and opens the inbox", async () => {
     mockApi({ pendingInvitations: [pendingOrganizationInvitation()] })
+    const onNavigate = vi.fn()
     const user = userEvent.setup()
-    await renderSwitcherOnAPage()
+    await renderSwitcherOnAPage({ onNavigate })
 
     await user.click(
       await screen.findByRole("button", { name: /^Switch workspace/ }),
@@ -703,6 +764,8 @@ describe("the invitations row in the scope switcher", () => {
     )
 
     expect(await screen.findByText("INVITATIONS PAGE")).toBeInTheDocument()
+    // So the shell can close the mobile drawer over the page it opened.
+    expect(onNavigate).toHaveBeenCalledTimes(1)
   })
 
   it("counts more than one in the plural", async () => {

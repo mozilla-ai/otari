@@ -11,7 +11,10 @@ from the streaming hot path, which has no database session. So stored providers
 are overlaid onto ``config.providers`` in memory: loaded at startup, refreshed
 on a TTL (like the alias cache), and re-applied immediately on the worker that
 served a write. A stored row wins over a config-file entry of the same instance
-name, and that shadowing is logged at startup so it is never silent.
+name, and that shadowing is logged at startup so it is never silent. An entry
+left without a credential once merged (``api_key: ${VAR}`` with ``VAR`` empty)
+is dropped from the merged map, with a warning, so it cannot shadow an
+organization's own key for the same provider.
 
 The API key is held encrypted; it is decrypted here only to build the in-memory
 overlay. A row whose key cannot be decrypted (no or wrong ``OTARI_SECRET_KEY``)
@@ -21,9 +24,9 @@ only: the caller must not load or refresh this in the hybrid platform path.
 
 import asyncio
 import time
-from typing import Any, Final
+from typing import Any, Final, cast
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -31,6 +34,7 @@ from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.providers import ProviderCredential
 from gateway.models.secret_fields import restore_redacted_values
+from gateway.services.provider_kwargs import prune_uncredentialed_providers
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -84,11 +88,6 @@ def _row_to_entry(row: ProviderCredential) -> dict[str, Any]:
     return entry
 
 
-def cached_providers() -> dict[str, dict[str, Any]]:
-    """The stored provider overlay this worker last loaded (decrypted)."""
-    return {name: dict(entry) for name, entry in _cache.items()}
-
-
 def cache_is_stale(ttl: float = PROVIDER_CACHE_TTL_SECONDS) -> bool:
     """Whether the cache has never been loaded or has outlived ``ttl``."""
     return _cached_at is None or (time.monotonic() - _cached_at) >= ttl
@@ -118,6 +117,9 @@ def apply_to_config(config: GatewayConfig) -> set[str]:
         config._provider_baseline = {name: dict(entry) for name, entry in config.providers.items()}
     baseline = config._provider_baseline
     config.providers = {**baseline, **_cache}
+    # After the merge, not before: a stored row fills a config-file entry whose
+    # ``${VAR}`` resolved empty, and the baseline keeps that entry so it can.
+    prune_uncredentialed_providers(config)
     return set(baseline) & set(_cache)
 
 
@@ -125,15 +127,17 @@ async def refresh_provider_cache(db: AsyncSession, config: GatewayConfig) -> set
     """Reload the overlay from the database, apply it, and return shadowed names."""
     global _cached_at  # noqa: PLW0603
 
-    rows = (await db.execute(select(ProviderCredential))).scalars().all()
+    # `populate_existing`: sessions use `expire_on_commit=False`, so without it
+    # a row still in the identity map (as after a rotation on this session)
+    # would return the values it was loaded with, not what is committed.
+    rows = (await db.execute(select(ProviderCredential).execution_options(populate_existing=True))).scalars().all()
     overlay: dict[str, dict[str, Any]] = {}
     for row in rows:
         try:
             overlay[row.instance] = _row_to_entry(row)
         except (SecretBoxUnavailableError, SecretDecryptionError):
             logger.warning(
-                "Skipping stored provider '%s': its API key could not be decrypted "
-                "(check OTARI_SECRET_KEY).",
+                "Skipping stored provider '%s': its API key could not be decrypted (check OTARI_SECRET_KEY).",
                 row.instance,
             )
     _cache.clear()
@@ -154,6 +158,9 @@ async def load_providers_at_startup(db: AsyncSession, config: GatewayConfig) -> 
         shadowed = await refresh_provider_cache(db, config)
     except Exception:
         logger.exception("Failed to load stored providers; continuing with config providers only")
+        # The empty overlay still has to be applied, so a config entry with no
+        # credential is dropped on this path too.
+        apply_to_config(config)
         return
     if _cache:
         logger.info("Loaded %d stored provider(s)", len(_cache))
@@ -259,13 +266,18 @@ async def save_credential(
     return row
 
 
-async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int]:
+async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int, int]:
     """Re-encrypt stored provider keys with the current primary OTARI_SECRET_KEY.
 
-    Returns ``(reencrypted, unreadable)``. Rows without a stored key are ignored.
-    If any encrypted key cannot be decrypted with the configured key set, it is
-    left untouched and counted as unreadable so the operator can recover it by
+    Returns ``(reencrypted, unreadable, skipped)``. Rows without a stored key are
+    ignored. A key that cannot be decrypted with the configured key set is left
+    untouched and counted as unreadable, so the operator can recover it by
     replacing that provider's key.
+
+    Each row is written only if it still holds the ciphertext that was read, so
+    an edit committed mid-rotation is not overwritten. Such a row is counted as
+    skipped rather than retried: whoever wrote it already encrypted it with the
+    primary key.
     """
     rows = (
         (await db.execute(select(ProviderCredential).where(ProviderCredential.encrypted_api_key.is_not(None))))
@@ -274,17 +286,31 @@ async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int]:
     )
     reencrypted = 0
     unreadable = 0
+    skipped = 0
     for row in rows:
-        if row.encrypted_api_key is None:
+        original = row.encrypted_api_key
+        if original is None:
             continue
         try:
-            plaintext = decrypt_secret(row.encrypted_api_key)
+            plaintext = decrypt_secret(original)
         except SecretDecryptionError:
             unreadable += 1
             continue
-        row.encrypted_api_key = encrypt_secret(plaintext)
-        reencrypted += 1
-    return reencrypted, unreadable
+        # Core UPDATE rather than a mutation on the loaded row: the whole point
+        # is the WHERE, and an ORM flush would carry no condition at all.
+        result = await db.execute(
+            update(ProviderCredential)
+            .where(ProviderCredential.instance == row.instance, ProviderCredential.encrypted_api_key == original)
+            .values(encrypted_api_key=encrypt_secret(plaintext))
+            .execution_options(synchronize_session=False)
+        )
+        # `execute` is typed as returning Result; an UPDATE always yields a
+        # CursorResult, which is where rowcount lives.
+        if cast(CursorResult[Any], result).rowcount == 1:
+            reencrypted += 1
+        else:
+            skipped += 1
+    return reencrypted, unreadable, skipped
 
 
 async def delete_credential(db: AsyncSession, instance: str) -> bool:

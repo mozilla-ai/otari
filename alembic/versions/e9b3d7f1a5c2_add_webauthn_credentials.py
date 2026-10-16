@@ -77,9 +77,7 @@ def upgrade() -> None:
     # Unique deployment-wide rather than per identity: an assertion arrives
     # naming only this id, so it is what a usernameless sign-in resolves an
     # identity from, and two rows sharing one would make that ambiguous.
-    op.create_index(
-        op.f("ix_webauthn_credential_credential_id"), "webauthn_credential", ["credential_id"], unique=True
-    )
+    op.create_index(op.f("ix_webauthn_credential_credential_id"), "webauthn_credential", ["credential_id"], unique=True)
     op.create_index(op.f("ix_webauthn_credential_rp_id"), "webauthn_credential", ["rp_id"], unique=False)
     op.create_index(op.f("ix_webauthn_credential_user_id"), "webauthn_credential", ["user_id"], unique=False)
 

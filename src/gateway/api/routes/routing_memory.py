@@ -49,15 +49,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.api.routes._helpers import resolve_managed_workspace_id
+from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
 from gateway.models.routing import RouterPreference, RoutingMemory
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.routing import KNN_BACKEND, backend_pool_is_teachable, get_router_backend
-from gateway.services.routing.knn import KnnRoutingMemory
+from gateway.services.routing import KNN_BACKEND, KnnRoutingMemory, backend_pool_is_teachable, get_router_backend
 
 router = APIRouter(
     prefix="/routing",
@@ -102,6 +102,7 @@ class ScoredExample(BaseModel):
             return None
         trimmed = value.strip()
         return trimmed or None
+
     scores: dict[str, Annotated[float, Field(ge=0.0, le=1.0)]] = Field(
         min_length=1,
         description=(
@@ -300,9 +301,7 @@ def _validated_scores(
             normalized[selector] = canonical
     if rejected:
         expected = (
-            f" Candidates this user's learned policies can use: {', '.join(sorted(known.values()))}."
-            if known
-            else ""
+            f" Candidates this user's learned policies can use: {', '.join(sorted(known.values()))}." if known else ""
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -332,9 +331,7 @@ def _validated_scores(
     return normalized
 
 
-def _learned_policies(
-    config: GatewayConfig, user_id: str | None, workspace_id: uuid.UUID
-) -> list[LearnedPolicy]:
+def _learned_policies(config: GatewayConfig, user_id: str | None, workspace_id: uuid.UUID) -> list[LearnedPolicy]:
     policies: list[LearnedPolicy] = []
     for name, spec in effective_policies(config, user_id, workspace_id=workspace_id).items():
         backend = spec.router_backend
@@ -413,11 +410,9 @@ async def rank_candidates(
     # every example in the batch would then fail its foreign key one at a time.
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from None
+        raise database_error("commit the workspace before recording router examples", exc) from None
     normalized = _validated_scores(config, request.user_id, request.examples, workspace_id)
 
     recorded = 0
@@ -433,11 +428,10 @@ async def rank_candidates(
                 task_id=example.task_id,
                 label_source=example.label_source,
             )
+        # Not DATABASE_ERRORS: the embedding call can raise TimeoutError too, and
+        # that is the 502 below, not a database failure.
         except SQLAlchemyError as exc:
-            logger.warning("Router example write failed after %d example(s)", recorded)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-            ) from exc
+            raise database_error(f"record a router example after {recorded} example(s)", exc) from exc
         except Exception as exc:
             # Broad on purpose, and matching the read path: `knn.rank` catches bare
             # `Exception` around the same call because an embedding provider can fail
@@ -445,9 +439,7 @@ async def rank_candidates(
             # default target; the write path has nothing safe to do, so it says what
             # broke. Earlier examples in the batch are already committed, which the
             # message states rather than pretending the call was atomic.
-            logger.warning(
-                "Router example embedding failed after %d example(s): %s", recorded, type(exc).__name__
-            )
+            logger.warning("Router example embedding failed after %d example(s): %s", recorded, type(exc).__name__)
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=(
@@ -472,11 +464,9 @@ async def rank_candidates(
                 )
             )
             await db.commit()
-        except SQLAlchemyError:
+        except DATABASE_ERRORS as exc:
             await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-            ) from None
+            raise database_error(f"store a router preference after {recorded} example(s)", exc) from None
 
     # Warmth of every pool this batch wrote into: each named partition, plus the
     # default pool when any example carried no task label.
@@ -527,9 +517,7 @@ async def routing_memory_status(
         k=backend.k,
         confidence_floor=backend.confidence_floor,
         default_pool=PoolStatus(records=total, warm=total >= seed),
-        tasks=[
-            TaskPool(task_id=task_id, records=count, warm=count >= seed) for task_id, count in per_task
-        ],
+        tasks=[TaskPool(task_id=task_id, records=count, warm=count >= seed) for task_id, count in per_task],
         policies=_learned_policies(config, user_id, target_workspace_id),
     )
 

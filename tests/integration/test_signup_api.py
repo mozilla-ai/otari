@@ -71,7 +71,7 @@ def test_signup_then_verify_then_sign_in(
     unverified = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
     assert unverified.status_code == 403
 
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
     assert verified.json()["email"] == "ada@example.com"
 
@@ -94,9 +94,6 @@ def test_invited_member_accepts_then_claims_the_invited_address(
     tested; the join between them was not, so nothing failed if the address the
     accept page previews stopped being the address signup can claim.
     """
-    monkeypatch.setattr(test_config, "mail_transport", "console")
-    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
-
     invited = client.post(
         f"{API_ROOT}/organizations/me/member-invitations",
         json={"email": "grace@example.com", "role": "member"},
@@ -105,6 +102,9 @@ def test_invited_member_accepts_then_claims_the_invited_address(
     assert invited.status_code == 201, invited.text
     accept_token = _TOKEN_IN_LINK.search(invited.json()["accept_link"])
     assert accept_token, invited.json()["accept_link"]
+    # Mail only from here on: a mailed invitation returns no link to share.
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
     # The address the claim is bound to is the one the preview publishes, which
     # is what lets the accept page prefill it without a second endpoint.
@@ -122,7 +122,7 @@ def test_invited_member_accepts_then_claims_the_invited_address(
     assert spent.status_code == 400, spent.text
 
     verification_token = _signed_up_token(client, caplog, email=previewed_email)
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": verification_token})
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": verification_token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
 
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": previewed_email, "password": PASSWORD})

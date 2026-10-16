@@ -3,7 +3,7 @@
 from any_llm.types.completion import CompletionUsage, PromptTokensDetails
 
 from gateway.core.usage import GatewayUsage
-from gateway.streaming import _merge_usage
+from gateway.streaming import merge_stream_usage
 
 
 def test_merge_usage_cumulative() -> None:
@@ -15,7 +15,7 @@ def test_merge_usage_cumulative() -> None:
 
     result = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     for chunk in chunks:
-        result = _merge_usage(result, chunk)
+        result = merge_stream_usage(result, chunk)
 
     assert result.prompt_tokens == 100
     assert result.completion_tokens == 30
@@ -26,7 +26,7 @@ def test_merge_usage_final_chunk_only() -> None:
     base = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     final = CompletionUsage(prompt_tokens=50, completion_tokens=200, total_tokens=250)
 
-    result = _merge_usage(base, final)
+    result = merge_stream_usage(base, final)
 
     assert result.prompt_tokens == 50
     assert result.completion_tokens == 200
@@ -37,7 +37,7 @@ def test_merge_usage_preserves_current_on_zero_update() -> None:
     current = CompletionUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
     update = CompletionUsage(prompt_tokens=0, completion_tokens=75, total_tokens=0)
 
-    result = _merge_usage(current, update)
+    result = merge_stream_usage(current, update)
 
     assert result.prompt_tokens == 100
     assert result.completion_tokens == 75
@@ -54,7 +54,7 @@ def test_merge_usage_preserves_cache_tokens() -> None:
         cache_write_tokens=15,
     )
 
-    result = _merge_usage(current, update)
+    result = merge_stream_usage(current, update)
 
     assert isinstance(result, GatewayUsage)
     assert result.cache_read_tokens == 60
@@ -71,7 +71,7 @@ def test_merge_usage_keeps_current_cache_on_zero_update() -> None:
     )
     update = GatewayUsage(prompt_tokens=0, completion_tokens=20, total_tokens=0)
 
-    result = _merge_usage(current, update)
+    result = merge_stream_usage(current, update)
 
     assert isinstance(result, GatewayUsage)
     assert result.cache_read_tokens == 40
@@ -88,7 +88,7 @@ def test_merge_usage_reads_plain_completion_usage_cached_tokens() -> None:
         prompt_tokens_details=PromptTokensDetails(cached_tokens=30),
     )
 
-    result = _merge_usage(current, update)
+    result = merge_stream_usage(current, update)
 
     assert isinstance(result, GatewayUsage)
     assert result.cache_read_tokens == 30

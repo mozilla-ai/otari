@@ -257,14 +257,15 @@ async def test_failed_request_logs_error(
     db_session: Session,
 ) -> None:
     """Test that failed requests are logged with error status."""
-    response = client.post(
-        f"{API_ROOT}/chat/completions",
-        json={
-            "model": "gemini:invalid-model",
-            "messages": test_messages,
-        },
-        headers=api_key_header,
-    )
+    with patch("gateway.api.routes.chat.acompletion", side_effect=RuntimeError("provider down")):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": "gemini:invalid-model",
+                "messages": test_messages,
+            },
+            headers=api_key_header,
+        )
 
     assert response.status_code == 502
 
@@ -378,11 +379,12 @@ def test_failed_request_records_latency(
     db_session: Session,
 ) -> None:
     """The failure path also records latency_ms (never negative)."""
-    response = client.post(
-        f"{API_ROOT}/chat/completions",
-        json={"model": "gemini:invalid-model", "messages": test_messages},
-        headers=api_key_header,
-    )
+    with patch("gateway.api.routes.chat.acompletion", side_effect=RuntimeError("provider down")):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "gemini:invalid-model", "messages": test_messages},
+            headers=api_key_header,
+        )
     assert response.status_code == 502
 
     log = db_session.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).first()

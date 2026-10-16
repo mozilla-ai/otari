@@ -18,9 +18,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import _raise_for_unresolvable_model, failure_status_code
+from gateway.api.routes._pipeline import (
+    PROVIDER_CREDENTIALS_DETAIL,
+    _raise_for_unresolvable_model,
+    classify_provider_error,
+    failure_status_code,
+)
+from gateway.api.routes._platform import is_provider_credential_rejection
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
 from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
@@ -41,11 +48,16 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.inference import is_upstream_request_fault
 from gateway.services.log_writer import LogWriter
-from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
+from gateway.services.model_access import (
+    is_model_allowed,
+    model_not_allowed_detail,
+    org_model_refusal,
+    resolve_request_allowlist,
+)
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
-from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -185,9 +197,7 @@ def _resolve_batch_provider(
     return impl, get_provider_kwargs(config, impl, workspace_id=workspace_id)
 
 
-async def _lifecycle_workspace_id(
-    db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None
-) -> uuid.UUID:
+async def _lifecycle_workspace_id(db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None) -> uuid.UUID:
     """Which workspace's organization-scoped credentials a lifecycle call should use.
 
     The batch's own stored ``workspace_id`` when there is a record that has one
@@ -254,9 +264,7 @@ def _authorize_record(
         return
     requester = str(api_key.user_id) if api_key and api_key.user_id else None
     denied = record.user_id != requester or (
-        record.workspace_id is not None
-        and api_key is not None
-        and record.workspace_id != api_key.workspace_id
+        record.workspace_id is not None and api_key is not None and record.workspace_id != api_key.workspace_id
     )
     if denied:
         raise HTTPException(
@@ -285,13 +293,31 @@ def _authorize_legacy_batch(
         )
 
 
+def _provider_failure(exc: Exception) -> HTTPException:
+    """The answer to a failed provider call.
+
+    A rejected credential is a 424, and a 403 that rejects the request itself the
+    caller's 400 with the provider's sentence, as on the completion routes.
+    Anything else is a 502.
+    """
+    if is_upstream_request_fault(exc) and (mapping := classify_provider_error(exc)) is not None:
+        return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
+    if is_provider_credential_rejection(exc):
+        return HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail=PROVIDER_CREDENTIALS_DETAIL,
+            headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
+        )
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM provider error")
+
+
 async def _retrieve_batch_or_502(
     provider_enum: LLMProvider,
     batch_id: str,
     provider: str,
     provider_kwargs: dict[str, Any],
 ) -> Batch:
-    """Retrieve a batch from the provider, mapping failures to 502."""
+    """Retrieve a batch from the provider, mapping failures as ``_provider_failure`` does."""
     try:
         batch: Batch = await aretrieve_batch(
             provider=provider_enum,
@@ -302,10 +328,7 @@ async def _retrieve_batch_or_502(
         raise
     except Exception as e:
         logger.error("Batch retrieve failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
     return batch
 
 
@@ -358,7 +381,7 @@ async def create_batch(
         reject_mismatch=config.reject_user_mismatch,
     )
 
-    rate_limit_info = check_rate_limit(raw_request, user_id)
+    rate_limit_info = await check_rate_limit(raw_request, user_id)
 
     # Zero I/O for a keyed request (see `_pipeline.resolve_request_context`'s
     # equivalent comment); only a master-key request pays a lookup.
@@ -373,12 +396,11 @@ async def create_batch(
     # refund. Master-key callers have api_key None -> unrestricted. A key with no
     # list of its own inherits its user's default.
     key_allowlist = await resolve_request_allowlist(db, api_key)
-    if key_allowlist is not None and not is_model_allowed(
-        key_allowlist, f"{resolved.instance}:{resolved.model}"
-    ):
+    if key_allowlist is not None and not is_model_allowed(key_allowlist, f"{resolved.instance}:{resolved.model}"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=model_not_allowed_detail(request.model),
+            headers=error_headers(MODEL_NOT_ALLOWED),
         )
 
     # Organization-scoped model restriction (otari#643): mirrors `_pipeline.py`'s
@@ -386,11 +408,14 @@ async def create_batch(
     # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
     # uses to decide whether to consult the organization overlay at all.
     if workspace_id is not None and resolved.instance not in config.providers:
-        org_allowlist = cached_org_model_restriction(workspace_id, provider.value)
-        if org_allowlist is not None and model not in org_allowlist:
+        refusal = org_model_refusal(
+            workspace_id, provider.value, model, selector=request.model, through_alias=resolved.alias is not None
+        )
+        if refusal is not None:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=model_not_allowed_detail(request.model),
+                status_code=refusal.status_code,
+                detail=refusal.detail,
+                headers=error_headers(refusal.code),
             )
 
     # Validate provider supports batch operations
@@ -469,10 +494,7 @@ async def create_batch(
         )
         await refund_reservation(db, reservation)
         logger.error("Batch create failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
     finally:
         try:
             os.unlink(tmp_path)
@@ -576,10 +598,7 @@ async def cancel_batch(
         raise
     except Exception as e:
         logger.error("Batch cancel failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
 
     response_data = batch.model_dump()
     response_data["provider"] = provider
@@ -623,10 +642,7 @@ async def list_batches(
         raise
     except Exception as e:
         logger.error("Batch list failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
 
     # Prefer the local records (strict) and fall back to the metadata marker for
     # legacy batches. One bulk lookup avoids a per-batch query.
@@ -641,11 +657,7 @@ async def list_batches(
             # Same pair as `_authorize_record`, and tolerant of a NULL workspace
             # for the same reason: a batch created before the column existed has
             # no workspace to compare against.
-            in_workspace = (
-                record.workspace_id is None
-                or api_key is None
-                or record.workspace_id == api_key.workspace_id
-            )
+            in_workspace = record.workspace_id is None or api_key is None or record.workspace_id == api_key.workspace_id
             return record.user_id == requester and in_workspace
         return _owns_batch(batch, api_key, is_master_key)
 
@@ -719,10 +731,7 @@ async def retrieve_batch_results(
         ) from e
     except Exception as e:
         logger.error("Batch results retrieve failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
 
     # Extract model from the first successful result if available
     batch_model = "batch"

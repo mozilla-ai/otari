@@ -8,7 +8,8 @@ transport is what proves a *templated message actually sends* without one.
 
 import ast
 import logging
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -29,8 +30,11 @@ from gateway.services.mail import (
     render_email,
     select_transport,
 )
-from gateway.services.mail.templates import _load
+from gateway.services.mail.templates import FONT_FILES, MARK_PATH, _load
 from gateway.services.mail.transports import build_mime
+from gateway.services.tenancy.invitation_email import render_invitation_email
+from gateway.services.tenancy.password_reset_email import render_account_exists_email, render_password_reset_email
+from gateway.services.tenancy.verification_email import render_verification_email
 
 MESSAGE = MailMessage(subject="Hi", html="<p>Hi</p>", text="Hi")
 
@@ -423,6 +427,29 @@ def test_whatever_can_send_links_permits_is_followable_from_an_inbox() -> None:
     assert mailer.link("/#/verify-email?token=t") == "https://app.example.com/ui/#/verify-email?token=t"
 
 
+def test_a_query_on_the_interface_address_travels_ahead_of_the_hash_route() -> None:
+    # An edge serving one interface for several deployments needs each link to
+    # say which one built it. Placed before the hash so the page's own location
+    # carries it, where the route's query would only reach the route.
+    mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui/?edge=eu"))
+
+    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/?edge=eu#/verify-email?token=abc"
+    assert mailer.link("/x") == "https://app.example.com/ui/x?edge=eu"
+    assert mailer.link("/x?y=1") == "https://app.example.com/ui/x?y=1&edge=eu"
+
+
+def test_a_trailing_slash_inside_a_query_value_survives_the_link() -> None:
+    mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui/?edge=team/"))
+
+    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/?edge=team/#/verify-email?token=abc"
+
+
+def test_asset_root_is_the_interface_address_without_its_query() -> None:
+    config = _ready(ui_base_url="https://otari.example.com/dashboard/?region=eu")
+    assert Mailer(config).asset_root == "https://otari.example.com/dashboard"
+    assert Mailer(GatewayConfig()).asset_root is None
+
+
 def test_link_does_not_double_a_trailing_slash() -> None:
     assert Mailer(_ready(public_base_url="https://otari.example.com/")).link("/x") == "https://otari.example.com/x"
 
@@ -436,6 +463,92 @@ def test_render_wraps_a_body_in_the_shared_layout() -> None:
     assert "<title>Otari test message</title>" in message.html
     assert "Your Otari mail settings work" in message.html
     assert message.text.rstrip().endswith("Otari")
+
+
+def test_the_mark_and_fonts_load_from_the_asset_root_and_are_left_out_without_one() -> None:
+    values = {"UI_BASE_URL": "u", "TRANSPORT": "t"}
+    with_root = render_email("mail_test", subject="x", values=values, asset_root="https://otari.example.com/ui")
+    assert f'src="https://otari.example.com/ui/{MARK_PATH}"' in with_root.html
+    for _, path, _ in FONT_FILES:
+        assert f"url('https://otari.example.com/ui/{path}')" in with_root.html
+
+    without = render_email("mail_test", subject="x", values=values)
+    assert "<img" not in without.html
+    assert "@font-face" not in without.html
+
+
+def test_every_body_template_is_a_run_of_card_rows() -> None:
+    """The layout places a body between table rows, where a browser hoists anything else out of the card."""
+    package = Path(mail_package.__file__).parents[2] / "templates" / "email"
+    bodies = sorted(path for path in package.glob("*.html") if not path.name.startswith("_"))
+    assert bodies, "no body templates found; this test would pass vacuously"
+    for path in bodies:
+        body = path.read_text(encoding="utf-8").strip()
+        assert body.startswith("<tr>") and body.endswith("</tr>"), path.name
+
+
+@pytest.mark.parametrize(
+    "render",
+    [
+        lambda root: render_invitation_email(
+            organization_name="Acme",
+            inviter_name="Ada",
+            inviter_email="ada@example.com",
+            role="member",
+            accept_link="https://otari.example.com/#/accept-invitation?token=t",
+            expiry_hours=168,
+            asset_root=root,
+        ),
+        lambda root: render_verification_email(
+            verify_link="https://otari.example.com/v", expiry_hours=24, asset_root=root
+        ),
+        lambda root: render_password_reset_email(
+            reset_link="https://otari.example.com/r", expiry_hours=2, asset_root=root
+        ),
+        lambda root: render_account_exists_email(
+            sign_in_link="https://otari.example.com/", has_password=True, provider=None, asset_root=root
+        ),
+    ],
+    ids=["invitation", "verify_email", "password_reset", "account_exists"],
+)
+def test_every_message_loads_its_mark_and_fonts_from_the_asset_root(render: Callable[[str], MailMessage]) -> None:
+    html = render("https://otari.example.com/ui").html
+    assert f'src="https://otari.example.com/ui/{MARK_PATH}"' in html
+    assert "@font-face" in html
+
+
+@pytest.mark.asyncio
+async def test_send_template_loads_the_mark_from_the_deployment() -> None:
+    mailer = Mailer(_ready(ui_base_url="https://otari.example.com/ui/?region=eu"))
+    with patch.object(Mailer, "send", autospec=True) as send:
+        await mailer.send_template(
+            "mail_test", to="ada@example.com", subject="x", values={"UI_BASE_URL": "u", "TRANSPORT": "t"}
+        )
+    message = send.call_args.kwargs["message"]
+    assert f'src="https://otari.example.com/ui/{MARK_PATH}"' in message.html
+
+
+def test_every_asset_a_message_loads_is_a_file_the_dashboard_serves() -> None:
+    """A moved file would break the mark or the fonts in every message without failing anything else."""
+    public = Path(__file__).parents[2] / "web" / "public"
+    for path in (MARK_PATH, *(path for _, path, _ in FONT_FILES)):
+        assert (public / path).is_file(), path
+
+
+def test_the_preheader_is_filled_escaped_and_hidden() -> None:
+    message = render_email(
+        "mail_test",
+        subject="x",
+        values={"UI_BASE_URL": "u", "TRANSPORT": "<b>smtp</b>"},
+        preheader="Sent over {{TRANSPORT}}.",
+    )
+    assert "Sent over &lt;b&gt;smtp&lt;/b&gt;." in message.html
+    assert 'style="display:none;' in message.html
+    assert "Sent over" not in message.text
+
+    assert (
+        "display:none" not in render_email("mail_test", subject="x", values={"UI_BASE_URL": "u", "TRANSPORT": "t"}).html
+    )
 
 
 def test_a_placeholder_with_no_value_fails_here_rather_than_in_an_inbox() -> None:
@@ -471,6 +584,8 @@ def test_a_missing_template_is_named() -> None:
 def test_a_reserved_value_name_is_refused_rather_than_silently_overwritten() -> None:
     with pytest.raises(MailTemplateError, match="SUBJECT"):
         render_email("mail_test", subject="x", values={"SUBJECT": "mine", "UI_BASE_URL": "u", "TRANSPORT": "t"})
+    with pytest.raises(MailTemplateError, match="MARK"):
+        render_email("mail_test", subject="x", values={"MARK": "<img>", "UI_BASE_URL": "u", "TRANSPORT": "t"})
 
 
 def test_a_value_is_never_rescanned_as_a_placeholder() -> None:
@@ -535,3 +650,28 @@ def test_normalized_address_lowercases_trims_and_refuses_a_non_address() -> None
     assert normalized_address("ada@example") is None
     assert normalized_address("not an address") is None
     assert normalized_address("") is None
+
+
+def test_normalized_address_refuses_the_edge_shapes() -> None:
+    assert normalized_address("a@b.c") == "a@b.c"
+    assert normalized_address("a@b.c.d") == "a@b.c.d"
+    assert normalized_address("@b.c") is None
+    assert normalized_address("a@.bc") is None
+    assert normalized_address("a@bc.") is None
+    assert normalized_address("a@b@c.d") is None
+    assert normalized_address("a b@c.d") is None
+    assert normalized_address("a@b .c") is None
+
+
+def test_normalized_address_refuses_an_empty_domain_label() -> None:
+    """A mail server refuses these, and an invitation to one used to fail where nobody saw it."""
+    assert normalized_address("x@example.test.") is None
+    assert normalized_address("x@.example.test") is None
+    assert normalized_address("x@example..test") is None
+    assert normalized_address("x@sub.example.test") == "x@sub.example.test"
+
+
+def test_normalized_address_is_linear_on_a_long_run_of_dots() -> None:
+    started = time.perf_counter()
+    assert normalized_address("!@!." + "!." * 50_000 + "@") is None
+    assert time.perf_counter() - started < 0.5

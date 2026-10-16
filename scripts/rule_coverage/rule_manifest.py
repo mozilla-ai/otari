@@ -37,9 +37,7 @@ MANIFEST_DIR = Path(__file__).resolve().parent
 
 FRONTEND_MANIFEST = MANIFEST_DIR / "frontend-standards.txt"
 FRONTEND_SKILL_DIR = REPO_ROOT / ".github" / "skills" / "frontend-standards"
-FRONTEND_INSTRUCTIONS = (
-    REPO_ROOT / ".github" / "instructions" / "frontend-standards.instructions.md"
-)
+FRONTEND_INSTRUCTIONS = REPO_ROOT / ".github" / "instructions" / "frontend-standards.instructions.md"
 
 # `<file> :: <heading>`. Two colons rather than one because a heading may end in
 # one, and rather than `#` because `#` already means "reason trailer" here.

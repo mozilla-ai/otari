@@ -20,12 +20,13 @@ per page load.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db, require_deployment_operator
+from gateway.api.routes._helpers import database_error
+from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode, stage_maintenance_mode
 
@@ -75,12 +76,8 @@ async def update_maintenance_mode(
     try:
         await stage_maintenance_mode(db, enabled=request.enabled)
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        logger.warning("Failed to persist the maintenance-mode flag", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("persist the maintenance-mode flag", exc) from None
     logger.info("Dashboard sign-in freeze set to %s", request.enabled)
     return MaintenanceMode(enabled=request.enabled)

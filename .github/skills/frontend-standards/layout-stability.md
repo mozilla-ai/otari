@@ -53,13 +53,13 @@ pulse so the motion-safe handling comes with it.
 ## Theme is applied before the first paint
 
 `web/index.html` carries an inline script that reads `otari.dashboard.theme` from
-localStorage, resolves `system` against `prefers-color-scheme`, and sets `data-theme`, the
+localStorage, uses a stored `light` or `dark` and otherwise `prefers-color-scheme`, and sets `data-theme`, the
 `dark` class, and `color-scheme` on `<html>` before the bundle loads. `useTheme`
 (`src/shared/hooks/useTheme.tsx`) sets the same three properties once React has mounted.
 
 **The duplication is deliberate and the two must stay in step.** Moving the initial resolution
 into the effect alone would paint the boot screen light for every operator who chose dark. If
-you change the storage key, the three-state resolution, or which attributes carry the theme,
+you change the storage key, the resolution rule, or which attributes carry the theme,
 change both, and `useTheme.test.tsx` plus the screenshot matrix's dark projects are what
 notice when you do not.
 

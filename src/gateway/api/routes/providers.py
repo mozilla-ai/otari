@@ -23,7 +23,9 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.log_config import logger
 from gateway.models.providers import ProviderCredential
@@ -146,7 +148,7 @@ async def list_providers(
     """List static metadata for every configured provider.
 
     Operator-facing: reports each provider's capabilities, documentation and
-    pricing links, and display name from the bundled any-llm and genai-prices
+    pricing links, and display name from the bundled any-llm and models.dev
     datasets. No provider is contacted, so this is cheap and always available.
     """
     return ProvidersResponse(providers=[_to_schema(info) for info in list_provider_info(config)])
@@ -193,7 +195,7 @@ async def provider_catalog() -> list[KnownProviderSummarySchema]:
     """List every known provider for the add-provider picker: id and name only.
 
     Lightweight by design so the picker never lags: provider ids come from the
-    any-llm registry and names from the bundled genai-prices dataset, so no
+    any-llm registry and names from the models.dev catalog, so no
     provider SDK is imported. The autofill hints for a chosen provider come from
     GET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.
     """
@@ -389,6 +391,13 @@ class ReencryptProviderCredentialsResponse(BaseModel):
 
     reencrypted: int = Field(description="Number of stored provider keys re-encrypted.")
     unreadable: int = Field(description="Number of encrypted keys left untouched because they could not be decrypted.")
+    skipped: int = Field(
+        default=0,
+        description=(
+            "Number of rows whose stored key changed between the read and the write, so the "
+            "re-encryption was not applied. They already hold whoever wrote them last."
+        ),
+    )
 
 
 class TestProviderRequest(BaseModel):
@@ -450,22 +459,19 @@ async def _gate_api_base(api_base: str | None) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
 
-async def _commit(db: AsyncSession, *, conflict_detail: str | None = None) -> None:
+async def _commit(db: AsyncSession, operation: str, *, conflict_detail: str | None = None) -> None:
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         # A concurrent create can slip past the pre-check and collide on the
         # primary key here; surface that as the intended 409, not a 500.
         await db.rollback()
         if conflict_detail is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
-    except SQLAlchemyError:
+        raise database_error(operation, exc) from None
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error(operation, exc) from None
 
 
 async def _apply_write(db: AsyncSession, config: GatewayConfig, instance: str) -> None:
@@ -533,20 +539,20 @@ async def reencrypt_stored_provider_keys(
     by replacing the affected provider keys.
     """
     try:
-        reencrypted, unreadable = await reencrypt_credentials(db)
+        reencrypted, unreadable, skipped = await reencrypt_credentials(db)
         await db.commit()
     except SecretBoxUnavailableError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error("reencrypt stored provider keys", exc) from None
     get_model_cache().clear()
     try:
         await refresh_provider_cache(db, config)
     except SQLAlchemyError:
         logger.warning("Provider overlay refresh failed after re-encrypting credentials; converges within TTL")
-    return ReencryptProviderCredentialsResponse(reencrypted=reencrypted, unreadable=unreadable)
+    return ReencryptProviderCredentialsResponse(reencrypted=reencrypted, unreadable=unreadable, skipped=skipped)
 
 
 @router.get("/provider-credentials")
@@ -587,6 +593,7 @@ async def create_stored_provider(
 
     await _commit(
         db,
+        "create stored provider",
         conflict_detail=f"A stored provider '{request.instance}' already exists; use PATCH to update it.",
     )
     if request.instance in (config._provider_baseline or {}):
@@ -639,7 +646,7 @@ async def update_stored_provider(
     except SecretBoxUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
-    await _commit(db)
+    await _commit(db, "update stored provider")
     await _apply_write(db, config, instance)
     await db.refresh(row)
     return StoredProviderResponse.from_model(row)
@@ -657,7 +664,7 @@ async def delete_stored_provider(
         if instance in (config._provider_baseline or {}):
             detail = f"Provider '{instance}' is defined in config.yml and cannot be deleted through the API."
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
-    await _commit(db)
+    await _commit(db, "delete stored provider")
     await _apply_write(db, config, instance)
 
 

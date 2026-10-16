@@ -22,8 +22,9 @@ class StubLogWriter:
     def __init__(self) -> None:
         self.logs = []
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         self.logs.append(log)
+        return True
 
     async def start(self) -> None:  # pragma: no cover - not used
         return None

@@ -5,9 +5,11 @@ import type {
   CreateWorkspaceMcpServerRequest,
   GuardrailCatalog,
   OrganizationGuardrail,
+  OrganizationGuardrailTestResult,
   SearchProviderInfo,
   SearchToolsResponse,
   StoredSearchTool,
+  TestOrganizationGuardrailRequest,
   TestServiceResponse,
   ToolSettingsResponse,
   ToolsResponse,
@@ -32,6 +34,7 @@ import {
   TOOL_SETTINGS,
   TOOLS,
   WORKSPACES,
+  workspaceMeta,
 } from "@/shared/api/queryKeys"
 
 export function useToolSettings(enabled = true) {
@@ -230,6 +233,22 @@ export function useUpdateOrganizationGuardrail() {
   })
 }
 
+export function useTestOrganizationGuardrail() {
+  return useMutation({
+    mutationFn: ({
+      guardrailId,
+      body,
+    }: {
+      guardrailId: string
+      body: TestOrganizationGuardrailRequest
+    }) =>
+      apiFetch<OrganizationGuardrailTestResult>(
+        `/organizations/me/guardrails/${encodeURIComponent(guardrailId)}/test`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+  })
+}
+
 export function useDeleteOrganizationGuardrail() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -249,6 +268,7 @@ export function useDeleteOrganizationGuardrail() {
 export function useWorkspaceCodeExecutionPolicy(workspaceId: string | null) {
   return useQuery({
     queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceCodeExecutionPolicy>(
         `/workspaces/${encodeURIComponent(workspaceId as string)}/code-execution-policy`,
@@ -308,6 +328,7 @@ export function useClearWorkspaceCodeExecutionPolicy() {
 export function useWorkspaceWebSearchConfig(workspaceId: string | null) {
   return useQuery({
     queryKey: [WORKSPACES, workspaceId, "web-search"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceWebSearchConfig>(
         `/workspaces/${encodeURIComponent(workspaceId as string)}/web-search`,
@@ -373,6 +394,7 @@ const MCP_SERVERS_PAGE_SIZE = 1000
 export function useWorkspaceMcpServers(workspaceId: string | null) {
   return useQuery({
     queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceMcpServers>(
         `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers?limit=${MCP_SERVERS_PAGE_SIZE}`,

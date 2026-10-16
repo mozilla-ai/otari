@@ -53,9 +53,9 @@ on an ``AsyncSession``), so the routes join explicitly.
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from sqlalchemy import Column, Index, Text, UniqueConstraint
+from sqlalchemy import JSON, Column, Index, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin
@@ -72,6 +72,9 @@ MAX_MESSAGE_CONTENT_LENGTH = 200_000
 MAX_MESSAGES_PER_CONVERSATION = 400
 MAX_MODEL_KEY_LENGTH = 512
 MAX_COMPARISON_TEXT_LENGTH = 200_000
+MAX_ATTACHMENTS_PER_MESSAGE = 10
+MAX_FILE_ID_LENGTH = 64
+MAX_FILENAME_LENGTH = 255
 
 # How many rows one identity keeps per workspace before the oldest are pruned to
 # make room. A cap is needed because nothing else bounds these tables, and
@@ -119,7 +122,7 @@ class PlaygroundConsentUpdate(SQLModel):
     store_comparisons: bool | None = None
 
 
-class PlaygroundConsent(SQLModel, CreatedAtMixin, UpdatedAtMixin, table=True):
+class PlaygroundConsent(CreatedAtMixin, UpdatedAtMixin, table=True):
     """One identity's content-retention consent for the Playground.
 
     ``user_id`` is the primary key: an identity has one consent record or none,
@@ -148,6 +151,19 @@ class PlaygroundConsent(SQLModel, CreatedAtMixin, UpdatedAtMixin, table=True):
 # ==============================================================================
 
 
+class PlaygroundAttachment(SQLModel):
+    """A file one turn sent, as the page draws its chip and sends it again.
+
+    A record of the attachment rather than a reference the gateway keeps alive:
+    the file can be deleted after the save, and a resumed turn that sends it
+    then does not send its contents.
+    """
+
+    file_id: str = Field(max_length=MAX_FILE_ID_LENGTH)
+    filename: str = Field(max_length=MAX_FILENAME_LENGTH)
+    bytes: int = Field(ge=0)
+
+
 class PlaygroundMessageCreate(SQLModel):
     """One turn in a transcript being saved."""
 
@@ -157,6 +173,7 @@ class PlaygroundMessageCreate(SQLModel):
     # page renders it in a collapsed block and a resumed transcript that lost it
     # reads as a different answer than the one that was saved.
     reasoning: str | None = Field(default=None, max_length=MAX_MESSAGE_CONTENT_LENGTH)
+    attachments: list[PlaygroundAttachment] = Field(default_factory=list, max_length=MAX_ATTACHMENTS_PER_MESSAGE)
 
 
 class PlaygroundConversationCreate(SQLModel):
@@ -202,13 +219,14 @@ class PlaygroundMessagePublic(SQLModel):
     role: str
     content: str
     reasoning: str | None = None
+    attachments: list[PlaygroundAttachment] = []
 
 
 class PlaygroundMessagesPublic(SQLModel):
     data: list[PlaygroundMessagePublic]
 
 
-class PlaygroundConversation(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class PlaygroundConversation(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """One saved single-panel transcript, owned by the identity that saved it."""
 
     __tablename__ = "playground_conversation"
@@ -234,7 +252,7 @@ class PlaygroundConversation(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedA
     model: str = Field(max_length=MAX_MODEL_KEY_LENGTH)
 
 
-class PlaygroundMessage(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
+class PlaygroundMessage(PrimaryKeyMixin, CreatedAtMixin, table=True):
     """One turn of a saved transcript."""
 
     __tablename__ = "playground_message"
@@ -251,6 +269,9 @@ class PlaygroundMessage(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
     role: str = Field(max_length=16)
     content: str = Field(sa_column=Column(Text, nullable=False))
     reasoning: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    attachments: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False, server_default="[]")
+    )
 
 
 # ==============================================================================
@@ -299,7 +320,7 @@ class PlaygroundComparisonsPublic(SQLModel):
     data: list[PlaygroundComparisonSummary]
 
 
-class PlaygroundComparison(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
+class PlaygroundComparison(PrimaryKeyMixin, CreatedAtMixin, table=True):
     """One recorded model preference, owned by the identity that recorded it."""
 
     __tablename__ = "playground_comparison"
@@ -352,9 +373,7 @@ class PlaygroundFavoriteModelsUpdate(SQLModel):
     # first caps how many pins one person keeps, the second is the column's own
     # width. Refused rather than truncated, because a truncated key is a pin
     # that can never match a model again and nothing says why.
-    model_keys: list[Annotated[str, Field(max_length=MAX_MODEL_KEY_LENGTH)]] = Field(
-        max_length=MAX_FAVORITE_MODELS
-    )
+    model_keys: list[Annotated[str, Field(max_length=MAX_MODEL_KEY_LENGTH)]] = Field(max_length=MAX_FAVORITE_MODELS)
 
 
 class PlaygroundFavoriteModelsPublic(SQLModel):
@@ -363,7 +382,7 @@ class PlaygroundFavoriteModelsPublic(SQLModel):
     model_keys: list[str]
 
 
-class PlaygroundFavoriteModel(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
+class PlaygroundFavoriteModel(PrimaryKeyMixin, CreatedAtMixin, table=True):
     """One model key an identity has pinned in one workspace."""
 
     __tablename__ = "playground_favorite_model"

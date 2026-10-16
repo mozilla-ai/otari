@@ -15,17 +15,19 @@ management plane; a hybrid gateway's accounts live on otari.ai.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, IdentityServiceDep, get_db, verify_master_key
 from gateway.core.surface import Surface
+from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import (
     DeploymentAdminAccessPublic,
     DeploymentUserPublic,
     DeploymentUsersPublic,
     DeploymentUserUpdateRequest,
 )
+from gateway.schemas.identity import PasswordLinkPublic
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 
 # Auth on the router for the reason `routes/organizations.py` declares it there:
@@ -50,6 +52,14 @@ def get_deployment_user_service(db: Annotated[AsyncSession, Depends(get_db)]) ->
 DeploymentUserServiceDep = Annotated[DeploymentUserService, Depends(get_deployment_user_service)]
 
 
+async def require_deployment_administration(
+    service: DeploymentUserServiceDep, current_identity: CurrentIdentity
+) -> None:
+    """Answer 404 unless the caller operates this deployment, as every route the service gates does."""
+    if not await service.has_administration_access(current_identity):
+        raise DeploymentAdministrationUnavailableError
+
+
 @router.get("/access")
 async def get_administration_access(
     service: DeploymentUserServiceDep,
@@ -72,6 +82,13 @@ async def list_deployment_users(
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description="Narrow to accounts whose name or email contains this text, case-insensitively.",
+        ),
+    ] = None,
 ) -> DeploymentUsersPublic:
     """List every account on this deployment, with the organizations each belongs to.
 
@@ -80,8 +97,9 @@ async def list_deployment_users(
     membership, while this one carries every identity at whatever standing,
     including one whose memberships are all suspended. Each row also reports when
     the account last signed in to the dashboard, and null there means never.
+    ``search`` narrows the page and the count together.
     """
-    return await service.list_users(actor=current_identity, skip=skip, limit=limit)
+    return await service.list_users(actor=current_identity, skip=skip, limit=limit, search=search)
 
 
 @router.patch("/users/{user_id}")
@@ -104,3 +122,25 @@ async def update_deployment_user(
     master-key sign-in resolves to. Granting either is unguarded.
     """
     return await service.update_user(actor=current_identity, user_id=user_id, request=body)
+
+
+@router.post(
+    "/users/{user_id}/password-link",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_deployment_administration)],
+)
+async def issue_password_link(identities: IdentityServiceDep, user_id: uuid.UUID) -> PasswordLinkPublic:
+    """Give an account a single-use link that sets its password, for someone who cannot sign in.
+
+    Where this deployment can mail links, the link goes to the account's address and is not returned, the
+    same as "Forgot your password?". Where it cannot, or the send fails, the response carries the link for
+    you to pass on, which is how a member who forgot their password gets back in on a deployment without
+    mail. A password chosen through a link that was not mailed records the address as vouched for rather
+    than proven. A new link replaces any earlier reset link for the account.
+
+    Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
+    with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
+    disabled, an unverified address no organization still has as a member or invitee.
+    """
+    link = await identities.issue_password_link(user_id)
+    return PasswordLinkPublic(mail_sent=link.mail_sent, link=link.link, expires_at=link.expires_at)

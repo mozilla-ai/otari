@@ -9,8 +9,9 @@ which mode the gateway is in.
 Registered in both modes, and unauthenticated by necessity: this is what tells a
 browser whether a sign-in screen is even the right thing to show. It therefore
 carries no secret. In particular it never carries the platform token, and
-``management_url``, ``data_plane_url``, ``docs_url``, ``terms_url`` and
-``privacy_url`` are addresses an operator configured, not credentials.
+``management_url``, ``data_plane_url``, ``docs_url``, ``terms_url``,
+``privacy_url`` and ``site_url`` are addresses an operator configured, not
+credentials.
 
 The contract is shared with otari.ai, which serves the same shape for its hosted
 deployment (mozilla-ai/otari-ai#1591). ``deployment_type`` and ``session_type``
@@ -48,6 +49,7 @@ from gateway.api.routes import (
     workspaces,
 )
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.database import describe_database_error
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.log_config import logger
@@ -206,6 +208,15 @@ class DeploymentBootstrap(BaseModel):
             "http(s) URL carrying no credential, since this response is unauthenticated."
         )
     )
+    site_url: str | None = Field(
+        description=(
+            "Where this deployment's public website lives. Set, the logo on the pages a visitor "
+            "reaches without an account links to it; null, it links to the public catalog where "
+            "public_catalog is true, and is not a link otherwise. A link target an operator "
+            "configured, validated at startup as an absolute http(s) URL carrying no credential, "
+            "since this response is unauthenticated."
+        ),
+    )
     sign_in_methods: list[SignInMethod] = Field(
         description=(
             "How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is "
@@ -227,6 +238,15 @@ class DeploymentBootstrap(BaseModel):
             "redeploys it. The sign-in screen says so rather than presenting a form whose only "
             "outcome is a 503. Sessions already issued keep working, and the management API and "
             "the data plane are unaffected. False for a hybrid gateway, which issues no session."
+        )
+    )
+    passkeys_enabled: bool = Field(
+        description=(
+            "Whether this deployment offers passkeys at all (the passkeys_enabled setting). False "
+            "means the passkey routes are not mounted and the dashboard hides its passkey page, "
+            "which is a different answer from passkeys_ready: a deployment that merely has not "
+            "configured a relying party is ready for nobody yet but still shows the page that says "
+            "so. False for a hybrid gateway, which issues no session of its own."
         )
     )
     passkeys_ready: bool = Field(
@@ -267,6 +287,7 @@ class DeploymentBootstrap(BaseModel):
             "the wording that matches. False for a hybrid gateway, which holds no identities."
         )
     )
+    feedback_enabled: bool = Field(description="Whether this deployment accepts deliberate feedback submissions.")
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -312,9 +333,12 @@ async def get_bootstrap(
             docs_url=config.docs_url,
             terms_url=config.terms_url,
             privacy_url=config.privacy_url,
+            site_url=config.site_url,
             maintenance_mode=False,
+            passkeys_enabled=False,
             passkeys_ready=False,
             oauth_providers=[],
+            feedback_enabled=False,
             mail_ready=False,
             open_signup=False,
         )
@@ -338,10 +362,13 @@ async def get_bootstrap(
         docs_url=config.docs_url,
         terms_url=config.terms_url,
         privacy_url=config.privacy_url,
+        site_url=config.site_url,
         maintenance_mode=await _maintenance_mode(db),
         public_catalog=bool(config.public_catalog) and not config.is_hybrid_mode,
+        passkeys_enabled=config.passkeys_enabled,
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
+        feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
         mail_ready=config.mail_ready,
         # Gated on mail as well as on the setting, and not only because the
         # route refuses without it: an operator who turned open signup on and
@@ -388,8 +415,8 @@ async def _sign_in_methods(db: AsyncSession, config: GatewayConfig) -> list[Sign
         claimed = await operator_has_password(db)
         passwords = await password_sign_in_possible(db)
         passkeys = await has_any_credential(db, config)
-    except SQLAlchemyError:
-        logger.warning("Could not read which sign-in methods this deployment offers", exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning("Could not read which sign-in methods this deployment offers: %s", describe_database_error(exc))
         return []
     methods: list[SignInMethod] = []
     if not claimed:
@@ -413,6 +440,8 @@ async def _maintenance_mode(db: AsyncSession) -> bool:
     """
     try:
         return await is_maintenance_mode(db)
-    except SQLAlchemyError:
-        logger.warning("Could not read whether this deployment is in maintenance mode", exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "Could not read whether this deployment is in maintenance mode: %s", describe_database_error(exc)
+        )
         return False

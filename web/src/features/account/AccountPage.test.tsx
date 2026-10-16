@@ -7,10 +7,15 @@ import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 
-function renderPage(sessionType: SessionType) {
+function renderPage(sessionType: SessionType, passkeysEnabled = true) {
   return render(
     <AppProviders>
-      <DeploymentProvider value={bootstrap({ session_type: sessionType })}>
+      <DeploymentProvider
+        value={bootstrap({
+          session_type: sessionType,
+          passkeys_enabled: passkeysEnabled,
+        })}
+      >
         <AccountPage />
       </DeploymentProvider>
     </AppProviders>,
@@ -45,6 +50,27 @@ describe("AccountPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Your name" }),
     ).toBeInTheDocument()
+  })
+
+  it("shows the passkeys page unless the deployment turned passkeys off", async () => {
+    const { unmount } = renderPage("local_operator")
+    expect(
+      await screen.findByRole("heading", { name: "Passkeys" }),
+    ).toBeInTheDocument()
+    unmount()
+    vi.mocked(apiClient.apiFetch).mockClear()
+
+    renderPage("local_operator", false)
+    expect(
+      await screen.findByRole("heading", { name: "Your name" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Passkeys" })).toBeNull()
+    // The page that would have asked routes that are not mounted never ran.
+    expect(
+      vi
+        .mocked(apiClient.apiFetch)
+        .mock.calls.some(([path]) => String(path).includes("/auth/webauthn")),
+    ).toBe(false)
   })
 
   it("says why there is nothing to change when another control plane owns the session", () => {

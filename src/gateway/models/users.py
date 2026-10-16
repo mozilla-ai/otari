@@ -8,10 +8,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdCost
 
 
@@ -19,6 +19,9 @@ class User(Base):
     """User/Customer model for end-user tracking."""
 
     __tablename__ = "users"
+    # One row per end user a service names. NULLs are distinct, so every user that
+    # is not an end user stays out of it.
+    __table_args__ = (Index("uq_users_parent_external_id", "parent_user_id", "external_id", unique=True),)
 
     user_id: Mapped[str] = mapped_column(primary_key=True)
     alias: Mapped[str | None] = mapped_column()
@@ -46,8 +49,10 @@ class User(Base):
     # canonical instance:model entries (see services/model_access.py). A key may
     # narrow this default but never broaden it (validated on key write).
     allowed_models: Mapped[list[str] | None] = mapped_column(JSON)
-    budget_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    next_budget_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ``UtcDateTime`` because the budget gate compares these to an aware ``now``,
+    # and a plain ``DateTime(timezone=True)`` reads back naive on SQLite.
+    budget_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    next_budget_reset_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
     blocked: Mapped[bool] = mapped_column(default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
@@ -57,6 +62,12 @@ class User(Base):
         onupdate=lambda: datetime.now(UTC),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    # Set on an end user, a row a service key created for an id its caller named
+    # (see ``APIKey.is_service_key``): the key's user, and the id as the caller
+    # sent it. ``user_id`` is generated, so two services naming the same end user
+    # get two rows. Both NULL on every other user.
+    parent_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    external_id: Mapped[str | None] = mapped_column()
 
     budget = relationship("Budget", back_populates="users")
     api_keys = relationship("APIKey", back_populates="user", passive_deletes=True)
@@ -78,4 +89,6 @@ class User(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "metadata": self.metadata_,
+            "parent_user_id": self.parent_user_id,
+            "external_id": self.external_id,
         }

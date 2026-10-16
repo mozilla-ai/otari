@@ -11,7 +11,12 @@
 // `undefined` is "no workspace selected yet", which every read here declines to
 // run on rather than asking about a workspace nobody named.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   PlaygroundComparisons,
   PlaygroundConsent,
@@ -19,13 +24,15 @@ import type {
   PlaygroundConversation,
   PlaygroundConversations,
   PlaygroundFavoriteModels,
+  PlaygroundFile,
+  PlaygroundFiles,
   PlaygroundMessages,
   PlaygroundTools,
   SavePlaygroundComparisonRequest,
   SavePlaygroundConversationRequest,
 } from "@/client"
 import { apiFetch, apiStream } from "@/shared/api/client"
-import { PLAYGROUND } from "@/shared/api/queryKeys"
+import { PLAYGROUND, workspaceMeta } from "@/shared/api/queryKeys"
 
 const ROOT = "/playground"
 
@@ -73,10 +80,82 @@ export function useUpdatePlaygroundConsent() {
 export function usePlaygroundTools(workspaceId: string | undefined) {
   return useQuery({
     queryKey: [PLAYGROUND, workspaceId, "tools"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<PlaygroundTools>(`${ROOT}/tools${scope(workspaceId as string)}`),
     enabled: workspaceId !== undefined,
     staleTime: 60_000,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Files a message can attach
+//
+// The caller's own uploads in one workspace, newest first, a page at a time:
+// the dialog asks for the next page with the last file's id as the cursor.
+// ---------------------------------------------------------------------------
+
+// Longer than the default request deadline: an upload takes as long as its
+// bytes do on the caller's link, and the gateway already bounds its size.
+const UPLOAD_TIMEOUT_MS = 5 * 60_000
+
+export function usePlaygroundFiles(
+  workspaceId: string | undefined,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  return useInfiniteQuery({
+    queryKey: [PLAYGROUND, workspaceId, "files"],
+    meta: workspaceMeta(workspaceId),
+    queryFn: ({ pageParam }) =>
+      apiFetch<PlaygroundFiles>(
+        `${ROOT}/files${scope(workspaceId as string)}${
+          pageParam ? `&after=${encodeURIComponent(pageParam)}` : ""
+        }`,
+      ),
+    initialPageParam: "",
+    getNextPageParam: (page) =>
+      page.has_more && page.last_id ? page.last_id : undefined,
+    enabled: enabled && workspaceId !== undefined,
+    staleTime: 30_000,
+  })
+}
+
+export function useUploadPlaygroundFile(workspaceId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData()
+      body.append("file", file)
+      return apiFetch<PlaygroundFile>(
+        `${ROOT}/files${scope(workspaceId as string)}`,
+        {
+          method: "POST",
+          body,
+          signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+        },
+      )
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "files"],
+      })
+    },
+  })
+}
+
+export function useDeletePlaygroundFile(workspaceId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (fileId: string) =>
+      apiFetch<void>(
+        `${ROOT}/files/${encodeURIComponent(fileId)}${scope(workspaceId as string)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "files"],
+      })
+    },
   })
 }
 
@@ -87,6 +166,7 @@ export function usePlaygroundTools(workspaceId: string | undefined) {
 export function usePlaygroundConversations(workspaceId: string | undefined) {
   return useQuery({
     queryKey: [PLAYGROUND, workspaceId, "conversations"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<PlaygroundConversations>(
         `${ROOT}/conversations${scope(workspaceId as string)}`,
@@ -155,6 +235,7 @@ export function useDeletePlaygroundConversation(
 export function usePlaygroundComparisons(workspaceId: string | undefined) {
   return useQuery({
     queryKey: [PLAYGROUND, workspaceId, "comparisons"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<PlaygroundComparisons>(
         `${ROOT}/comparisons${scope(workspaceId as string)}`,
@@ -203,6 +284,7 @@ export function useDeletePlaygroundComparison(workspaceId: string | undefined) {
 export function usePlaygroundFavoriteModels(workspaceId: string | undefined) {
   return useQuery({
     queryKey: [PLAYGROUND, workspaceId, "favorite-models"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<PlaygroundFavoriteModels>(
         `${ROOT}/favorite-models${scope(workspaceId as string)}`,
@@ -255,10 +337,61 @@ export function useReplacePlaygroundFavoriteModels(
 // The streaming completion
 // ---------------------------------------------------------------------------
 
-/** One streamed fragment: visible answer text, reasoning text, or both. */
+/**
+ * A tool the gateway ran for this reply: the model's call, then its result.
+ *
+ * The gateway consumes its own tool calls and a plain Chat Completions stream
+ * hides them. The Playground's route reports them in an `otari_tool_activity`
+ * field beside a chunk's `choices`, one record when a call starts and one when
+ * it finishes, joined by `id`.
+ */
+export type ToolActivity =
+  | { type: "tool_call"; id: string; name: string; arguments: string }
+  | {
+      type: "tool_result"
+      id: string
+      name: string
+      content: string
+      isTruncated: boolean
+      isError: boolean
+    }
+
+/** One streamed fragment: answer text, reasoning text, or a tool's activity. */
 export interface StreamDelta {
   content?: string
   reasoning?: string
+  toolActivity?: ToolActivity
+}
+
+/** The activity record as the wire spells it. */
+type WireToolActivity =
+  | { type: "tool_call"; id?: string; name?: string; arguments?: string }
+  | {
+      type: "tool_result"
+      id?: string
+      name?: string
+      content?: string
+      truncated?: boolean
+      is_error?: boolean
+    }
+
+function toolActivityOf(wire: WireToolActivity): ToolActivity | undefined {
+  const id = wire.id ?? ""
+  const name = wire.name ?? ""
+  if (wire.type === "tool_call") {
+    return { type: "tool_call", id, name, arguments: wire.arguments ?? "" }
+  }
+  if (wire.type === "tool_result") {
+    return {
+      type: "tool_result",
+      id,
+      name,
+      content: wire.content ?? "",
+      isTruncated: wire.truncated ?? false,
+      isError: wire.is_error ?? false,
+    }
+  }
+  return undefined
 }
 
 /**
@@ -288,7 +421,8 @@ interface StreamChunk {
   error?: string
   // Some models stream chain-of-thought in a field of its own rather than in
   // inline `<think>` tags; both are surfaced.
-  choices?: { delta?: StreamDelta }[]
+  choices?: { delta?: { content?: string; reasoning?: string } }[]
+  otari_tool_activity?: WireToolActivity
   // Present on the final chunk only, because the gateway is asked for it.
   usage?: StreamUsage | null
 }
@@ -301,11 +435,21 @@ interface StreamChunk {
 const WEB_SEARCH_TOOL = "otari_web_search"
 const CODE_EXECUTION_TOOL = "otari_code_execution"
 
+/** One part of a message that carries more than text, in the OpenAI format. */
+export type PlaygroundContentPart =
+  | { type: "text"; text: string }
+  | { type: "file"; file: { file_id: string; filename: string } }
+
+export interface PlaygroundWireMessage {
+  role: string
+  content: string | PlaygroundContentPart[]
+}
+
 export interface StreamChatParams {
   workspaceId: string
   /** The `instance:model` selector, as the catalog publishes it. */
   model: string
-  messages: { role: string; content: string }[]
+  messages: PlaygroundWireMessage[]
   tools: ToolSelection
   onDelta: (delta: StreamDelta) => void
   onUsage?: (usage: StreamUsage) => void
@@ -382,6 +526,10 @@ export async function streamPlaygroundChat({
         if (delta?.content || delta?.reasoning) {
           onDelta({ content: delta.content, reasoning: delta.reasoning })
         }
+        const toolActivity = chunk.otari_tool_activity
+          ? toolActivityOf(chunk.otari_tool_activity)
+          : undefined
+        if (toolActivity) onDelta({ toolActivity })
       }
     }
   } finally {

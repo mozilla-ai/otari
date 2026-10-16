@@ -1,4 +1,4 @@
-"""Bounded stored-server discovery (R-DISC-5, R-SCHEMA-3, R-ADM-1).
+"""Bounded stored-server discovery.
 
 Discovery either returns the complete authorized catalog or nothing. The one
 permitted partial result is the labeled per-tool omission: a single unusable

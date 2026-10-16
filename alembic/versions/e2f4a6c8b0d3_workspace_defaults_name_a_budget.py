@@ -168,7 +168,8 @@ def downgrade() -> None:
         sa.text(
             "UPDATE workspace_budget_defaults SET "
             "name = (SELECT b.name FROM budgets b WHERE b.budget_id = workspace_budget_defaults.budget_id), "
-            "max_budget = (SELECT b.max_budget FROM budgets b WHERE b.budget_id = workspace_budget_defaults.budget_id), "
+            "max_budget = (SELECT b.max_budget FROM budgets b "
+            "WHERE b.budget_id = workspace_budget_defaults.budget_id), "
             "budget_duration_sec = (SELECT b.budget_duration_sec FROM budgets b "
             "WHERE b.budget_id = workspace_budget_defaults.budget_id)"
         )

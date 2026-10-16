@@ -136,17 +136,13 @@ def _global_index(name: str, table: str, columns: list[str]) -> None:
 
 def upgrade() -> None:
     op.drop_index(_ALIAS_IX_OLD, table_name="model_aliases")
-    with op.batch_alter_table(
-        "model_aliases", copy_from=_model_aliases(workspace_scoped=False)
-    ) as batch:
+    with op.batch_alter_table("model_aliases", copy_from=_model_aliases(workspace_scoped=False)) as batch:
         batch.drop_constraint(_ALIAS_UQ_OLD, type_="unique")
         batch.create_unique_constraint(_ALIAS_UQ_NEW, ["workspace_id", "name", "user_id"])
     _global_index(_ALIAS_IX_NEW, "model_aliases", ["workspace_id", "name"])
 
     op.drop_index(_POLICY_IX_OLD, table_name="routing_policies")
-    with op.batch_alter_table(
-        "routing_policies", copy_from=_routing_policies(workspace_scoped=False)
-    ) as batch:
+    with op.batch_alter_table("routing_policies", copy_from=_routing_policies(workspace_scoped=False)) as batch:
         batch.drop_constraint(_POLICY_UQ_OLD, type_="unique")
         batch.create_unique_constraint(_POLICY_UQ_NEW, ["workspace_id", "name", "user_id"])
     _global_index(_POLICY_IX_NEW, "routing_policies", ["workspace_id", "name"])
@@ -161,17 +157,13 @@ def downgrade() -> None:
     rolling back has to decide which row survives.
     """
     op.drop_index(_ALIAS_IX_NEW, table_name="model_aliases")
-    with op.batch_alter_table(
-        "model_aliases", copy_from=_model_aliases(workspace_scoped=True)
-    ) as batch:
+    with op.batch_alter_table("model_aliases", copy_from=_model_aliases(workspace_scoped=True)) as batch:
         batch.drop_constraint(_ALIAS_UQ_NEW, type_="unique")
         batch.create_unique_constraint(_ALIAS_UQ_OLD, ["name", "user_id"])
     _global_index(_ALIAS_IX_OLD, "model_aliases", ["name"])
 
     op.drop_index(_POLICY_IX_NEW, table_name="routing_policies")
-    with op.batch_alter_table(
-        "routing_policies", copy_from=_routing_policies(workspace_scoped=True)
-    ) as batch:
+    with op.batch_alter_table("routing_policies", copy_from=_routing_policies(workspace_scoped=True)) as batch:
         batch.drop_constraint(_POLICY_UQ_NEW, type_="unique")
         batch.create_unique_constraint(_POLICY_UQ_OLD, ["name", "user_id"])
     _global_index(_POLICY_IX_OLD, "routing_policies", ["name"])

@@ -75,36 +75,18 @@ export function membershipLabel(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
+/** `MEMBERSHIP_ROLES` as role picker options. */
+export const MEMBERSHIP_ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
+  value: role,
+  label: membershipLabel(role),
+}))
+
 /** The roles that may manage an organization or a workspace. */
 const MANAGEMENT_ROLES: readonly string[] = ["owner", "admin"]
 
 /** Whether the caller's standing in their organization lets them manage it. */
 export function canManage(context: OrganizationContext | undefined): boolean {
   return context !== undefined && MANAGEMENT_ROLES.includes(context.role)
-}
-
-/**
- * Whether this caller also operates the deployment, which no role above confers.
- *
- * The other authority a signed-in identity can hold, and the reason the roster's
- * role picker looked like it did more than it does (otari#838): an organization
- * role is authority over one tenant, and the deployment's own surfaces answer to
- * `is_superuser` or the bootstrap identity instead.
- *
- * Like the predicates above, this is the client half of a gate the server
- * enforces, and it exists so a control that would be refused is withheld rather
- * than offered. It reads the same field `GET /v1/admin/access` publishes, which
- * `OrganizationMembershipContextPublic` now carries so a page that already has
- * the context needs no second request to know.
- *
- * Requires an explicit `true`: an absent or still-loading context is not an
- * operator, which withholds a deployment-wide read for one paint rather than
- * firing it and rendering its refusal.
- */
-export function isDeploymentOperator(
-  context: OrganizationContext | undefined,
-): boolean {
-  return context?.deployment_operator === true
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 
 import type { ManagedTool } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
@@ -42,97 +42,117 @@ function DeclarationChip({ tool }: { tool: ManagedTool }) {
  * to say these rows belong to the tool row that opened them. Eyebrowed
  * paragraphs read as a second system on a page that is otherwise all rows.
  */
-export function ToolStatusGroup({
-  tool,
-  docsHref,
-  urlFieldKey,
-  unavailableSummary = "Unavailable · no backend",
-  unavailableHelp = "No backend URL is set, so every call is rejected with 400.",
-}: {
+export function ToolStatusGroup(props: ToolStatusProps) {
+  return (
+    <SettingsGroup isBounded>
+      <ToolStatusRow {...props} />
+    </SettingsGroup>
+  )
+}
+
+interface ToolStatusProps {
   tool: ManagedTool
   docsHref: string
+  /** Shown in place of the tool's own description, which is written for the model. */
+  help?: ReactNode
+  /**
+   * Off where this process's own config does not decide whether the tool runs,
+   * as on a hosted control plane whose sandbox belongs to the platform.
+   */
+  showsAvailability?: boolean
   /** The setting the "no backend" case sends the operator to, when there is one. */
   urlFieldKey?: string
   /** The trailing status, for a tool that does not wait on a backend URL. */
   unavailableSummary?: string
   /** What turns that tool on, in place of setting a URL. */
   unavailableHelp?: string
-}) {
+}
+
+/** The status row alone, for a group that carries more rows under it. */
+export function ToolStatusRow({
+  tool,
+  docsHref,
+  help,
+  showsAvailability = true,
+  urlFieldKey,
+  unavailableSummary = "Unavailable · no backend",
+  unavailableHelp = "No backend URL is set, so every call is rejected with 400.",
+}: ToolStatusProps) {
   const [isOpen, setIsOpen] = useState(false)
   // The provider-named keywords interception adds. Absent when it is off, which
   // is the only thing on this page that changes the list.
   const alsoAccepted = tool.accepted_types.filter((type) => type !== tool.id)
 
   return (
-    <SettingsGroup isBounded>
-      <DisclosureRow
-        label={<code className="text-mono-caption">{tool.id}</code>}
-        help={tool.description}
-        isOpen={isOpen}
-        onToggle={() => setIsOpen((open) => !open)}
-        trailing={
+    <DisclosureRow
+      label={<code className="text-mono-caption">{tool.id}</code>}
+      help={help ?? tool.description}
+      isOpen={isOpen}
+      onToggle={() => setIsOpen((open) => !open)}
+      trailing={
+        showsAvailability ? (
           <span className="flex items-center gap-2.5 text-mono-overline text-subtle">
             <Dot className={tool.available ? "bg-success" : "bg-text-subtle"} />
             {tool.available ? "Available" : unavailableSummary}
           </span>
-        }
-      >
-        <div className="flex flex-col divide-y divide-border-subtle">
-          {/* Absent rather than empty when the tool is available: there is no
+        ) : null
+      }
+    >
+      <div className="flex flex-col divide-y divide-border-subtle">
+        {/* Absent rather than empty when the tool is available: there is no
               reason to give. */}
-          {tool.available ? null : (
-            <SettingRow
-              isNested
-              label="Why unavailable"
-              help={unavailableHelp}
-              control={
-                urlFieldKey ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // The field's own `scroll-mt-16` keeps it clear of the
-                      // top bar; focus moves separately so the smooth scroll is
-                      // not cut short by the browser's own scroll-into-view.
-                      const input = document.getElementById(
-                        settingInputId(urlFieldKey),
-                      )
-                      input?.scrollIntoView({
-                        behavior: "smooth",
-                        block: "start",
-                      })
-                      input?.focus({ preventScroll: true })
-                    }}
-                    // The only control in this row's lane, so it carries the
-                    // 44px floor itself; a bare `<button>` also keeps Tailwind's
-                    // reset cursor without this.
-                    className="inline-flex min-h-11 cursor-pointer items-center text-caption text-link transition-colors duration-150 ease-out hover:text-link-hover focus-visible:otari-focus-ring motion-reduce:transition-none"
-                  >
-                    Set backend URL ↓
-                  </button>
-                ) : null
-              }
-            />
-          )}
+        {tool.available || !showsAvailability ? null : (
           <SettingRow
             isNested
-            label="Declare in a request"
-            help={
-              <>
-                Goes in <code className="font-mono">tools[].type</code>.{" "}
-                {alsoAccepted.length > 0 ? (
-                  <>
-                    This deployment also routes{" "}
-                    <code className="font-mono">{alsoAccepted.join(", ")}</code>{" "}
-                    to it.{" "}
-                  </>
-                ) : null}
-                <DocsLink href={docsHref}>Developer docs</DocsLink>
-              </>
+            label="Why unavailable"
+            help={unavailableHelp}
+            control={
+              urlFieldKey ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // The field's own `scroll-mt-16` keeps it clear of the
+                    // top bar; focus moves separately so the smooth scroll is
+                    // not cut short by the browser's own scroll-into-view.
+                    const input = document.getElementById(
+                      settingInputId(urlFieldKey),
+                    )
+                    input?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    })
+                    input?.focus({ preventScroll: true })
+                  }}
+                  // The only control in this row's lane, so it carries the
+                  // 44px floor itself; a bare `<button>` also keeps Tailwind's
+                  // reset cursor without this.
+                  className="inline-flex min-h-11 cursor-pointer items-center text-caption text-link transition-colors duration-150 ease-out hover:text-link-hover focus-visible:otari-focus-ring motion-reduce:transition-none"
+                >
+                  Set backend URL ↓
+                </button>
+              ) : null
             }
-            control={<DeclarationChip tool={tool} />}
           />
-        </div>
-      </DisclosureRow>
-    </SettingsGroup>
+        )}
+        <SettingRow
+          isNested
+          label="Declare in a request"
+          help={
+            <>
+              Goes in <code className="font-mono">tools[].type</code>.{" "}
+              {alsoAccepted.length > 0 ? (
+                <>
+                  This deployment also routes{" "}
+                  <code className="font-mono">{alsoAccepted.join(", ")}</code>{" "}
+                  to it.{" "}
+                </>
+              ) : null}
+              <DocsLink href={docsHref}>Developer docs</DocsLink>
+            </>
+          }
+          control={<DeclarationChip tool={tool} />}
+        />
+      </div>
+    </DisclosureRow>
   )
 }

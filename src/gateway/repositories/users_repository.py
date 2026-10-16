@@ -1,7 +1,8 @@
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 
-from sqlalchemy import String, and_, cast, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -122,9 +123,7 @@ async def attribution_spend(db: AsyncSession, user_ids: Sequence[str]) -> dict[s
 
     if not user_ids:
         return {}
-    rows = (
-        await db.execute(select(User).where(User.user_id.in_(list(user_ids)), User.deleted_at.is_(None)))
-    ).scalars()
+    rows = (await db.execute(select(User).where(User.user_id.in_(list(user_ids)), User.deleted_at.is_(None)))).scalars()
     return {row.user_id: row for row in rows}
 
 
@@ -136,6 +135,20 @@ def _keyed_in(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
             col(Workspace.organization_id) == organization_id
         )
     return condition.exists()
+
+
+def _end_user_in(organization_id: uuid.UUID) -> ColumnElement[bool]:
+    """Whether this user is an end user of an owner holding a key in ``organization_id``.
+
+    What puts an end user in scope before its first request settles, when it has
+    no usage of its own yet.
+    """
+    return (
+        select(APIKey.user_id)
+        .join(Workspace, col(Workspace.id) == APIKey.workspace_id)
+        .where(APIKey.user_id == User.parent_user_id, col(Workspace.organization_id) == organization_id)
+        .exists()
+    )
 
 
 def _spent_in(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
@@ -180,20 +193,23 @@ def in_organization(organization_id: uuid.UUID) -> ColumnElement[bool]:
     besides: one identity's attribution row serves every organization that
     person belongs to, so a single column could not hold the answer anyway.
 
-    So the scope is derived from the three joins that do exist, any of which puts
-    a user in reach: a key, usage, or a roster row.
+    So the scope is derived from the joins that do exist, any of which puts a
+    user in reach: a key, usage, a roster row, or, for a service key's end user,
+    a key of its owner.
 
-    A user reached by none of the three, in any organization at all, is shared
-    rather than hidden. That is the shared ``default`` owner by construction, and
-    a user an operator has just created and not yet keyed, and hiding those would
-    take a freshly created user out of the page that assigns it a budget. The
-    first key written for one binds it, because the key is itself a join.
+    A user reached by none of them, in any organization at all, is shared rather
+    than hidden. That is the shared ``default`` owner by construction, and a user
+    an operator has just created and not yet keyed, and hiding those would take a
+    freshly created user out of the page that assigns it a budget. The first key
+    written for one binds it, because the key is itself a join. An end user is
+    never shared: it belongs to its owner's organization from the start.
     """
     return or_(
         _keyed_in(organization_id),
         _spent_in(organization_id),
         _on_roster_of(organization_id),
-        and_(~_keyed_in(None), ~_spent_in(None), ~_on_roster_of(None)),
+        _end_user_in(organization_id),
+        and_(User.parent_user_id.is_(None), ~_keyed_in(None), ~_spent_in(None), ~_on_roster_of(None)),
     )
 
 
@@ -206,3 +222,39 @@ async def owned_by_organization(db: AsyncSession, user_id: str, organization_id:
     """
     found = await db.execute(select(User.user_id).where(User.user_id == user_id, in_organization(organization_id)))
     return found.scalar_one_or_none() is not None
+
+
+@dataclass(frozen=True)
+class UserFilter:
+    """Narrows a ``users`` listing; a field left ``None`` does not filter."""
+
+    parent_user_id: str | None = None
+    external_id: str | None = None
+    blocked: bool | None = None
+
+
+def _listed(organization_id: uuid.UUID, filters: UserFilter) -> list[ColumnElement[bool]]:
+    conditions: list[ColumnElement[bool]] = [User.deleted_at.is_(None), in_organization(organization_id)]
+    if filters.parent_user_id is not None:
+        conditions.append(User.parent_user_id == filters.parent_user_id)
+    if filters.external_id is not None:
+        conditions.append(User.external_id == filters.external_id)
+    if filters.blocked is not None:
+        conditions.append(User.blocked.is_(filters.blocked))
+    return conditions
+
+
+async def page_users(
+    db: AsyncSession, organization_id: uuid.UUID, filters: UserFilter, *, skip: int, limit: int
+) -> Sequence[User]:
+    """One page of the live users ``organization_id`` can name, in ``user_id`` order."""
+    result = await db.execute(
+        select(User).where(*_listed(organization_id, filters)).order_by(User.user_id).offset(skip).limit(limit)
+    )
+    return result.scalars().all()
+
+
+async def count_users(db: AsyncSession, organization_id: uuid.UUID, filters: UserFilter) -> int:
+    """How many users :func:`page_users` would page through."""
+    total = await db.scalar(select(func.count()).select_from(User).where(*_listed(organization_id, filters)))
+    return int(total or 0)

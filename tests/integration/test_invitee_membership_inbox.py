@@ -19,6 +19,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import (
+    InvitationAlreadyUsedError,
+    InvitationExpiredError,
+    InvitationNotFoundError,
+)
 from gateway.models.tenancy import (
     Invitation,
     InviteOrganizationMemberRequest,
@@ -36,13 +41,10 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.errors import (
-    InvitationAlreadyUsedError,
-    InvitationExpiredError,
-    InvitationNotFoundError,
-)
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
+
+from .tenancy_helpers import NO_MAIL_LIMIT, NO_TERMS, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -108,6 +110,7 @@ async def _invite(
             workspace_assignments=workspace_assignments,
         ),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
 
@@ -123,7 +126,7 @@ async def test_the_inbox_lists_an_invitation_the_switcher_deliberately_hides(
     invitee, home = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
 
     issued = await _invite(service, admin, email="invitee@example.com", role="admin")
 
@@ -149,7 +152,7 @@ async def test_the_inbox_is_scoped_to_the_caller_and_not_to_the_address(
     second, _ = await _identity_with_a_home(async_db, email="second@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
 
     await _invite(service, admin, email="first@example.com")
 
@@ -174,7 +177,7 @@ async def test_accepting_from_the_inbox_needs_no_token_and_applies_the_parked_as
         organization_id=inviting.id,
         created_by_user_id=admin.id,
     )
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(
         service,
@@ -219,9 +222,10 @@ async def test_declining_cancels_the_invitation_and_kills_the_emailed_link(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com")
+    assert issued.accept_link is not None
     token = issued.accept_link.split("token=")[1]
 
     await service.decline_pending_membership_for_user(
@@ -244,7 +248,7 @@ async def test_declining_cancels_the_invitation_and_kills_the_emailed_link(
     # decline. Refused as already-used rather than not-found: the row is still
     # there and still theirs, it is its `cancelled` status that ends it.
     with pytest.raises(InvitationAlreadyUsedError):
-        await service.accept_invitation(token)
+        await service.accept_invitation(token, claims=NO_TERMS)
     assert inviting.id not in {
         row.organization.id for row in (await service.list_organization_memberships_for_user(user=invitee)).data
     }
@@ -257,7 +261,7 @@ async def test_a_declined_address_can_be_invited_again(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
 
     first = await _invite(service, admin, email="invitee@example.com")
     await service.decline_pending_membership_for_user(
@@ -288,7 +292,7 @@ async def test_declining_an_owner_invitation_is_the_invitees_own_to_do(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
 
     issued = await _invite(service, admin, email="invitee@example.com", role="owner")
     await service.decline_pending_membership_for_user(
@@ -311,7 +315,7 @@ async def test_another_identitys_invitation_is_not_found_rather_than_forbidden(
     outsider, _ = await _identity_with_a_home(async_db, email="outsider@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com")
 
@@ -334,7 +338,7 @@ async def test_an_unknown_membership_id_is_not_found(
     action: str,
 ) -> None:
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     with pytest.raises(InvitationNotFoundError):
         if action == "accept":
@@ -355,7 +359,7 @@ async def test_accepting_twice_answers_the_same_success_rather_than_a_404(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com", role="admin")
     first = await service.accept_pending_membership_for_user(
@@ -388,7 +392,7 @@ async def test_the_idempotent_branch_is_any_active_membership_and_decline_gets_n
     active one collapses into the same 404 as somebody else's.
     """
     invitee, home = await _identity_with_a_home(async_db, email="invitee@example.com")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
     own = await OrganizationMemberRepository(async_db).get_by_organization_and_user(home.id, invitee.id)
     assert own is not None
 
@@ -424,7 +428,7 @@ async def test_a_lapsed_invitation_is_omitted_from_the_inbox_and_refused_on_acce
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com")
     invitation = await InvitationRepository(async_db).get(issued.invitation_id)
@@ -456,7 +460,7 @@ async def test_a_revoked_invitation_leaves_nothing_in_the_inbox(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com")
     await service.revoke_organization_member_invitation_for_user(
@@ -482,7 +486,7 @@ async def test_the_inbox_pages_over_several_waiting_organizations(
     the walk early.
     """
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     for index in range(3):
         organization = await _organization(async_db, slug=f"inviting-{index}")
         admin = await _owner(async_db, organization, full_name=f"Admin {index}")
@@ -513,7 +517,7 @@ async def test_declining_cancels_every_live_link_to_the_membership(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com")
     second_token = uuid.uuid4().hex
@@ -540,7 +544,7 @@ async def test_declining_cancels_every_live_link_to_the_membership(
         assert cancelled.status == "cancelled"
 
     with pytest.raises(InvitationAlreadyUsedError):
-        await service.accept_invitation(second_token)
+        await service.accept_invitation(second_token, claims=NO_TERMS)
 
     membership = await OrganizationMemberRepository(async_db).get(issued.organization_member_id)
     assert membership is not None
@@ -559,7 +563,7 @@ async def test_a_stale_pending_row_alongside_a_live_one_resolves_to_the_live_inv
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com")
     stale = Invitation(

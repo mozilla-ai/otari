@@ -1,7 +1,7 @@
 """The caller's own organization's usage, for a tenant who does not operate the deployment.
 
-``/api/v1/usage`` is deployment-wide and has been operator-only since #821, which
-was right: it reads every tenant's rows and its ``workspace_id`` parameter is a
+``/api/v1/usage`` has been operator-only since #821, which
+was right: it read every tenant's rows and its ``workspace_id`` parameter is a
 filter the client supplies, so nothing but the operator gate stands between a
 signed-in member and another organization's traffic. On a deployment serving
 mutually-untrusting tenants that left "show me my organization's usage", the
@@ -30,7 +30,7 @@ reading of the same rows:
   workspace-scoped read uses, so a workspace outside the caller's scope answers
   404 exactly as a workspace that does not exist does.
 
-Reads only. Deleting rows and repricing them stay deployment-wide, as does
+Reads only. Deleting rows and repricing them stay operator-only, as does
 ``/api/v1/usage/in-flight``: its registry entries carry no workspace at all
 (see ``usage.list_in_flight``), so there is nothing there to scope yet.
 
@@ -69,8 +69,10 @@ from gateway.api.routes.usage import (
     _USER_MULTI_DESC,
     _WORKSPACE_DESC,
     Bucket,
+    GroupByTag,
     SeriesGroupBy,
     SummaryDimension,
+    TagFilter,
     ToolFilter,
     UsageCount,
     UsageEntry,
@@ -93,6 +95,7 @@ from gateway.services.tenancy.authorization import (
     resolve_visible_workspace_scope,
     resolve_workspace_in_organization,
 )
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 router = APIRouter(
     prefix="/organizations/me/usage",
@@ -120,7 +123,7 @@ async def _scope_condition(
     suspended or a role changed between two requests, and the cheaper answer is
     the one that goes stale in the unsafe direction.
     """
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
 
     if workspace_id is not None:
         # Only the organization is resolved on this branch. The full scope would
@@ -176,6 +179,7 @@ async def list_organization_usage(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -206,6 +210,7 @@ async def list_organization_usage(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -243,6 +248,7 @@ async def count_organization_usage(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -259,7 +265,7 @@ async def count_organization_usage(
     Serves the paginator's "N of M" beside the list above, and is scoped the
     same way, so the total can never describe more rows than the list will show.
 
-    Unlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
+    Unlike the operator's ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
     is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
     this surface has none. So this total keeps matching the list beside it.
     """
@@ -274,6 +280,7 @@ async def count_organization_usage(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -300,6 +307,7 @@ async def organization_usage_summary(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -309,6 +317,7 @@ async def organization_usage_summary(
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
+    group_by_tag: GroupByTag = None,
 ) -> UsageSummary:
     """Aggregate spend, tokens and request volume for the caller's organization.
 
@@ -330,6 +339,7 @@ async def organization_usage_summary(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -346,6 +356,7 @@ async def organization_usage_summary(
         status=status,
         bucket=bucket,
         dimensions=dimensions,
+        group_by_tag=group_by_tag,
     )
 
 
@@ -364,6 +375,7 @@ async def organization_usage_series(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -392,6 +404,7 @@ async def organization_usage_series(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,

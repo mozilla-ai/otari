@@ -132,7 +132,7 @@ test.describe("standalone tenancy", () => {
     await openPage(page, "Members & roles", "Members")
 
     await page.getByRole("button", { name: "Invite member" }).click()
-    const inviteDialog = page.getByRole("dialog", { name: "Invitation" })
+    const inviteDialog = page.getByRole("dialog")
     await inviteDialog.getByLabel("Email address").fill(email)
     await pickOption(page, "Role", "Member", inviteDialog)
     // Scoped: the heading's trigger and the dialog's submit share the label.
@@ -194,7 +194,7 @@ test.describe("standalone tenancy", () => {
     // Re-inviting the same address revives that membership rather than
     // starting a second one.
     await page.getByRole("button", { name: "Invite member" }).click()
-    const reinviteDialog = page.getByRole("dialog", { name: "Invitation" })
+    const reinviteDialog = page.getByRole("dialog")
     await reinviteDialog.getByLabel("Email address").fill(email)
     await reinviteDialog.getByRole("button", { name: "Invite member" }).click()
     await reinviteDialog.getByRole("button", { name: "Done" }).click()

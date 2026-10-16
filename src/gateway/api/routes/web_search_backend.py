@@ -39,12 +39,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from gateway.api.deps import get_config
+from gateway.api.deps import WebProviderClientDep, get_config
 from gateway.core.config import GatewayConfig
 from gateway.inflight import track_request
 from gateway.log_config import logger
-from gateway.services.search_backend import get_search_client
-from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_search_providers import WebSearchProviderError, provider_search
 
 router = APIRouter(prefix="/web-search", tags=["web-search"])
@@ -102,6 +102,7 @@ def _authorize(config: GatewayConfig, presented: str | None) -> None:
 async def web_search(
     request: Request,
     config: ConfigDep,
+    web_provider_client: WebProviderClientDep,
     q: Annotated[str, Query(min_length=1, description="The search query.")],
     x_gateway_token: Annotated[str | None, Header()] = None,
     max_results: Annotated[int | None, Query(ge=1, le=MAX_RESULTS_CAP)] = None,
@@ -151,7 +152,7 @@ async def web_search(
             api_key=api_key,
             query=q,
             options={key: value for key, value in options.items() if value is not None},
-            client=get_search_client(),
+            client=web_provider_client,
         )
     except WebSearchProviderError as exc:
         # Logged here because nothing else on this path does: the exception only

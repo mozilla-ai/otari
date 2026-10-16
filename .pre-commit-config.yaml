@@ -1,6 +1,29 @@
+# The single list of Python lint checks. `make lint-python` and CI run it with --all-files.
+# The hooks call the tools through uv, so they use the versions pinned in uv.lock.
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.9
+  - repo: local
     hooks:
-      - id: ruff
-        args: [src, tests, scripts]
+      - id: check-architecture
+        name: architecture check
+        entry: uv run python scripts/check_architecture.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: check-alembic-heads
+        name: alembic single head
+        entry: uv run python scripts/check_alembic_heads.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true

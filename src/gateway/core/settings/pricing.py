@@ -18,7 +18,6 @@ class PricingTierConfig(BaseModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_has_rate_override(self) -> "PricingTierConfig":
@@ -27,7 +26,6 @@ class PricingTierConfig(BaseModel):
             self.output_price_per_million,
             self.cache_read_price_per_million,
             self.cache_write_price_per_million,
-            self.cache_write_1h_price_per_million,
         )
         if all(rate is None for rate in rates):
             raise ValueError("pricing tier must override at least one price field")
@@ -49,11 +47,6 @@ class PricingConfig(BaseModel):
         ge=0,
         description="Price per 1M cache-write (creation) tokens. Anthropic only.",
     )
-    cache_write_1h_price_per_million: float | None = Field(
-        default=None,
-        ge=0,
-        description="Price per 1M Anthropic 1-hour cache-write tokens.",
-    )
     pricing_tiers: list[PricingTierConfig] = Field(
         default_factory=list,
         description="Whole-request context threshold pricing rules.",
@@ -65,8 +58,9 @@ class PricingConfig(BaseModel):
     unit: Literal["tokens", "requests", "images"] = Field(
         default="tokens",
         description=(
-            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a "
-            "moderation call (USD per million requests), 'images' for image generation."
+            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
+            "moderation call, or a completion model billed per call (USD per million requests), "
+            "'images' for image generation (USD per million images)."
         ),
     )
 
@@ -99,7 +93,7 @@ class PricingSettings(BaseModel):
         default=False,
         description=(
             "When a model has no pricing in the database, fall back to community-maintained "
-            "default pricing from the bundled genai-prices dataset. Off by default: a billing "
+            "default pricing from the models.dev catalog. Off by default: a billing "
             "gateway should price from rates you control, and these community estimates can lag "
             "or differ from real provider rates. Database pricing always takes precedence. Enable "
             "to auto-price common models without configuring each one; while off, require_pricing "
@@ -109,7 +103,7 @@ class PricingSettings(BaseModel):
     pricing_refresh: Annotated[Literal["manual", "review", "auto"], Shown(SettingsGroup.METERING)] = Field(
         default="manual",
         description=(
-            "How the genai-prices defaults are kept current. 'manual': only when an operator checks for "
+            "How the models.dev defaults are kept current. 'manual': only when an operator checks for "
             "updates on Model pricing. 'review': fetch upstream every pricing_refresh_interval_seconds and "
             "hold the update for an operator to accept or reject. 'auto': fetch and apply on that schedule."
         ),
@@ -117,5 +111,5 @@ class PricingSettings(BaseModel):
     pricing_refresh_interval_seconds: Annotated[int, Shown(SettingsGroup.METERING)] = Field(
         default=86400,
         ge=300,
-        description="How often the scheduled genai-prices check runs when pricing_refresh is review or auto.",
+        description="How often the scheduled models.dev price check runs when pricing_refresh is review or auto.",
     )

@@ -60,6 +60,7 @@ def _make_ctx(resolved_provider: object = None) -> MagicMock:
     # first) are both no-ops without a session, and are covered end to end in
     # tests/integration/test_gateway_rejection_logging.py.
     ctx.db = None
+    ctx.rate_limit_grant = None
     return ctx
 
 
@@ -86,11 +87,16 @@ class _NoHostedCredential:
 @pytest.mark.asyncio
 async def test_resolve_dispatch_provider_returns_cached() -> None:
     """When ctx.resolved_provider is set it is returned without calling resolve_provider_selector."""
-    cached = MagicMock()
+    cached = MagicMock(owned_endpoint=None, deployment_paid=False)
     ctx = _make_ctx(resolved_provider=cached)
     with patch("gateway.api.routes._pipeline.resolve_provider_selector") as mock_rps:
         result = await resolve_dispatch_provider(
-            ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock(), model_provider=_NoHostedCredential()
+            ctx,
+            _make_config(),
+            "openai:gpt-4o",
+            adapter=MagicMock(),
+            model_provider=_NoHostedCredential(),
+            billing=MagicMock(),
         )
     assert result is cached
     mock_rps.assert_not_called()
@@ -106,7 +112,12 @@ async def test_resolve_dispatch_provider_unparseable_raises_400() -> None:
     ):
         with pytest.raises(HTTPException) as exc_info:
             await resolve_dispatch_provider(
-                ctx, _make_config(), "nosuchmodel", adapter=MagicMock(), model_provider=_NoHostedCredential()
+                ctx,
+                _make_config(),
+                "nosuchmodel",
+                adapter=MagicMock(),
+                model_provider=_NoHostedCredential(),
+                billing=MagicMock(),
             )
     assert exc_info.value.status_code == 400
     assert "nosuchmodel" in exc_info.value.detail
@@ -122,7 +133,12 @@ async def test_resolve_dispatch_provider_unknown_provider_raises_400() -> None:
     ):
         with pytest.raises(HTTPException) as exc_info:
             await resolve_dispatch_provider(
-                ctx, _make_config(), "nobody:model", adapter=MagicMock(), model_provider=_NoHostedCredential()
+                ctx,
+                _make_config(),
+                "nobody:model",
+                adapter=MagicMock(),
+                model_provider=_NoHostedCredential(),
+                billing=MagicMock(),
             )
     assert exc_info.value.status_code == 400
     assert "nobody:model" in exc_info.value.detail
@@ -132,13 +148,18 @@ async def test_resolve_dispatch_provider_unknown_provider_raises_400() -> None:
 async def test_resolve_dispatch_provider_fresh_resolution_succeeds() -> None:
     """When ctx.resolved_provider is None and selector is valid, returns resolved."""
     ctx = _make_ctx(resolved_provider=None)
-    fresh = MagicMock()
+    fresh = MagicMock(owned_endpoint=None, deployment_paid=False)
     with patch(
         "gateway.api.routes._pipeline.resolve_provider_selector",
         return_value=fresh,
     ) as mock_rps:
         result = await resolve_dispatch_provider(
-            ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock(), model_provider=_NoHostedCredential()
+            ctx,
+            _make_config(),
+            "openai:gpt-4o",
+            adapter=MagicMock(),
+            model_provider=_NoHostedCredential(),
+            billing=MagicMock(),
         )
     assert result is fresh
     mock_rps.assert_called_once()

@@ -5,10 +5,15 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
+from typing import Any, TypedDict
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget
 from gateway.models.tenancy import Organization, User, Workspace
+from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -16,6 +21,57 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets import BudgetMembershipListener, BudgetService
+from gateway.services.organizations import InvitationMailLimit
+from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
+
+
+class MembershipWrites(TypedDict):
+    """What a service that changes membership is built with: a Unit of Work and the listeners writing through it."""
+
+    uow: UnitOfWork
+    membership_listener: MembershipListener
+    workspace_listener: WorkspaceListener
+
+
+def membership_writes(db: AsyncSession) -> MembershipWrites:
+    """Build a Unit of Work over ``db`` and the listeners on it, as a standalone deployment's request path does."""
+    uow = UnitOfWork(db)
+    return {
+        "uow": uow,
+        "membership_listener": BudgetMembershipListener(BudgetRepositories.on(uow)),
+        "workspace_listener": NullWorkspaceListener(),
+    }
+
+
+# A deployment that publishes no terms, for an accept that does not exercise them.
+NO_TERMS = InvitationClaimSettings(terms_url=None)
+
+# No invitation mail limit, for a test that is not about it.
+NO_MAIL_LIMIT = InvitationMailLimit(None, per_organization=None, per_address=None)
+
+
+def claim_writes(db: AsyncSession) -> dict[str, Any]:
+    """Build the Unit of Work and the organization service a claim writes through, as the claim routes do."""
+    writes = membership_writes(db)
+    return {"uow": writes["uow"], "organizations": OrganizationService(db, **writes)}
+
+
+def budget_service(db: AsyncSession) -> BudgetService:
+    """Build the budget service over ``db``, as ``get_budget_service`` does."""
+    uow = UnitOfWork(db)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    return BudgetService(
+        uow,
+        BudgetRepositories.on(uow),
+        organizations,
+        ApiKeyService(ApiKeyRepository(uow)),
+        WorkspaceAccess(db, organizations),
+    )
 
 
 async def create_organization(db: AsyncSession, *, slug: str) -> Organization:

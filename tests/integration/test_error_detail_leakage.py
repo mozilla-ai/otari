@@ -21,15 +21,8 @@ def test_provider_error_does_not_leak_details(
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """Test that provider errors return a generic message without internal details."""
-    response = client.post(
-        f"{API_ROOT}/chat/completions",
-        json={
-            "model": "openai:nonexistent-model-xyz",
-            "messages": [{"role": "user", "content": "Hello"}],
-        },
-        headers=api_key_header,
-    )
+    """A failure that carries no safe signal keeps the generic detail, whatever its message said."""
+    response = _post_chat(client, api_key_header, RuntimeError("upstream exploded: token=sk-live-secret"))
     assert response.status_code == 502
     detail = response.json()["detail"]
     assert detail == "LLM provider error"
@@ -105,10 +98,10 @@ def test_gateway_fault_error_keeps_a_fixed_detail(
     test_user: dict[str, Any],
 ) -> None:
     """A provider rejecting the gateway's credentials is the operator's problem.
-    It surfaces as a 502 with a fixed detail and never echoes the upstream text,
+    It surfaces as a 424 with a fixed detail and never echoes the upstream text,
     which is where a provider names the account it rejected."""
     response = _post_chat(client, api_key_header, _UpstreamError(401, "Incorrect API key sk-proj-BBBBBBBBBBBB"))
-    assert response.status_code == 502
+    assert response.status_code == 424
     assert response.json()["detail"] == "The provider rejected the gateway's credentials"
     assert "sk-proj-BBBBBBBBBBBB" not in response.text
 

@@ -1,6 +1,7 @@
 import {
   hashKey,
   keepPreviousData,
+  type Query,
   useMutation,
   useQuery,
   useQueryClient,
@@ -8,6 +9,8 @@ import {
 import type {
   AcceptInvitationRequest,
   AcceptInvitationResult,
+  BulkInviteOrganizationMembersRequest,
+  BulkInviteOrganizationMembersResult,
   CallerOrganizationMembership,
   CreateOrganizationDomainRequest,
   CreateOrganizationRequest,
@@ -34,7 +37,12 @@ import type {
   UpdateOrgProviderKeyRequest,
   UpdateOrgProviderModelRequest,
 } from "@/client"
-import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
+import {
+  ApiError,
+  apiFetch,
+  longRequestSignal,
+  retryUnlessNotFound,
+} from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   CATALOG,
@@ -61,13 +69,101 @@ const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
 // `enabled` is for the one page that renders ahead of a session: the public
 // catalog has no organization to ask about, and asking would 401 into the
 // sign-out handler.
+//
+// A 404 is not retried: it is an identity with no active membership anywhere
+// (see `isNoOrganizationError`), and asking again only holds every page that
+// waits on this answer behind the backoff. Any other failure keeps the
+// dashboard's own retry policy.
 export function useOrganizationContext(enabled = true) {
   return useQuery({
     queryKey: ORGANIZATION_CONTEXT,
     queryFn: () => apiFetch<OrganizationContext>("/organizations/me"),
     staleTime: 60_000,
+    retry: retryUnlessNotFound(useQueryClient()),
     enabled,
   })
+}
+
+/**
+ * Whether a failed context read means the caller belongs to no organization.
+ *
+ * `/organizations/me` answers 404 for a signed-in identity with no active
+ * membership: somebody who declined their only invitation, or who signed up or
+ * signed in before accepting one.
+ */
+export function isNoOrganizationError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+}
+
+/**
+ * What the organization context says about whether the caller operates the
+ * deployment, as one of five answers rather than a boolean.
+ *
+ * `"unavailable"` is the read having failed with nothing cached to fall back
+ * on. It is kept apart from `"not-operator"` because the two call for opposite
+ * behavior: a resolved no withholds the operator surface silently, while a
+ * failed read cannot say whether anything is being withheld from its owner.
+ *
+ * `"no-organization"` is the one failure that is an answer: the server said
+ * the caller belongs to no organization, so there is nothing to operate and
+ * nothing to fail open onto.
+ */
+export type DeploymentOperatorAnswer =
+  | "operator"
+  | "not-operator"
+  | "no-organization"
+  | "pending"
+  | "unavailable"
+
+/**
+ * Derive the answer from the context query.
+ *
+ * Cached data wins over a later failed refetch. `isFetched` rather than
+ * `isError` marks a failure, because a query that errored with no data goes
+ * back to pending on its next fetch, and a caller that read that as "still
+ * loading" would swap pages on every retry. An older gateway that omits the
+ * field reads as not an operator.
+ */
+export function deploymentOperatorAnswer(query: {
+  data?: OrganizationContext
+  error?: unknown
+  isFetched: boolean
+}): DeploymentOperatorAnswer {
+  if (query.data) {
+    return query.data.deployment_operator === true ? "operator" : "not-operator"
+  }
+  if (!query.isFetched) {
+    return "pending"
+  }
+  return isNoOrganizationError(query.error) ? "no-organization" : "unavailable"
+}
+
+/**
+ * Whether to treat the caller as a deployment operator, for every page, rail
+ * row and scope hook that asks (otari#876).
+ *
+ * `isOperator` **fails open** on an unavailable answer. Every deployment-wide
+ * route it gates refuses a non-operator with a 403 that names the reason, so
+ * offering the surface costs a tenant a refusal during the outage, while
+ * withholding it would silently take an operator's controls away with nothing
+ * on screen saying why. It is false while the answer is pending, so nothing
+ * deployment-wide is asked for and then refused on an ordinary first paint;
+ * `isSettled` is for a caller that must wait rather than render that window.
+ *
+ * Client-side only: it decides what to offer, and the server still authorizes
+ * every request.
+ */
+export function useDeploymentOperator(enabled = true): {
+  answer: DeploymentOperatorAnswer
+  isOperator: boolean
+  isSettled: boolean
+} {
+  const answer = deploymentOperatorAnswer(useOrganizationContext(enabled))
+  return {
+    answer,
+    isOperator: answer === "operator" || answer === "unavailable",
+    isSettled: answer !== "pending",
+  }
 }
 
 // Whether the deployment can encrypt a provider credential at rest, i.e. whether
@@ -139,8 +235,9 @@ export function useCreateOrganization() {
 // step with every future query, and the one it missed would render another
 // organization's rows under this one's name.
 //
-// The context is the exception, and the only one: it is what the switch itself
-// answers with, and what a role gate reads.
+// The context is the exception to the invalidation: it is what the switch
+// itself answers with, and what a role gate reads. Queries keyed on one of the
+// left organization's workspaces are invalidated without a refetch.
 export function useSwitchOrganization() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -157,6 +254,25 @@ export function useSwitchOrganization() {
       })
     },
     onSuccess: (context) => {
+      const leftWorkspaceIds = (
+        queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT)
+          ?.workspace_memberships ?? []
+      ).map((membership) => membership.workspace_id)
+      // A query keyed on a workspace of the organization just left stays
+      // mounted under that id until the selection follows the new context on
+      // the next render, so refetching it here asks for a workspace the caller
+      // no longer acts in and earns a 404. It is only marked stale, and the
+      // page asks for the new workspace once the selection moves. Such a query
+      // is found by the workspace it declares (`workspaceMeta`), not by
+      // searching its key, which also holds ids that are not workspaces.
+      const isKeyedOnLeftWorkspace = (query: Query) => {
+        const workspaceId = query.meta?.workspaceId
+        return (
+          typeof workspaceId === "string" &&
+          workspaceId !== "" &&
+          leftWorkspaceIds.includes(workspaceId)
+        )
+      }
       // Written, not invalidated, and written first: the invalidation below is
       // where every query decides whether to refetch, and one gated on the role
       // in here would decide it against the organization just left, asking for
@@ -165,7 +281,13 @@ export function useSwitchOrganization() {
       // being made in it.
       queryClient.setQueryData(ORGANIZATION_CONTEXT, context)
       void queryClient.invalidateQueries({
-        predicate: (query) => query.queryHash !== ORGANIZATION_CONTEXT_HASH,
+        predicate: (query) =>
+          query.queryHash !== ORGANIZATION_CONTEXT_HASH &&
+          !isKeyedOnLeftWorkspace(query),
+      })
+      void queryClient.invalidateQueries({
+        predicate: isKeyedOnLeftWorkspace,
+        refetchType: "none",
       })
     },
   })
@@ -265,8 +387,8 @@ export function useRemoveOrganizationMember() {
 }
 
 // The dashboard's one write path onto the roster: lands `invited`, and the
-// response always carries `accept_link` (whether or not `mail_sent` is true),
-// so the operator can share it themselves.
+// response carries `accept_link` only when `mail_sent` is false, for the
+// operator to share themselves.
 export function useInviteOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -278,6 +400,39 @@ export function useInviteOrganizationMember() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// Several addresses in one call: each is invited or refused on its own, and
+// every invited entry carries its own `mail_sent` and accept link.
+export function useBulkInviteOrganizationMembers() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: BulkInviteOrganizationMembersRequest) =>
+      apiFetch<BulkInviteOrganizationMembersResult>(
+        "/organizations/me/member-invitations/bulk",
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// A new link for a pending or expired invitation: the old one stops working,
+// and the new one is emailed, or comes back to share when it was not.
+export function useReissueOrganizationMemberInvitation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      apiFetch<InviteOrganizationMemberResult>(
+        `/organizations/me/member-invitations/${encodeURIComponent(invitationId)}/reissue`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
     },
   })
 }
@@ -309,7 +464,7 @@ export function useRevokeOrganizationMemberInvitation() {
 // every `/organizations` path by design. Neither is something a retry
 // fixes, and the entry point that reads the count treats a failure as "nothing
 // waiting" rather than showing an error in the chrome.
-export function usePendingOrganizationInvitations() {
+export function usePendingOrganizationInvitations(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATIONS, "pending-memberships"],
     queryFn: () =>
@@ -319,6 +474,7 @@ export function usePendingOrganizationInvitations() {
     staleTime: 60_000,
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+    enabled,
   })
 }
 

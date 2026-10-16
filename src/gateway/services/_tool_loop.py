@@ -25,6 +25,8 @@ from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar, cast
 
+from gateway.log_config import logger
+
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
 StateT = TypeVar("StateT")
@@ -34,12 +36,12 @@ AccT = TypeVar("AccT")
 class ToolBackend(Protocol):
     """Subset of the tool-backend surface the loop drives.
 
-    Structurally implemented by ``MCPClientPool``, ``SandboxBackend``, and
-    ``WebSearchBackend``; each exposes the same members the loop and the route
-    pipeline need to advertise tools, decide ownership, execute a call, and
-    describe each tool's purpose for the system-message hint block. Widening
-    ``pool`` to this Protocol lets the routes pass any of those backends
-    without casts.
+    Structurally implemented by ``MCPClientPool``, ``SandboxBackend``,
+    ``WebRetrievalBackend`` and ``CombinedToolBackend`` (``services/tools``); each exposes the
+    same members the loop and the route pipeline need to advertise tools, decide
+    ownership, execute a call, and describe each tool's purpose for the
+    system-message hint block. Widening ``pool`` to this Protocol lets the routes
+    pass any of those backends without casts.
     """
 
     @property
@@ -50,6 +52,24 @@ class ToolBackend(Protocol):
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str: ...
 
     def purpose_hints(self) -> list[tuple[str, str]]: ...
+
+
+def tool_failure_detail(pool: ToolBackend, name: str) -> str:
+    """What the model and the caller are told when a call to ``name`` raised.
+
+    It names the kind of tool and never the exception, whose text can carry a URL
+    with a query credential, a header value or an internal hostname. One call gets
+    the same words on every path.
+    """
+    server_name_for_tool = getattr(pool, "server_name_for_tool", None)
+    if callable(server_name_for_tool) and server_name_for_tool(name):
+        return "MCP tool execution failed"
+    return "Gateway tool execution failed"
+
+
+def log_tool_failure(name: str, detail: str, exc: BaseException) -> None:
+    """Log a call that raised, keeping the exception's text out of the line for the same reason."""
+    logger.warning("%s: %s", detail, name, extra={"error_type": type(exc).__name__})
 
 
 class MaxToolIterationsExceeded(Exception):
@@ -138,9 +158,7 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
 
     def new_stream_accumulator(self) -> AccT: ...
 
-    def observe(
-        self, state: StateT, event: ChunkT, pool: ToolBackend, acc: AccT
-    ) -> tuple[StreamAction, ChunkT]: ...
+    def observe(self, state: StateT, event: ChunkT, pool: ToolBackend, acc: AccT) -> tuple[StreamAction, ChunkT]: ...
 
     def stream_exiting(self, state: StateT, pool: ToolBackend) -> bool: ...
 
@@ -200,6 +218,7 @@ async def run_tool_loop(
     pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
+    check_first_response: Callable[[ResultT], ResultT] | None = None,
 ) -> ResultT:
     """Non-streaming tool loop, generic over the wire format.
 
@@ -226,6 +245,8 @@ async def run_tool_loop(
     the model has produced any assistant output, the conversation state is
     provider-specific and subsequent failures must not silently swap
     providers. See the hybrid-mode attempt loops in the route modules.
+    ``check_first_response`` runs before it and may raise to refuse that
+    response as a provider failure, which leaves the attempt free to fall over.
     """
     transcript, merged_tools, base = _prepare(
         strategy.transcript_key,
@@ -245,6 +266,8 @@ async def run_tool_loop(
 
         result = await strategy.call(kwargs)
         if not first_response_signaled:
+            if check_first_response is not None:
+                result = check_first_response(result)
             first_response_signaled = True
             if on_first_response is not None:
                 on_first_response()
@@ -312,22 +335,30 @@ async def run_tool_loop_stream(
     base["stream"] = True
     acc = strategy.new_stream_accumulator()
 
-    for _ in range(max_iterations):
+    for iteration in range(1, max_iterations + 1):
         kwargs: dict[str, Any] = {**base, strategy.transcript_key: transcript}
         if merged_tools:
             kwargs["tools"] = merged_tools
 
         stream = await strategy.open_stream(kwargs)
         state = strategy.new_stream_state()
+        events = 0
 
         async with _stream_scope(stream):
             async for event in stream:
+                events += 1
                 action, visible = strategy.observe(state, event, pool, acc)
                 if action is StreamAction.BREAK:
                     break
                 if action is StreamAction.FORWARD:
                     yield visible
 
+        if events == 0:
+            # Nothing to continue from, so the loop exits with whatever it has sent.
+            # The route decides whether that is a complete stream; this line says
+            # which round came back empty.
+            # codeql[py/clear-text-logging-sensitive-data]
+            logger.warning("Tool-loop upstream round %d returned no events model=%s", iteration, kwargs.get("model"))
         if strategy.stream_exiting(state, pool):
             # A mixed batch (the gateway's own tools plus the caller's) exits here so
             # the caller can dispatch its own, but the gateway's calls were hidden

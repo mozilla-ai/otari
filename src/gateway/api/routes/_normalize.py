@@ -1,46 +1,68 @@
-"""Shared glue for running the content normalizer from the request routes.
+"""Normalizing a request's attachments, and deciding who runs its code.
 
-Resolves the target model's multimodal capabilities and rewrites file/image
-content blocks in place — passthrough for natively-capable providers, extract to
-text for text-only models. Used by the Chat-Completions, Anthropic Messages, and
-OpenAI Responses endpoints so all three get identical handling.
+Two rules govern what leaves here, and they pull in opposite directions.
 
-Only the standalone path calls this: hybrid mode routes to frontier providers
-that natively understand documents/images (passthrough is already correct) and
-has no local DB / file store to resolve ``file_id`` references against.
+An attachment the model reads never fails the request.
+The payload is forwarded unchanged instead, because a request refused here would
+lose a budget reservation already taken and a caller gains nothing from the
+refusal.
+
+An attachment the provider's own code execution reads does fail the request when
+it cannot be given.
+The caller asked for code to be run over that file, so an answer written without
+it is worse than no answer, and a block Otari cannot resolve must not reach the
+provider carrying a file ID of the caller's choosing.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable, Sequence
 from typing import Any
 
-from any_llm import LLMProvider
-from fastapi import Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from any_llm import AnyLLM, LLMProvider
+from fastapi import HTTPException
 
-from gateway.api.routes._tools import (
-    _extract_code_execution_tool,
-    decide_code_executor,
-    first_provider_code_execution_tool,
-    parse_code_execution_header,
-    provider_runs_code_natively,
-    resolve_code_executor_preference,
-)
+from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyError
+from gateway.exceptions.files_exceptions import (
+    AttachedFilesNotReadError,
+    InlineAttachmentsTooLargeError,
+    NoCandidateHoldsCopiesError,
+    ProviderAttachmentError,
+    ProviderAttachmentRefusedError,
+    ProviderUploadFailedError,
+)
 from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
-from gateway.services.content_normalizer import InlineLimit, NormalizationStats, WireFormat, normalize_messages
-from gateway.services.files.provider_uploads import upload_attachment, uploads_attachments
-from gateway.services.model_capabilities import resolve_capabilities
-
-# The providers that cap the attachment bytes one request may carry inline.
-_INLINE_LIMITED_PROVIDERS = frozenset({LLMProvider.GEMINI, LLMProvider.VERTEXAI})
-
-INLINE_LIMIT_DETAIL = (
-    "Invalid request: the attachments exceed the {max_bytes} bytes Gemini accepts inline in one request, "
-    "and they could not be moved to Gemini's file storage. Send fewer or smaller attachments."
+from gateway.services.content_normalizer import (
+    InlineLimit,
+    NormalizationStats,
+    WireFormat,
+    has_container_blocks,
+    name_container_copies,
+    normalize_messages,
 )
+from gateway.services.files import FileService, StagedFile, provider_holds_copies, uploads_attachments
+from gateway.services.model_capabilities import resolve_capabilities
+from gateway.services.provider_kwargs import ProviderAccounts, effective_credential, get_provider_kwargs
+from gateway.services.tools import (
+    CODE_EXECUTION_TOOL,
+    CandidateTools,
+    Dialect,
+    ProviderToolDeclaration,
+    decide_candidate_tools,
+    extract_code_execution_tool,
+    first_provider_code_execution_tool,
+    parse_code_execution_header,
+    resolve_code_executor_preference,
+)
+
+# The providers that cap the attachment bytes one request may carry inline. Vertex
+# AI is left out: its provider serves Claude and Mistral models as well as Gemini,
+# under limits of their own.
+_INLINE_LIMITED_PROVIDERS = frozenset({LLMProvider.GEMINI})
 
 
 def inline_limit_for(
@@ -48,65 +70,155 @@ def inline_limit_for(
     provider: LLMProvider,
     fmt: WireFormat,
     *,
+    files: FileService | None,
+    candidates: Sequence[LLMProvider | None],
     instance: str | None,
     workspace_id: uuid.UUID | None,
 ) -> InlineLimit | None:
-    """The inline attachment limit for ``provider``, with an upload when Otari can move a file there."""
-    if provider not in _INLINE_LIMITED_PROVIDERS or fmt == "responses":
+    """The inline attachment limit for ``provider``, with an upload where Otari can move a file there.
+
+    Only where every candidate shares the limit: a request that may fall back to
+    a provider without it is sent as it is, so the fallback can still serve it.
+    """
+    if fmt == "responses" or not candidates or any(c not in _INLINE_LIMITED_PROVIDERS for c in candidates):
         return None
     upload = None
-    if uploads_attachments(provider):
+    if files is not None and uploads_attachments(provider):
+        attachments = files
 
         async def upload(data: bytes, mime: str, filename: str) -> str:
-            return await upload_attachment(
-                config,
+            kwargs = get_provider_kwargs(config, provider, instance, workspace_id=workspace_id)
+            return await attachments.attachment_uri(
+                data,
                 provider=provider,
-                instance=instance,
+                credential=effective_credential(provider, kwargs),
                 workspace_id=workspace_id,
-                data=data,
-                mime=mime,
+                mime_type=mime,
                 filename=filename,
             )
 
     return InlineLimit(max_bytes=config.files_gemini_inline_max_bytes, upload=upload)
 
 
+def _executor_preference(
+    config: GatewayConfig, code_execution_header: str | None, workspace_executor: CodeExecutor | None
+) -> CodeExecutor | None:
+    """The three layers admission uses, composed into one preference.
+
+    The workspace pin, the header and the deployment default.
+    None for a header outside the vocabulary, which admission refuses, so
+    nothing here decides on it.
+    """
+    try:
+        requested = parse_code_execution_header(code_execution_header)
+    except ValueError:
+        return None
+    preference, _ = resolve_code_executor_preference(
+        requested=requested, workspace=workspace_executor, deployment=config.effective_code_executor()
+    )
+    return preference
+
+
+def _keyword_candidates(
+    keyword: dict[str, Any],
+    *,
+    config: GatewayConfig,
+    providers: Sequence[LLMProvider | None],
+    dialect: Dialect,
+    code_execution_header: str | None,
+    workspace_executor: CodeExecutor | None,
+) -> list[CandidateTools] | None:
+    """What each candidate is sent for ``keyword``, as admission decides it, head first.
+
+    ``None`` where admission refuses the request: a header outside the vocabulary,
+    or ``otari`` with no sandbox to run it on.
+    """
+    preference = _executor_preference(config, code_execution_header, workspace_executor)
+    if preference is None or (preference is CodeExecutor.OTARI and not config.sandbox_configured()):
+        return None
+    declaration = ProviderToolDeclaration(
+        tool=CODE_EXECUTION_TOOL,
+        entry=keyword,
+        preference=preference,
+        backend_configured=config.sandbox_configured(),
+    )
+    names = [provider.value if provider is not None else None for provider in providers] or [None]
+    return decide_candidate_tools([declaration], providers=names, dialect=dialect)
+
+
+def provider_container_requested(
+    tools: list[dict[str, Any]] | None,
+    *,
+    config: GatewayConfig,
+    providers: Sequence[LLMProvider | None],
+    dialect: Dialect,
+    code_execution_header: str | None,
+    workspace_executor: CodeExecutor | None = None,
+) -> bool:
+    """Whether some attempt of this request runs its code in the provider's own container.
+
+    The other side of ``sandbox_requested``: a provider's own declaration, in the
+    wire format that declaration is native to, which the executor leaves with a
+    candidate that runs it natively. A file the request attaches then has to be one
+    that provider holds, so it is copied there rather than read for the model.
+    ``providers`` is every candidate the request may dispatch to, head first; unless
+    ``auto`` splits them, the head decides.
+    """
+    explicit, remaining = extract_code_execution_tool(tools)
+    keyword = first_provider_code_execution_tool(remaining)
+    if explicit is not None or keyword is None:
+        return False
+    candidates = _keyword_candidates(
+        keyword,
+        config=config,
+        providers=providers,
+        dialect=dialect,
+        code_execution_header=code_execution_header,
+        workspace_executor=workspace_executor,
+    )
+    if not candidates:
+        return False
+    claimed = [CODE_EXECUTION_TOOL.name in candidate.claimed for candidate in candidates]
+    if any(claimed) and not all(claimed):
+        return True
+    return CODE_EXECUTION_TOOL.name in candidates[0].native
+
+
 def sandbox_requested(
     tools: list[dict[str, Any]] | None,
     *,
     config: GatewayConfig,
-    provider: LLMProvider | None,
-    dialect: str,
+    providers: Sequence[LLMProvider | None],
+    dialect: Dialect,
     code_execution_header: str | None,
     workspace_executor: CodeExecutor | None = None,
 ) -> bool:
-    """Whether this request's code will run on the gateway's sandbox.
+    """Whether some attempt of this request runs its code on the gateway's sandbox.
 
     True for the explicit ``otari_code_execution`` type, and for a provider's own
-    declaration the executor would bring here (see ``_tools.decide_code_executor``):
-    a file the request attaches is then staged for the sandbox rather than only
-    shown to the model. Decided from the same three layers admission uses, the
-    workspace pin (``workspace_executor``, read once in the preamble), the header
-    and the deployment default, against the dispatched provider. A header outside
-    the vocabulary answers false here and is refused at admission.
+    declaration the executor would bring here for any candidate (see
+    ``_tools.decide_code_executor``): a file the request attaches is then staged for
+    the sandbox rather than only shown to the model. Decided from the same three
+    layers admission uses, the workspace pin (``workspace_executor``, read once in
+    the preamble), the header and the deployment default, against every candidate
+    the request may dispatch to (``providers``, head first). A header outside the
+    vocabulary answers false here and is refused at admission.
     """
-    explicit, remaining = _extract_code_execution_tool(tools)
+    explicit, remaining = extract_code_execution_tool(tools)
     if explicit is not None:
         return True
     keyword = first_provider_code_execution_tool(remaining)
     if keyword is None or not config.sandbox_configured():
         return False
-    try:
-        requested = parse_code_execution_header(code_execution_header)
-    except ValueError:
-        return False
-    preference, _ = resolve_code_executor_preference(
-        requested=requested, workspace=workspace_executor, deployment=config.effective_code_executor()
+    candidates = _keyword_candidates(
+        keyword,
+        config=config,
+        providers=providers,
+        dialect=dialect,
+        code_execution_header=code_execution_header,
+        workspace_executor=workspace_executor,
     )
-    native = provider_runs_code_natively(
-        keyword, provider=provider.value if provider is not None else None, dialect=dialect
-    )
-    return decide_code_executor(preference, sandbox_configured=True, native_available=native) is CodeExecutor.OTARI
+    return any(CODE_EXECUTION_TOOL.name in candidate.claimed for candidate in candidates or [])
 
 
 async def normalize_request_messages(
@@ -116,12 +228,14 @@ async def normalize_request_messages(
     config: GatewayConfig,
     provider: LLMProvider | None,
     model: str,
-    db: AsyncSession | None,
-    raw_request: Request,
+    files: FileService | None,
     user_id: str | None,
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
+    provider_container: bool = False,
+    candidates: Sequence[LLMProvider | None] = (),
+    credential_workspace_id: uuid.UUID | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
 
@@ -129,32 +243,105 @@ async def normalize_request_messages(
     code-execution tool; the normalizer then records referenced uploads on the
     stats for the sandbox backend to seed (see ``NormalizationStats.sandbox_inputs``).
 
-    No-ops (returns the input untouched) when file understanding is disabled or
-    the provider couldn't be parsed — the downstream provider call surfaces an
-    unknown model with its own status code.
+    ``provider_container`` is set where the provider runs the code in a container
+    of its own. The uploads its ``container_upload`` blocks name are then
+    recorded on ``NormalizationStats.container_inputs``, and a block naming none
+    refuses the request.
 
-    This is called after the budget reservation, so it must never raise: an
-    unexpected failure would otherwise leak the in-flight reservation. The
-    normalizer is already defensive per-block; this is a belt-and-suspenders
-    guard that forwards the original messages unchanged on any error.
+    ``candidates`` is every provider the request may dispatch to, head first, and
+    ``credential_workspace_id`` the workspace it dispatches under. Together they
+    decide whether attachments past the provider's inline limit are moved to its
+    own storage (see ``inline_limit_for``).
+
+    An attachment the model reads never fails the request, because this runs
+    after the budget reservation and a refusal here would lose it.
+    The input is returned untouched instead, which is also the answer where file
+    understanding is off or the provider could not be parsed.
+    The exception is an attachment past an inline limit that could not be moved,
+    which the provider would refuse anyway, so the request is refused here first.
+
+    Raises:
+        ProviderAttachmentError: only where ``provider_container`` is set.
+        InlineAttachmentsTooLargeError: the attachments pass the provider's inline limit and could not be moved.
     """
+    if provider_container and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
+        # Nothing below would examine the blocks, so a `container_upload` would
+        # reach the provider naming a file of the caller's choosing.
+        raise AttachedFilesNotReadError
     if provider is None or not config.file_understanding_enabled:
         return messages, NormalizationStats()
     try:
         caps = resolve_capabilities(config, provider, model, instance=instance)
-        file_store = getattr(raw_request.app.state, "file_store", None)
-        return await normalize_messages(
+        inline_limit = inline_limit_for(
+            config,
+            provider,
+            fmt,
+            files=files,
+            candidates=candidates or (provider,),
+            instance=instance,
+            workspace_id=credential_workspace_id,
+        )
+        normalized, stats = await normalize_messages(
             messages,
             config=config,
             caps=caps,
             fmt=fmt,
-            db=db,
-            file_store=file_store,
+            files=files,
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
-            inline_limit=inline_limit_for(config, provider, fmt, instance=instance, workspace_id=workspace_id),
+            provider_container=provider_container,
+            inline_limit=inline_limit,
         )
-    except Exception as exc:  # noqa: BLE001 — never fail the request / leak the reservation
+    except ProviderAttachmentError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - never fail the request or leak the reservation
+        if provider_container:
+            # An aborted pass leaves the payload as it arrived, container blocks
+            # and all, so forwarding it would hand the provider the caller's own
+            # file ids. That is what this path exists to stop.
+            logger.warning("content normalization failed for a provider container: %s", exc)
+            raise ProviderUploadFailedError from exc
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)
         return messages, NormalizationStats()
+    if stats.oversized:
+        raise InlineAttachmentsTooLargeError(config.files_gemini_inline_max_bytes)
+    return normalized, stats
+
+
+def container_copies_step(
+    *,
+    files: FileService,
+    inputs: Sequence[StagedFile],
+    accounts: ProviderAccounts,
+    render: Callable[[TenancyError], HTTPException],
+) -> PrepareKwargs:
+    """The step that sends each candidate the IDs of copies in its own provider account.
+
+    A candidate whose provider cannot hold a copy cannot serve the request.
+    A refusal is rendered with ``render``, the dialect's own envelope.
+    A copy that could not be made raises :class:`ProviderUploadFailedError`,
+    which is that candidate's own failure rather than a refusal of the request.
+    A candidate sent no ``container_upload`` block, as one whose sandbox holds the files is, needs no copy.
+    """
+
+    async def _prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if not has_container_blocks(kwargs["messages"], "anthropic"):
+            return kwargs
+        provider, _ = AnyLLM.split_model_provider(kwargs["model"])
+        if not isinstance(provider, LLMProvider) or not provider_holds_copies(provider):
+            raise CandidateCannotServe(render(NoCandidateHoldsCopiesError()))
+        try:
+            credential = effective_credential(provider, kwargs)
+        except LookupError as exc:
+            # codeql[py/clear-text-logging-sensitive-data]
+            logger.warning("No credential to copy attached files to %s: %s", instance, exc)
+            raise ProviderUploadFailedError from exc
+        account = accounts.name(provider, instance, credential)
+        try:
+            copies = await files.provider_file_ids(inputs, account, credential)
+        except ProviderAttachmentRefusedError as exc:
+            raise render(exc) from exc
+        return {**kwargs, "messages": name_container_copies(kwargs["messages"], copies)}
+
+    return _prepare

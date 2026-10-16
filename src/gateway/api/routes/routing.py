@@ -26,9 +26,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.api.routes._helpers import resolve_managed_workspace_id
+from gateway.api.deps import CallerWorkspaceQuery, get_config, get_db, require_deployment_operator
+from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.log_config import logger
 from gateway.models.routing import PolicySpec, RoutingPolicy
@@ -36,6 +37,7 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names
 from gateway.services.policy_store import (
     all_policy_names,
+    list_stored_policies,
     refresh_policy_cache,
     resolve_effective_policy,
 )
@@ -44,9 +46,9 @@ from gateway.services.routing import (
     NoEligibleCandidatesError,
     backend_requires_pricing,
     compile_policy,
+    explain_router_ordering,
+    unpriced_router_candidates,
 )
-from gateway.services.routing.decide import explain_router_ordering
-from gateway.services.routing.knn import unpriced_router_candidates
 
 router = APIRouter(
     prefix="/routing/policies",
@@ -308,9 +310,7 @@ async def _validate_router_pricing(
     """
     if not backend_requires_pricing(spec.router_backend):
         return
-    missing = await unpriced_router_candidates(
-        config, db, spec.router_candidates, workspace_id=workspace_id
-    )
+    missing = await unpriced_router_candidates(config, db, spec.router_candidates, workspace_id=workspace_id)
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -385,28 +385,26 @@ async def _refresh_quietly(db: AsyncSession, name: str) -> None:
 async def list_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_ids: CallerWorkspaceQuery,
     workspace_id: Annotated[
         uuid.UUID | None,
         Query(
             description=(
                 "Only stored policies in this workspace. Config-file policies are always included, "
-                "being deployment-wide. Omit to list the stored policies of every workspace."
+                "being deployment-wide. Omit to list the stored policies of every workspace in your organization."
             )
         ),
     ] = None,
 ) -> list[PolicyResponse]:
-    """List every routing policy in force, from config.yml and from storage.
+    """List every routing policy in force in your organization, from config.yml and from storage.
 
     Every scope at once, workspace-wide and user-scoped alike: this is the
     master-key management view, not what any one caller resolves.
     """
-    statement = select(RoutingPolicy)
-    if workspace_id is not None:
-        # Stored rows only. A config.yml entry has no workspace: it is
-        # deployment-wide and in force in every one of them, so filtering
-        # it out would misreport what actually resolves.
-        statement = statement.where(RoutingPolicy.workspace_id == workspace_id)
-    rows = (await db.execute(statement.order_by(RoutingPolicy.name))).scalars().all()
+    # Stored rows only when a workspace is named. A config.yml entry has no
+    # workspace: it is deployment-wide and in force in every one of them, so
+    # filtering it out would misreport what actually resolves.
+    rows = await list_stored_policies(db, workspaces=workspace_ids, workspace_id=workspace_id)
     merged: dict[tuple[uuid.UUID | None, str, str | None], PolicyResponse] = {}
     for row in rows:
         key = (row.workspace_id, row.name, row.user_id)
@@ -518,7 +516,7 @@ async def upsert_policy_in_workspace(
 
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
         # The name check above and this commit are not one atomic step, so another
         # writer can claim the name in between and the unique constraint is what
@@ -526,17 +524,11 @@ async def upsert_policy_in_workspace(
         # covers the user foreign key, and reporting a deleted user as a name clash
         # would send the operator after the wrong thing.
         if await _name_is_taken(db, request.name, request.user_id, workspace_id):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=_name_taken_detail(request.name)
-            ) from None
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from None
-    except SQLAlchemyError:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_name_taken_detail(request.name)) from None
+        raise database_error("upsert policy in workspace", exc) from None
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from None
+        raise database_error("upsert policy in workspace", exc) from None
     await db.refresh(policy)
     # An operator changing where traffic goes is worth a line in the log: this is the
     # object that decides which model spends money.
@@ -610,11 +602,9 @@ async def delete_policy_in_workspace(
     await db.delete(policy)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from None
+        raise database_error("delete policy in workspace", exc) from None
     await _refresh_quietly(db, name)
 
 
@@ -676,9 +666,7 @@ async def explain_policy(
         name = request.name
         resolved = resolve_effective_policy(config, name, request.user_id, workspace_id=request.workspace_id)
         if resolved is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"Routing policy '{name}' not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Routing policy '{name}' not found")
         spec = resolved
 
     # A weighted policy's ordering is computable here: it needs no prompt, no
@@ -699,9 +687,7 @@ async def explain_policy(
             user_id=request.user_id,
             key_id=request.key_id,
             allowlist=request.allowed_models,
-            budget=BudgetState(
-                used_pct=request.budget_used_pct, remaining_usd=request.budget_remaining_usd
-            ),
+            budget=BudgetState(used_pct=request.budget_used_pct, remaining_usd=request.budget_remaining_usd),
             router_ordering=weighted_ordering,
             workspace_id=request.workspace_id,
         )
@@ -714,8 +700,7 @@ async def explain_policy(
             router_candidates=spec.router_candidates,
             candidates=[],
             dropped=[
-                DroppedResponse(selector=item.selector, reason=item.reason, detail=item.detail)
-                for item in exc.dropped
+                DroppedResponse(selector=item.selector, reason=item.reason, detail=item.detail) for item in exc.dropped
             ],
             guardrails=[],
         )
@@ -738,8 +723,7 @@ async def explain_policy(
             for attempt in plan.attempts
         ],
         dropped=[
-            DroppedResponse(selector=item.selector, reason=item.reason, detail=item.detail)
-            for item in plan.dropped
+            DroppedResponse(selector=item.selector, reason=item.reason, detail=item.detail) for item in plan.dropped
         ],
         guardrails=[guardrail.model_dump(mode="json", exclude_none=True) for guardrail in plan.guardrails],
     )

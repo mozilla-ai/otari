@@ -83,9 +83,14 @@ through the explicit overlay seams.
 - `surface`, the deployment topology
 - `capability`, the installed or entitled feature
 - `operatorOnly`, deployment-wide authority
+- `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
+  caller with no organization can use (Overview today); every other row,
+  overlay rows included, is hidden from that caller, and from every caller
+  until `GET /v1/organizations/me` has answered
 
-These gates combine with AND. Organization and workspace authorization still
-comes from server responses.
+These gates combine with AND, and the top bar and the account menu gate their
+Playground link through the same predicate. Organization and workspace
+authorization still comes from server responses.
 
 The workspace and organization rails have separate registries. A sidebar item
 points to a real page, never a redirect. `/playground`, `/docs`, and `/account` are chrome
@@ -94,6 +99,16 @@ destinations and do not belong in a rail.
 Overlay navigation uses the empty seam modules under `src/app/nav/` for new
 sections, items inserted into base sections, and label overrides. Keep their
 types aligned with otari-ai.
+
+More seams let a build whose one dashboard reaches several deployments
+say which: `shared/api/overlayRequestPolicy.ts` (the origin and credential every
+management request uses, settled before the bootstrap is read),
+`features/auth/overlayPublicAuthFields.tsx` (a control above the address on the
+pages that post one), `features/auth/overlayAuthShellSlot.tsx` (a control in the
+header of the public auth pages), `app/nav/overlayAccountMenuRows.tsx` (extra
+rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
+the account control, the monogram here). Each ships inert; `src/overlaySeams.test.ts`
+lists every seam and checks it is reached by its `@/…` specifier.
 
 ## Icons
 
@@ -180,8 +195,8 @@ aspect so it is never stretched.
 ## Checks
 
 ```bash
-pnpm --dir web run lint
-pnpm --dir web run typecheck
+make lint-web
+make typecheck-web
 pnpm --dir web test
 pnpm --dir web run build
 ```

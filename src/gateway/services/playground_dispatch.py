@@ -131,17 +131,21 @@ async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal,
     # a 500 on every later request. Whichever row wins is a complete credential,
     # so the loser is simply never read.
     row = (
-        await db.execute(
-            select(APIKey)
-            .where(
-                col(APIKey.user_id) == principal.user_id,
-                col(APIKey.workspace_id) == principal.workspace_id,
-                col(APIKey.internal_secret).is_not(None),
+        (
+            await db.execute(
+                select(APIKey)
+                .where(
+                    col(APIKey.user_id) == principal.user_id,
+                    col(APIKey.workspace_id) == principal.workspace_id,
+                    col(APIKey.internal_secret).is_not(None),
+                )
+                .order_by(col(APIKey.created_at), col(APIKey.id))
+                .limit(1)
             )
-            .order_by(col(APIKey.created_at), col(APIKey.id))
-            .limit(1)
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     # Read once: the answer decides both whether to mint and whether the existing
     # row needs rewriting, and decrypting twice would log the failure twice.
@@ -205,13 +209,15 @@ async def forward_completion(
 
     Nothing from the browser's request is carried except the body. In particular
     no dashboard cookie: the data plane authenticates the key above, and must not
-    also be handed a credential that means something else here.
+    also be handed a credential that means something else here. Nor the body's
+    ``user``: the data plane would derive the end-user identifier from it rather
+    than from the key's own user.
     """
     client = httpx.AsyncClient(timeout=_TIMEOUT)
     request = client.build_request(
         "POST",
         url,
-        json=payload,
+        json={field: value for field, value in payload.items() if field != "user"},
         headers={"Authorization": f"Bearer {api_key}", "Accept": "text/event-stream, application/json"},
     )
     try:

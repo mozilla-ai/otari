@@ -19,9 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel, col
 
 import gateway.models  # noqa: F401  imports every model module, so create_all sees the whole schema
+from gateway.exceptions.identity_exceptions import PasskeyCeremonyError
 from gateway.models.tenancy import Organization, User, WebAuthnChallenge
 from gateway.services.tenancy import webauthn_service
-from gateway.services.tenancy.errors import PasskeyCeremonyError
 
 CHALLENGE = b"\x01" * 32
 OTHER_CHALLENGE = b"\x02" * 32

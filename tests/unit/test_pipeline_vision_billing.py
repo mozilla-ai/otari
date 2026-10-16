@@ -13,15 +13,19 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat
+from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
+from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.services import pricing_service
 from gateway.services.budgets import ReservationHandle, estimate_tokens
+from gateway.types.normalization_target import NormalizationTarget
 
 _VISION_USAGE = CompletionUsage(prompt_tokens=200, completion_tokens=50, total_tokens=250)
 
@@ -48,6 +52,7 @@ class _Recorder:
                 allowed_models=None,
                 exclude_from_budget=False,
                 reject_user_mismatch=None,
+                is_service_key=False,
                 workspace_id=uuid.uuid4(),
             ), False
 
@@ -68,7 +73,9 @@ class _Recorder:
 
         async def fake_reserve(*args: Any, **kwargs: Any) -> ReservationHandle:
             self.reserve_calls.append(kwargs)
-            return ReservationHandle(user_id="user-1", estimate=Decimal(0), reserved=True, strategy="for_update")
+            return ReservationHandle(
+                user_id="user-1", estimate=Decimal(0), reserved=True, strategy="for_update", scope_ceilings=()
+            )
 
         async def fake_increase(*args: Any, **kwargs: Any) -> None:
             if topup_status is not None:
@@ -84,31 +91,43 @@ class _Recorder:
         async def fake_refund(db: Any, handle: Any) -> None:
             self.refunded += 1
 
+        async def fake_check_rate_limit(request: Any, user_id: str) -> None:
+            return None
+
+        async def fake_minute_limits(*_args: object, **_kwargs: object) -> None:
+            return None
+
         monkeypatch.setattr(pipeline, "verify_api_key_or_master_key", fake_verify)
-        monkeypatch.setattr(pipeline, "check_rate_limit", lambda request, user_id: None)
-        monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
+        monkeypatch.setattr(pipeline, "check_rate_limit", fake_check_rate_limit)
+        # The preamble prices through the request's price memo, which resolves here.
+        monkeypatch.setattr(pricing_service, "resolve_model_pricing", fake_find_pricing)
         monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
         monkeypatch.setattr(pipeline, "organization_for_workspace_id", fake_organization_for_workspace_id)
         monkeypatch.setattr(pipeline, "reserve_budget", fake_reserve)
+        monkeypatch.setattr(pipeline, "_budget_minute_limits", fake_minute_limits)
         monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)
         monkeypatch.setattr(pipeline, "reconcile_reservation", fake_reconcile)
         monkeypatch.setattr(pipeline, "refund_reservation", fake_refund)
 
 
-async def _normalize_with_vision(
-    user_id: str,
-    provider: LLMProvider | None,
-    model: str,
-    instance: str | None,
-    workspace_id: uuid.UUID | None,
-    workspace_executor: object = None,
-) -> tuple[int, CompletionUsage | None]:
+async def _normalize_with_vision(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
     return 5000, _VISION_USAGE
 
 
 async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
-    request = Request({"type": "http", "method": "POST", "path": f"{API_ROOT}/chat/completions", "headers": []})
+    app = SimpleNamespace(
+        state=SimpleNamespace(container=build_container(config=GatewayConfig(), workspace_listener=None))
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": f"{API_ROOT}/chat/completions",
+            "headers": [],
+            "app": app,
+        }
+    )
     return await pipeline.resolve_request_context(
         adapter=chat._ADAPTER,
         raw_request=request,
@@ -123,6 +142,8 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         estimate_max_output_tokens=None,
         master_key_user_required_detail="user required",
         user_forbidden_detail="forbidden",
+        code_execution_policies=cast(CodeExecutionPolicyPort, object()),
+        model_provider=cast(ModelProviderPort, object()),
         normalize_messages=_normalize_with_vision,
     )
 
@@ -190,6 +211,8 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
         # reservation, so the free-model shortcut prices at the same rate the
         # request settles at. None here is the stub above saying "no override".
         "organization_id": None,
+        # Priced for the gate already, so the free-model check is answered, not looked up.
+        "model_is_free": False,
         # The completion path is the one reserve site with the config object to
         # hand, so it is the one that passes the deployment's own reservation TTL
         # rather than letting the ledger fall back to its module default.
@@ -201,6 +224,9 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
             max_output_tokens=None,
             default_output_tokens=_config().budget_estimate_default_output_tokens,
         ),
+        # The output allowance a refusal names, left out here because the stub
+        # above prices nothing, so a lower output limit could not shrink the estimate.
+        "reserved_output_tokens": None,
     }
     # The scoped ceilings narrow on the same resolved provider the pricing does,
     # and bill to the key that authenticated the request.

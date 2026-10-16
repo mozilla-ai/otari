@@ -37,7 +37,7 @@ const served = entry({
 
 function planTable() {
   return screen.getByRole("table", {
-    name: "Routing plan for policy cheap-first",
+    name: "Routing plan for cheap-first",
   })
 }
 

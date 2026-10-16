@@ -14,6 +14,8 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm import AnyLLM, LLMProvider
+from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
 from any_llm.types.responses import Response, ResponseStreamEvent
 from fastapi.testclient import TestClient
 from openai.types.responses import (
@@ -274,6 +276,34 @@ def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
         assert field not in captured, f"gateway-internal field {field!r} leaked to upstream"
 
 
+def test_client_cannot_smuggle_sdk_request_options(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """The provider SDK's per-request headers and query string stay the gateway's to set."""
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response()
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={
+                "model": _MODEL,
+                "input": "hi",
+                "extra_headers": {"OpenAI-Project": "proj_other"},
+                "extra_query": {"api-version": "preview"},
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "extra_headers" not in captured
+    assert "extra_query" not in captured
+
+
 def test_user_supplied_chat_shape_tools_get_flattened_to_responses_shape(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -326,7 +356,9 @@ def test_mcp_servers_dispatches_through_responses_tool_loop(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         seen["completion_kwargs"] = completion_kwargs
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -372,7 +404,9 @@ def test_code_execution_dispatches_through_sandbox_backend(
 
     pool_seen: list[Any] = []
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         pool_seen.append(pool)
         return _response()
 
@@ -416,7 +450,9 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
 
     pool_seen: list[Any] = []
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         pool_seen.append(pool)
         return _response()
 
@@ -455,7 +491,7 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
 
     Counterpart to
     ``test_messages_route_dispatch.test_intercept_routes_provider_keywords_to_the_gateway_backend``:
-    the adapter's ``web_search_budget`` plumbing is only reachable through the route,
+    the adapter's ``use_budget`` plumbing is only reachable through the route,
     so the unit tests that call the loop functions directly cannot cover it.
     """
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
@@ -467,9 +503,10 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
         completion_kwargs: Any,
         pool: Any,
         max_iterations: int,
-        web_search_budget: Any = None,
+        use_budget: Any = None,
+        native_tools: frozenset[str] = frozenset(),
     ) -> Response:
-        budgets_seen.append(web_search_budget)
+        budgets_seen.append(use_budget)
         return _response()
 
     fake_backend = AsyncMock()
@@ -498,10 +535,10 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
     budget = budgets_seen[0]
     assert budget is not None, "the cap never reached the loop"
     # Arrived by value, not just as "some budget": spending it exactly twice exhausts it.
-    budget.record("results")
-    assert not budget.exhausted()
-    budget.record("results")
-    assert budget.exhausted()
+    budget.record("web_search", "results")
+    assert not budget.exhausted("web_search")
+    budget.record("web_search", "results")
+    assert budget.exhausted("web_search")
 
 
 def test_invalid_web_search_max_uses_is_rejected_by_this_format(
@@ -613,49 +650,6 @@ def test_code_execution_without_sandbox_env_returns_400(
     assert "OTARI_SANDBOX_URL" in resp.json()["detail"]
 
 
-def test_code_execution_combined_with_mcp_servers_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    resp = client.post(
-        f"{API_ROOT}/responses",
-        json={
-            "model": _MODEL,
-            "input": "hi",
-            "tools": [{"type": "otari_code_execution"}],
-            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    assert "otari_code_execution and mcp_servers" in resp.json()["detail"]
-
-
-def test_web_search_combined_with_sandbox_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
-    resp = client.post(
-        f"{API_ROOT}/responses",
-        json={
-            "model": _MODEL,
-            "input": "hi",
-            "tools": [
-                {"type": "otari_code_execution"},
-                {"type": "otari_web_search"},
-            ],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    assert "cannot be combined with otari_code_execution" in resp.json()["detail"]
-
-
 # ---------- gateway-side runtime errors ----------
 
 
@@ -668,7 +662,9 @@ def test_max_tool_iterations_exceeded_returns_422(
 
     from gateway.services.mcp_loop_responses import MaxToolIterationsExceeded
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
     fake_backend = AsyncMock()
@@ -874,7 +870,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     seen: dict[str, Any] = {}
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[ResponseStreamEvent]:
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -913,6 +909,78 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     assert plain_aresponses_called is False
 
 
+def _assert_stream_ended_cleanly(resp: Any) -> None:
+    assert resp.status_code == 200, resp.text
+    lines = [line for line in resp.text.splitlines() if line]
+    assert "event: error" not in lines, resp.text
+    assert lines[-1] == "data: [DONE]", resp.text
+    assert any('"response.completed"' in line for line in lines), resp.text
+
+
+def test_stream_mcp_pool_close_failure_does_not_cut_off_the_stream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    async def fake_loop_stream(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        yield _stream_completed_event()
+
+    with (
+        patch("gateway.api.routes.responses.responses_tool_loop_stream", new=fake_loop_stream),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aenter__",
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+        ),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aexit__",
+            new=AsyncMock(side_effect=RuntimeError("the MCP server hung up")),
+        ),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={
+                "model": _MODEL,
+                "input": "hi",
+                "stream": True,
+                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+            },
+            headers=api_key_header,
+        )
+
+    _assert_stream_ended_cleanly(resp)
+
+
+def test_stream_sandbox_close_failure_does_not_cut_off_the_stream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+
+    async def fake_loop_stream(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        yield _stream_completed_event()
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_backend.__aenter__ = AsyncMock(return_value=fake_backend)
+    fake_backend.__aexit__ = AsyncMock(side_effect=RuntimeError("the sandbox hung up"))
+
+    with (
+        patch("gateway.api.routes.responses.responses_tool_loop_stream", new=fake_loop_stream),
+        patch("gateway.api.routes._pipeline.SandboxBackend", return_value=fake_backend),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _MODEL, "input": "compute", "stream": True, "tools": [{"type": "otari_code_execution"}]},
+            headers=api_key_header,
+        )
+
+    _assert_stream_ended_cleanly(resp)
+
+
 def test_stream_code_execution_dispatches_through_sandbox(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -932,7 +1000,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
     pool_seen: list[Any] = []
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[ResponseStreamEvent]:
         pool_seen.append(pool)
         yield _stream_completed_event()
@@ -1002,17 +1070,26 @@ def test_stream_sandbox_unreachable_returns_502(
     assert ("sandbox temporarily unavailable" if unavailable else "sandbox unreachable") in resp.json()["detail"]
 
 
-# ---------- provider-support guard (pre-existing behavior) ----------
+# ---------- provider-support guard ----------
 
 
-def test_provider_without_responses_support_returns_400(
+class _NoTextGeneration:
+    SUPPORTS_RESPONSES = False
+    SUPPORTS_COMPLETION = False
+
+
+def test_provider_without_responses_or_chat_support_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The pre-existing SUPPORTS_RESPONSES check still works after the
-    wiring changes. Catches regressions where the provider-support guard
-    might be bypassed by the tool dispatch path.
-    """
+    """A provider that can serve neither API is refused before dispatch, tool path included."""
+    real = AnyLLM.get_provider_class
+
+    def get_provider_class(provider: Any) -> Any:
+        return _NoTextGeneration if LLMProvider(provider) == LLMProvider.ANTHROPIC else real(provider)
+
+    monkeypatch.setattr(AnyLLM, "get_provider_class", get_provider_class)
     resp = client.post(
         f"{API_ROOT}/responses",
         json={"model": "anthropic:claude-3-5-sonnet-20241022", "input": "hi"},
@@ -1020,3 +1097,126 @@ def test_provider_without_responses_support_returns_400(
     )
     assert resp.status_code == 400
     assert "does not support the Responses API" in resp.json()["detail"]
+
+
+# ---------- providers without a Responses API ----------
+
+_BRIDGED_MODEL = "mistral:mistral-small-latest"
+_ACOMPLETION = "gateway.services.inference._responses_bridge.acompletion"
+_CHAT_USAGE = {"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13}
+
+
+def _chat_chunk(
+    delta: dict[str, Any] | None, finish_reason: str | None = None, usage: Any = None
+) -> ChatCompletionChunk:
+    return ChatCompletionChunk.model_validate(
+        {
+            "id": "cmpl-1",
+            "object": "chat.completion.chunk",
+            "created": 1700000000,
+            "model": "mistral-small-latest",
+            "choices": [] if delta is None else [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+            "usage": usage,
+        }
+    )
+
+
+def test_provider_without_responses_api_is_served_as_a_chat_completion(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured.update(kwargs)
+        return ChatCompletion.model_validate(
+            {
+                "id": "cmpl-1",
+                "object": "chat.completion",
+                "created": 1700000000,
+                "model": "mistral-small-latest",
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": "Bonjour"}, "finish_reason": "stop"}
+                ],
+                "usage": _CHAT_USAGE,
+            }
+        )
+
+    native = AsyncMock()
+    with patch(_ACOMPLETION, new=fake_acompletion), patch("gateway.api.routes.responses.aresponses", new=native):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _BRIDGED_MODEL, "instructions": "Answer in French.", "input": "hello", "store": True},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    native.assert_not_called()
+    assert captured["model"] == "mistral-small-latest"
+    assert captured["messages"] == [
+        {"role": "system", "content": "Answer in French."},
+        {"role": "user", "content": "hello"},
+    ]
+    assert "store" not in captured
+    body = resp.json()
+    assert body["object"] == "response"
+    assert body["status"] == "completed"
+    assert body["output"][0]["content"][0]["text"] == "Bonjour"
+    assert body["usage"]["input_tokens"] == 9
+    assert body["usage"]["output_tokens"] == 4
+
+
+def test_provider_without_responses_api_streams_responses_events(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    async def chunks() -> AsyncIterator[ChatCompletionChunk]:
+        for chunk in (
+            _chat_chunk({"role": "assistant", "content": "Bon"}),
+            _chat_chunk({"content": "jour"}, finish_reason="stop"),
+            _chat_chunk(None, usage=_CHAT_USAGE),
+        ):
+            yield chunk
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        assert kwargs["stream"] is True
+        return chunks()
+
+    with patch(_ACOMPLETION, new=fake_acompletion):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _BRIDGED_MODEL, "input": "hello", "stream": True},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    events = [line.removeprefix("event: ") for line in resp.text.splitlines() if line.startswith("event: ")]
+    assert events[0] == "response.created"
+    assert "response.output_text.delta" in events
+    assert events[-1] == "response.completed"
+    completed = json.loads(
+        next(
+            line.removeprefix("data: ")
+            for line in reversed(resp.text.splitlines())
+            if line.startswith("data: ") and '"response.completed"' in line
+        )
+    )
+    assert completed["response"]["output"][0]["content"][0]["text"] == "Bonjour"
+    assert completed["response"]["usage"]["total_tokens"] == 13
+
+
+def test_provider_without_responses_api_refuses_server_state(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    acompletion = AsyncMock()
+    with patch(_ACOMPLETION, new=acompletion):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _BRIDGED_MODEL, "input": "hello", "previous_response_id": "resp_1"},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 400, resp.text
+    assert "previous_response_id" in resp.json()["detail"]
+    acompletion.assert_not_called()

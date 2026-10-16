@@ -7,7 +7,13 @@
 // because it yanks the view down on every token. Both are unit-testable here
 // and neither is testable through a render.
 
-import type { ChatTurn } from "./playgroundTypes"
+import type {
+  PlaygroundWireMessage,
+  StreamDelta,
+  ToolActivity,
+} from "@/shared/api/playground"
+
+import type { ChatTurn, ToolCall } from "./playgroundTypes"
 
 /**
  * A copy of `turns` with its trailing assistant turn replaced by `patch(last)`.
@@ -35,29 +41,78 @@ export function patchLastAssistantTurn(
  * start one on the first token.
  *
  * Content and reasoning accumulate independently, because a model that streams
- * both interleaves them and the two are rendered in different places.
+ * both interleaves them and the two are rendered in different places. A tool's
+ * activity joins the turn's tool calls, which render above the answer.
  */
 export function appendStreamDelta(
   turns: ChatTurn[],
-  delta: { content?: string; reasoning?: string },
+  delta: StreamDelta,
 ): ChatTurn[] {
   const next = turns.slice()
   const last = next[next.length - 1]
+  const base: ChatTurn =
+    last?.role === "assistant" ? last : { role: "assistant", content: "" }
+  const reasoning = (base.reasoning ?? "") + (delta.reasoning ?? "")
+  const updated: ChatTurn = {
+    ...base,
+    content: base.content + (delta.content ?? ""),
+    reasoning: reasoning || undefined,
+  }
+  if (delta.toolActivity) {
+    updated.toolCalls = foldToolActivity(
+      base.toolCalls ?? [],
+      delta.toolActivity,
+    )
+  }
   if (last?.role === "assistant") {
-    const reasoning = (last.reasoning ?? "") + (delta.reasoning ?? "")
-    next[next.length - 1] = {
-      ...last,
-      content: last.content + (delta.content ?? ""),
-      reasoning: reasoning || undefined,
-    }
+    next[next.length - 1] = updated
   } else {
-    next.push({
-      role: "assistant",
-      content: delta.content ?? "",
-      reasoning: delta.reasoning || undefined,
-    })
+    next.push(updated)
   }
   return next
+}
+
+/**
+ * A copy of `calls` with one activity record folded in.
+ *
+ * A call starts a row, and its result fills the row it belongs to: by `id`, or,
+ * when the model sent none, the earliest call of that name still waiting. A
+ * result with no call to join (the call record was lost) still gets a row, so
+ * what a tool returned is never dropped.
+ */
+export function foldToolActivity(
+  calls: ToolCall[],
+  activity: ToolActivity,
+): ToolCall[] {
+  if (activity.type === "tool_call") {
+    return [
+      ...calls,
+      {
+        id: activity.id,
+        name: activity.name,
+        arguments: activity.arguments,
+        isError: false,
+        isTruncated: false,
+      },
+    ]
+  }
+  const index = calls.findIndex((call) =>
+    activity.id
+      ? call.id === activity.id
+      : call.name === activity.name && call.result === undefined,
+  )
+  const finished = {
+    result: activity.content,
+    isError: activity.isError,
+    isTruncated: activity.isTruncated,
+  }
+  if (index === -1) {
+    return [
+      ...calls,
+      { id: activity.id, name: activity.name, arguments: "", ...finished },
+    ]
+  }
+  return calls.map((call, i) => (i === index ? { ...call, ...finished } : call))
 }
 
 /**
@@ -112,9 +167,26 @@ export function shouldFollowToBottom(params: {
   return justAsked || params.isPinnedToBottom
 }
 
-/** The wire form of a panel's turns: what the model is sent, and nothing else. */
-export function wireMessages(
-  turns: ChatTurn[],
-): { role: string; content: string }[] {
-  return turns.map((turn) => ({ role: turn.role, content: turn.content }))
+/**
+ * The wire form of a panel's turns: what the model is sent, and nothing else.
+ *
+ * A question with attachments becomes content parts, its text first and then
+ * one file part per attachment, which the gateway resolves by `file_id`.
+ */
+export function wireMessages(turns: ChatTurn[]): PlaygroundWireMessage[] {
+  return turns.map((turn) => {
+    if (!turn.attachments?.length) {
+      return { role: turn.role, content: turn.content }
+    }
+    return {
+      role: turn.role,
+      content: [
+        { type: "text", text: turn.content },
+        ...turn.attachments.map((attachment) => ({
+          type: "file" as const,
+          file: { file_id: attachment.fileId, filename: attachment.filename },
+        })),
+      ],
+    }
+  })
 }

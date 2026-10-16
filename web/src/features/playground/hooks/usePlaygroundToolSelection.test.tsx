@@ -12,6 +12,7 @@ function tools(overrides: Partial<PlaygroundTools> = {}): PlaygroundTools {
   return {
     web_search: { configured: true, enabled: true, reason: null },
     code_execution: { configured: true, enabled: true, reason: null },
+    files: { configured: true, enabled: true, reason: null },
     mcp_servers: [
       { id: "srv-1", name: "Docs", purpose_hint: null, enabled: true },
       { id: "srv-2", name: "Tickets", purpose_hint: null, enabled: true },
@@ -45,18 +46,24 @@ describe("usePlaygroundToolSelection", () => {
     })
   })
 
-  it("clears the others when one is turned on", () => {
-    // One request carries one tool mode, so a selection the gateway would
-    // refuse is not reachable from the menu.
+  it("keeps web search, code execution and MCP servers attached together", () => {
     const { result } = renderHook(() => usePlaygroundToolSelection(tools()))
     act(() => result.current.toggleWebSearch(true))
-    act(() => result.current.toggleMcpServer("srv-1", true))
-    expect(result.current.isWebSearchOn).toBe(false)
-    expect(result.current.selectedMcpIds).toEqual(["srv-1"])
-
     act(() => result.current.toggleCodeExecution(true))
-    expect(result.current.selectedMcpIds).toEqual([])
-    expect(result.current.isCodeExecutionOn).toBe(true)
+    act(() => result.current.toggleMcpServer("srv-1", true))
+    expect(result.current.selection).toEqual({
+      isWebSearchOn: true,
+      isCodeExecutionOn: true,
+      mcpServerIds: ["srv-1"],
+    })
+
+    act(() => result.current.toggleCodeExecution(false))
+    act(() => result.current.toggleMcpServer("srv-1", false))
+    expect(result.current.selection).toEqual({
+      isWebSearchOn: true,
+      isCodeExecutionOn: false,
+      mcpServerIds: [],
+    })
   })
 
   it("attaches several MCP servers at once", () => {

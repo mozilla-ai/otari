@@ -14,19 +14,28 @@ ends or the loop exits:
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+import anyio
+import anyio.lowlevel
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
+from gateway.services.mcp_stateless import failure_class
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.traces import RequestTrace
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from mcp.types import CallToolResult
     from mcp.types import Tool as MCPTool
 
@@ -41,9 +50,7 @@ def _effective_port(url: httpx.URL) -> int | None:
 
 def _is_allowed_mcp_redirect(base: httpx.URL, target: httpx.URL) -> bool:
     same_host = base.host == target.host
-    same_origin = (
-        same_host and base.scheme == target.scheme and _effective_port(base) == _effective_port(target)
-    )
+    same_origin = same_host and base.scheme == target.scheme and _effective_port(base) == _effective_port(target)
     https_upgrade = (
         same_host
         and base.scheme == "http"
@@ -74,6 +81,10 @@ def _origin_bound_http_client(
         follow_redirects=True,
         event_hooks={"request": [enforce_origin]},
     )
+
+
+CLOSE_TIMEOUT_SECONDS = 10.0
+_CANCEL_GRACE_SECONDS = 1.0
 
 
 def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
@@ -107,9 +118,20 @@ class _ConnectedServer:
 
 
 class MCPClientPool:
-    """Manages concurrent MCP sessions for one request lifetime."""
+    """Manages concurrent MCP sessions for one request lifetime.
 
-    def __init__(self, configs: list[McpServerConfig], *, tally: ToolUsageTally | None = None):
+    The sessions open and close in a task the pool owns, so any task may close the pool.
+    The MCP transport holds an anyio task group, which must exit in the task that entered it.
+    The owned task belongs to no task group, and it runs in a copy of the opening task's context.
+    """
+
+    def __init__(
+        self,
+        configs: list[McpServerConfig],
+        *,
+        tally: ToolUsageTally | None = None,
+        trace: RequestTrace | None = None,
+    ):
         self._configs = configs
         self._stack = AsyncExitStack()
         self._servers: dict[str, _ConnectedServer] = {}
@@ -117,20 +139,91 @@ class MCPClientPool:
         # Per-request accounting, owned by the route and passed in. None when the
         # pool runs outside a billed request (tests, direct use).
         self._tally = tally
+        # The request's trace, which records each connection and call. None outside a request.
+        self._trace = trace
+        self._owner: asyncio.Task[None] | None = None
+        self._release = asyncio.Event()
+
+    @property
+    def trace(self) -> RequestTrace | None:
+        """The request's trace, which the tool loop also records each model round on."""
+        return self._trace
 
     async def __aenter__(self) -> MCPClientPool:
+        if self._owner is not None:
+            raise RuntimeError("An MCP client pool opens only once")
+        opened: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        owner = asyncio.create_task(self._hold_sessions(opened), name="mcp-client-pool")
+        self._owner = owner
         try:
+            await asyncio.wait((opened, owner), return_when=asyncio.FIRST_COMPLETED)
+        except BaseException:
+            # The release comes first, so an owner that ignores the cancellation still ends once it opens.
+            self._release.set()
+            owner.cancel()
+            try:
+                await _wait_for_owner(owner)
+            finally:
+                _retrieve_failure(owner)
+            raise
+        if not opened.done():
+            if owner.cancelled():
+                raise McpSessionsInterruptedError
+            # The owner ends before opening only by raising, so this re-raises why.
+            owner.result()
+        return self
+
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
+    ) -> None:
+        """Close the sessions, abandoning their outstanding work when the request ended by raising.
+
+        A clean exit lets the transport's task group finish its child tasks. After a provider
+        error or a client that went away nothing waits on that work, so the owner task is
+        canceled instead, which exits the sessions as a failed request does. The cancellation
+        is the owner's own, so it never crosses into an anyio scope that does not hold it.
+        """
+        owner = self._owner
+        if owner is None:
+            return
+        abandon = exc is not None
+        self._release.set()
+        if abandon:
+            owner.cancel()
+        try:
+            in_time = await _wait_for_owner(owner)
+        except asyncio.CancelledError:
+            if (failure := _retrieve_failure(owner)) is not None:
+                logger.warning("MCP sessions failed to close: %s", failure_class(failure))
+            raise
+        if not in_time:
+            _retrieve_failure(owner)
+            return
+        if owner.cancelled():
+            if not abandon:
+                logger.warning("MCP sessions were canceled before they closed")
+            return
+        owner.result()
+
+    async def _hold_sessions(self, opened: asyncio.Future[None]) -> None:
+        async with self._stack:
             for cfg in self._configs:
                 if cfg.name in self._servers:
                     raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
-                self._servers[cfg.name] = await self._connect(cfg)
-        except BaseException:
-            await self._stack.aclose()
-            raise
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        await self._stack.aclose()
+                started = datetime.now(UTC)
+                try:
+                    server = await self._connect(cfg)
+                except Exception:
+                    if self._trace is not None:
+                        self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
+                    raise
+                if self._trace is not None:
+                    self._trace.record_mcp_connect(
+                        server=cfg.name, tool_count=len(server.tools), started=started, ok=True
+                    )
+                self._servers[cfg.name] = server
+            opened.set_result(None)
+            await self._release.wait()
 
     async def _connect(self, cfg: McpServerConfig) -> _ConnectedServer:
         headers: dict[str, str] | None = None
@@ -192,12 +285,18 @@ class MCPClientPool:
         owner = self._tool_owner.get(name)
         if owner is None:
             raise KeyError(f"No MCP server owns tool {name!r}")
+        started = datetime.now(UTC)
         try:
-            return await self._servers[owner].session.call_tool(name, arguments)
+            result = await self._servers[owner].session.call_tool(name, arguments)
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
+            if self._trace is not None:
+                self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=False)
             raise
+        if self._trace is not None:
+            self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=not result.isError)
+        return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
         """Execute an MCP call and preserve its explicit ``isError`` status.
@@ -246,6 +345,57 @@ class MCPClientPool:
         is counted and never billed.
         """
         return (await self.call_tool_outcome(name, arguments)).content
+
+
+async def _wait_for_owner(owner: asyncio.Task[None]) -> bool:
+    """Wait for ``owner`` to end, and only then raise a cancellation of the waiting task.
+
+    Canceling the wait never cancels ``owner``, so a canceled close still closes every session.
+    Returns whether ``owner`` ended in time; one still running then is canceled, and abandoned if it ignores that.
+    """
+    loop = asyncio.get_running_loop()
+    # The shield stops an anyio scope from redelivering its cancellation on every loop pass.
+    with anyio.CancelScope(shield=True):
+        cancellation = await _wait_until_done(owner, loop.time() + CLOSE_TIMEOUT_SECONDS)
+        in_time = owner.done()
+        if not in_time:
+            logger.warning("MCP sessions did not close within %s seconds", CLOSE_TIMEOUT_SECONDS)
+            owner.cancel()
+            cancellation = await _wait_until_done(owner, loop.time() + _CANCEL_GRACE_SECONDS) or cancellation
+            if not owner.done():
+                owner.add_done_callback(_log_late_failure)
+    if cancellation is not None:
+        raise cancellation
+    await anyio.lowlevel.checkpoint_if_cancelled()
+    return in_time
+
+
+async def _wait_until_done(task: asyncio.Task[None], deadline: float) -> asyncio.CancelledError | None:
+    """Wait for ``task`` to end or ``deadline`` to pass, returning a cancellation of the wait instead of raising it."""
+    loop = asyncio.get_running_loop()
+    cancellation: asyncio.CancelledError | None = None
+    while not task.done() and (remaining := deadline - loop.time()) > 0:
+        try:
+            await asyncio.wait((task,), timeout=remaining)
+        except asyncio.CancelledError as exc:
+            cancellation = exc
+    return cancellation
+
+
+def _log_late_failure(task: asyncio.Task[None]) -> None:
+    """Log by type why an abandoned owner failed, so asyncio never logs its message."""
+    if (failure := _retrieve_failure(task)) is not None:
+        logger.warning("Abandoned MCP sessions failed to close: %s", failure_class(failure))
+
+
+def _retrieve_failure(task: asyncio.Task[None]) -> BaseException | None:
+    """Return why ``task`` failed, if it ended by raising.
+
+    Reading the exception marks it retrieved, so asyncio does not log it as lost.
+    """
+    if not task.done() or task.cancelled():
+        return None
+    return task.exception()
 
 
 def _render_content_block(block: Any) -> str:

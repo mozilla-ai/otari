@@ -324,8 +324,9 @@ class _StubCodeExecutionPort:
 
 
 def _stub_request() -> Request:
-    """A request carrying the file store the bridge builder looks for on the app."""
-    return cast(Request, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(file_store=object()))))
+    """A request carrying the file backends the bridge builder looks for on the app."""
+    state = SimpleNamespace(file_store=object(), provider_files=object())
+    return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
 
 
 def _build_bridge(uow: UnitOfWork | None) -> SandboxFileBridge | None:

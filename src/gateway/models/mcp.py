@@ -22,7 +22,7 @@ MAX_MCP_SERVER_IDS = 50
 
 # Hex characters kept from the revision digest. 32 leaves collision risk far
 # below the chance of a stored-server change going unnoticed for any other
-# reason, and stays well inside the 1-to-128-character wire format (R-DISC-3).
+# reason, and stays well inside the 1-to-128-character wire format.
 REVISION_LENGTH = 32
 
 
@@ -56,10 +56,8 @@ class ResolvedMcpServer(BaseModel):
     check compares, and ``enabled`` is what separates the disabled-server 404
     from a server the caller cannot see at all.
 
-    Lives here rather than beside either resolver because both modes produce it:
-    ``_platform._resolve_platform_mcp_server`` in hybrid mode and
-    ``workspace_mcp_server_service.resolve_workspace_mcp_server`` in standalone,
-    and a service may not import the API layer.
+    Lives here rather than beside either resolver, because both produce it and
+    a port may name only a model.
     """
 
     # Extra keys are ignored so a platform that grows a field does not break a
@@ -80,7 +78,7 @@ class ResolvedMcpServer(BaseModel):
     def revision(self) -> str:
         """The opaque revision of this server's execution-relevant configuration.
 
-        Derived rather than stored (R-RES-3): a pure function of the four fields
+        Derived rather than stored: a pure function of the four fields
         that change what an execution does, so every worker and replica agrees
         by construction and the value moves atomically with the configuration it
         covers. ``name`` and ``purpose_hint`` are excluded, so retitling a server

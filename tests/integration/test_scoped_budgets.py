@@ -13,25 +13,36 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from any_llm import LLMProvider
 from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway.api.deps import get_budget_service
+from gateway.api.routes._pipeline import spend_ceiling_refusal
 from gateway.core.config import API_ROOT
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import Budget, ScopedBudget
+from gateway.models.budgets import Budget, BudgetReservation, BudgetReservationScope, ScopedBudget
+from gateway.models.pricing import ModelPricing
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.users import User
+from gateway.repositories.budgets import ReservationRepository, ScopedBudgetRepository
 from gateway.services.budgets import (
     BudgetScopeRequest,
+    EstimateInputs,
     ReservationHandle,
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.budgets import _ledger as budget_ledger
+from gateway.services.budgets._periods import seconds_until
+from gateway.types.attempt import Attempt
 
 from .conftest import _to_async_url
 
@@ -270,6 +281,24 @@ async def test_provider_narrowed_cap_binds_only_that_provider(async_db: AsyncSes
         await reserve_budget(async_db, tenancy.user_id, 5.0, scope=tenancy.scope("openai"))
     assert exc_info.value.status_code == 403
     assert "Workspace" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_a_handle_keeps_the_ceilings_of_every_provider(async_db: AsyncSession, tenancy: Fixture) -> None:
+    narrowed = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=1.0,
+        provider_key_id="openai",
+    )
+    async_db.add(narrowed)
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 5.0, scope=tenancy.scope("anthropic"))
+
+    assert handle.scoped_budget_ids == ()
+    assert [ceiling.scoped_budget_id for ceiling in handle.scope_ceilings] == [narrowed.id]
 
 
 @pytest.mark.asyncio
@@ -567,7 +596,9 @@ async def test_settle_is_inert_for_a_handle_that_held_nothing(async_db: AsyncSes
     async_db.add(User(user_id="plain-user"))
     await async_db.commit()
 
-    handle = ReservationHandle(user_id="plain-user", estimate=Decimal(0), reserved=False, strategy="disabled")
+    handle = ReservationHandle(
+        user_id="plain-user", estimate=Decimal(0), reserved=False, strategy="disabled", scope_ceilings=()
+    )
     await reconcile_reservation(async_db, handle, 3.0)
 
     async_db.expire_all()
@@ -925,7 +956,7 @@ def test_a_blank_provider_narrowing_is_refused(
 ) -> None:
     """A ceiling narrowed to nothing would be created, listed, and never enforced.
 
-    ``applicable_budgets`` matches ``provider_key_id == provider_instance OR IS
+    ``get_provider_ceilings`` matches ``provider_key_id == provider_instance OR IS
     NULL``, and a blank string is neither: it would store as a narrowed row
     under ``uq_scoped_budgets_scope_with_key`` and bind to no request ever. That
     is the same permissive-direction failure a scope naming nothing has, so it
@@ -1126,6 +1157,42 @@ async def test_a_rolled_period_zeroes_every_axis_and_leaves_the_holds(async_db: 
 
 
 @pytest.mark.asyncio
+async def test_a_top_up_grows_a_ceiling_by_what_it_lacks_when_the_user_has_no_budget(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    cap = await _scoped(async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope())
+    assert not handle.reserved, "this fixture's user has no budget row"
+
+    await increase_reservation(async_db, handle, estimate=4.0)
+
+    assert await _counters(async_db, cap.id) == (0.0, 4.0)
+    assert handle.scoped_estimate == Decimal(4)
+
+
+@pytest.mark.asyncio
+async def test_a_top_up_the_ceilings_already_hold_writes_nothing_when_the_user_has_no_budget(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cap = await _scoped(async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope())
+
+    async def unexpected(*_args: Any, **_kwargs: Any) -> bool:
+        raise AssertionError("the ledger was written")
+
+    monkeypatch.setattr("gateway.services.budgets._ledger.grow", unexpected)
+
+    await increase_reservation(async_db, handle, estimate=3.0)
+
+    assert await _counters(async_db, cap.id) == (0.0, 3.0)
+    assert handle.scoped_estimate == Decimal(3)
+
+
+@pytest.mark.asyncio
 async def test_a_token_top_up_on_a_ceiling_is_released_when_the_user_has_no_budget(
     async_db: AsyncSession, tenancy: Fixture
 ) -> None:
@@ -1152,7 +1219,7 @@ async def test_a_token_top_up_on_a_ceiling_is_released_when_the_user_has_no_budg
     assert not handle.reserved, "this fixture's user has no budget row"
     assert await _token_counters(async_db, cap.id) == (0, 1_000)
 
-    await increase_reservation(async_db, handle, Decimal("0.5"), additional_tokens=500)
+    await increase_reservation(async_db, handle, estimate=Decimal("1.5"), tokens=1_500)
 
     assert handle.scoped_token_estimate == 1_500
     assert await _token_counters(async_db, cap.id) == (0, 1_500)
@@ -1180,7 +1247,7 @@ async def test_a_refused_top_up_leaves_no_token_hold_behind(async_db: AsyncSessi
     handle = await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=1_000, scope=tenancy.scope())
 
     with pytest.raises(HTTPException):
-        await increase_reservation(async_db, handle, Decimal("0"), additional_tokens=500)
+        await increase_reservation(async_db, handle, estimate=Decimal("0"), tokens=1_500)
 
     # Refused, so nothing grew: the ceiling still holds only the original hold.
     assert await _token_counters(async_db, cap.id) == (0, 1_000)
@@ -1263,3 +1330,604 @@ async def test_a_refusal_names_the_axis_a_hold_would_push_past(async_db: AsyncSe
         await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=200, scope=tenancy.scope())
 
     assert "token limit" in str(refusal.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_a_ceiling_too_small_for_the_hold_names_both_amounts(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A scoped ceiling with room, but not this much, refuses in the same terms as a user budget."""
+    cap = await _scoped(async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=1.0)
+    cap.current_spend = Decimal("0.25")
+    async_db.add(cap)
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, tenancy.user_id, 5.0, scope=tenancy.scope(), reserved_output_tokens=1_024)
+
+    assert refusal.value.status_code == 403
+    assert refusal.value.detail == (
+        "Workspace has $0.75 of budget remaining, less than this request's estimated cost of $5.00. "
+        "The estimate assumes 1024 output tokens; a lower output token limit on the request may let it fit"
+    )
+    assert refusal.value.headers is not None
+    assert refusal.value.headers["Otari-Budget-Scope"] == "workspace"
+    # The hold is larger than the whole cap, so no window would admit it.
+    assert "Retry-After" not in refusal.value.headers
+
+
+async def _spent_ceiling_refusal(async_db: AsyncSession, tenancy: Fixture, **cadence: Any) -> HTTPException:
+    """The refusal of a $1 request by a $10 workspace ceiling with its allowance spent."""
+    cap = await _scoped(
+        async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=10.0, **cadence
+    )
+    cap.current_spend = Decimal("10")
+    async_db.add(cap)
+    await async_db.commit()
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+    assert refusal.value.headers is not None
+    assert refusal.value.headers["Otari-Budget-Scope"] == "workspace"
+    return refusal.value
+
+
+@pytest.mark.asyncio
+async def test_a_spent_calendar_ceiling_says_when_its_day_ends(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """``Retry-After`` counts down to the UTC midnight that ends the ceiling's window."""
+    now = datetime.now(UTC)
+    before = datetime.now(UTC)
+    refusal = await _spent_ceiling_refusal(
+        async_db,
+        tenancy,
+        reset_alignment="calendar_day",
+        period_start=_midnight(now),
+        period_end=_midnight(now) + timedelta(days=1),
+    )
+    after = datetime.now(UTC)
+
+    assert refusal.headers is not None
+    end = _midnight(now) + timedelta(days=1)
+    assert seconds_until(end, after) <= int(refusal.headers["Retry-After"]) <= seconds_until(end, before)
+
+
+@pytest.mark.asyncio
+async def test_a_spent_rolling_ceiling_says_when_its_period_ends(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A rolling window ends where its own row says, not a whole period from the refusal."""
+    now = datetime.now(UTC)
+    end = now + timedelta(minutes=20)
+    refusal = await _spent_ceiling_refusal(
+        async_db, tenancy, budget_duration_sec=3600, period_start=end - timedelta(hours=1), period_end=end
+    )
+    after = datetime.now(UTC)
+
+    assert refusal.headers is not None
+    assert seconds_until(end, after) <= int(refusal.headers["Retry-After"]) <= seconds_until(end, now)
+
+
+@pytest.mark.asyncio
+async def test_a_spent_ceiling_that_never_resets_sends_no_wait(async_db: AsyncSession, tenancy: Fixture) -> None:
+    refusal = await _spent_ceiling_refusal(async_db, tenancy)
+
+    assert refusal.headers is not None
+    assert "Retry-After" not in refusal.headers
+
+
+@pytest.mark.asyncio
+async def test_a_refused_top_up_says_when_the_window_ends(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """Growing an admitted reservation is refused with the same wait as admitting one."""
+    now = datetime.now(UTC)
+    end = now + timedelta(minutes=20)
+    cap = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=10.0,
+        budget_duration_sec=3600,
+        period_start=end - timedelta(hours=1),
+        period_end=end,
+    )
+    cap.current_spend = Decimal("8")
+    async_db.add(cap)
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+    with pytest.raises(HTTPException) as refusal:
+        await increase_reservation(async_db, handle, estimate=3.0)
+    after = datetime.now(UTC)
+
+    assert refusal.value.headers is not None
+    assert seconds_until(end, after) <= int(refusal.value.headers["Retry-After"]) <= seconds_until(end, now)
+    await refund_reservation(async_db, handle)
+
+
+@pytest.mark.asyncio
+async def test_an_end_user_spends_inside_its_owners_member_ceiling(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A member's service key cannot spend around the member's own cap by billing end users."""
+    cap = await _scoped(
+        async_db,
+        scope_type="workspace_member",
+        scope_id=str(tenancy.workspace_member_id),
+        max_budget=None,
+        request_limit=1,
+    )
+    async_db.add(cap)
+    async_db.add(User(user_id="eu_alice", parent_user_id=tenancy.user_id, external_id="alice"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "eu_alice", 0.0, scope=tenancy.scope())
+    await reconcile_reservation(async_db, handle, 0.0)
+    assert await _request_counters(async_db, cap.id) == (1, 0)
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, "eu_alice", 0.0, scope=tenancy.scope())
+
+    assert refusal.value.status_code == 403
+
+
+# A fallback's request size, and the token count every move below estimates for it.
+_FALLBACK_TOKENS = 100
+
+
+async def move(db: AsyncSession, handle: ReservationHandle, provider: str, *, cost: float | None = None) -> None:
+    """Move ``handle`` onto ``provider``'s ceilings, as a fallback whose estimate is ``cost``, or unpriced when None."""
+
+    async def price_of(instance: str, model: str) -> ModelPricing | None:
+        if cost is None:
+            return None
+        return ModelPricing(
+            model_key=f"{instance}:{model}",
+            input_price_per_million=Decimal(str(cost)) * 1_000_000 / _FALLBACK_TOKENS,
+            output_price_per_million=Decimal(0),
+            unit="tokens",
+            pricing_tiers=[],
+        )
+
+    await get_budget_service(UnitOfWork(db), db).move_reservation(
+        handle,
+        Attempt(position=2, instance=provider, provider=LLMProvider.OPENAI, model="fallback", kwargs={}),
+        estimate_inputs=EstimateInputs(prompt_chars=_FALLBACK_TOKENS * 4, max_output_tokens=0, default_output_tokens=0),
+        price_of=price_of,
+    )
+
+
+async def _caps_for_two_providers(
+    db: AsyncSession, tenancy: Fixture, *, aggregate_cap: float = 50.0, anthropic_cap: float | None = 5.0
+) -> tuple[ScopedBudget, ScopedBudget, ScopedBudget]:
+    """Build a workspace cap on every provider, and one cap each narrowed to openai and to anthropic."""
+    aggregate = await _scoped(db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=aggregate_cap)
+    openai_cap = await _scoped(
+        db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=5.0, provider_key_id="openai"
+    )
+    anthropic = await _scoped(
+        db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=anthropic_cap,
+        provider_key_id="anthropic",
+    )
+    db.add_all([aggregate, openai_cap, anthropic])
+    await db.commit()
+    return aggregate, openai_cap, anthropic
+
+
+async def _anthropic_cap(db: AsyncSession, tenancy: Fixture, **caps: Any) -> ScopedBudget:
+    cap = await _scoped(
+        db, scope_type="workspace", scope_id=str(tenancy.workspace_id), provider_key_id="anthropic", **caps
+    )
+    db.add(cap)
+    await db.commit()
+    return cap
+
+
+@pytest.mark.asyncio
+async def test_a_move_holds_the_new_providers_cap_and_frees_the_old_one(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """The new cap needs room for the fallback's estimate alone, even for a user with no per-user budget."""
+    aggregate, openai_cap, anthropic = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert set(handle.scoped_budget_ids) == {aggregate.id, anthropic.id}
+    assert await _counters(async_db, aggregate.id) == (0.0, 3.0)
+    assert await _counters(async_db, openai_cap.id) == (0.0, 0.0)
+    assert await _counters(async_db, anthropic.id) == (0.0, 3.0)
+    assert await _request_counters(async_db, anthropic.id) == (0, 1)
+    assert await _request_counters(async_db, openai_cap.id) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_spend_after_a_move_lands_on_the_new_providers_cap(async_db: AsyncSession, tenancy: Fixture) -> None:
+    aggregate, openai_cap, anthropic = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    await move(async_db, handle, "anthropic", cost=3.0)
+
+    await reconcile_reservation(async_db, handle, 2.0)
+
+    assert await _counters(async_db, aggregate.id) == (2.0, 0.0)
+    assert await _counters(async_db, openai_cap.id) == (0.0, 0.0)
+    assert await _counters(async_db, anthropic.id) == (2.0, 0.0)
+    assert await _request_counters(async_db, anthropic.id) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_move_the_new_providers_cap_refuses_changes_nothing(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A refusal rolls nothing back, so the rows the session loaded stay readable for the rest of the walk."""
+    aggregate, openai_cap, anthropic = await _caps_for_two_providers(async_db, tenancy, anthropic_cap=1.0)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    with pytest.raises(SpendCeilingExceededError) as refusal:
+        await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert isinstance(refusal.value, ProviderSpendCeilingExceededError)
+    assert str(refusal.value) == (
+        "Workspace has $1.00 of budget remaining, less than this request's estimated cost of $3.00"
+    )
+    assert set(handle.scoped_budget_ids) == {aggregate.id, openai_cap.id}
+    assert await _counters(async_db, aggregate.id) == (0.0, 3.0)
+    assert await _counters(async_db, openai_cap.id) == (0.0, 3.0)
+    assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
+    assert await _request_counters(async_db, anthropic.id) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_moves_refusal_answers_as_the_caps_refusal_at_admission(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A client sees one of the two, depending on which candidate the cap binds, so they answer alike."""
+    await _anthropic_cap(async_db, tenancy, max_budget=1.0)
+    with pytest.raises(HTTPException) as admitted:
+        await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("anthropic"))
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    with pytest.raises(SpendCeilingExceededError) as moved:
+        await move(async_db, handle, "anthropic", cost=3.0)
+
+    rendered = spend_ceiling_refusal(moved.value)
+    assert (rendered.status_code, rendered.detail, rendered.headers) == (
+        admitted.value.status_code,
+        admitted.value.detail,
+        admitted.value.headers,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_cheaper_fallback_keeps_the_hold_the_request_has(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A fallback chain's holds only grow, so a dearer candidate later in the chain finds them still in place."""
+    aggregate, _, anthropic = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    await move(async_db, handle, "anthropic", cost=1.0)
+
+    assert await _counters(async_db, aggregate.id) == (0.0, 3.0)
+    assert await _counters(async_db, anthropic.id) == (0.0, 3.0)
+    assert handle.scoped_estimate == Decimal(3)
+
+
+@pytest.mark.asyncio
+async def test_a_dearer_fallback_on_the_same_provider_grows_its_providers_cap(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    aggregate, openai_cap, _ = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    await move(async_db, handle, "openai", cost=4.0)
+
+    assert await _counters(async_db, aggregate.id) == (0.0, 4.0)
+    assert await _counters(async_db, openai_cap.id) == (0.0, 4.0)
+    assert handle.scoped_estimate == Decimal(4)
+
+
+@pytest.mark.asyncio
+async def test_a_dearer_fallback_on_the_same_provider_is_refused_for_that_provider_alone(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """The walk then skips the candidate, because a candidate on another provider can still fit."""
+    aggregate, openai_cap, _ = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    with pytest.raises(ProviderSpendCeilingExceededError):
+        await move(async_db, handle, "openai", cost=6.0)
+
+    assert await _counters(async_db, aggregate.id) == (0.0, 3.0)
+    assert await _counters(async_db, openai_cap.id) == (0.0, 3.0)
+    assert handle.scoped_estimate == Decimal(3)
+
+
+@pytest.mark.asyncio
+async def test_a_dearer_fallback_grows_the_shared_cap_to_its_estimate(async_db: AsyncSession, tenancy: Fixture) -> None:
+    aggregate, _, anthropic = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    await move(async_db, handle, "anthropic", cost=4.0)
+
+    assert await _counters(async_db, aggregate.id) == (0.0, 4.0)
+    assert await _counters(async_db, anthropic.id) == (0.0, 4.0)
+
+
+@pytest.mark.asyncio
+async def test_a_shared_cap_with_no_room_for_a_dearer_fallback_refuses_it(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    aggregate, openai_cap, anthropic = await _caps_for_two_providers(
+        async_db, tenancy, aggregate_cap=5.0, anthropic_cap=None
+    )
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    with pytest.raises(SpendCeilingExceededError) as refusal:
+        await move(async_db, handle, "anthropic", cost=6.0)
+
+    assert not isinstance(refusal.value, ProviderSpendCeilingExceededError)
+    assert await _counters(async_db, aggregate.id) == (0.0, 3.0)
+    assert await _counters(async_db, openai_cap.id) == (0.0, 3.0)
+    assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_free_fallback_is_not_held_or_gated_on_dollars(async_db: AsyncSession, tenancy: Fixture) -> None:
+    anthropic = await _anthropic_cap(async_db, tenancy, max_budget=0.0, request_limit=5)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    await move(async_db, handle, "anthropic", cost=0.0)
+
+    assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
+    assert await _request_counters(async_db, anthropic.id) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_move_from_a_request_that_held_nothing_holds_the_new_cap(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """The new cap holds what the fallback costs, counts the request once, and has a ledger row to be swept by."""
+    anthropic = await _anthropic_cap(async_db, tenancy, max_budget=5.0)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    assert handle.scoped_budget_ids == ()
+    assert handle.reservation_id is None
+
+    await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert handle.reservation_id is not None
+    assert await _counters(async_db, anthropic.id) == (0.0, 3.0)
+    lines = (
+        (
+            await async_db.execute(
+                select(BudgetReservationScope).where(BudgetReservationScope.reservation_id == handle.reservation_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [(line.scoped_budget_id, line.request_amount) for line in lines] == [(anthropic.id, 1)]
+
+    await reconcile_reservation(async_db, handle, 2.0)
+
+    assert await _counters(async_db, anthropic.id) == (2.0, 0.0)
+    assert await _request_counters(async_db, anthropic.id) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_move_from_a_request_that_held_nothing_is_refused_by_a_full_request_cap(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    anthropic = await _anthropic_cap(async_db, tenancy, max_budget=None, request_limit=1)
+    first = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    await move(async_db, first, "anthropic", cost=3.0)
+    second = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    with pytest.raises(SpendCeilingExceededError) as refusal:
+        await move(async_db, second, "anthropic", cost=3.0)
+
+    assert str(refusal.value) == "Workspace has exceeded request limit"
+    assert await _request_counters(async_db, anthropic.id) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_move_from_a_request_that_held_nothing_is_refused_by_a_full_token_cap(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    anthropic = await _anthropic_cap(async_db, tenancy, max_budget=None, token_limit=_FALLBACK_TOKENS - 1)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    with pytest.raises(SpendCeilingExceededError) as refusal:
+        await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert str(refusal.value) == "Workspace has exceeded token limit"
+    assert await _token_counters(async_db, anthropic.id) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_cheaper_move_between_providers_with_the_same_caps_writes_nothing(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aggregate = await _scoped(async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=50.0)
+    async_db.add(aggregate)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    async def unexpected(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("the ledger was written")
+
+    monkeypatch.setattr(ReservationRepository, "move_lines", unexpected)
+
+    await move(async_db, handle, "anthropic", cost=2.0)
+
+    assert handle.scoped_estimate == Decimal(3)
+    assert await _counters(async_db, aggregate.id) == (0.0, 3.0)
+
+
+@pytest.mark.asyncio
+async def test_a_move_onto_the_provider_the_request_holds_touches_no_row(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aggregate, openai_cap, _ = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    async def unexpected(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("a row was locked")
+
+    monkeypatch.setattr(ReservationRepository, "lock_active", unexpected)
+    monkeypatch.setattr(ScopedBudgetRepository, "lock", unexpected)
+
+    await move(async_db, handle, "openai", cost=3.0)
+
+    assert set(handle.scoped_budget_ids) == {aggregate.id, openai_cap.id}
+    assert handle.scoped_estimate == Decimal(3)
+
+
+@pytest.mark.asyncio
+async def test_a_database_error_during_a_move_changes_nothing(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    caps = await _caps_for_two_providers(async_db, tenancy)
+    # The rollback expires every ORM instance in the session, so the IDs are read before it.
+    aggregate_id, openai_id, anthropic_id = (cap.id for cap in caps)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    async def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise OperationalError("UPDATE budget_reservation_scopes", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(ReservationRepository, "move_lines", broken)
+
+    with pytest.raises(OperationalError):
+        await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert set(handle.scoped_budget_ids) == {aggregate_id, openai_id}
+    assert await _counters(async_db, openai_id) == (0.0, 3.0)
+    assert await _counters(async_db, anthropic_id) == (0.0, 0.0)
+    assert await _request_counters(async_db, anthropic_id) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_database_error_during_a_move_on_the_same_provider_changes_nothing(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A move that only grows its holds keeps the same ceilings, so a rollback cannot be told from a commit by them."""
+    caps = await _caps_for_two_providers(async_db, tenancy)
+    aggregate_id, openai_id, _ = (cap.id for cap in caps)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    async def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise OperationalError("UPDATE budget_reservation_scopes", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(ReservationRepository, "move_lines", broken)
+
+    with pytest.raises(OperationalError):
+        await move(async_db, handle, "openai", cost=4.0)
+
+    assert handle.scoped_estimate == Decimal(3)
+    assert await _counters(async_db, aggregate_id) == (0.0, 3.0)
+    assert await _counters(async_db, openai_id) == (0.0, 3.0)
+
+
+@pytest.mark.asyncio
+async def test_a_move_whose_commit_landed_but_reported_failure_is_kept(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aggregate, _, anthropic = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    commit = async_db.commit
+    failed = False
+
+    async def commit_then_fail() -> None:
+        nonlocal failed
+        await commit()
+        if not failed:
+            failed = True
+            raise OperationalError("COMMIT", {}, Exception("connection lost after the commit"))
+
+    monkeypatch.setattr(async_db, "commit", commit_then_fail)
+
+    await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert failed
+    assert set(handle.scoped_budget_ids) == {aggregate.id, anthropic.id}
+    assert await _counters(async_db, anthropic.id) == (0.0, 3.0)
+
+
+@pytest.mark.asyncio
+async def test_a_moves_new_row_whose_commit_landed_but_reported_failure_is_kept(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    anthropic = await _anthropic_cap(async_db, tenancy, max_budget=5.0)
+    anthropic_id = anthropic.id
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    assert handle.reservation_id is None
+    commit = async_db.commit
+    failed = False
+
+    async def commit_then_fail() -> None:
+        nonlocal failed
+        await commit()
+        if not failed:
+            failed = True
+            raise OperationalError("COMMIT", {}, Exception("connection lost after the commit"))
+
+    monkeypatch.setattr(async_db, "commit", commit_then_fail)
+
+    await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert failed
+    assert handle.reservation_id is not None
+    assert handle.scoped_budget_ids == (anthropic_id,)
+    assert await _counters(async_db, anthropic_id) == (0.0, 3.0)
+
+
+@pytest.mark.asyncio
+async def test_a_move_cancelled_after_its_commit_landed_keeps_it(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The caller's refund then gives back the new holds, rather than the old ones a second time."""
+    aggregate, _, anthropic = await _caps_for_two_providers(async_db, tenancy)
+    aggregate_id, anthropic_id = aggregate.id, anthropic.id
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    commit = async_db.commit
+    cancelled = False
+
+    async def commit_then_cancel() -> None:
+        nonlocal cancelled
+        await commit()
+        if not cancelled:
+            cancelled = True
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(async_db, "commit", commit_then_cancel)
+
+    with pytest.raises(asyncio.CancelledError):
+        await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert set(handle.scoped_budget_ids) == {aggregate_id, anthropic_id}
+    assert await _counters(async_db, anthropic_id) == (0.0, 3.0)
+
+
+@pytest.mark.asyncio
+async def test_a_moves_holds_are_committed_before_it_returns(
+    async_db: AsyncSession, postgres_url: str, tenancy: Fixture
+) -> None:
+    _, _, anthropic = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    await move(async_db, handle, "anthropic", cost=3.0)
+
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        async with async_sessionmaker(engine)() as other:
+            assert await _counters(other, anthropic.id) == (0.0, 3.0)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_move_after_the_sweep_reclaimed_the_reservation_takes_no_hold(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    _, _, anthropic = await _caps_for_two_providers(async_db, tenancy)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    assert handle.reservation_id is not None
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+    await budget_ledger.sweep_expired(async_db, batch_size=10)
+
+    await move(async_db, handle, "anthropic", cost=3.0)
+
+    assert anthropic.id in handle.scoped_budget_ids
+    assert await _counters(async_db, anthropic.id) == (0.0, 0.0)

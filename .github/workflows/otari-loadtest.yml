@@ -1,0 +1,158 @@
+name: Otari Load Test
+
+# Compares a PR's merge commit with its base under load, route by route, with
+# loadtest/run.sh (see loadtest/README.md). The checks fail on a regression;
+# adding the `perf-accepted` label re-runs the job and lets a deliberate cost
+# pass (the label is read when the job runs, so a manual re-run sees it too).
+# A draft is skipped until it is marked ready for review. On a PR from this
+# repository, a result worth reading is also posted as a comment.
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, ready_for_review, labeled ]
+    paths:
+      - 'src/**'
+      - 'cli/src/**'
+      - 'alembic/**'
+      - 'alembic.ini'
+      - 'pyproject.toml'
+      - 'cli/pyproject.toml'
+      - 'uv.lock'
+      - 'Dockerfile'
+      - 'loadtest/**'
+      - '.github/workflows/otari-loadtest.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    if: >-
+      !github.event.pull_request.draft &&
+      (github.event.action != 'labeled' || github.event.label.name == 'perf-accepted')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The results comment. A fork PR's token stays read-only, so it gets the
+      # job summary alone.
+      pull-requests: write
+    concurrency:
+      group: loadtest-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      # A PR's checkout is its merge commit, and its first parent is the base it
+      # was merged onto, so the difference is the PR alone. The event's base.sha
+      # is not that commit once main has moved, as on a later `labeled` run.
+      - name: Resolve base
+        id: base
+        run: echo "sha=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Read the cache otari-docker.yml writes on main and write none back, as
+      # otari-docker-build.yml does: a fork PR cannot.
+      - name: Build head image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: otari:head
+          cache-from: type=gha
+
+      - name: Build base image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: base
+          load: true
+          tags: otari:base
+          cache-from: type=gha
+
+      - name: Read the perf-accepted label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh pr view "$PR" --repo "$REPO" --json labels -q '.labels[].name' | grep -qx perf-accepted; then
+            echo "LOADTEST_ACCEPT_REGRESSION=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Compare base and head
+        id: compare
+        env:
+          BASE_REF: ${{ steps.base.outputs.sha }}
+          HEAD_REF: ${{ github.sha }}
+        run: ./loadtest/run.sh otari:base otari:head
+
+      - name: Job summary
+        if: always()
+        run: |
+          for report in loadtest/results/ab-*/report.md; do
+            if [[ -f "$report" ]]; then cat "$report" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loadtest
+          path: loadtest/results/
+          if-no-files-found: ignore
+
+      # One comment per PR, edited on every run once it exists. It is created only
+      # when a run has something to say (a route or a statement count changed, or
+      # a check failed), so a PR where everything reads unchanged gets none. It
+      # names the commit it describes, because a run that dies before writing a
+      # report leaves the previous one in place.
+      - name: Post the results on the pull request
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OUTCOME: ${{ steps.compare.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          report=$(ls loadtest/results/ab-*/report.md 2>/dev/null | head -n 1)
+          if [[ -z "$report" ]]; then exit 0; fi
+          marker='<!-- otari-loadtest -->'
+          body="$RUNNER_TEMP/loadtest-comment.md"
+          {
+            echo "$marker"
+            echo "Load test of PR commit \`$HEAD_SHA\` against its base."
+            if [[ "$OUTCOME" == failure ]]; then
+              echo
+              echo "**A check failed.** The run's log names it."
+            elif [[ "${LOADTEST_ACCEPT_REGRESSION:-}" == 1 ]]; then
+              echo
+              echo "Any regression below is accepted with the \`perf-accepted\` label."
+            fi
+            echo
+            cat "$report"
+            echo "[View the run]($RUN_URL); \`perf.json\` is in its \`loadtest\` artifact."
+          } > "$body"
+          existing=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id")
+          existing=${existing%%$'\n'*}
+          if [[ -n "$existing" ]]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$body" > /dev/null
+          elif [[ "$OUTCOME" == failure ]] || grep -qE '🔴|🟢' "$report"; then
+            gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
+          fi

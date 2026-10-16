@@ -31,6 +31,30 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("shows a skipped candidate as a note, not as an error", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          status: "absorbed",
+          status_code: 429,
+          error_message:
+            "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("Skipped")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /^Rate limit 'flash-cap' exceeded: 2 requests per minute\. Routing moved/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Error (429)")).not.toBeInTheDocument()
+  })
+
   it("spells out the billed total beside the provider-reported one", async () => {
     mockApi()
     renderPage(
@@ -58,6 +82,29 @@ describe("RequestDetail", () => {
     expect(
       screen.getByTitle(/the tokens this request was priced on/),
     ).toHaveTextContent("1,200")
+  })
+
+  it("shows the reasoning tokens, and a dash for a row that never recorded them", async () => {
+    mockApi()
+    const { unmount } = renderPage(
+      <RequestDetail
+        entry={entry({ reasoning_tokens: 1234 })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(
+      screen.getByText("Reasoning tokens").parentElement,
+    ).toHaveTextContent("1,234")
+    unmount()
+
+    renderPage(<RequestDetail entry={entry()} onPriceModel={null} />)
+    await flushRouter()
+
+    expect(
+      screen.getByText("Reasoning tokens").parentElement,
+    ).toHaveTextContent("—")
   })
 
   it("names a row's tool calls and what they cost", async () => {
@@ -106,7 +153,34 @@ describe("RequestDetail", () => {
     await flushRouter()
 
     await user.click(screen.getByRole("button", { name: "Price this model" }))
-    expect(onPriceModel).toHaveBeenCalledWith("openai:gpt-4o")
+    expect(onPriceModel).toHaveBeenCalledWith(
+      "openai:gpt-4o",
+      "/v1/chat/completions",
+    )
+  })
+
+  it("passes the endpoint with the model, so a rerank row prices per request", async () => {
+    const user = userEvent.setup()
+    const onPriceModel = vi.fn()
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          cost: null,
+          provider: "cohere",
+          model: "rerank-v3.5",
+          endpoint: "/v1/rerank",
+        })}
+        onPriceModel={onPriceModel}
+      />,
+    )
+    await flushRouter()
+
+    await user.click(screen.getByRole("button", { name: "Price this model" }))
+    expect(onPriceModel).toHaveBeenCalledWith(
+      "cohere:rerank-v3.5",
+      "/v1/rerank",
+    )
   })
 
   it("still explains an uncosted row to a caller who cannot price it", async () => {
@@ -125,6 +199,40 @@ describe("RequestDetail", () => {
       screen.getByText(/A deployment operator sets one/),
     ).toBeInTheDocument()
   })
+
+  it.each([
+    [404, "The model `gpt-5-nonexistent` does not exist."],
+    [402, "Your credit balance is too low to access the API."],
+    [
+      402,
+      "No pricing is configured for model 'openai:gpt-4o', and require_pricing is on, so it cannot be billed.",
+    ],
+  ])(
+    "does not offer a price for a failed attempt (%i), which billed nothing",
+    async (statusCode, message) => {
+      // Nothing was billed, whatever the cause, so a price is not the fix; the
+      // error above names the cause, the gateway's own pricing refusal included.
+      mockApi()
+      renderPage(
+        <RequestDetail
+          entry={entry({
+            cost: null,
+            status: "error",
+            status_code: statusCode,
+            error_message: message,
+          })}
+          onPriceModel={vi.fn()}
+        />,
+      )
+      await flushRouter()
+
+      expect(screen.getByText(message)).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Price this model" }),
+      ).not.toBeInTheDocument()
+      expect(screen.queryByText(/carries no cost/)).not.toBeInTheDocument()
+    },
+  )
 
   it("treats a zero cost as a real price, not as uncosted", async () => {
     mockApi()
@@ -189,5 +297,24 @@ describe("RequestDetail", () => {
     expect(screen.getByText("Billed meters")).toBeInTheDocument()
     expect(screen.getByText(/200 at \$10.00 \/ 1M/)).toBeInTheDocument()
     expect(screen.getByText(/2 at .* each/)).toBeInTheDocument()
+  })
+
+  it("shows the provider-reported compute time alongside Total time", async () => {
+    // provider_latency_ms is a diagnostic alongside Total time (otari#337); this
+    // asserts the row's value actually reaches the "Provider time" field rather
+    // than only being present in the fixture shape.
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ provider: "groq", provider_latency_ms: 156 })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    const label = screen.getByText("Provider time", {
+      selector: "span.text-overline",
+    })
+    expect(label.parentElement?.textContent).toContain("156 ms")
   })
 })

@@ -408,9 +408,7 @@ async def agent_telemetry_summary(
     reset never reads as negative work. Master-key only.
     """
     start, end = _resolve_window(start_date, end_date)
-    scope = _scope(
-        start_date=start, end_date=end, user_id=user_id, api_key_id=api_key_id, session_label=session_label
-    )
+    scope = _scope(start_date=start, end_date=end, user_id=user_id, api_key_id=api_key_id, session_label=session_label)
     usage_conditions = _usage_filters(
         start=start, end=end, user_id=user_id, api_key_id=api_key_id, session_label=session_label
     )
@@ -517,9 +515,7 @@ async def _summary_series(
     for raw_bucket, cost in usage_rows:
         point_for(canonical_bucket(raw_bucket, bucket)).cost = float(cost)
 
-    return _dense_series(
-        start, end, bucket, populated, lambda key: AgentTelemetrySeriesPoint(bucket_start=key)
-    )
+    return _dense_series(start, end, bucket, populated, lambda key: AgentTelemetrySeriesPoint(bucket_start=key))
 
 
 @router.get("/count")
@@ -537,9 +533,7 @@ async def count_agent_telemetry(
     "delete all N matching" would remove. Behavioral and metric rows are counted
     together: neither this nor the purge distinguishes them. Master-key only.
     """
-    scope = _scope(
-        start_date=start_date, end_date=end_date, user_id=user_id, api_key_id=api_key_id, name=name
-    )
+    scope = _scope(start_date=start_date, end_date=end_date, user_id=user_id, api_key_id=api_key_id, name=name)
     return AgentTelemetryCount(total=await storage.count(filters=scope))
 
 
@@ -569,9 +563,7 @@ async def agent_telemetry_series(
             detail=f"window spans more than {_MAX_SERIES_POINTS} {bucket} buckets; use bucket=day or narrow the range",
         )
     scope = _scope(start_date=start, end_date=end, user_id=user_id, api_key_id=api_key_id, name=name)
-    counts = await storage.grouped_row_counts(
-        filters=scope, group_by=group_by, bucket=bucket, top_n=_SERIES_TOP_N
-    )
+    counts = await storage.grouped_row_counts(filters=scope, group_by=group_by, bucket=bucket, top_n=_SERIES_TOP_N)
 
     # The fold reconciles the ranked groups against every matching row, so the
     # stacked series adds up to the total whatever storage ranked. It is encoded

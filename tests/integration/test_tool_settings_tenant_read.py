@@ -99,6 +99,15 @@ def test_an_operator_session_still_reads_the_endpoints(client: TestClient, sessi
     assert _URL_KEYS.issubset(_read_as(client, sessions["operator"]))
 
 
+def test_the_sandbox_provider_follows_the_endpoints(client: TestClient, sessions: dict[str, str]) -> None:
+    for role, expected in (("member", None), ("operator", "protocol")):
+        client.cookies.set(SESSION_COOKIE_NAME, sessions[role])
+        try:
+            assert client.get(_PATH).json()["sandbox_provider"] == expected
+        finally:
+            client.cookies.clear()
+
+
 def test_the_master_key_still_reads_everything(
     client: TestClient, master_key_header: dict[str, str], sessions: dict[str, str]
 ) -> None:

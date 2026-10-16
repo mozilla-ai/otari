@@ -1,4 +1,4 @@
-"""One bounded stateless execution (execution steps 9-13, R-EXEC-1, R-ERR-2, R-ERR-3).
+"""One bounded stateless execution.
 
 The dispatch boundary is what these cover. Before the transport starts writing
 ``tools/call``, Otari knows the tool did not run and says ``not_started``. From
@@ -196,7 +196,7 @@ async def test_an_oversized_result_is_refused_as_an_unknown_outcome(session: _Fa
 
 @pytest.mark.asyncio
 async def test_a_definitive_result_survives_a_cleanup_failure(session: _FakeSession) -> None:
-    """R-EXEC-1: transport shutdown must not turn a completed mutation into a retry."""
+    """Transport shutdown must not turn a completed mutation into a retry."""
     session.transport["cleanup_error"] = RuntimeError("server-secret cleanup failure")
 
     assert await execute_stored_tool(SERVER, "create_issue", {"title": "Approved"}) == RESULT
@@ -231,7 +231,7 @@ async def test_no_free_slot_before_the_deadline_is_not_started(
 
 @pytest.mark.asyncio
 async def test_phase_timings_and_result_size_are_recorded_without_content(session: _FakeSession) -> None:
-    """R-OBS-1: the route logs phases and sizes, and R-OBS-2 leaves out everything else."""
+    """The route logs phases and sizes, and leaves out everything else."""
     timings: dict[str, float] = {}
 
     await execute_stored_tool(SERVER, "create_issue", {"title": "Approved"}, timings=timings)
@@ -316,7 +316,7 @@ async def test_a_group_holding_a_cancellation_after_dispatch_is_an_unknown_outco
 
 @pytest.mark.asyncio
 async def test_a_grouped_cleanup_failure_still_preserves_the_result(session: _FakeSession) -> None:
-    """The shape transport shutdown actually produces, over R-EXEC-1."""
+    """A grouped exception is what transport shutdown raises, and the result survives it."""
     session.transport["cleanup_error"] = BaseExceptionGroup(
         "unhandled errors in a TaskGroup",
         [asyncio.CancelledError()],
@@ -362,5 +362,5 @@ def test_a_failure_class_names_the_leaves_and_nothing_else(exc: BaseException, e
 
 
 def test_a_failure_class_carries_no_message_from_the_exception() -> None:
-    """R-OBS-2: an exception message can hold a URL, a credential, or an argument."""
+    """An exception message can hold a URL, a credential, or an argument."""
     assert "server-secret" not in mcp_stateless.failure_class(RuntimeError("server-secret leaked"))

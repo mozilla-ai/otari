@@ -8,11 +8,13 @@ import { Section } from "@/design-system/layout/Section"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 
 import { ComparisonRatingBar } from "./ComparisonRatingBar"
+import { useFileDrop } from "./hooks/useFileDrop"
 import { useFollowConversation } from "./hooks/useFollowConversation"
 import { usePlayground } from "./hooks/usePlayground"
 import { ModelSelect } from "./ModelSelect"
 import { PlaygroundComposer } from "./PlaygroundComposer"
 import { PlaygroundConversation } from "./PlaygroundConversation"
+import { PlaygroundFiles } from "./PlaygroundFiles"
 import { PlaygroundGateNotice } from "./PlaygroundGateNotice"
 import { PlaygroundHistory } from "./PlaygroundHistory"
 import { PlaygroundToolbar } from "./PlaygroundToolbar"
@@ -25,6 +27,10 @@ export function PlaygroundPage() {
   const follow = useFollowConversation({
     turnCount: playground.panelA.turns.length + playground.panelB.turns.length,
     lastRole: playground.panelA.turns[playground.panelA.turns.length - 1]?.role,
+  })
+  const drop = useFileDrop({
+    isEnabled: playground.canAttachFiles && playground.canChat,
+    onDrop: playground.attachFiles,
   })
 
   if (playground.gate !== "ready") {
@@ -68,13 +74,27 @@ export function PlaygroundPage() {
     toggleWebSearch: playground.toggleWebSearch,
     toggleCodeExecution: playground.toggleCodeExecution,
     toggleMcpServer: playground.toggleMcpServer,
+    canAttachFiles: playground.canAttachFiles,
+    attachments: playground.attachments,
+    onAttachFiles: playground.attachFiles,
+    onRemoveAttachment: playground.removeAttachment,
+    isUploading: playground.isUploading,
+    uploadError: playground.uploadError,
   }
 
   const hasTranscript =
     playground.panelA.turns.length > 0 || playground.panelB.turns.length > 0
 
   return (
-    <div className="flex min-h-[calc(100dvh-6rem)] flex-col md:min-h-[calc(100dvh-6.5rem)]">
+    <div
+      {...drop.dropProps}
+      className="relative flex min-h-[calc(100dvh-6rem)] flex-col md:min-h-[calc(100dvh-6.5rem)]"
+    >
+      {drop.isDragging ? (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-border-strong border-dashed bg-background/90">
+          <p className="text-emphasis">Drop files to attach them</p>
+        </div>
+      ) : null}
       <Section className="border-b border-border">
         <PageIntro
           title="Playground"
@@ -84,6 +104,32 @@ export function PlaygroundPage() {
               hasTranscript={hasTranscript}
               onToggleCompare={playground.toggleCompare}
               onNewChat={() => playground.setIsNewChatConfirmOpen(true)}
+              files={
+                playground.canAttachFiles ? (
+                  <PlaygroundFiles
+                    isOpen={playground.isFilesOpen}
+                    onOpenChange={playground.setIsFilesOpen}
+                    files={playground.files}
+                    isLoading={playground.isFilesLoading}
+                    hasMore={playground.hasMoreFiles}
+                    isLoadingMore={playground.isLoadingMoreFiles}
+                    onLoadMore={playground.loadMoreFiles}
+                    error={playground.filesError}
+                    attachedIds={
+                      new Set(
+                        playground.attachments.flatMap((attachment) =>
+                          attachment.status === "ready"
+                            ? [attachment.fileId]
+                            : [],
+                        ),
+                      )
+                    }
+                    canAttach={playground.canChat && !playground.isBusy}
+                    onAttach={playground.attachUploaded}
+                    onDelete={playground.removeFile}
+                  />
+                ) : undefined
+              }
               history={
                 <PlaygroundHistory
                   conversations={playground.conversations}

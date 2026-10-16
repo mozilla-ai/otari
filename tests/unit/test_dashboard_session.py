@@ -33,11 +33,12 @@ from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 MASTER_KEY = "sk-test-master"
 
 
-def _config(tmp_path: Path) -> GatewayConfig:
+def _config(tmp_path: Path, **overrides: object) -> GatewayConfig:
     return GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'session-test.db'}",
         master_key=MASTER_KEY,
         require_pricing=False,
+        **overrides,  # type: ignore[arg-type]
     )
 
 
@@ -116,6 +117,35 @@ def test_cross_site_requests_cannot_ride_the_cookie(tmp_path: Path) -> None:
         assert client.get(f"{API_ROOT}/settings", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
 
 
+def test_a_sibling_host_cannot_ride_the_cookie_unless_it_is_a_listed_origin(tmp_path: Path) -> None:
+    # A dashboard an edge serves from a sibling of this process is same-site
+    # to it, which SameSite=Strict lets through. Only an origin the operator
+    # listed for CORS is admitted; every other sibling stays refused, and so
+    # does a same-site request that names no origin at all.
+    listed = "https://app.example.com"
+    with TestClient(create_app(_config(tmp_path, cors_allow_origins=[listed]))) as client:
+        _sign_in(client)
+        same_site = {"Sec-Fetch-Site": "same-site"}
+        assert client.get(f"{API_ROOT}/settings", headers={**same_site, "Origin": listed}).status_code == 200
+        other = client.get(f"{API_ROOT}/settings", headers={**same_site, "Origin": "https://other.example.com"})
+        assert other.status_code == 401
+        assert client.get(f"{API_ROOT}/settings", headers=same_site).status_code == 401
+
+
+def test_a_wildcard_cors_entry_admits_no_sibling_host(tmp_path: Path) -> None:
+    with TestClient(create_app(_config(tmp_path, cors_allow_origins=["*"]))) as client:
+        _sign_in(client)
+        headers = {"Sec-Fetch-Site": "same-site", "Origin": "https://app.example.com"}
+        assert client.get(f"{API_ROOT}/settings", headers=headers).status_code == 401
+
+
+def test_with_no_listed_origin_a_sibling_host_stays_refused(tmp_path: Path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        _sign_in(client)
+        headers = {"Sec-Fetch-Site": "same-site", "Origin": "https://app.example.com"}
+        assert client.get(f"{API_ROOT}/settings", headers=headers).status_code == 401
+
+
 def test_sign_out_revokes_the_session_server_side(tmp_path: Path) -> None:
     with TestClient(create_app(_config(tmp_path))) as client:
         _sign_in(client)
@@ -124,10 +154,17 @@ def test_sign_out_revokes_the_session_server_side(tmp_path: Path) -> None:
         response = client.delete(f"{API_ROOT}/auth/session")
         assert response.status_code == 204
 
+        # The clear carries the attributes the cookie was set with.
+        assert "samesite=strict" in response.headers["set-cookie"].lower()
+        assert "httponly" in response.headers["set-cookie"].lower()
+
         # Even a kept copy of the cookie is dead after sign-out (server-side
         # revocation, not just cookie deletion in the browser).
         client.cookies.set(SESSION_COOKIE_NAME, stolen_cookie)
-        assert client.get(f"{API_ROOT}/settings").status_code == 401
+        refused = client.get(f"{API_ROOT}/settings")
+        assert refused.status_code == 401
+        # Worded for a browser whose session ended, not for an API client missing a key header.
+        assert refused.json()["detail"] == "Your dashboard session has ended. Sign in again."
 
 
 def test_sign_out_without_a_session_is_a_no_op(tmp_path: Path) -> None:

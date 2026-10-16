@@ -1,6 +1,6 @@
 """The merged catalog: every selector one caller may be shown, before presentation.
 
-Discovery, stored prices, the genai-prices defaults, aliases and routing
+Discovery, stored prices, the models.dev defaults, aliases and routing
 policies folded into one view, scoped to the caller who asked. Two surfaces
 read it and must not disagree about which selectors exist or which of them a
 caller may see: the flat, OpenAI-shaped listing, and the catalog grouped by
@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -30,6 +30,7 @@ from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
+from gateway.services.catalog import apply_model_limits, load_catalog_metadata
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
 from gateway.services.policy_store import effective_policies
@@ -39,14 +40,16 @@ from gateway.services.pricing_service import (
     default_model_pricing,
     default_pricing_enabled,
     default_pricing_reference,
-    model_context_window,
+    load_organization_override_index,
     normalize_effective_at,
     pricing_key_forms,
     resolve_organization_override,
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_model_access import (
+    hosted_allowlist_entries,
     resolve_default_workspace_offered_keys,
     resolve_hosted_models,
     resolve_organization_byo_providers,
@@ -55,7 +58,11 @@ from gateway.services.tenancy.organization_model_access import (
     resolve_workspace_byo_providers,
     resolve_workspace_offered_keys,
 )
-from gateway.services.workspace_scope import lookup_default_workspace_id, organization_for_workspace_id
+from gateway.services.workspace_scope import (
+    lookup_default_workspace_id,
+    organization_for_key_id,
+    organization_for_workspace_id,
+)
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -74,7 +81,6 @@ class ModelPricingInfo(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
     # The same tiers SetPricingRequest accepts, so the response says what the
     # request already promised. The permissive arm stays for the same reason as
     # the billing shapes on a usage row, with one addition specific to here:
@@ -105,7 +111,6 @@ def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
         output_price_per_million=float(pricing.output_price_per_million),
         cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
         cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
-        cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
         pricing_tiers=pricing.pricing_tiers or [],
         # A transient row (a default, an override) is built without the column
         # default that an insert would apply, so it reads back None here.
@@ -121,13 +126,15 @@ class ModelObject(BaseModel):
     created: int
     owned_by: str
     pricing: ModelPricingInfo | None = None
-    # Where ``pricing`` came from: "configured" (DB), "default" (genai-prices
-    # fallback, only when default_pricing is enabled), or "none".
+    # Where ``pricing`` came from: "organization" (the caller's organization's
+    # own rate), "configured" (DB), "default" (models.dev fallback, only when
+    # default_pricing is enabled), "dynamic" (a policy priced per request), or "none".
     pricing_source: str = "none"
-    # Context-window token limit from the bundled genai-prices dataset, when it
-    # knows the model. Metadata only (independent of the default_pricing toggle);
-    # ``None`` when the dataset has no value for the model.
+    # Token limits (see ``model_limits``): the context window from the live models.dev
+    # catalog, then the pricing snapshot; the output limit from the live catalog alone.
+    # Metadata only, independent of the default_pricing toggle; ``None`` where neither knows one.
     context_window: int | None = None
+    max_output_tokens: int | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
@@ -165,18 +172,6 @@ def created_timestamp(model: "Model") -> int:
         return 0
 
 
-def context_window_for_key(model_key: str) -> int | None:
-    """genai-prices context-window for a ``provider:model`` (or bare) key.
-
-    Metadata, so it is filled whether or not the default-pricing fallback is on;
-    ``None`` when the dataset does not know the model or lists no window for it.
-    """
-    provider_part, separator, model_part = model_key.partition(":")
-    provider = provider_part if separator else None
-    model_name = model_part if separator else model_key
-    return model_context_window(provider, model_name)
-
-
 def model_from_pricing(pricing: ModelPricing) -> ModelObject:
     """Convert a ModelPricing row to an OpenAI-compatible ModelObject."""
     created = int(calendar.timegm(pricing.created_at.utctimetuple()))
@@ -186,11 +181,17 @@ def model_from_pricing(pricing: ModelPricing) -> ModelObject:
         owned_by=owner_from_key(pricing.model_key),
         pricing=pricing_info(pricing),
         pricing_source="configured",
-        context_window=context_window_for_key(pricing.model_key),
     )
 
 
-def alias_model(config: GatewayConfig, alias: str, target: str, pricing_lookup: dict[str, ModelPricing]) -> ModelObject:
+def alias_model(
+    config: GatewayConfig,
+    alias: str,
+    target: str,
+    pricing_lookup: dict[str, ModelPricing],
+    *,
+    models_dev: dict[str, Any] | None,
+) -> ModelObject:
     """Build a ModelObject for an alias, from config.yml or from storage.
 
     The alias id is what the caller sees; pricing is looked up from the resolved
@@ -207,15 +208,14 @@ def alias_model(config: GatewayConfig, alias: str, target: str, pricing_lookup: 
         owned_by=ALIAS_OWNED_BY,
         pricing=pricing_info(pricing) if pricing else None,
         pricing_source="configured" if pricing else "none",
-        # From the resolved target, like pricing: an alias's display name is not a
-        # model the dataset knows. Exposing the window does not reveal the target.
-        context_window=context_window_for_key(canonical_target),
     )
     # Priced from the target, never from the alias's display name: the fallback
     # keys on a real provider/model, and the display name is neither. Without
     # this an alias to an unpriced model would report no price while the gateway
     # billed it at the default rate.
     apply_default_pricing(obj, pricing_selector=canonical_target)
+    # Limits from the target too, for the same reason. Exposing them does not reveal the target.
+    apply_model_limits(config, models_dev, obj, limits_selector=canonical_target)
     return obj
 
 
@@ -315,7 +315,7 @@ def normalized_pricing_lookup(config: GatewayConfig, pricing_map: dict[str, Mode
 
 
 def apply_default_pricing(obj: ModelObject, pricing_selector: str | None = None) -> None:
-    """Fill the genai-prices default rate for a model that has no DB price.
+    """Fill the models.dev default rate for a model that has no DB price.
 
     No-op when the fallback is disabled or the model already carries a price, so
     database pricing always takes precedence. Marks the source as "default".
@@ -414,6 +414,35 @@ class CatalogScope:
     and for the master key, which dispatch from one workspace.
     """
 
+    deployment_key_models: HostedModels = field(default_factory=dict)
+    """What the caller reaches on a deployment-owned key, by provider, for the credential label.
+
+    The hosted roster less every provider the organization's own key serves
+    wherever this caller dispatches from. Wider than
+    ``deployment_supplied_providers`` for an operator, who may price a hosted
+    model and so sees it unflagged, but still does not hold its key.
+    """
+
+
+def served_on_deployment_key(hosted_models: HostedModels, model_key: str) -> bool:
+    """Whether ``model_key`` names a model the caller reaches on a deployment-owned key.
+
+    Decided per model, not per provider: a model the port does not advertise
+    is reached on the organization's own key or not at all.
+    """
+    split = split_selector(model_key)
+    if split is None:
+        return False
+    provider, model = split
+    if provider not in hosted_models:
+        return False
+    roster = hosted_models[provider]
+    return roster is None or model in roster
+
+
+def _without(hosted_models: HostedModels, providers: frozenset[str]) -> HostedModels:
+    return {provider: roster for provider, roster in hosted_models.items() if provider not in providers}
+
 
 def withheld_as_unadvertised(config: GatewayConfig, scope: CatalogScope, model_key: str) -> bool:
     """Whether a priced key names a hosted model the deployment does not advertise.
@@ -465,20 +494,27 @@ async def catalog_scope(
     A master key, and a session that operates the deployment, are unrestricted.
     Any other session gets what its organization can reach,
     and the workspace-scoped rows only for workspaces it may see.
-    A visitor to the public catalog gets the configured instances alone.
+    A visitor to the public catalog gets the configured instances and what the
+    hosted port advertises deployment-wide.
     ``include_offered=False`` leaves out the organization's offered models, for
     the deployment-wide view the selector index is built from, which reads every
     organization's offerings separately.
     """
-    # A visitor, while the catalog is public: the deployment's configured
-    # instances and nothing that belongs to a tenant. Not a member of anything,
+    # A visitor, while the catalog is public: what the deployment itself
+    # serves, its configured instances and the hosted port's deployment-wide
+    # roster, and nothing that belongs to a tenant. Not a member of anything,
     # so no BYO key, no workspace's aliases or policies.
     if anonymous:
+        hosted_models = await resolve_hosted_models(model_provider, None)
+        hosted = frozenset(hosted_models)
+        allowlist = {f"{instance}:*" for instance in config.providers}
+        allowlist |= hosted_allowlist_entries(hosted_models, hosted)
         return CatalogScope(
-            allowlist=[f"{instance}:*" for instance in config.providers],
+            allowlist=sorted(allowlist),
             reads_workspace_layer=False,
-            deployment_supplied_providers=frozenset(),
+            deployment_supplied_providers=hosted,
             offered_keys=frozenset(),
+            deployment_key_models=hosted_models,
         )
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
@@ -490,17 +526,28 @@ async def catalog_scope(
             # from the catalog they were told it joined.
             organization_id: uuid.UUID | None = session_identity.active_organization_id
             hosted_models = await resolve_hosted_models(model_provider, organization_id)
+            # Read only once something is advertised: neither reader consults
+            # them otherwise, and the keys cost a decryption each.
+            operator_byo_providers: frozenset[str] = frozenset()
+            organization_key_providers: frozenset[str] = frozenset()
+            if hosted_models:
+                operator_byo_providers = await resolve_organization_byo_providers(db, organization_id)
+                if organization_id is not None:
+                    organization_key_providers = await OrgProviderKeyService(db).get_byo_providers(
+                        organization_id=organization_id
+                    )
             return CatalogScope(
                 allowlist=None,
                 reads_workspace_layer=True,
                 deployment_supplied_providers=frozenset(),
                 offered_keys=await _operator_offered_keys(db, session_identity) if include_offered else frozenset(),
                 hosted_models=hosted_models,
-                # Read only once something is advertised: the withhold never
-                # consults it otherwise, and the keys cost a decryption each.
-                byo_providers=(
-                    await resolve_organization_byo_providers(db, organization_id) if hosted_models else frozenset()
-                ),
+                byo_providers=operator_byo_providers,
+                # The label's line is the member flag's, not the withhold's: a
+                # key one workspace calls on leaves the deployment paying for
+                # the others, so only a key every workspace calls on takes a
+                # provider out.
+                deployment_key_models=_without(hosted_models, organization_key_providers),
             )
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
@@ -540,6 +587,7 @@ async def catalog_scope(
         ),
         hosted_models=hosted_models,
         byo_providers=byo_providers,
+        deployment_key_models=_without(hosted_models, byo_providers),
     )
 
 
@@ -557,6 +605,10 @@ class MergedCatalog:
     dynamic_policies: dict[str, PolicySpec]
     discovered_keys: set[str]
     """The selectors phase 1 heard from a provider, as opposed to only priced."""
+    deployment_key_models: HostedModels = field(default_factory=dict)
+    """What the caller reaches on a deployment-owned key; see :attr:`CatalogScope.deployment_key_models`."""
+    models_dev: dict[str, Any] | None = None
+    """The models.dev catalog the limits were read from, for a reader that joins more of it."""
 
 
 async def build_merged_catalog(
@@ -570,18 +622,25 @@ async def build_merged_catalog(
     cached_only: bool = False,
     model_provider: ModelProviderPort | None,
     include_offered: bool = True,
+    withhold_alias_targets: bool = True,
 ) -> MergedCatalog:
     """Merge discovery, stored prices, defaults, aliases and policies for one caller.
 
-    ``anonymous`` is the public catalog's visitor, who is answered from the
-    configured instances alone; see :func:`catalog_scope`.
+    ``anonymous`` is the public catalog's visitor, who is answered from what
+    the deployment itself serves; see :func:`catalog_scope`.
 
-    ``cached_only`` builds the view without dialing any provider, for a caller
-    that runs off the request path; see :func:`discover_all_models`.
+    ``cached_only`` builds the view without dialing any provider or fetching
+    models.dev, for a caller that runs off the request path; see
+    :func:`discover_all_models`.
 
     Passing ``None`` as ``model_provider`` lists no hosted providers, and
     ``include_offered=False`` leaves out the caller's organization's offered
     models; both are what the selector index's deployment-wide build wants.
+
+    ``withhold_alias_targets=False`` keeps an alias's target in the listing
+    beside the alias. The flat listing hides the target behind its alias, but a
+    reader that lists real models only (the grouped catalog, the selector index)
+    would otherwise list the model nowhere once something aliases it.
     """
     # Aliases are scoped, so the catalog is too: a caller sees their workspace's
     # aliases and the configured ones, plus their own user-scoped layer, never
@@ -640,10 +699,11 @@ async def build_merged_catalog(
     # while a policy decides where traffic goes among models the caller may name
     # directly anyway. Hiding its candidates cost more than it bought: one policy
     # naming a fallback chain could empty most of the catalog, a model priced by
-    # the genai-prices default then vanished from the dashboard along with its
+    # the models.dev default then vanished from the dashboard along with its
     # rate, and the single-model read served the same model with its price all
     # along, so nothing was actually kept off the wire.
-    alias_targets = alias_target_keys(config, configured_aliases)
+    alias_targets = alias_target_keys(config, configured_aliases) if withhold_alias_targets else set()
+    models_dev = await load_catalog_metadata(config, cached_only=cached_only)
 
     merged: dict[str, ModelObject] = {}
     discovered_keys: set[str] = set()
@@ -678,7 +738,6 @@ async def build_merged_catalog(
                 owned_by=provider_name,
                 pricing=pricing_info(pricing) if pricing else None,
                 pricing_source="configured" if pricing else "none",
-                context_window=context_window_for_key(model_key),
             )
 
     # Phase 2: pricing-only models (not discovered but have pricing entries).
@@ -727,17 +786,17 @@ async def build_merged_catalog(
             owned_by=owner,
             pricing=None,
             pricing_source="none",
-            context_window=context_window_for_key(model_key),
         )
 
-    # Phase 3: fill the genai-prices default for unpriced models, so the catalog
-    # shows the effective rate when the fallback is active. Database pricing
-    # (phases 1-2) always wins; this only touches models still without a price.
-    # Runs before aliases are added: this fills from ``id``, and an alias's id is
-    # a display name the fallback must never be asked to price. Aliases fill
-    # their own default from the resolved target in phase 4.
+    # Phase 3: fill the models.dev default for unpriced models, so the catalog
+    # shows the effective rate when the fallback is active, and every model's
+    # token limits. Database pricing (phases 1-2) always wins; this only touches
+    # models still without a price. Runs before aliases are added: this fills
+    # from ``id``, and an alias's id is a display name the fallback must never be
+    # asked to price. Aliases fill both from the resolved target in phase 4.
     for obj in merged.values():
         apply_default_pricing(obj)
+        apply_model_limits(config, models_dev, obj)
 
     # Phase 4: aliases, from config.yml and from storage alike. An alias is a
     # display name, not a provider, so it is only listed for the unfiltered
@@ -745,7 +804,7 @@ async def build_merged_catalog(
     # must not leak the alias mapping.
     if provider is None:
         for alias, target in aliases.items():
-            merged[alias] = alias_model(config, alias, target, pricing_lookup)
+            merged[alias] = alias_model(config, alias, target, pricing_lookup, models_dev=models_dev)
         # Phase 5: policies whose candidate is decided per request. Listed last so
         # nothing else can price them, and excluded from a ``?provider=`` filter
         # for the same reason aliases are.
@@ -784,6 +843,33 @@ async def build_merged_catalog(
         aliases=aliases,
         dynamic_policies=dynamic_policies,
         discovered_keys=discovered_keys,
+        deployment_key_models=scope.deployment_key_models,
+        models_dev=models_dev,
+    )
+
+
+async def build_real_model_catalog(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    anonymous: bool = False,
+    model_provider: ModelProviderPort | None,
+) -> MergedCatalog:
+    """The merged catalog for a view that lists real models and never an alias.
+
+    Such a view keeps an alias's target: hiding it behind the alias, as the flat
+    listing does, would list the model nowhere once something aliases it.
+    """
+    return await build_merged_catalog(
+        db,
+        config,
+        auth=auth,
+        session_identity=session_identity,
+        anonymous=anonymous,
+        model_provider=model_provider,
+        withhold_alias_targets=False,
     )
 
 
@@ -808,7 +894,7 @@ def viewer_price(
 
     The order is settlement's, and is stated once in
     :func:`pricing_service.find_model_pricing`: the organization's own override,
-    then the deployment's stored row, then the genai-prices default. The merged
+    then the deployment's stored row, then the models.dev default. The merged
     catalog has already folded the last two into ``obj`` (phases 2 and 3), so
     what is left here is the override, resolved against the same key forms
     settlement offers, and naming which rung answered.
@@ -821,3 +907,56 @@ def viewer_price(
     if obj.pricing is not None and obj.pricing_source == "default":
         return ViewerPrice(obj.pricing, "defaults", default_pricing_reference(instance, model_id, as_of))
     return ViewerPrice(None, None, None)
+
+
+async def viewer_organization(
+    db: AsyncSession, caller: tuple[APIKey | None, bool] | None, session_identity: TenancyUser | None
+) -> uuid.UUID | None:
+    """The organization whose overrides price this viewer's requests.
+
+    Resolved the way settlement resolves it: a session acts in its active
+    organization, an API key in its workspace's, and a master key in the default
+    workspace's. Never from the request. A visitor has none.
+    """
+    if session_identity is not None:
+        return session_identity.active_organization_id
+    if caller is None:
+        return None
+    api_key, _ = caller
+    return await organization_for_key_id(db, api_key.id if api_key is not None else None)
+
+
+async def apply_organization_pricing(
+    db: AsyncSession,
+    config: GatewayConfig,
+    models: Sequence[ModelObject],
+    aliases: dict[str, str],
+    organization_id: uuid.UUID | None,
+) -> None:
+    """Price each of ``models`` at the organization's own rate where it holds one.
+
+    Settlement charges an organization's override ahead of the deployment's
+    stored row and the models.dev default, so a listing that stopped at those
+    two would state a rate, and a ``pricing_source``, the request is not billed
+    at. An alias is priced from its target, as everywhere else in the catalog;
+    a dynamic policy has no single target and keeps no price.
+    """
+    if organization_id is None:
+        return
+    keys = {
+        obj.id: normalize_pricing_key(config, aliases[obj.id]) if obj.id in aliases else obj.id
+        for obj in models
+        if obj.pricing_source != "dynamic"
+    }
+    overrides = await load_organization_override_index(
+        db, organization_id, (form for key in keys.values() for form in pricing_key_forms(key))
+    )
+    if not overrides:
+        return
+    now = normalize_effective_at(None)
+    for obj in models:
+        key = keys.get(obj.id)
+        override = resolve_organization_override(overrides, pricing_key_forms(key), now) if key else None
+        if override is not None:
+            obj.pricing = pricing_info(override)
+            obj.pricing_source = "organization"

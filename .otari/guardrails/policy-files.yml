@@ -1,0 +1,19 @@
+schema_version: "1.0"
+policy:
+  id: otari/policy-files
+  description: The guardrails and verifiers an agent must not change.
+
+gates:
+
+  # NOTE: This gate runs before an edit tool ONLY, so it never reports a change a human made in the tree.
+  - id: no-agent-edited-policy
+    type: path
+    runs: [pre_tool_use.edit_target]
+    enforcement: required
+    forbidden: [".otari/**"]
+    accept_warnings: [shell-write-unseen]
+    message: >-
+      The files under .otari/ are the rules an agent works under, so a human
+      changes them. Do not edit, relax or revert them, and leave alone any
+      change to them that you did not make. If a gate refuses work it should
+      allow, stop and say so.

@@ -1,10 +1,18 @@
 """Errors that the budgets domain may raise.
 
-The surface errors carry the HTTP status each renders as.
+Most surface errors carry the HTTP status each renders as.
+A surface error that carries none is mapped to a status by the API layer.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
-from gateway.exceptions import TenancyConflictError, TenancyNotFoundError
+from gateway.core.error_codes import END_USER_BUDGET_NOT_ALLOWED
+from gateway.exceptions import (
+    TenancyConflictError,
+    TenancyForbiddenError,
+    TenancyNotFoundError,
+    TenancyValidationError,
+)
+from gateway.models.budgets import ScopeType
 
 
 class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
@@ -65,8 +73,8 @@ class OrganizationBudgetInUseError(TenancyConflictError):
 class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
     """Something outside this organization's own surface still names the budget.
 
-    ``users.budget_id`` and ``budget_reset_logs.budget_id``, neither of which is a
-    tenant's to see, so the refusal does not name the rows holding it.
+    ``users.budget_id``, which is not a tenant's to see, so the refusal does not
+    name the rows holding it.
     """
 
     def __init__(self, budget_id: object):
@@ -74,6 +82,71 @@ class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
             f"Budget {budget_id} is still in use outside this organization and cannot be deleted. "
             "Ask a deployment operator to release it."
         )
+
+
+class DeploymentBudgetNotFoundError(TenancyNotFoundError):
+    def __init__(self, budget_id: object):
+        super().__init__(f"Budget with id '{budget_id}' not found")
+
+
+class DeploymentBudgetOwnedByOrganizationError(TenancyConflictError):
+    """The operator may edit an organization's budget but not delete it out from under the tenant."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This budget is owned by an organization. It can be edited here but not "
+            "deleted; the organization that owns it manages it."
+        )
+
+
+class DeploymentBudgetNotReplaceableError(TenancyConflictError):
+    """A PUT named the id of an organization's budget, which only that organization replaces."""
+
+    def __init__(self, budget_id: str) -> None:
+        super().__init__(f"Budget '{budget_id}' belongs to an organization; change it on that organization's budgets")
+
+
+class DeploymentBudgetIsMemberDefaultError(TenancyConflictError):
+    """A workspace hands the budget to its members, so the delete is refused by workspace name."""
+
+    def __init__(self, workspaces: list[str]):
+        super().__init__(
+            f"This budget is the member default for {', '.join(workspaces)}. Change or remove that "
+            "default on the workspace (Organization > Workspaces > Edit) before deleting it."
+        )
+
+
+class DeploymentBudgetIsEndUserDefaultError(TenancyConflictError):
+    """Service keys start their end users on the budget, so the delete is refused by key name.
+
+    Deleting it would leave every end user those keys create from then on uncapped.
+    """
+
+    def __init__(self, keys: list[str]):
+        shown = ", ".join(keys[:5]) + (f" and {len(keys) - 5} more" if len(keys) > 5 else "")
+        super().__init__(
+            f"This budget is the default end-user budget of {shown}. Change that default on the key "
+            "(Keys > Edit > Service key) before deleting it."
+        )
+
+
+class DeploymentBudgetEnforcedError(TenancyConflictError):
+    """Ceilings still enforce the budget.
+
+    Counted rather than named: a scope id is a bare uuid, so listing them would say less than the number does.
+    """
+
+    def __init__(self, ceilings: int):
+        super().__init__(
+            f"This budget is enforced by {ceilings} spend {'ceiling' if ceilings == 1 else 'ceilings'}. "
+            "A member's ceiling is changed on Members & roles (Edit > Workspace access); others are managed "
+            "through /api/v1/scoped-budgets."
+        )
+
+
+class DeploymentBudgetStillReferencedError(TenancyConflictError):
+    def __init__(self, budget_id: object):
+        super().__init__(f"Budget {budget_id} is still in use and cannot be deleted.")
 
 
 class OrganizationScopeNotFoundError(TenancyNotFoundError):
@@ -115,6 +188,14 @@ class BudgetStillReferencedError(Exception):
         super().__init__(f"Budget {budget_id} is still referenced")
 
 
+class MemberBudgetPolicyAlreadyExistsError(Exception):
+    """A policy already caps this workspace's members for this provider."""
+
+    def __init__(self, workspace_id: object, provider_key_id: object):
+        provider = "every provider" if provider_key_id is None else f"provider '{provider_key_id}'"
+        super().__init__(f"Workspace {workspace_id} already has a member budget policy for {provider}")
+
+
 class SpendCeilingAlreadyExistsError(Exception):
     """A ceiling already caps this scope for this provider."""
 
@@ -122,16 +203,118 @@ class SpendCeilingAlreadyExistsError(Exception):
         super().__init__(f"A spend ceiling already exists for {scope_type} {scope_id}")
 
 
+class SpendCeilingExceededError(Exception):
+    """A scoped ceiling has no room for a request on one of its axes.
+
+    ``retry_after`` is the seconds until the ceiling's window ends, None when waiting would not help.
+    """
+
+    def __init__(self, detail: str, *, scope_type: ScopeType, retry_after: int | None = None) -> None:
+        super().__init__(detail)
+        self.scope_type = scope_type
+        self.retry_after = retry_after
+
+
+class ProviderSpendCeilingExceededError(SpendCeilingExceededError):
+    """A scoped ceiling on one provider has no room for a request, which may still fit on another provider."""
+
+
+class EndUserBudgetNotFoundError(TenancyNotFoundError):
+    """A service key names an end-user budget that does not exist, or that a tenant owns.
+
+    One answer for both, as ``POST /users`` gives: an end user is a deployment
+    user, so a tenant's budget is not one it may be capped at.
+    """
+
+    def __init__(self, budget_id: str):
+        super().__init__(f"Budget with id '{budget_id}' not found")
+
+
+class EndUserBudgetNotAllowedError(TenancyForbiddenError):
+    """A service key named a budget that is not on its list of end-user budgets."""
+
+    error_code = END_USER_BUDGET_NOT_ALLOWED
+
+    def __init__(self, budget_id: str):
+        super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
+
+
+class EndUserDefaultNotListedError(TenancyValidationError):
+    """A key's default end-user budget is not on its list of end-user budgets."""
+
+    def __init__(self) -> None:
+        super().__init__("end_user_budget_id must be one of end_user_budget_ids")
+
+
+class EndUserNotFoundError(TenancyNotFoundError):
+    """No end user of the key's owner goes by this id."""
+
+    def __init__(self, external_id: str):
+        super().__init__(f"End user '{external_id}' not found")
+
+
+class NotAServiceKeyError(TenancyValidationError):
+    """End users were addressed through a key that cannot have any."""
+
+    def __init__(self, key_id: str):
+        super().__init__(f"API key '{key_id}' is not a service key")
+
+
+class EndUserIdInvalidError(TenancyValidationError):
+    """A service key named an end user by an id it cannot be stored under."""
+
+    def __init__(self, requirement: str):
+        super().__init__(f"'user' {requirement} to name an end user")
+
+
+class EndUserPathInvalidError(TenancyValidationError):
+    """An end user was named in a URL path by an id that a path cannot carry intact."""
+
+    def __init__(self, external_id: str):
+        super().__init__(
+            f"End user '{external_id}' has a '.' or '..' segment, which HTTP clients collapse in a path; "
+            "name it with the external_id query parameter instead"
+        )
+
+
+class EndUserOwnerUnavailableError(TenancyForbiddenError):
+    """The service key's own user is blocked or deleted, so none of its end users may spend."""
+
+    def __init__(self) -> None:
+        super().__init__("The user this key belongs to is blocked")
+
+
 __all__ = [
     "BudgetStillReferencedError",
+    "EndUserBudgetNotAllowedError",
+    "EndUserBudgetNotFoundError",
+    "EndUserDefaultNotListedError",
+    "EndUserIdInvalidError",
+    "EndUserNotFoundError",
+    "EndUserOwnerUnavailableError",
+    "EndUserPathInvalidError",
+    "MemberBudgetPolicyAlreadyExistsError",
+    "NotAServiceKeyError",
     "OrganizationBudgetHeldElsewhereError",
     "OrganizationBudgetInUseError",
     "OrganizationBudgetNotFoundError",
     "OrganizationScopeNotFoundError",
     "OrganizationScopedBudgetAlreadyExistsError",
     "OrganizationScopedBudgetNotFoundError",
+    "ProviderSpendCeilingExceededError",
     "SpendCeilingAlreadyExistsError",
+    "SpendCeilingExceededError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",
 ]
+
+
+class DeclaredAccessError(TenancyValidationError):
+    """config.yml declares a budget or an API key this deployment cannot apply, so the gateway does not start.
+
+    The message names the config entry and never a key's secret.
+    """
+
+    def __init__(self, entry: str, reason: str):
+        super().__init__(f"{entry}: {reason}")

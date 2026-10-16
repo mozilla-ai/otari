@@ -5,6 +5,7 @@ organization-scoped rates, budget isolation, and the read-surface (source filter
 by_source).
 """
 
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -359,6 +360,29 @@ def test_idempotent_resubmit(client: TestClient, master_key_header: dict[str, st
     assert second.json() == {"accepted": 0, "duplicate": 1, "rejected": 0, "errors": []}
 
     assert db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_dup").count() == 1
+
+
+def test_resubmit_held_by_an_uncommitted_write_gets_a_retryable_503(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A resubmit colliding with a write still in flight fails fast with a 503 rather than waiting it out."""
+    _seed_user(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    assert _post(client, master_key_header, [_event("req_held")]).json()["accepted"] == 1
+
+    db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_held").delete()
+    db_session.flush()
+    try:
+        started = time.monotonic()
+        held = _post(client, master_key_header, [_event("req_held")])
+        waited = time.monotonic() - started
+    finally:
+        db_session.rollback()
+
+    assert held.status_code == 503, held.text
+    assert held.headers["Retry-After"] == "2"
+    assert waited < 10
+    assert _post(client, master_key_header, [_event("req_held")]).json()["duplicate"] == 1
 
 
 def test_dedupes_within_batch(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
@@ -740,20 +764,8 @@ def test_rejects_reserved_gateway_source(client: TestClient, master_key_header: 
     assert "reserved" in resp.text
 
 
-def test_rejects_reserved_otari_ai_source_prefix(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """otari.ai stamps the rows its backfill writes `otari-ai:<slug>`; an import under
-    that prefix is a lookalike in every reconciliation total."""
-    _seed_user(client, master_key_header)
-    for source in ("otari-ai:gateway", "otari-ai:claude_code", "OTARI-AI:gateway"):
-        resp = _post(client, master_key_header, [_event()], source=source)
-        assert resp.status_code == 422, f"{source}: {resp.text}"
-        assert "reserved" in resp.text
-
-
-def test_accepts_source_with_colon_outside_the_reserved_prefix(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
-    """The guard is a prefix check, not a ban on colons in a slug."""
+def test_accepts_source_with_colon(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
+    """A colon is an ordinary slug character."""
     _seed_user(client, master_key_header)
     _seed_pricing(client, master_key_header)
 

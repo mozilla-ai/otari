@@ -658,19 +658,36 @@ def test_rank_refuses_a_selector_that_resolves_to_no_provider(client: TestClient
     assert "nope:whatever" in resp.json()["detail"]
 
 
-def test_rank_reports_an_unreachable_embedding_model_as_a_502(client: TestClient) -> None:
+@pytest.mark.parametrize(
+    "failure",
+    # A timeout is a TimeoutError, which the database path also catches for a
+    # connect timeout, so it must not be reported as a database failure.
+    [RuntimeError("no credentials for embeddings"), TimeoutError()],
+    ids=["error", "timeout"],
+)
+def test_rank_reports_an_unreachable_embedding_model_as_a_502(client: TestClient, failure: Exception) -> None:
     # The read path degrades to the policy default when embedding fails; the write
     # path has nothing safe to do, so it must say what broke rather than 500.
-    with patch(
-        "gateway.services.routing.knn.aembedding",
-        new=AsyncMock(side_effect=RuntimeError("no credentials for embeddings")),
-    ):
+    with patch("gateway.services.routing.knn.aembedding", new=AsyncMock(side_effect=failure)):
         resp = _rank(client, "what is 2 plus 2", {CHEAP: 1.0, STRONG: 1.0})
 
     assert resp.status_code == 502
     detail = resp.json()["detail"]
     assert "openai:text-embedding-3-small" in detail
     assert "OTARI_ROUTER_EMBEDDING_MODEL" in detail
+
+
+def test_rank_reports_a_database_connect_timeout_as_a_database_error(client: TestClient) -> None:
+    # A connect timeout is a bare TimeoutError like an embedding timeout, so the
+    # write has to say which one it was or the operator is sent after the wrong thing.
+    with patch(
+        "gateway.services.routing.knn.create_session",
+        side_effect=TimeoutError(),
+    ):
+        resp = _rank(client, "what is 2 plus 2", {CHEAP: 1.0, STRONG: 1.0})
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Database error"
 
 
 def test_rank_accepts_tied_scores(client: TestClient) -> None:

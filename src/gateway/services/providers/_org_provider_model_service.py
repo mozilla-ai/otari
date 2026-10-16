@@ -25,11 +25,12 @@ row an admin edited through ``/organizations/me/pricing`` carries ``"api"`` and
 a refresh leaves it alone forever. That is the whole provenance mechanism, and
 it is why no timestamp column mirrors it.
 
-**Disabled until priced.** A model no rate could be found for is recorded and
-not served, so a model the pricing data has not caught up with cannot be billed
-at nothing. The switch is also how a model is withdrawn: rows are disabled
-rather than deleted, so the model, its rate and its history stay where an admin
-can turn it back on.
+**Disabled until priced.** While ``require_pricing`` is on, a model no rate could
+be found for is recorded and not served, so a model the pricing data has not
+caught up with cannot be billed at nothing. With it off, the deployment serves
+unpriced traffic by choice, and such a model is offered switched on. The switch
+is also how a model is withdrawn: rows are disabled rather than deleted, so the
+model, its rate and its history stay where an admin can turn it back on.
 
 No transaction is open across an upstream dial or across the thread hop that
 resolves community defaults, both of which can take the whole discovery timeout.
@@ -46,6 +47,7 @@ from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
+    OrgProviderKeyNotFoundError,
     OrgProviderLastModelError,
     OrgProviderModelAlreadyOfferedError,
     OrgProviderModelNameRequiredError,
@@ -74,14 +76,12 @@ from gateway.services.model_discovery_service import ProviderDiscovery, test_pro
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
-from gateway.services.tenancy.errors import OrgProviderKeyNotFoundError
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # What a client is told about where a rate came from. The spellings are
 # ``models.pricing.PriceSource``, so the models panel and the Models page name
 # the same rungs to the same reader.
-PRICE_SOURCE_ORGANIZATION: PriceSource = "organization"
 PRICE_SOURCE_DEFAULT: PriceSource = "defaults"
 PRICE_SOURCE_DEPLOYMENT: PriceSource = "deployment"
 
@@ -96,7 +96,6 @@ _RATE_FIELDS = (
     "output_price_per_million",
     "cache_read_price_per_million",
     "cache_write_price_per_million",
-    "cache_write_1h_price_per_million",
 )
 
 
@@ -104,13 +103,13 @@ _RATE_FIELDS = (
 class _Price:
     """What one offered model currently costs, and which rung said so."""
 
-    source: str
+    source: PriceSource
     input_price_per_million: float | None = None
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
     pricing_id: uuid.UUID | None = None
+    unit: str = "tokens"
 
 
 def _quantized(value: Decimal | None) -> Decimal | None:
@@ -131,10 +130,9 @@ def _same_rates(stored: OrganizationModelPricing, default: ModelPricing) -> bool
     return list(stored.pricing_tiers or []) == list(default.pricing_tiers or [])
 
 
-
 def _priced_by_deployment(rate: EffectiveRate | None) -> bool:
     """Whether the deployment's own price list answers, which nothing here may reprice."""
-    return rate is not None and rate.source == "deployment"
+    return rate is not None and rate.source == PRICE_SOURCE_DEPLOYMENT
 
 
 def _repriceable(rate: EffectiveRate | None) -> bool:
@@ -167,8 +165,8 @@ def _price_from(rate: EffectiveRate) -> _Price:
         output_price_per_million=float(rate.rates.output_price_per_million),
         cache_read_price_per_million=as_float(rate.rates.cache_read_price_per_million),
         cache_write_price_per_million=as_float(rate.rates.cache_write_price_per_million),
-        cache_write_1h_price_per_million=as_float(rate.rates.cache_write_1h_price_per_million),
         pricing_id=rate.row.id if rate.row is not None else None,
+        unit=rate.rates.unit or "tokens",
     )
 
 
@@ -183,7 +181,6 @@ def _seeded_row(
         output_price_per_million=to_usd(float(default.output_price_per_million)),
         cache_read_price_per_million=to_usd_or_none(as_float(default.cache_read_price_per_million)),
         cache_write_price_per_million=to_usd_or_none(as_float(default.cache_write_price_per_million)),
-        cache_write_1h_price_per_million=to_usd_or_none(as_float(default.cache_write_1h_price_per_million)),
         pricing_tiers=list(default.pricing_tiers or []),
         unit=default.unit or "tokens",
         origin=SEED_ORIGIN,
@@ -203,7 +200,6 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.output_price_per_million = to_usd(float(default.output_price_per_million))
     row.cache_read_price_per_million = to_usd_or_none(as_float(default.cache_read_price_per_million))
     row.cache_write_price_per_million = to_usd_or_none(as_float(default.cache_write_price_per_million))
-    row.cache_write_1h_price_per_million = to_usd_or_none(as_float(default.cache_write_1h_price_per_million))
     row.pricing_tiers = list(default.pricing_tiers or [])
 
 
@@ -226,9 +222,9 @@ def _model_public(row: OrgProviderKeyModel, price: _Price | None) -> OrgProvider
         output_price_per_million=price.output_price_per_million if price else None,
         cache_read_price_per_million=price.cache_read_price_per_million if price else None,
         cache_write_price_per_million=price.cache_write_price_per_million if price else None,
-        cache_write_1h_price_per_million=price.cache_write_1h_price_per_million if price else None,
         price_source=price.source if price else None,
         pricing_id=price.pricing_id if price else None,
+        unit=price.unit if price else "tokens",
         enabled=row.enabled,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -273,6 +269,16 @@ class OrgProviderModelService:
         self.keys = keys
         self.refresh_overlay = refresh_overlay
 
+    @property
+    def _pricing_required(self) -> bool:
+        """Whether an unpriced model must stay unserved.
+
+        Read at call time rather than bound in the constructor: a runtime
+        settings override mutates the config this service holds, and the switch
+        has to agree with the dispatch gate that reads the same field.
+        """
+        return self.config.require_pricing
+
     # ------------------------------------------------------------------
     # Authorization
     # ------------------------------------------------------------------
@@ -288,9 +294,7 @@ class OrgProviderModelService:
             OrgProviderKeyNotFoundError: no such key in the caller's organization.
         """
         organization = await self.organizations.get_active_organization_for_user(user)
-        await self.organizations.require_active_organization_management_access(
-            user=user, organization=organization
-        )
+        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
         key = await self.keys.get_in_organization(key_id, organization.id)
         if key is None:
             # Scoped rather than checked afterward, so another organization's id
@@ -310,13 +314,9 @@ class OrgProviderModelService:
             key = await self._key_for_user(user, key_id)
             rows, count = await self.models.list_for_key(key_id, skip=skip, limit=limit)
             prices = await self._current_prices(key, rows)
-        return OrgProviderKeyModelsPublic(
-            data=[_model_public(row, prices.get(row.model)) for row in rows], count=count
-        )
+        return OrgProviderKeyModelsPublic(data=[_model_public(row, prices.get(row.model)) for row in rows], count=count)
 
-    async def available_models(
-        self, *, user: User, key_id: uuid.UUID
-    ) -> OrgProviderAvailableModelsPublic:
+    async def available_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderAvailableModelsPublic:
         """What the provider says it serves on this key's stored credential.
 
         The credential never leaves the process: it goes into an any-llm client
@@ -348,7 +348,7 @@ class OrgProviderModelService:
         Takes no rate: an organization's rates are written through
         ``/organizations/me/pricing``, so a price set here and a price set there
         could not disagree. The offer seeds the community default like any other,
-        and a model nothing prices lands disabled.
+        and a model nothing prices lands disabled while ``require_pricing`` is on.
 
         Raises:
             OrgProviderKeyNotFoundError: no such key in the caller's organization.
@@ -397,24 +397,28 @@ class OrgProviderModelService:
     ) -> OrgProviderKeyModelPublic:
         """Turn one offered model's serving switch on or off.
 
-        Switching one on is refused where nothing prices it. The offer path
-        already records such a model unserved so it cannot be billed at nothing,
-        and without the same check here the switch would be a way straight past
-        that rule: the model would reach the catalog, and the dispatch gate, with
-        no rate behind it. Switching one *off* is never refused, so a row that
-        reached that state some other way can still be withdrawn.
+        Switching one on is refused where nothing prices it, while
+        ``require_pricing`` is on. The offer path already records such a model
+        unserved so it cannot be billed at nothing, and without the same check
+        here the switch would be a way straight past that rule: the model would
+        reach the catalog, and the dispatch gate, with no rate behind it. With
+        ``require_pricing`` off the operator has chosen to serve unpriced
+        traffic, and the dispatch gate lets it through, so the switch does too.
+        Switching one *off* is never refused, so a row that reached that state
+        some other way can still be withdrawn.
 
         Raises:
             OrgProviderKeyNotFoundError: no such key in the caller's organization.
             OrgProviderModelNotFoundError: no such model on that key.
-            OrgProviderModelUnpricedError: serving was asked for an unpriced model.
+            OrgProviderModelUnpricedError: serving was asked for an unpriced model
+                and ``require_pricing`` is on.
         """
         async with self.uow:
             key = await self._key_for_user(user, key_id)
             row = await self.models.get_in_key(model_id, key_id)
             if row is None:
                 raise OrgProviderModelNotFoundError(model_id)
-            if enabled and not row.enabled:
+            if enabled and not row.enabled and self._pricing_required:
                 priced = await self._current_prices(key, [row])
                 if row.model not in priced:
                     raise OrgProviderModelUnpricedError(row.model)
@@ -481,9 +485,7 @@ class OrgProviderModelService:
             logger.exception("Offering the discovered models failed for new provider key %s", key.id)
         return key
 
-    async def refresh_models(
-        self, *, user: User, key_id: uuid.UUID
-    ) -> OrgProviderModelsRefreshPublic:
+    async def refresh_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderModelsRefreshPublic:
         """Ask the provider again, offer whatever is newly listed, and move seeded rates.
 
         Additive only: a model the provider no longer lists stays offered,
@@ -514,9 +516,7 @@ class OrgProviderModelService:
 
         added = sorted({model.id for model in discovery.models} - offered)
         repriced = await self._reprice(user=user, key_id=key_id, added=added)
-        return OrgProviderModelsRefreshPublic(
-            added=added, repriced=repriced, count=len(offered) + len(added)
-        )
+        return OrgProviderModelsRefreshPublic(added=added, repriced=repriced, count=len(offered) + len(added))
 
     async def refresh_pricing(self, *, user: User, key_id: uuid.UUID) -> OrgProviderModelsRefreshPublic:
         """Move every seeded rate onto today's community default, with no dial.
@@ -559,11 +559,7 @@ class OrgProviderModelService:
         # because the dataset had not caught up and is what this pass is for. The
         # two it may not touch are the deployment's own list and a rate an admin
         # chose.
-        candidates = [
-            row.model
-            for row in offered_rows
-            if _repriceable(priced.get(keys_by_model[row.model]))
-        ]
+        candidates = [row.model for row in offered_rows if _repriceable(priced.get(keys_by_model[row.model]))]
         defaults = await self._defaults_for(provider, [*candidates, *added])
 
         async with self.uow:
@@ -596,9 +592,10 @@ class OrgProviderModelService:
                 if default is None or _priced_by_deployment(rate) or row.model not in allowed:
                     continue
                 fresh.append(_seeded_row(organization_id, model_key, default, now))
-                if not row.enabled:
-                    # It arrived disabled because nothing priced it. Something
-                    # does now.
+                if not row.enabled and self._pricing_required:
+                    # While pricing is required, an unpriced model can only be
+                    # off because nothing priced it, and something does now.
+                    # With it off, the switch was an administrator's, so it stays.
                     row.enabled = True
                     await self.models.save(row)
                 repriced.append(row.model)
@@ -651,15 +648,17 @@ class OrgProviderModelService:
             seeded[model] = _seeded_row(organization_id, model_key, default, now)
         await self.org_pricing.stage_seeded_rates(list(seeded.values()))
 
+        # Offered and not served when nothing prices it, so a model the
+        # community data has not caught up with cannot be billed at nothing.
+        # With require_pricing off, unpriced traffic is what the operator asked
+        # for, and the dispatch gate serves it, so it is offered switched on.
+        serve_unpriced = not self._pricing_required
         rows = [
             OrgProviderKeyModel(
                 organization_id=organization_id,
                 org_provider_key_id=key_id,
                 model=model,
-                # Offered and not served when nothing prices it, so a model the
-                # community data has not caught up with cannot be billed at
-                # nothing.
-                enabled=keys_by_model[model] in priced_by_a_table or model in seeded,
+                enabled=serve_unpriced or keys_by_model[model] in priced_by_a_table or model in seeded,
             )
             for model in models
         ]
@@ -685,9 +684,7 @@ class OrgProviderModelService:
     # Pricing and dialing
     # ------------------------------------------------------------------
 
-    async def _current_prices(
-        self, key: OrgProviderKey, rows: Sequence[OrgProviderKeyModel]
-    ) -> dict[str, _Price]:
+    async def _current_prices(self, key: OrgProviderKey, rows: Sequence[OrgProviderKeyModel]) -> dict[str, _Price]:
         """What each offered model currently costs this organization, keyed by model.
 
         The ladder's order belongs to `OrganizationPricingService.rates_in_effect`,
@@ -732,9 +729,7 @@ class OrgProviderModelService:
             return None
 
     @staticmethod
-    async def _dial(
-        key: OrgProviderKey, credential: dict[str, object], *, timeout: float
-    ) -> ProviderDiscovery:
+    async def _dial(key: OrgProviderKey, credential: dict[str, object], *, timeout: float) -> ProviderDiscovery:
         """Ask the provider what it serves on this key. Never raises, never echoes the key."""
         api_key = credential.get("api_key")
         return await test_provider_credentials(

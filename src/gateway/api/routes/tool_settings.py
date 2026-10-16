@@ -36,7 +36,6 @@ from typing import Annotated, Literal, cast
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -47,9 +46,13 @@ from gateway.api.deps import (
     verify_catalog_reader,
     verify_master_key,
 )
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
+from gateway.core.settings.tools import validate_default_tool
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
+from gateway.models.tools import SandboxProvider
 from gateway.services.guardrail_catalog import (
     BuiltInGuardrailCatalog,
     GuardrailCatalog,
@@ -57,11 +60,14 @@ from gateway.services.guardrail_catalog import (
     fetch_guardrail_catalog,
 )
 from gateway.services.runtime_settings_service import SettingValue
+from gateway.services.search_tool_store_service import refresh_search_tool_cache
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tool_settings_service import (
     GUARDRAILS_URL,
     SERVICE_URL_FIELD,
     TOOL_SETTABLE_KEYS,
+    WEB_FETCH_DEFAULT_TOOL,
+    WEB_SEARCH_DEFAULT_TOOL,
     apply_override,
     effective_value,
     effective_values,
@@ -128,6 +134,13 @@ class ToolSettingsResponse(BaseModel):
     """The effective value of every editable tool/guardrail field."""
 
     fields: list[ToolSettingField]
+    sandbox_provider: SandboxProvider | None = Field(
+        default=None,
+        description=(
+            "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, "
+            "not editable here. Null for a reader who does not operate the deployment."
+        ),
+    )
 
 
 class UpdateToolSettingsRequest(BaseModel):
@@ -146,6 +159,12 @@ class UpdateToolSettingsRequest(BaseModel):
     web_search_extract: bool | None = None
     web_search_purpose_hint: str | None = None
     web_search_intercept: bool | None = None
+    web_search_default_tool: str | None = Field(
+        default=None,
+        description="A search instance whose provider any-search serves, or 'none' to turn in-loop search off.",
+    )
+    web_fetch_default_tool: str | None = Field(default=None, description="A fetch instance, or 'builtin_fetch'.")
+    web_search_max_calls: int | None = Field(default=None, ge=1)
     sandbox_url: str | None = None
     sandbox_purpose_hint: str | None = None
     sandbox_session_image: str | None = None
@@ -192,7 +211,8 @@ def _current_fields(config: GatewayConfig, *, include_urls: bool = True) -> Tool
         )
         for key in keys
     ]
-    return ToolSettingsResponse(fields=fields)
+    provider = config.effective_sandbox_provider() if include_urls else None
+    return ToolSettingsResponse(fields=fields, sandbox_provider=provider)
 
 
 @reader_router.get("")
@@ -298,20 +318,26 @@ async def update_tool_settings(
 
     if updates:
         try:
+            if WEB_SEARCH_DEFAULT_TOOL in updates or WEB_FETCH_DEFAULT_TOOL in updates:
+                # A search tool stored through another replica since this worker's
+                # overlay last refreshed can be the one a search default names, or
+                # take a fetch default's name and so leave that fetch instance out.
+                await refresh_search_tool_cache(db, config)
             normalized = {key: await stage_override(db, key, value) for key, value in updates.items()}
+            # Here rather than in the service's own check, which also runs at
+            # startup, before the stored search tools a default may name.
+            for key in (WEB_SEARCH_DEFAULT_TOOL, WEB_FETCH_DEFAULT_TOOL):
+                if key in normalized:
+                    validate_default_tool(config, key, normalized[key])
             await db.commit()
         except ValueError as exc:
             await db.rollback()
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
-        except SQLAlchemyError:
+        except DATABASE_ERRORS as exc:
             await db.rollback()
             # Log for the operator debugging from logs; the client sees only a
             # generic message so no internals leak. Keys, not values, are logged.
-            logger.exception("Failed to persist tool settings: %s", sorted(updates))
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error",
-            ) from None
+            raise database_error(f"read or persist tool settings {sorted(updates)}", exc) from None
         # Apply only after the commit succeeds, so a failed write never leaves this
         # worker running against an unpersisted value.
         for key, value in normalized.items():
@@ -346,6 +372,7 @@ async def test_service(
 
     try:
         async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S, follow_redirects=False) as client:
+            # codeql[py/full-ssrf]
             resp = await client.get(url)
     except httpx.HTTPError as exc:
         return TestServiceResponse(ok=False, reason=f"unreachable: {exc.__class__.__name__}: {exc}")

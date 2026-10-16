@@ -7,12 +7,15 @@ import { CopyField } from "@/design-system/actions/CopyField"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { formatRate } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   buildCurlSnippet,
   buildPythonSnippet,
   resolveSnippetBaseUrl,
 } from "@/shared/helpers/requestSnippets"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+
+import { providerModelId } from "./modelKey"
 
 // The way in to a model, beside the page rather than over it: a drawer from
 // the right, so the offerings it talks about stay in view. Three steps: which
@@ -34,13 +37,10 @@ export function UseModelDrawer({
   model,
   isOpen,
   onOpenChange,
-  publicView,
 }: {
   model: CatalogModelDetail
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  /** Ahead of a session: a visitor is told to sign in for a key rather than linked to the page. */
-  publicView: boolean
 }) {
   const deployment = useDeployment()
   const baseUrl = resolveSnippetBaseUrl(deployment)
@@ -60,7 +60,7 @@ export function UseModelDrawer({
   const sendAs = pinned ? selectorFor(pinned) : (model.selector ?? "")
   const offeringOptions = model.offerings.map((offering) => ({
     value: offering.selector,
-    label: `${offering.provider} · ${rate(offering.pricing?.input_price_per_million)} in / ${rate(offering.pricing?.output_price_per_million)} out`,
+    label: `${providerDisplayName(offering.provider)} · ${providerModelId(offering.selector)} · ${rate(offering.pricing?.input_price_per_million)} in / ${rate(offering.pricing?.output_price_per_million)} out`,
   }))
   const options = model.selector
     ? [
@@ -113,7 +113,7 @@ export function UseModelDrawer({
                   {model.selector ? (
                     <>
                       With the model id alone, the gateway sends the request to
-                      the cheapest offering it serves
+                      the first offering in the catalog's order
                       {cheapest ? (
                         <>
                           , today{" "}
@@ -155,26 +155,11 @@ export function UseModelDrawer({
               <section className="flex flex-col gap-2">
                 <h3 className="text-title">2. Get an API key</h3>
                 <p className="text-sm text-muted">
-                  {publicView ? (
-                    <>
-                      <a href="#/" className="text-link hover:text-link-hover">
-                        Sign in
-                      </a>{" "}
-                      and create a key on API keys, then set it as an
-                      environment variable.
-                    </>
-                  ) : (
-                    <>
-                      Create a key on{" "}
-                      <Link
-                        to="/keys"
-                        className="text-link hover:text-link-hover"
-                      >
-                        API keys
-                      </Link>{" "}
-                      and set it as an environment variable.
-                    </>
-                  )}
+                  Create a key on{" "}
+                  <Link to="/keys" className="text-link hover:text-link-hover">
+                    API keys
+                  </Link>{" "}
+                  and set it as an environment variable.
                 </p>
                 <CopyField
                   label="Environment"

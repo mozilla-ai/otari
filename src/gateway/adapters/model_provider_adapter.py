@@ -13,10 +13,10 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.ports.model_provider_port import HostedCredential, HostedModels
+from gateway.ports.model_provider_port import HostedCredential, HostedModels, ModelProviderPort
 
 
-class SelfHostedModelProviderAdapter:
+class SelfHostedModelProviderAdapter(ModelProviderPort):
     """Core adapter: a self-hosted deployment has no hosted account to consult.
 
     Session-agnostic: the answer is a deployment-wide constant, not something

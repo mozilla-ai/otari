@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import { AuthProvider } from "@/features/auth/AuthContext"
-import { ApiError } from "@/shared/api/client"
+import { defaultQueryRetry } from "@/shared/api/client"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 
 export function Provider({ children }: { children: ReactNode }) {
@@ -12,16 +12,7 @@ export function Provider({ children }: { children: ReactNode }) {
         defaultOptions: {
           queries: {
             refetchOnWindowFocus: false,
-            retry: (failureCount, error) => {
-              // Never retry auth failures; they won't fix themselves.
-              if (
-                error instanceof ApiError &&
-                (error.status === 401 || error.status === 403)
-              ) {
-                return false
-              }
-              return failureCount < 2
-            },
+            retry: defaultQueryRetry,
           },
         },
       }),

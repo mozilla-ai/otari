@@ -1,13 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   DashboardBuild,
   DeploymentAdminAccess,
   DeploymentUser,
+  DeploymentUsers,
   GatewayHealth,
+  PasswordLink,
   UpdateDeploymentUserRequest,
 } from "@/client"
 import { apiFetch, DASHBOARD_BUILD_PATH, siteFetch } from "@/shared/api/client"
-import { fetchAllPaged } from "@/shared/api/paging"
 import {
   BUILD,
   BUILD_POLL_MS,
@@ -105,11 +111,32 @@ export function useDeploymentAdminAccess() {
   })
 }
 
-export function useDeploymentUsers(enabled = true) {
+/**
+ * One page of the deployment's accounts, narrowed by `search` on the server.
+ *
+ * Debounce the term before it gets here (`useDebounced`), or every keystroke is
+ * a request.
+ */
+export function useDeploymentUsers(
+  {
+    page,
+    pageSize,
+    search,
+  }: { page: number; pageSize: number; search: string },
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [DEPLOYMENT_ADMIN, "users"],
-    queryFn: () => fetchAllPaged<DeploymentUser>("/admin/users"),
+    queryKey: [DEPLOYMENT_ADMIN, "users", page, pageSize, search],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        skip: String(page * pageSize),
+        limit: String(pageSize),
+      })
+      if (search) params.set("search", search)
+      return apiFetch<DeploymentUsers>(`/admin/users?${params}`)
+    },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
     enabled,
   })
 }
@@ -134,5 +161,21 @@ export function useUpdateDeploymentUser() {
       // organization roster may offer it, so the tenancy reads go stale with it.
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
     },
+  })
+}
+
+/**
+ * Give an account a single-use link that sets its password.
+ *
+ * The gateway mails it where it can and otherwise returns it to pass on, so the
+ * result says which. No cached read changes, so nothing is invalidated.
+ */
+export function useIssuePasswordLink() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<PasswordLink>(
+        `/admin/users/${encodeURIComponent(id)}/password-link`,
+        { method: "POST" },
+      ),
   })
 }

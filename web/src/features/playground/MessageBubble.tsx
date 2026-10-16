@@ -11,10 +11,12 @@ import { IconButton } from "@/design-system/actions/IconButton"
 import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { SentAttachmentList } from "./AttachmentChips"
 import { parseThinkTags } from "./helpers/parseThinkTags"
 import { splitModelKey } from "./helpers/playgroundModels"
 import type { ChatTurn } from "./helpers/playgroundTypes"
 import { ThinkingBlock } from "./ThinkingBlock"
+import { ToolCalls } from "./ToolCalls"
 import { TurnReadout } from "./TurnReadout"
 
 /**
@@ -68,6 +70,7 @@ export function MessageBubble({
   model,
   onRegenerate,
   areActionsVisible = true,
+  isStreaming = false,
 }: {
   model: string
   turn: ChatTurn
@@ -75,10 +78,18 @@ export function MessageBubble({
   onRegenerate?: () => void
   /** Hidden while this turn is the reply still streaming in. */
   areActionsVisible?: boolean
+  /** Whether this turn is the reply still arriving, so a tool call may be running. */
+  isStreaming?: boolean
 }) {
   if (turn.role === "user") {
     return (
-      <article aria-label="Your message" className="flex justify-end">
+      <article
+        aria-label="Your message"
+        className="flex flex-col items-end gap-2"
+      >
+        {turn.attachments?.length ? (
+          <SentAttachmentList attachments={turn.attachments} />
+        ) : null}
         <p className="max-w-[35rem] whitespace-pre-wrap break-words bg-surface-alt px-4 py-3 text-base leading-[1.625rem]">
           {turn.content}
         </p>
@@ -101,6 +112,9 @@ export function MessageBubble({
         ) : null}
       </div>
       {reasoning ? <ThinkingBlock content={reasoning} /> : null}
+      {turn.toolCalls?.length ? (
+        <ToolCalls calls={turn.toolCalls} isStreaming={isStreaming} />
+      ) : null}
       {response ? (
         <Markdown components={ANSWER_MARKDOWN}>{response}</Markdown>
       ) : null}

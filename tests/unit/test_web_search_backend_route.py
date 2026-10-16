@@ -7,7 +7,7 @@ it, and that no upstream detail reaches the caller.
 
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from gateway.api.deps import reset_config
+from gateway.api.deps import get_web_provider_client, reset_config
 from gateway.api.routes.web_search_backend import SEARCH_ENDPOINT, _authorize
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
@@ -62,28 +62,36 @@ class _Recorder(httpx.AsyncBaseTransport):
 
 
 @pytest.fixture
-def upstream(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """Answer the provider call in-process, through the route's pooled client."""
-    recorder = _Recorder(httpx.Response(200, json=TAVILY_OK))
-    monkeypatch.setattr(
-        "gateway.api.routes.web_search_backend.get_search_client",
-        lambda: httpx.AsyncClient(transport=recorder),
-    )
-    return recorder
+def upstream() -> _Recorder:
+    """Answer the provider call in-process, through the app's web provider client."""
+    return _Recorder(httpx.Response(200, json=TAVILY_OK))
 
 
-def _client(tmp_path: Path, **overrides: Any) -> TestClient:
+def _client(tmp_path: Path, transport: httpx.AsyncBaseTransport | None = None, **overrides: Any) -> TestClient:
+    """An app on ``overrides``, whose web provider client sends through ``transport`` when one is given.
+
+    Overridden once the app exists, since the app's own client is built by its lifespan.
+    """
     config = GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'web-search-backend.db'}",
         master_key="sk-test-master",
         **overrides,
     )
-    return TestClient(create_app(config))
+    app = create_app(config)
+    if transport is not None:
+
+        async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+            async with httpx.AsyncClient(transport=transport) as client:
+                yield client
+
+        app.dependency_overrides[get_web_provider_client] = web_provider_client
+    return TestClient(app)
 
 
-def _configured(tmp_path: Path, **overrides: Any) -> TestClient:
+def _configured(tmp_path: Path, transport: httpx.AsyncBaseTransport | None = None, **overrides: Any) -> TestClient:
     return _client(
         tmp_path,
+        transport,
         web_search_provider="tavily",
         web_search_provider_api_key="tvly-x",
         web_search_backend_token=BACKEND_TOKEN,
@@ -108,7 +116,7 @@ def test_not_mounted_without_a_backend_token(tmp_path: Path) -> None:
 
 
 def test_serves_searxng_shaped_results(tmp_path: Path, upstream: _Recorder) -> None:
-    with _configured(tmp_path) as client:
+    with _configured(tmp_path, upstream) as client:
         response = client.get(f"{API_ROOT}/web-search/search", params={"q": "claude code"}, headers=AUTH)
 
     assert response.status_code == 200
@@ -126,13 +134,13 @@ def test_serves_searxng_shaped_results(tmp_path: Path, upstream: _Recorder) -> N
 
 
 def test_refuses_a_missing_token(tmp_path: Path, upstream: _Recorder) -> None:
-    with _configured(tmp_path) as client:
+    with _configured(tmp_path, upstream) as client:
         assert client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}).status_code == 401
     assert upstream.requests == []
 
 
 def test_refuses_a_wrong_token(tmp_path: Path, upstream: _Recorder) -> None:
-    with _configured(tmp_path) as client:
+    with _configured(tmp_path, upstream) as client:
         response = client.get(
             f"{API_ROOT}/web-search/search",
             params={"q": "x"},
@@ -143,7 +151,7 @@ def test_refuses_a_wrong_token(tmp_path: Path, upstream: _Recorder) -> None:
 
 
 def test_forwards_only_the_provider_options_it_declares(tmp_path: Path, upstream: _Recorder) -> None:
-    with _configured(tmp_path) as client:
+    with _configured(tmp_path, upstream) as client:
         response = client.get(
             f"{API_ROOT}/web-search/search",
             params={"q": "x", "search_depth": "advanced", "format": "json", "engines": "google"},
@@ -157,16 +165,13 @@ def test_forwards_only_the_provider_options_it_declares(tmp_path: Path, upstream
     assert "format" not in body
 
 
-def test_the_recency_signal_survives_the_hop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_recency_signal_survives_the_hop(tmp_path: Path) -> None:
     """Undeclared here, Pydantic would drop it, and a search over this hop would
     render without the date an in-process one renders with."""
     recorder = _Recorder(httpx.Response(200, json=BRAVE_DATED))
-    monkeypatch.setattr(
-        "gateway.api.routes.web_search_backend.get_search_client",
-        lambda: httpx.AsyncClient(transport=recorder),
-    )
     with _client(
         tmp_path,
+        recorder,
         web_search_provider="brave",
         web_search_provider_api_key="brv-x",
         web_search_backend_token=BACKEND_TOKEN,
@@ -180,14 +185,14 @@ def test_the_recency_signal_survives_the_hop(tmp_path: Path, monkeypatch: pytest
 def test_max_results_is_bounded_by_the_server(tmp_path: Path, upstream: _Recorder) -> None:
     """The caller is another gateway forwarding an opaque ``provider_options``
     bag, so the ceiling on upstream work and response size is enforced here."""
-    with _configured(tmp_path) as client:
+    with _configured(tmp_path, upstream) as client:
         response = client.get(f"{API_ROOT}/web-search/search", params={"q": "x", "max_results": 500}, headers=AUTH)
 
     assert response.status_code == 422
     assert upstream.requests == []
 
 
-def test_a_search_in_progress_is_registered_in_flight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_search_in_progress_is_registered_in_flight(tmp_path: Path) -> None:
     """A paid call nobody can see running is a paid call nobody can see hanging.
 
     Read from inside the provider call, which is the only moment the entry
@@ -201,31 +206,21 @@ def test_a_search_in_progress_is_registered_in_flight(tmp_path: Path, monkeypatc
             in_flight.extend((entry.endpoint, entry.provider) for entry in registry[0].snapshot())
             return httpx.Response(200, json=TAVILY_OK)
 
-    monkeypatch.setattr(
-        "gateway.api.routes.web_search_backend.get_search_client",
-        lambda: httpx.AsyncClient(transport=_Watcher()),
-    )
-    with _configured(tmp_path) as client:
+    with _configured(tmp_path, _Watcher()) as client:
         registry.append(client.app.state.inflight)  # type: ignore[attr-defined]
         assert client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 200
 
     assert in_flight == [(SEARCH_ENDPOINT, "tavily")]
 
 
-def test_an_upstream_failure_is_logged_for_the_operator(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_an_upstream_failure_is_logged_for_the_operator(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Nothing else on this path logs: the provider error only becomes an
     ``HTTPException``'s ``__cause__``, which FastAPI renders and discards."""
     recorder = _Recorder(httpx.Response(401, text="invalid api key tvly-secret"))
-    monkeypatch.setattr(
-        "gateway.api.routes.web_search_backend.get_search_client",
-        lambda: httpx.AsyncClient(transport=recorder),
-    )
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.ERROR, logger="gateway")
     try:
-        with _configured(tmp_path) as client:
+        with _configured(tmp_path, recorder) as client:
             assert client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 502
     finally:
         gateway_logger.removeHandler(caplog.handler)
@@ -235,13 +230,9 @@ def test_an_upstream_failure_is_logged_for_the_operator(
     assert "tvly-secret" not in caplog.text
 
 
-def test_upstream_failure_does_not_leak_the_provider_body(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_upstream_failure_does_not_leak_the_provider_body(tmp_path: Path) -> None:
     recorder = _Recorder(httpx.Response(401, text="invalid api key tvly-secret"))
-    monkeypatch.setattr(
-        "gateway.api.routes.web_search_backend.get_search_client",
-        lambda: httpx.AsyncClient(transport=recorder),
-    )
-    with _configured(tmp_path) as client:
+    with _configured(tmp_path, recorder) as client:
         response = client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH)
 
     assert response.status_code == 502

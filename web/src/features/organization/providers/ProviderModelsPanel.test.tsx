@@ -157,6 +157,30 @@ describe("ProviderModelsPanel", () => {
     expect(within(table).getAllByText("—").length).toBeGreaterThan(0)
   })
 
+  it("names the unit of a rate that is not per token", async () => {
+    // Stored per million like every rate, so a $2-per-1,000-searches price is
+    // 2000 on the wire: shown bare under "Input / 1M" it would read as a token
+    // price a thousand times too high.
+    mockApi({
+      models: [
+        orgProviderModel({
+          model: "rerank-v3.5",
+          input_price_per_million: 2000,
+          output_price_per_million: 0,
+          price_source: "organization",
+          unit: "requests",
+        }),
+      ],
+    })
+    await renderPanel()
+
+    const table = await screen.findByRole("grid", {
+      name: "Models on Production",
+    })
+    expect(within(table).getByText("$0.002 per request")).toBeInTheDocument()
+    expect(within(table).queryByText("$2,000.00")).toBeNull()
+  })
+
   it("withholds a model with its serving switch", async () => {
     const requests = mockApi()
     const user = userEvent.setup()

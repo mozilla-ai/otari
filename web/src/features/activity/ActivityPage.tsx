@@ -26,6 +26,10 @@ import {
 import { FilterMultiComboBox } from "@/design-system/navigation/FilterMultiComboBox"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
+  type PricingUnit,
+  pricingUnitForEndpoint,
+} from "@/features/models/pricingUnit"
+import {
   type ManualRates,
   SetPriceDialog,
 } from "@/features/models/SetPriceDialog"
@@ -65,6 +69,8 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { ActivityTimeline } from "./ActivityTimeline"
 import {
   describeSource,
+  displayStatus,
+  findGroupsMissingEarlierAttempts,
   formatLatencyCell,
   formatToolUsage,
   formatUSD,
@@ -80,6 +86,7 @@ import {
 } from "./activityModel"
 import { InFlightControl } from "./InFlightControl"
 import { RequestDetail } from "./RequestDetail"
+import { RequestTraceLink } from "./RequestTraceLink"
 import { RoutingCell } from "./RoutingCell"
 import { StatusMark } from "./StatusMark"
 import { TokenBar } from "./TokenBar"
@@ -516,17 +523,21 @@ export function ActivityPage() {
   // outcome row is missing: a page boundary splits a group, and filtering to the
   // `absorbed` status (the way an operator investigates fallovers) hides every
   // outcome row by construction, which is precisely when the answer is wanted.
+  // A served row is looked up as well when its earlier attempts are off the page,
+  // so it can still say what it spilled over from.
   const { pageOutcomes, unresolvedGroupIds } = useMemo(() => {
     const known = indexGroupOutcomes(rows)
-    const missing = new Set(
-      rows.flatMap((row) =>
+    const missing = new Set([
+      ...rows.flatMap((row) =>
         row.status === "absorbed" &&
         row.request_group_id &&
         !known.has(row.request_group_id)
           ? [row.request_group_id]
           : [],
       ),
-    )
+      // A served row whose skipped or failed attempts fell on the next page.
+      ...findGroupsMissingEarlierAttempts(rows),
+    ])
     return { pageOutcomes: known, unresolvedGroupIds: [...missing] }
   }, [rows])
   const unresolvedGroups = useRequestGroups(unresolvedGroupIds)
@@ -777,6 +788,7 @@ export function ActivityPage() {
   // unset when that dialog is closed. Distinct from `priceOpen` above, which
   // reprices already-logged imported rows rather than setting a model's price.
   const [modelPriceKey, setModelPriceKey] = useState<string>()
+  const [modelPriceUnit, setModelPriceUnit] = useState<PricingUnit>("tokens")
   const [expandedId, setExpandedId] = useState<string>()
 
   // Inline accordion panel under the clicked row (DataTable renderDetail).
@@ -790,7 +802,12 @@ export function ActivityPage() {
     (entry: UsageEntry) => (
       <div>
         <div className="flex items-center justify-between border-b border-border px-4 py-2">
-          <span className="text-body">Request detail</span>
+          {/* Left, by the title: the header spans the table's scroll width,
+              so its right end can sit off screen. */}
+          <div className="flex items-center gap-3">
+            <span className="text-body">Request detail</span>
+            <RequestTraceLink entry={entry} />
+          </div>
           <Button
             size="sm"
             variant="ghost"
@@ -803,8 +820,9 @@ export function ActivityPage() {
           entry={entry}
           onPriceModel={
             scope.isDeploymentWide
-              ? (model) => {
+              ? (model, endpoint) => {
                   setPriceOpenCount((count) => count + 1)
+                  setModelPriceUnit(pricingUnitForEndpoint(endpoint))
                   setModelPriceKey(model)
                 }
               : null
@@ -879,6 +897,7 @@ export function ActivityPage() {
           rates.cache_read_price_per_million ?? null,
         cache_write_price_per_million:
           rates.cache_write_price_per_million ?? null,
+        unit: rates.unit ?? "tokens",
       },
       { onSuccess: () => setModelPriceKey(undefined) },
     )
@@ -1050,7 +1069,7 @@ export function ActivityPage() {
       {
         id: "status",
         header: "Status",
-        cell: (entry) => <StatusMark status={entry.status} />,
+        cell: (entry) => <StatusMark status={displayStatus(entry)} />,
       },
     ]
   }, [groupOutcomes, memberLabels])
@@ -1246,6 +1265,7 @@ export function ActivityPage() {
 
       <TableScrollFrame className="otari-activity-table">
         <DataTable
+          mobileLayout="cards"
           ariaLabel="Activity log"
           columns={columns}
           rows={rows}
@@ -1328,6 +1348,8 @@ export function ActivityPage() {
         submitLabel="Price this model"
         collectModelKey
         initialModelKey={modelPriceKey ?? ""}
+        chooseUnit
+        initialUnit={modelPriceUnit}
         title="Price this model"
         description={() =>
           "Set what this model costs, taken from the request you were looking at. Requests from now on are costed at these rates and counted against budgets; rows already logged keep the cost they were served with."

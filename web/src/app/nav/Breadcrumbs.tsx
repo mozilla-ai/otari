@@ -1,6 +1,6 @@
 import { Fragment } from "react"
 
-import { navContextForPath, navLabelForPath } from "@/app/nav/registry"
+import { navContextForPath, pageLabelForPath } from "@/app/nav/registry"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -22,20 +22,17 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
   const organization = useOrganizationContext()
   const { selected } = useSelectedWorkspace()
 
-  const page = navLabelForPath(pathname)
+  const page = pageLabelForPath(pathname)
   const organizationName = organization.data?.organization?.name
   // A destination no rail owns names itself and no scope. The trail would
   // otherwise read "Default workspace / Settings" and file the deployment's own
   // settings under a workspace that does not own them, which is the same claim
   // the rail used to make before `ORG_PATHS` stopped counting these.
   //
-  // The scope goes rather than the page, though `/account` drops the page and
-  // keeps the scope. That is not a precedent to copy: `/account` is
-  // unregistered, so it has no page label to show and the scope is simply what
-  // is left. Dropping the page here would empty the trail on a deployment with
-  // no workspace selected (a first run has none), leaving a reader with neither
-  // a crumb nor a highlighted rail row, and no location at all is worse than a
-  // location that is merely brief.
+  // The scope goes rather than the page. Dropping the page here would empty the
+  // trail on a deployment with no workspace selected (a first run has none),
+  // leaving a reader with neither a crumb nor a highlighted rail row, and no
+  // location at all is worse than a location that is merely brief.
   const context = navContextForPath(pathname)
 
   const trail = [

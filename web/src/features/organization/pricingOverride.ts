@@ -15,7 +15,6 @@ export const RATE_FIELDS = [
   "output_price_per_million",
   "cache_read_price_per_million",
   "cache_write_price_per_million",
-  "cache_write_1h_price_per_million",
 ] as const
 
 export type RateField = (typeof RATE_FIELDS)[number]
@@ -33,20 +32,6 @@ export function parseRate(value: string): number | undefined {
   if (trimmed === "") return undefined
   const parsed = Number(trimmed)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : Number.NaN
-}
-
-/**
- * Whether a model key could ever be read back.
- *
- * A pricing row is only resolved under a `prefix:model` selector, so a key with
- * no provider or instance prefix would store a rate nothing bills against. Same
- * rule, and the same accepted legacy slash form, as the deployment price dialog
- * (`isValidModelKey` in `features/models/SetPriceDialog.tsx`); kept separate
- * rather than imported because `features/` may not reach across to another
- * feature's dialog for a regex.
- */
-export function isValidModelKey(value: string): boolean {
-  return /^[^\s:/]+[:/][^\s]+$/.test(value.trim())
 }
 
 /**

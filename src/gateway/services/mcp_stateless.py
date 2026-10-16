@@ -47,58 +47,53 @@ if TYPE_CHECKING:
 # caller-controlled request fields.
 # --------------------------------------------------------------------------- #
 
-# Request body (L-TOOLNAME, L-ARGS). Enforced at parse time by the request
-# model, so a caller's own text is bounded before resolution, logging or
-# telemetry sees any of it (R-REQ-3).
+# Request body. Enforced at parse time by the request model, so a caller's own
+# text is bounded before resolution, logging or telemetry sees any of it.
 TOOL_NAME_MAX_LENGTH = 256
 ARGUMENTS_MAX_BYTES = 256 * 1024
 ARGUMENTS_MAX_DEPTH = 32
 
-# The wire format of a stored-server revision (R-DISC-3).
+# The wire format of a stored-server revision.
 REVISION_PATTERN = r"^[A-Za-z0-9._:\-]{1,128}$"
 
-# Per tool (L-DISC-DESC, L-DISC-SCHEMA, L-DISC-ANNOT). A breach of one of these
-# omits the single tool and reports a warning (R-SCHEMA-3), rather than failing
-# the whole catalog: one hostile descriptor must not take a server's other
-# tools away from an application.
+# Per tool. A breach of one of these omits the single tool and reports a
+# warning, rather than failing the whole catalog: one hostile descriptor must
+# not take a server's other tools away from an application.
 TOOL_DESCRIPTION_MAX_BYTES = 4 * 1024
 SCHEMA_MAX_BYTES = 64 * 1024
 SCHEMA_MAX_DEPTH = 32
 TOOL_ANNOTATIONS_MAX_BYTES = 16 * 1024
 
-# Not in the design's table, and bounded for the same reason the three above
-# are: an object whose size and depth both pass can still hold hundreds of
-# thousands of one-character properties, and everything downstream of discovery
-# (an application's validator, a model's context) pays for each.
+# Bounded for the same reason the three above are: an object whose size and
+# depth both pass can still hold hundreds of thousands of one-character
+# properties, and everything downstream of discovery (an application's
+# validator, a model's context) pays for each.
 SCHEMA_MAX_PROPERTIES = 1000
 
-# Whole catalog (L-DISC-PAGES, L-DISC-EXAMINED, L-DISC-TOOLS,
-# L-DISC-RESPONSE). A breach of one of these refuses the entire response
-# (R-DISC-5). Returning what was collected so far would hand an application a
-# catalog it would read as complete and then base an authorization decision
-# on.
+# Whole catalog. A breach of one of these refuses the entire response.
+# Returning what was collected so far would hand an application a catalog it
+# would read as complete and then base an authorization decision on.
 DISCOVERY_MAX_PAGES = 20
 DISCOVERY_MAX_EXAMINED = 1000
 DISCOVERY_MAX_TOOLS = 200
 DISCOVERY_RESPONSE_MAX_BYTES = 1024 * 1024
 
-# Transport (L-TRANSPORT-BYTES, L-RESULT-BYTES). Compressed responses are
-# refused before reading, and uncompressed response streams are counted as
-# they are consumed, including chunked JSON and SSE (R-TRANSPORT-1).
+# Transport. Compressed responses are refused before reading, and uncompressed
+# response streams are counted as they are consumed, including chunked JSON and
+# SSE.
 TRANSPORT_MAX_BYTES = 1024 * 1024
 RESULT_MAX_BYTES = 1024 * 1024
 
-# Phase deadlines (L-CONNECT, L-CALL, L-CLEANUP, L-DISC-TOTAL, L-TOTAL). They
-# are distinct on purpose: the call deadline starts at dispatch and excludes the
-# capacity wait, and the total ones cap the whole operation so repeated slow
-# phases cannot exceed the intended request lifetime.
+# Phase deadlines. They are distinct on purpose: the call deadline starts at
+# dispatch and excludes the capacity wait, and the total ones cap the whole
+# operation so repeated slow phases cannot exceed the intended request lifetime.
 CONNECT_TIMEOUT_S = 5.0
 CALL_TIMEOUT_S = 30.0
 CLEANUP_TIMEOUT_S = 2.0
 DISCOVERY_TOTAL_TIMEOUT_S = 15.0
 EXECUTION_TOTAL_TIMEOUT_S = 45.0
 
-# Admission (L-DISC-CONC, L-DISC-ADMIT, L-EXEC-CONC, L-EXEC-ADMIT).
+# Admission.
 DISCOVERY_CONCURRENCY = 4
 DISCOVERY_ADMISSION_TIMEOUT_S = 5.0
 EXECUTION_CONCURRENCY = 8
@@ -147,7 +142,7 @@ T = TypeVar("T")
 
 
 class McpDiscoveryRefused(Exception):
-    """A whole-catalog discovery failure (R-DISC-5).
+    """A whole-catalog discovery failure.
 
     Raised for a pagination validation failure or a discovery ceiling breach,
     both of which refuse the entire response. Carries no message on purpose:
@@ -165,7 +160,7 @@ class McpCapacityUnavailable(Exception):
 
 
 class ExecutionState(StrEnum):
-    """Whether the remote tool may have run (R-ERR-2).
+    """Whether the remote tool may have run.
 
     A retry-safety classification, not a description of how the HTTP request
     went. ``NOT_STARTED`` is Otari saying it knows the tool did not run;
@@ -182,7 +177,7 @@ class McpExecutionError(Exception):
     """A stateless MCP failure, already classified for the wire.
 
     Carries the status, the stable error code, and the execution state rather
-    than a message: the detail a caller sees is fixed per category (R-ERR-1),
+    than a message: the detail a caller sees is fixed per category,
     and anything the remote server or the exception said about why is exactly
     what must not travel.
     """
@@ -214,7 +209,7 @@ def failure_class(exc: BaseException, _depth: int = 0) -> str:
     all, so the leaves are named instead.
 
     Types only, never a message: an exception's message can hold the server URL,
-    the credential, or the caller's arguments (R-OBS-2).
+    the credential, or the caller's arguments.
     """
     if isinstance(exc, BaseExceptionGroup) and _depth < _FAILURE_GROUP_MAX_DEPTH:
         leaves = sorted({failure_class(leaf, _depth + 1) for leaf in exc.exceptions})
@@ -289,7 +284,7 @@ def _walk(schema: dict[str, Any]) -> tuple[int, int, bool]:
 def screen_tool(tool: MCPTool) -> str | None:
     """Return the warning code that omits ``tool``, or ``None`` to admit it.
 
-    Structural and size checks only (R-SCHEMA-1). The schema is untrusted data
+    Structural and size checks only. The schema is untrusted data
     rather than something Otari executes, so an unrecognized dialect or keyword
     is carried through untouched; what is refused is a descriptor Otari cannot
     safely return or execute, or a schema that would make it fetch another
@@ -381,7 +376,7 @@ def build_http_client_factory() -> Callable[..., httpx.AsyncClient]:
     The SDK's own factory sets ``follow_redirects=True``, which on a
     credentialed request means httpx would replay the ``Authorization`` header,
     and the request body, at whatever host the remote server names. Redirects
-    are excluded from the first version entirely (R-TRANSPORT-2): a later one
+    are excluded from the first version entirely: a later one
     may follow them by validating each destination before anything is sent.
     """
 
@@ -406,7 +401,7 @@ def build_http_client_factory() -> Callable[..., httpx.AsyncClient]:
 
 
 def result_exceeds_bound(result: CallToolResult) -> bool:
-    """Whether a decoded MCP result is too large to return (L-RESULT-BYTES).
+    """Whether a decoded MCP result is too large to return.
 
     A breach here is ``outcome_unknown`` rather than a clean failure: the tool
     ran and may have mutated something, and Otari simply cannot carry what came
@@ -427,7 +422,7 @@ def discovery_response_exceeds_bound(response: Any) -> bool:
 class ConcurrencyGate:
     """A per-process slot ceiling with a bounded wait for admission.
 
-    Discovery and execution hold separate gates (R-ADM-1). Discovery talks to a
+    Discovery and execution hold separate gates. Discovery talks to a
     server that has not been authorized for anything yet and can be slow or
     hostile; execution is running a call a person or a policy already approved.
     One ceiling shared between them would let the first starve the second.
@@ -474,7 +469,7 @@ async def _run_in_owner_task(operation: Coroutine[Any, Any, T]) -> T:
 async def open_session(server: ResolvedMcpServer) -> AsyncIterator[ClientSession]:
     """Open one size-bounded, redirect-disabled MCP session on a stored server.
 
-    Connection and initialization share one deadline (L-CONNECT), so a server
+    Connection and initialization share one deadline, so a server
     that accepts a socket and then never answers ``initialize`` cannot hold a
     slot for the length of the call deadline instead.
     """
@@ -506,7 +501,7 @@ class DiscoveredCatalog:
 
     ``warnings`` pairs a tool name with the code that omitted it, and carries no
     schema fragment or validator text: a warning describes that a descriptor was
-    unusable, never what was in it (R-SCHEMA-3).
+    unusable, never what was in it.
     """
 
     tools: list[MCPTool]
@@ -573,8 +568,8 @@ async def _discover_once(server: ResolvedMcpServer) -> DiscoveredCatalog:
 async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> list[MCPTool]:
     """Page through ``tools/list`` and return the tools the allowlist admits.
 
-    ``allowed_tools`` carries the three-state meaning of the stored column
-    (R-RES-4): ``None`` exposes the whole live catalog, and a list exposes its
+    ``allowed_tools`` carries the three-state meaning of the stored column:
+    ``None`` exposes the whole live catalog, and a list exposes its
     intersection with it. An empty list is a deny-all the caller settles without
     connecting at all, so it never reaches here.
 
@@ -584,7 +579,7 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
     so omitted tools do not take valid siblings away from the caller.
 
     Raises:
-        McpDiscoveryRefused: on a pagination validation failure (R-DISC-4) or a
+        McpDiscoveryRefused: on a pagination validation failure or a
             discovery ceiling breach.
     """
     allowed = None if allowed_tools is None else set(allowed_tools)
@@ -651,16 +646,16 @@ async def execute_stored_tool(
 
     No ``list_tools``: MCP permits calling a known tool directly, and what
     authorizes this call is the stored allowlist and the authenticated
-    workspace, not a live catalog (R-DISC-6). The route has already applied
+    workspace, not a live catalog. The route has already applied
     both by the time this runs.
 
     ``on_dispatch`` fires immediately before the transport begins writing, which
     is the boundary every classification below turns on.
 
     ``timings``, when given, collects the phase durations and the result size for
-    the caller to log. It carries no tool name, argument, or result content
-    (R-OBS-1, R-OBS-2), and it is filled in as each phase ends, so a failure part
-    way through still leaves the phases that did run.
+    the caller to log. It carries no tool name, argument, or result content,
+    and it is filled in as each phase ends, so a failure part way through still
+    leaves the phases that did run.
 
     Raises:
         McpExecutionError: with the code, state and status the route returns.
@@ -697,7 +692,7 @@ async def _execute_once(
             # and return no response at all.
             #
             # Still ``not_started``: nothing was written, so the caller's own
-            # execution claim is safe to release or retry (R-ERR-2). The
+            # execution claim is safe to release or retry. The
             # enclosing total deadline reaches here as a cancellation too, and
             # is reported the same way, which is the same status and state.
             logger.warning("Stateless MCP connection failed error_class=%s", failure_class(exc))
@@ -713,11 +708,11 @@ async def _execute_once(
         except TimeoutError:
             raise McpExecutionError(CODE_OUTCOME_UNKNOWN, ExecutionState.OUTCOME_UNKNOWN, 504) from None
         except BaseException as exc:
-            # Deliberately conservative (R-ERR-3), cancellation and grouped
-            # cancellation included: a cancelled local transport says nothing
-            # about whether the remote server ran the tool to completion, and
-            # letting either escape would answer a possibly-completed mutation
-            # with no execution state at all.
+            # Deliberately conservative, cancellation and grouped cancellation
+            # included: a cancelled local transport says nothing about whether
+            # the remote server ran the tool to completion, and letting either
+            # escape would answer a possibly-completed mutation with no
+            # execution state at all.
             logger.warning("Stateless MCP call failed after dispatch error_class=%s", failure_class(exc))
             raise McpExecutionError(CODE_OUTCOME_UNKNOWN, ExecutionState.OUTCOME_UNKNOWN, 502) from None
 
@@ -739,8 +734,8 @@ async def _execute_once(
 async def _close_bounded(stack: AsyncExitStack) -> None:
     """Close the transport without letting shutdown outlive or replace a result.
 
-    Bounded and run in the same owner task that entered the transport
-    (R-EXEC-1). A definitive result is already in hand by the time this runs, so
+    Bounded and run in the same owner task that entered the transport.
+    A definitive result is already in hand by the time this runs, so
     a transport that will not close must not replace it. The timeout cancels and
     awaits cleanup in place, so no transport task is detached.
     """

@@ -350,6 +350,8 @@ def test_list_usage_response_shape(
         "cache_read_tokens": None,
         "cache_write_tokens": None,
         "cache_write_1h_tokens": None,
+        "reasoning_tokens": None,
+        "provider_latency_ms": None,
         "billing_meters": None,
         "pricing_breakdown": None,
         "cost": 1.23,
@@ -359,6 +361,7 @@ def test_list_usage_response_shape(
         "latency_ms": 842,
         "source": "gateway",
         "source_label": None,
+        "tags": None,
         "counts_toward_budget": True,
         # False on both counts here: this gateway served the row, and it counts toward
         # a budget. The dashboard reads this rather than deriving it, so the checkbox

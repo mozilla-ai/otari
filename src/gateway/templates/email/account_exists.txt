@@ -1,0 +1,10 @@
+You already have an Otari account
+
+Someone, probably you, asked to sign up or to reset a password with this address. It already has an Otari account, so nothing was changed.
+
+{{SIGN_IN_HINT}}
+
+Sign in here:
+{{SIGN_IN_LINK}}
+
+If you didn't ask for this, you can ignore this email; nothing about your account will change.

@@ -50,6 +50,9 @@ allow-list the catalog is filtered by
 (``services/tenancy/organization_model_access``), so an admin can only point a
 name at something their organization already reaches. That check, not the
 operator gate, is what makes these writes safe to open.
+
+``fallbacks_router`` is a read in the same scope: the models the organization's
+traffic used, and the fallback a catalog ID gives each with no policy.
 """
 
 import uuid
@@ -61,7 +64,15 @@ from sqlalchemy import Select, false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    RequestSessionModelProviderPortDep,
+    RoutingServiceDep,
+    VisibleWorkspacesDep,
+    get_config,
+    get_db,
+    verify_master_key,
+)
 from gateway.api.routes.aliases import (
     AliasRequest,
     AliasResponse,
@@ -82,10 +93,12 @@ from gateway.models.routing import PolicySpec, RoutingPolicy
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.schemas.routing import AutomaticFallbackPublic, AutomaticFallbacksResponse
 from gateway.services.alias_service import all_alias_names
 from gateway.services.model_access import is_model_allowed
 from gateway.services.policy_store import all_policy_names
 from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.routing import FALLBACK_WINDOW
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import (
     VisibleWorkspaceScope,
@@ -93,6 +106,7 @@ from gateway.services.tenancy.authorization import (
     resolve_workspace_in_organization,
 )
 from gateway.services.tenancy.organization_model_access import resolve_session_model_allowlist
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 # Authentication only, like the rest of the ``/api/v1/organizations/me`` surface.
 # What the caller may read or write is decided per request below, which is the
@@ -107,6 +121,12 @@ policies_router = APIRouter(
 aliases_router = APIRouter(
     prefix="/organizations/me/aliases",
     tags=["aliases"],
+    dependencies=[Depends(verify_master_key)],
+)
+
+fallbacks_router = APIRouter(
+    prefix="/organizations/me/automatic-fallbacks",
+    tags=["routing"],
     dependencies=[Depends(verify_master_key)],
 )
 
@@ -133,7 +153,7 @@ async def _writable_workspace_id(
     caller's own organization, so another tenant's id is a 404 rather than a 403.
     Then the targets, against the organization's own reach.
     """
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     organization = await organizations.get_active_organization_for_user(user)
     await organizations.require_active_organization_management_access(user=user, organization=organization)
     if workspace_id is None:
@@ -253,7 +273,9 @@ async def list_visible_routing_policies(
     ``workspace_id`` names one.
     """
     scope = await resolve_visible_workspace_scope(
-        db, user=current_identity, organizations=OrganizationService(db, membership_listener=None)
+        db,
+        user=current_identity,
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
     )
     statement = select(RoutingPolicy).where(
         col(RoutingPolicy.workspace_id).in_(_visible_workspace_ids(scope)),
@@ -298,7 +320,7 @@ async def set_organization_routing_policy(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> PolicyResponse:
     """Create or update a stored policy in one of the organization's workspaces.
 
@@ -357,7 +379,9 @@ async def list_visible_aliases(
     ``workspace_id`` names one.
     """
     scope = await resolve_visible_workspace_scope(
-        db, user=current_identity, organizations=OrganizationService(db, membership_listener=None)
+        db,
+        user=current_identity,
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
     )
     statement = select(ModelAlias).where(
         col(ModelAlias.workspace_id).in_(_visible_workspace_ids(scope)),
@@ -380,7 +404,7 @@ async def set_organization_alias(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> AliasResponse:
     """Create or update a stored alias in one of the organization's workspaces.
 
@@ -421,3 +445,26 @@ async def delete_organization_alias(
         model_provider=None,
     )
     await delete_alias_in_workspace(name, db, config, workspace_id=resolved, user_id=None)
+
+
+@fallbacks_router.get("")
+async def list_automatic_fallbacks(
+    visible: VisibleWorkspacesDep, routing: RoutingServiceDep
+) -> AutomaticFallbacksResponse:
+    """The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.
+
+    A request that sends a model's catalog ID moves to the model's next offering
+    when one fails, with no policy. Each model lists its offerings in the order
+    such a request tries them, priced for this organization, with who runs the
+    built-in tools on each, beside its traffic: how many requests a backup served,
+    and how many named one offering and so had no fallback. The traffic is the
+    workspaces the caller may see in their active organization, by the rule the
+    organization's usage reads use.
+    """
+    fallbacks = await routing.automatic_fallbacks(
+        organization_id=visible.organization_id, workspace_ids=visible.workspace_ids
+    )
+    return AutomaticFallbacksResponse(
+        window_days=FALLBACK_WINDOW.days,
+        models=[AutomaticFallbackPublic.model_validate(fallback) for fallback in fallbacks],
+    )

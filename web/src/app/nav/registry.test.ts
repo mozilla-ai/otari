@@ -16,6 +16,7 @@ import {
   navContextForPath,
   navItemForPath,
   ORG_NAV_SECTIONS,
+  pageLabelForPath,
   visibleNavSections,
 } from "./registry"
 import type {
@@ -73,6 +74,7 @@ describe("nav registry", () => {
       "Playground",
       "Overview",
       "Activity",
+      "Sessions",
       "Usage",
       "Models",
       "Routing",
@@ -292,9 +294,9 @@ describe("nav registry", () => {
     expect(overview?.capability).toBeUndefined()
   })
 
-  it("names the usage surface on both observability pages", () => {
+  it("names the surface each observability page reads", () => {
     // Activity and Usage are two views over /v1/usage, so they gate together on
-    // the surface rather than each on a name of its own.
+    // the surface rather than each on a name of its own; Sessions reads traces.
     const observability = NAV_SECTIONS.find(
       (section) => section.id === "observe",
     )
@@ -302,6 +304,7 @@ describe("nav registry", () => {
     // there is nothing ungated left in here to skip past.
     expect(observability?.items.map((item) => item.surface)).toEqual([
       "usage",
+      "traces",
       "usage",
     ])
   })
@@ -762,5 +765,28 @@ describe("composeNavItems", () => {
       "Billing",
       "Invoices",
     ])
+  })
+})
+
+describe("pageLabelForPath", () => {
+  it("names a rail page and a chrome page from one place", () => {
+    expect(pageLabelForPath("/usage")).toBe("Usage")
+    expect(pageLabelForPath("/invitations")).toBe("Invitations")
+    expect(pageLabelForPath("/account")).toBe("Account")
+    expect(pageLabelForPath("/nowhere")).toBeUndefined()
+  })
+})
+
+describe("reachableWithoutOrganization", () => {
+  it("is declared by Overview alone in the base registry", () => {
+    const optedIn = [
+      ...NAV_SECTIONS,
+      ...ORG_NAV_SECTIONS,
+      ...DEPLOYMENT_NAV_SECTIONS,
+    ]
+      .flatMap((section) => section.items)
+      .filter((item) => item.reachableWithoutOrganization)
+      .map((item) => item.to)
+    expect(optedIn).toEqual(["/"])
   })
 })

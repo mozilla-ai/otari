@@ -1,0 +1,56 @@
+schema_version: "1.0"
+policy:
+  id: otari/definition-of-done
+  description: Checks CONTRIBUTING.md asks for after any change.
+
+gates:
+
+  # Two gates rather than one with a two-item `require`: any one phrase in a
+  # `require` list satisfies that gate, so `make lint` alone would pass it.
+  # CONTRIBUTING.md asks for both commands, so each is its own required gate
+  # and `blocked` is true if either fails.
+  #
+  # The roots mirror `[tool.mypy]`'s own `files` scope. Both spellings of
+  # each, because `**` must consume a path segment: the `**/` form alone
+  # never reaches scripts/generate_openapi.py or tests/conftest.py, and
+  # `otari guardrails validate` names each missing twin.
+  - id: python-changed-needs-lint
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed:
+      [
+        "src/*.py",
+        "src/**/*.py",
+        "cli/src/*.py",
+        "cli/src/**/*.py",
+        "tests/*.py",
+        "tests/**/*.py",
+        "scripts/*.py",
+        "scripts/**/*.py",
+      ]
+    require: ["make lint"]
+    message: >-
+      Python source changed; run `make lint` before finishing (architecture
+      check + ruff; see CONTRIBUTING.md, "Making changes").
+
+  - id: python-changed-needs-typecheck
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed:
+      [
+        "src/*.py",
+        "src/**/*.py",
+        "cli/src/*.py",
+        "cli/src/**/*.py",
+        "tests/*.py",
+        "tests/**/*.py",
+        "scripts/*.py",
+        "scripts/**/*.py",
+      ]
+    require: ["make typecheck"]
+    message: >-
+      Python source changed; run `make typecheck` before finishing (mypy
+      --strict; see CONTRIBUTING.md, "Making changes"). `make lint` alone
+      does not run it.

@@ -9,7 +9,7 @@ to put it.
 
 Everything here is the query layer the read endpoints and the ingest service
 used to hold inline. It moved rather than changed: the aggregates, the
-uniqueness-collision escalation on insert, and the bucket grid are the same,
+uniqueness handling on insert, and the bucket grid are the same,
 which is what makes binding this adapter indistinguishable from not having the
 seam at all.
 """
@@ -22,7 +22,16 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
+from gateway.core.database import describe_database_error
+from gateway.core.sql import (
+    INGEST_LOCK_TIMEOUT_MS,
+    bucket_expr,
+    canonical_bucket,
+    dialect_name,
+    insert_ignoring_duplicates,
+    match_any,
+    utc_bound,
+)
 from gateway.log_config import logger
 from gateway.models.usage import AgentTelemetry
 from gateway.ports.telemetry_storage_port import (
@@ -39,6 +48,7 @@ from gateway.ports.telemetry_storage_port import (
     TelemetryGroupBy,
     TelemetryRecord,
     TelemetryScanTooLargeError,
+    TelemetryStoragePort,
 )
 
 # TelemetryRecord fields that feed a dedup key but are not their own
@@ -71,59 +81,44 @@ def _build_row(api_key_id: str, user_id: str, record: TelemetryRecord) -> AgentT
     return AgentTelemetry(api_key_id=api_key_id, user_id=user_id, **row_fields)
 
 
-async def _existing_dedup_keys(db: AsyncSession, source: str, dedup_keys: list[str]) -> set[str]:
-    rows = (
-        await db.execute(
-            select(AgentTelemetry.dedup_key).where(
-                AgentTelemetry.source == source,
-                AgentTelemetry.dedup_key.in_(dedup_keys),
-            )
-        )
-    ).scalars().all()
-    return set(rows)
+async def _insert_same_source_batch(db: AsyncSession, rows: list[AgentTelemetry]) -> IngestResult:
+    """Insert a same-source batch; a row whose ``(source, dedup_key)`` exists is a duplicate.
 
-
-async def _insert_same_source_batch(db: AsyncSession, source: str, rows: list[AgentTelemetry]) -> IngestResult:
-    """Insert a same-source batch, retrying only rows that do not collide.
-
-    Mirrors ``external_usage_service._insert_rows``: one ``add_all`` + ``commit``
-    for the whole batch; on a uniqueness collision, roll back, re-query which
-    ``(source, dedup_key)`` pairs already exist, and retry only the survivors as
-    one bulk insert; if that also collides, fall back to row-at-a-time for the
-    still-colliding remainder.
+    One ``ON CONFLICT DO NOTHING`` insert, as ``external_usage_service`` does, so a
+    replayed export needs no rollback and retry. Any other refusal fails the whole
+    statement, and the batch falls back to row-at-a-time so only the refused rows
+    are lost, counted as duplicates.
     """
-    db.add_all(rows)
     try:
-        await db.commit()
-        return IngestResult(accepted=len(rows))
+        inserted = await _insert_and_commit(db, rows)
     except IntegrityError:
         await db.rollback()
+    else:
+        return IngestResult(accepted=inserted, duplicate=len(rows) - inserted)
 
-    existing = await _existing_dedup_keys(db, source, [row.dedup_key for row in rows])
-    survivors = [row for row in rows if row.dedup_key not in existing]
-    duplicate = len(rows) - len(survivors)
-    if not survivors:
-        return IngestResult(duplicate=duplicate)
-    db.add_all(survivors)
-    try:
-        await db.commit()
-        return IngestResult(accepted=len(survivors), duplicate=duplicate)
-    except IntegrityError:
-        await db.rollback()
-
-    accepted = still_duplicate = 0
-    for row in survivors:
-        db.add(row)
+    accepted = 0
+    for row in rows:
         try:
-            await db.commit()
-            accepted += 1
+            accepted += await _insert_and_commit(db, [row])
         except IntegrityError:
             await db.rollback()
-            still_duplicate += 1
-    return IngestResult(accepted=accepted, duplicate=duplicate + still_duplicate)
+    return IngestResult(accepted=accepted, duplicate=len(rows) - accepted)
 
 
-class DatabaseTelemetryStorageAdapter:
+async def _insert_and_commit(db: AsyncSession, rows: list[AgentTelemetry]) -> int:
+    """Insert and commit ``rows``, returning how many were new."""
+    inserted = await insert_ignoring_duplicates(
+        db,
+        rows,
+        conflict=(AgentTelemetry.source, AgentTelemetry.dedup_key),
+        returning=AgentTelemetry.dedup_key,
+        lock_timeout_ms=INGEST_LOCK_TIMEOUT_MS,
+    )
+    await db.commit()
+    return len(inserted)
+
+
+class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
     """Core adapter: telemetry lives in this deployment's own database.
 
     Session-bound, unlike the stateless core adapters beside it: every method
@@ -184,8 +179,8 @@ class DatabaseTelemetryStorageAdapter:
 
         accepted = 0
         try:
-            for source, rows in by_source.items():
-                result = await _insert_same_source_batch(db, source, rows)
+            for rows in by_source.values():
+                result = await _insert_same_source_batch(db, rows)
                 accepted += result.accepted
                 duplicate += result.duplicate
         except SQLAlchemyError:
@@ -353,8 +348,8 @@ class DatabaseTelemetryStorageAdapter:
         try:
             result = cast("CursorResult[Any]", await db.execute(delete(AgentTelemetry).where(*conditions)))
             await db.commit()
-        except SQLAlchemyError:
+        except SQLAlchemyError as exc:
             await db.rollback()
-            logger.exception("agent_telemetry delete failed")
+            logger.error("agent_telemetry delete failed: %s", describe_database_error(exc))
             raise
         return result.rowcount or 0

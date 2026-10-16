@@ -1,4 +1,4 @@
-"""The derived stored-server revision (R-DISC-3, R-RES-3).
+"""The derived stored-server revision.
 
 The revision is what binds an application's authorization decision to the
 configuration Otari executed against. It has to be a pure function of the four
@@ -63,7 +63,7 @@ def test_allowlist_order_does_not_move_the_revision() -> None:
 
 
 def test_absent_and_empty_allowlists_are_different_revisions() -> None:
-    """The two are opposite policies (R-RES-4), so they must not collide."""
+    """The two are opposite policies, so they must not collide."""
     assert _server(allowed_tools=None).revision != _server(allowed_tools=[]).revision
 
 

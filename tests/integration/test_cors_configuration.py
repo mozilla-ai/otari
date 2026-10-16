@@ -62,6 +62,73 @@ def test_cors_with_specific_origins(postgres_url: str, test_db: Session) -> None
         dispose_override()
 
 
+def test_cors_rejects_trace_context_headers(postgres_url: str, test_db: Session) -> None:
+    """Test that trace-context headers are not enabled for cross-origin requests."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        cors_allow_origins=["https://trusted.com"],
+        # Enabled so the assertion pins what it claims: even where the gateway
+        # honors propagation headers, a browser still cannot send them.
+        accept_incoming_trace_context=True,
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(app) as client:
+            response = client.options(
+                f"{API_ROOT}/health",
+                headers={
+                    "Origin": "https://trusted.com",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "traceparent,tracestate",
+                },
+            )
+            assert response.status_code == 400
+            allow_headers = response.headers.get("access-control-allow-headers", "").lower()
+            assert "traceparent" not in allow_headers
+            assert "tracestate" not in allow_headers
+    finally:
+        dispose_override()
+
+
+def test_cors_preflight_allows_put(postgres_url: str, test_db: Session) -> None:
+    """Regression: PUT was missing from allow_methods, so any route needing it
+    (e.g. the platform's workspace web-search config) was rejected with
+    "Disallowed CORS method" wherever this middleware is enabled -- every
+    deployment that points cors_allow_origins at a shared dashboard."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        cors_allow_origins=["https://trusted.com"],
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(app) as client:
+            response = client.options(
+                f"{API_ROOT}/health",
+                headers={
+                    "Origin": "https://trusted.com",
+                    "Access-Control-Request-Method": "PUT",
+                },
+            )
+            assert response.status_code == 200
+            assert "PUT" in response.headers.get("access-control-allow-methods", "")
+    finally:
+        dispose_override()
+
+
 def test_cors_wildcard_disables_credentials(postgres_url: str, test_db: Session) -> None:
     """Test that wildcard origin disables allow_credentials per CORS spec."""
     config = GatewayConfig(

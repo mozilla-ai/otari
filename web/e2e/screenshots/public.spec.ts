@@ -25,7 +25,7 @@ test("sign-in screen offering a passkey and OAuth", async ({ page }) => {
   await withPasskeyAndOauth(page)
   await page.goto("/")
   await expect(
-    page.getByRole("button", { name: "Use a passkey" }),
+    page.getByRole("button", { name: "Sign in with a passkey" }),
   ).toBeVisible()
   await captureScreenshot(page, "sign-in-alternatives")
 })
@@ -133,6 +133,34 @@ test("signup", async ({ page }) => {
   await captureScreenshot(page, "signup")
 })
 
+test("signup offering OAuth, address form folded and open", async ({
+  page,
+}) => {
+  // Open signup with providers is the one signup state this fixture cannot
+  // reach: it has no OAuth client and does not allow signup. Stubbed on the one
+  // response the shell reads before it mounts.
+  await page.route("**/v1/bootstrap", async (route) => {
+    const response = await route.fetch()
+    const bootstrap = await response.json()
+    await route.fulfill({
+      response,
+      json: {
+        ...bootstrap,
+        mail_ready: true,
+        open_signup: true,
+        oauth_providers: ["google", "github"],
+      },
+    })
+  })
+  await page.goto("/#/signup")
+  const reveal = page.getByRole("button", { name: /with email/i })
+  await expect(reveal).toBeVisible()
+  await captureScreenshot(page, "signup-oauth")
+  await reveal.click()
+  await expect(page.getByLabel("Email")).toBeVisible()
+  await captureScreenshot(page, "signup-oauth-form-open")
+})
+
 test("signup on a gateway that cannot send mail", async ({ page }) => {
   // The hidden-rather-than-broken half of the same page: the sign-in screen
   // offers no link to it here, and this is what a bookmark still reaches.
@@ -189,7 +217,7 @@ test("recover password", async ({ page }) => {
   await withMailReady(page)
   await page.goto("/#/recover-password")
   await expect(
-    page.getByRole("heading", { name: "Reset your password" }),
+    page.getByRole("heading", { name: "Set or reset your password" }),
   ).toBeVisible()
   await captureScreenshot(page, "recover-password")
 })
@@ -198,8 +226,10 @@ test("verify email with a spent link", async ({ page }) => {
   // The gateway's own refusal, not a stub: a token it never issued is exactly
   // what an expired or already-used link looks like to it.
   await page.goto("/#/verify-email?token=not-a-real-token")
+  await page.getByLabel("Password", { exact: true }).fill("a-real-password")
+  await page.getByRole("button", { name: "Verify email" }).click()
   await expect(
-    page.getByRole("heading", { name: "Verification failed" }),
+    page.getByText("This verification link is invalid", { exact: false }),
   ).toBeVisible()
   await captureScreenshot(page, "verify-email-failed")
 })
@@ -236,6 +266,66 @@ test("OAuth callback that did not complete", async ({ page }) => {
     page.getByRole("heading", { name: "That sign-in did not complete" }),
   ).toBeVisible()
   await captureScreenshot(page, "oauth-callback-failed")
+})
+
+test("signup offering OAuth behind published terms", async ({ page }) => {
+  // The one box gating every way in on the card, above the provider rows.
+  await page.route("**/v1/bootstrap", async (route) => {
+    const response = await route.fetch()
+    const bootstrap = await response.json()
+    await route.fulfill({
+      response,
+      json: {
+        ...bootstrap,
+        mail_ready: true,
+        open_signup: true,
+        oauth_providers: ["google", "github"],
+        terms_url: "https://example.com/terms",
+      },
+    })
+  })
+  await page.goto("/#/signup")
+  await expect(
+    page.getByRole("checkbox", { name: "I accept the terms of service" }),
+  ).toBeVisible()
+  await captureScreenshot(page, "signup-oauth-terms")
+})
+
+test("OAuth callback asking for the terms a new account needs", async ({
+  page,
+}) => {
+  // A sign-in from a button that asked for no terms, refused because it would
+  // set up the account (`terms_not_accepted`). The exchange is stubbed: no
+  // provider here can mint a code.
+  await page.route("**/v1/bootstrap", async (route) => {
+    const response = await route.fetch()
+    const bootstrap = await response.json()
+    await route.fulfill({
+      response,
+      json: {
+        ...bootstrap,
+        oauth_providers: ["google", "github"],
+        terms_url: "https://example.com/terms",
+      },
+    })
+  })
+  await page.route("**/v1/auth/oauth/google/callback", async (route) => {
+    await route.fulfill({
+      status: 400,
+      json: {
+        detail: "Accept the terms of service to continue",
+        code: "terms_not_accepted",
+      },
+    })
+  })
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem("otari.oauth.state", "the-state")
+  })
+  await page.goto("/#/auth/google/callback?code=c&state=the-state")
+  await expect(
+    page.getByRole("heading", { name: "Accept the terms to continue" }),
+  ).toBeVisible()
+  await captureScreenshot(page, "oauth-callback-terms")
 })
 
 test("OAuth callback on a gateway that configures no provider", async ({

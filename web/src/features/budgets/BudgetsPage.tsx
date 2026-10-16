@@ -3,6 +3,7 @@
 // took chips off everything it rebuilt, so this is an inconsistency rather than
 // a decision: see the note in the PR body.
 import { Button, Chip, Spinner } from "@heroui/react"
+import { Navigate } from "@tanstack/react-router"
 import {
   type ReactNode,
   type RefObject,
@@ -20,7 +21,6 @@ import type {
 } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
-import { BulkActionBar } from "@/design-system/data/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
@@ -36,7 +36,6 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { SpendMeter, spendState } from "@/design-system/metrics/SpendMeter"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
-import { isDeploymentOperator } from "@/features/organization/roles"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import { aliasesByUserId, userDisplay } from "@/features/users/userDisplay"
 import {
@@ -46,17 +45,16 @@ import {
   useDeleteBudget,
   useUpdateBudget,
 } from "@/shared/api/budgets"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useUpdateUser, useUsers } from "@/shared/api/users"
 import {
   useAllWorkspaceBudgetDefaults,
   useWorkspaces,
 } from "@/shared/api/workspaces"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
-import {
-  resolveSelectedIds,
-  useTableSelection,
-} from "@/shared/helpers/tableSelection"
 
 import {
   budgetLabel,
@@ -536,8 +534,9 @@ const getBudgetRowKey = (budget: Budget): string => budget.budget_id
 
 // Whose budget a row is: a tenant's carries an organization, the deployment's own
 // carries none. `/users` refuses to cap a gateway user at a tenant's
-// (otari#881), so the page marks the row and withholds the assignment control
-// rather than offering a save the API answers 404.
+// (otari#881) and `/budgets` refuses to delete one (otari#902), so the page
+// marks the row and withholds both controls rather than offering an action the
+// API refuses.
 function isOrganizationOwned(budget: Budget): boolean {
   return budget.organization_id !== null
 }
@@ -592,10 +591,6 @@ function DeploymentBudgetsPage() {
     userIds: string[]
   }>()
   const [assigningUsers, setAssigningUsers] = useState(false)
-  const selection = useTableSelection()
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
-  const [bulkError, setBulkError] = useState<unknown>(undefined)
-  const [bulkPending, setBulkPending] = useState(false)
 
   const rows = budgets.data ?? []
   const nameBudget = budgetLabeler(rows)
@@ -643,27 +638,8 @@ function DeploymentBudgetsPage() {
   // open leaves it nothing to return to, so focus lands on body and Tab
   // restarts at the top of the document.
   const showOnboarding = !loading && rows.length === 0
-  const selectableKeys = rows.map((budget) => budget.budget_id)
-  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
-
-  const onBulkDelete = async () => {
-    setBulkPending(true)
-    setBulkError(undefined)
-    try {
-      for (const id of selectedIds) {
-        await deleteBudget.mutateAsync(id)
-      }
-      selection.clear()
-      setBulkDeleteOpen(false)
-    } catch (error) {
-      setBulkError(error)
-    } finally {
-      setBulkPending(false)
-    }
-  }
-
   // Memoized on the values the cells actually read so DataTable's per-row
-  // cache holds across selection clicks (see the DataTable docstring).
+  // cache holds across re-renders (see the DataTable docstring).
   // historyOpen is a real dependency: it drives the History button label, so
   // toggling it must invalidate the cached rows.
   const columns = useMemo<DataTableColumn<Budget>[]>(
@@ -673,27 +649,36 @@ function DeploymentBudgetsPage() {
         header: "Budget",
         isRowHeader: true,
         cell: (budget) => (
-          <div className="flex flex-col gap-0.5">
-            <span className="font-medium text-foreground">
-              {budget.name ?? <span className="text-muted">(unnamed)</span>}
-            </span>
-            {isOrganizationOwned(budget) ? (
-              // Not a warning: the budget is a real one this page may still
-              // relabel and refigure, it is simply not one a gateway user can be
-              // held to. The mirror of the tenant page's "Set at the deployment
-              // level".
-              <Chip className="self-start" size="sm" variant="secondary">
-                Owned by an organization
-              </Chip>
-            ) : null}
-            {/* Only a prefix is rendered, so the id an API call needs is not on the
-              page in full; the copy hands over the whole thing. */}
-            <CopyableValue value={budget.budget_id} label="budget id">
-              <code className="text-mono-micro" title={budget.budget_id}>
-                {shortBudgetId(budget.budget_id)}
-              </code>
-            </CopyableValue>
-          </div>
+          <span className="block truncate font-medium text-foreground">
+            {budget.name ?? <span className="text-muted">(unnamed)</span>}
+          </span>
+        ),
+      },
+      {
+        id: "owner",
+        header: "Owner",
+        cell: (budget) =>
+          isOrganizationOwned(budget) ? (
+            // Not a warning: the budget is a real one this page may still
+            // relabel and refigure, it is simply not one a gateway user can be
+            // held to.
+            <Chip size="sm" variant="secondary">
+              Organization
+            </Chip>
+          ) : (
+            <span className="text-muted">Gateway</span>
+          ),
+      },
+      {
+        id: "id",
+        header: "ID",
+        cell: (budget) => (
+          // Only a prefix is rendered; the copy hands over the whole id.
+          <CopyableValue value={budget.budget_id} label="budget id">
+            <code className="text-mono-micro" title={budget.budget_id}>
+              {shortBudgetId(budget.budget_id)}
+            </code>
+          </CopyableValue>
         ),
       },
       {
@@ -777,11 +762,13 @@ function DeploymentBudgetsPage() {
                 setEditing(budget.budget_id)
               }}
             />
-            <RowAction
-              icon={FiTrash2}
-              label="Delete"
-              onPress={() => setPendingDelete(budget)}
-            />
+            {isOrganizationOwned(budget) ? null : (
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(budget)}
+              />
+            )}
           </RowActionRow>
         ),
       },
@@ -944,25 +931,6 @@ function DeploymentBudgetsPage() {
         />
       ) : null}
 
-      {selectedIds.length > 0 ? (
-        <BulkActionBar
-          selectedCount={selectedIds.length}
-          allMatching={false}
-          matchingTotal={null}
-          canSelectAllMatching={false}
-          onSelectAllMatching={() => {}}
-          onClear={selection.clear}
-        >
-          <Button
-            size="sm"
-            variant="danger"
-            onPress={() => setBulkDeleteOpen(true)}
-          >
-            Delete
-          </Button>
-        </BulkActionBar>
-      ) : null}
-
       {/* Suppress the table (and its own empty message) while the onboarding
           panel owns the empty state, so a fresh gateway shows one call to action,
           not a panel stacked over a redundant "no rows" table. */}
@@ -975,9 +943,6 @@ function DeploymentBudgetsPage() {
             getRowKey={getBudgetRowKey}
             isLoading={loading}
             emptyContent="No budgets yet. Create one to cap spending."
-            selectionMode="multiple"
-            selectedKeys={selection.selectedKeys}
-            onSelectionChange={selection.onSelectionChange}
           />
         </TableScrollFrame>
       )}
@@ -1026,19 +991,6 @@ function DeploymentBudgetsPage() {
             onSuccess: () => setPendingDelete(undefined),
           })
         }}
-      />
-
-      <ConfirmDialog
-        isOpen={bulkDeleteOpen}
-        onOpenChange={setBulkDeleteOpen}
-        heading="Delete budgets"
-        body={`Delete ${selectedIds.length} ${selectedIds.length === 1 ? "budget" : "budgets"}? Users on ${
-          selectedIds.length === 1 ? "it" : "them"
-        } will no longer be capped.`}
-        confirmLabel="Delete"
-        isPending={bulkPending}
-        error={bulkError}
-        onConfirm={onBulkDelete}
       />
     </div>
   )
@@ -1232,16 +1184,21 @@ function CreateBudgetDialog({
  */
 export function BudgetsPage() {
   const organization = useOrganizationContext()
+  const { answer, isSettled } = useDeploymentOperator()
 
-  if (organization.isPending && !organization.data) {
+  if (!isSettled) {
     return <PageLoading label="Loading spend and budgets…" />
   }
-  // Fails towards the operator page on an errored context, matching what the
-  // rail does with this row: it is the page that was here before, its reads say
-  // in their own words when they are refused, and an admin seeing that is a
-  // worse-looking version of a page they can still reach, where the reverse
-  // would hide the deployment's budgets from the one caller who owns them.
-  if (organization.data && !isDeploymentOperator(organization.data)) {
+  // No organization means no budgets of its own and none to operate; the
+  // index is where such a caller is told how to get in.
+  if (answer === "no-organization") {
+    return <Navigate to="/" replace />
+  }
+  // An errored context lands on the operator page, as every operator gate does
+  // (`useDeploymentOperator`): its reads say in their own words when they are
+  // refused, where the reverse would hide the deployment's budgets from the one
+  // caller who owns them.
+  if (answer === "not-operator" && organization.data) {
     return <OrganizationBudgetsPage organization={organization.data} />
   }
   return <DeploymentBudgetsPage />

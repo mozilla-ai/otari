@@ -91,6 +91,18 @@ interface NavItemBase {
    * own refusal.
    */
   operatorOnly?: "unlisted" | "refused"
+  /**
+   * That this destination is of use to a signed-in caller who belongs to no
+   * organization: someone who declined their only invitation, or signed in
+   * before accepting one.
+   *
+   * Opt-in, because such a caller has no tenant and no workspace, so nearly
+   * every page would open on a refusal. A missing one hides the row from them,
+   * which is also what an overlay's row gets unless it says otherwise. Answered
+   * by the same context read as `operatorOnly`, whose 404 is what says there is
+   * no organization.
+   */
+  reachableWithoutOrganization?: boolean
 }
 
 /** One sidebar link with its deployment and entitlement gating. */
@@ -109,6 +121,8 @@ export type NavItem = NavItemBase & {
 export interface NavChild {
   to: NavPath
   label: string
+  /** A short marker after the label, such as "Beta". Hidden on a collapsed rail. */
+  badge?: string
   /**
    * The child's own glyph, as `otari-ai/frontend`'s nested leaves carry one.
    * The rail does not draw it on an expanded row, where the indent marks the

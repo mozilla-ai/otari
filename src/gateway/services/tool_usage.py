@@ -27,8 +27,6 @@ backend is unreachable. A failed call is counted and never billed.
 
 from __future__ import annotations
 
-from typing import Any
-
 # Every tool backend marks a recoverable failure by prefixing the string it hands
 # back to the model. The tool loop's own error path uses the same prefix, so this
 # is the single vocabulary for "the call ran but did not work".
@@ -112,17 +110,3 @@ class ToolUsageTally:
         value type is not int-only.
         """
         return {tool: dict(self._counts[tool]) for tool in sorted(self._counts)}
-
-
-def tool_meters_of(billing_meters: dict[str, Any] | None) -> dict[str, dict[str, float]]:
-    """Read the tool meters back off a stored row, tolerating older shapes.
-
-    Rows written before tool metering carry no namespace, and a hand-edited row
-    could carry anything, so a non-dict is treated as absent rather than trusted.
-    """
-    if not isinstance(billing_meters, dict):
-        return {}
-    nested = billing_meters.get(TOOL_METER_NAMESPACE)
-    if not isinstance(nested, dict):
-        return {}
-    return {tool: counts for tool, counts in nested.items() if isinstance(counts, dict) and isinstance(tool, str)}

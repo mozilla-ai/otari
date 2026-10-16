@@ -8,6 +8,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.services import model_catalog_service as mcs
+from gateway.services.catalog import load_catalog_metadata, metadata_entry
 from gateway.services.model_catalog_service import build_metadata_map, parse_entry
 
 
@@ -25,6 +26,7 @@ GPT_4O = {
     "name": "GPT-4o",
     "description": "General reasoning model.",
     "family": "gpt",
+    "canonical_model_id": "openai/gpt-4o",
     "reasoning": False,
     "tool_call": True,
     "structured_output": True,
@@ -47,6 +49,7 @@ CATALOG: dict[str, Any] = {
 def test_parse_entry_reads_all_fields() -> None:
     entry = parse_entry(GPT_4O)
     assert entry.name == "GPT-4o"
+    assert entry.canonical_model_id == "openai/gpt-4o"
     assert entry.input_modalities == ["text", "image", "pdf"]
     assert entry.output_modalities == ["text"]
     assert entry.tool_call is True
@@ -64,10 +67,18 @@ def test_parse_entry_reads_all_fields() -> None:
 def test_parse_entry_tolerates_missing_fields() -> None:
     entry = parse_entry({"id": "bare"})
     assert entry.name is None
+    assert entry.canonical_model_id is None
     assert entry.input_modalities == []
     assert entry.context_window is None
     assert entry.tool_call is False
     assert entry.deprecated is False
+
+
+def test_parse_entry_reads_a_zero_or_negative_limit_as_unknown() -> None:
+    """models.dev writes 0 where it does not know a limit; a client must not read that as no tokens."""
+    entry = parse_entry({"limit": {"context": 0, "output": -1}})
+
+    assert (entry.context_window, entry.max_output_tokens) == (None, None)
 
 
 def test_parse_entry_marks_deprecated_status() -> None:
@@ -163,3 +174,76 @@ def test_background_catalog_requires_caching_and_enrichment() -> None:
     assert (
         mcs.background_catalog_enabled(GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=60)) is True
     )
+
+
+def test_metadata_entry_reads_a_gemini_listing_id_as_the_bare_one() -> None:
+    """Gemini lists ``models/<id>``; models.dev keys the bare id under ``google``."""
+    catalog = {"google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}}}
+
+    entry = metadata_entry(catalog, "gemini", "models/gemini-3.5-flash-lite")
+
+    assert entry is not None
+    assert (entry.context_window, entry.max_output_tokens) == (1048576, 65536)
+    assert metadata_entry(catalog, "gemini", "gemini-3.5-flash-lite") is not None
+    assert metadata_entry(catalog, "gemini", "models/gemini-9") is None
+    assert metadata_entry(None, "gemini", "gemini-3.5-flash-lite") is None
+
+
+@pytest.mark.parametrize(
+    "catalog",
+    [
+        pytest.param({"openai": ["gpt-4o"]}, id="provider-not-an-object"),
+        pytest.param({"openai": {"models": ["gpt-4o"]}}, id="models-not-an-object"),
+        pytest.param({"openai": {}}, id="no-models"),
+        pytest.param({"openai": {"models": {"gpt-4o": "GPT-4o"}}}, id="model-not-an-object"),
+    ],
+)
+def test_metadata_entry_reads_a_malformed_catalog_as_no_entry(catalog: dict[str, Any]) -> None:
+    """models.dev is fetched JSON, so a shape it was not expected to have describes no model rather than raising."""
+    assert metadata_entry(catalog, "openai", "gpt-4o") is None
+
+
+@pytest.mark.asyncio
+async def test_catalog_metadata_fetches_only_when_a_read_may() -> None:
+    """A request-time read fetches on a cold cache; a read off the request path never does."""
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=60)
+
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)) as fetch:
+        assert await load_catalog_metadata(config, cached_only=True) is None
+        fetch.assert_not_called()
+
+        assert await load_catalog_metadata(config) == CATALOG
+        fetch.assert_awaited_once()
+
+        assert await load_catalog_metadata(config, cached_only=True) == CATALOG
+    assert await load_catalog_metadata(GatewayConfig(models_dev_metadata=False)) is None
+
+
+@pytest.mark.asyncio
+async def test_the_shared_fetch_fills_the_metadata_cache_and_is_reused() -> None:
+    mcs.clear_catalog_cache()
+    with patch.object(mcs, "_download", new=AsyncMock(return_value={"openai": {}})) as download:
+        assert await mcs.fetch_models_dev_document(fill_cache=True) == {"openai": {}}
+        assert await mcs.fetch_models_dev_document(reuse_within=60) == {"openai": {}}
+        assert download.await_count == 1
+
+        # A catalog refresher tick right after reuses it too, instead of fetching again.
+        config = GatewayConfig(master_key="k", models_dev_metadata=True)
+        assert await mcs.load_models_dev_catalog(config, force=True, reuse_within=60) == {"openai": {}}
+        assert download.await_count == 1
+    mcs.clear_catalog_cache()
+
+
+@pytest.mark.asyncio
+async def test_the_shared_fetch_leaves_the_cache_alone_unless_asked_and_raises_on_failure() -> None:
+    mcs.clear_catalog_cache()
+    with patch.object(mcs, "_download", new=AsyncMock(return_value={"openai": {}})):
+        await mcs.fetch_models_dev_document()
+    assert mcs._cache.ok is False
+
+    with (
+        patch.object(mcs, "_download", new=AsyncMock(side_effect=mcs.ModelsDevFetchError("down"))),
+        pytest.raises(mcs.ModelsDevFetchError),
+    ):
+        await mcs.fetch_models_dev_document()
+    mcs.clear_catalog_cache()

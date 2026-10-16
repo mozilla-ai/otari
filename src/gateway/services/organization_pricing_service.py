@@ -2,7 +2,7 @@
 
 The write half of per-organization pricing. The read half is
 `services.pricing_service.find_model_pricing`, which consults these rows ahead
-of ``model_pricing`` and the genai-prices dataset when it is given an
+of ``model_pricing`` and the models.dev catalog when it is given an
 organization.
 
 Three rules live here rather than in the route, because each has to hold for
@@ -46,6 +46,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyValidationError
+from gateway.exceptions.pricing_exceptions import (
+    OrganizationPricingManagedModelError,
+    OrganizationPricingNotFoundError,
+    OrganizationPricingOverlapError,
+)
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.pricing import API_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.tenancy import User as TenancyUser
@@ -58,14 +64,9 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.errors import (
-    OrganizationPricingManagedModelError,
-    OrganizationPricingNotFoundError,
-    OrganizationPricingOverlapError,
-    TenancyValidationError,
-)
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,6 @@ class PricingOverrideInput:
     output_price_per_million: float
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
-    cache_write_1h_price_per_million: float | None
     pricing_tiers: list[dict[str, object]]
     effective_from: datetime
     effective_to: datetime | None
@@ -98,7 +98,6 @@ def _describe_period(effective_from: datetime, effective_to: datetime | None) ->
     if effective_to is None:
         return f"from {start} onwards"
     return f"{start} to {effective_to.isoformat()}"
-
 
 
 @dataclass(frozen=True)
@@ -145,7 +144,9 @@ class OrganizationPricingService:
         """
         self.db = db
         self.config = config
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
         self.provider_keys = OrgProviderKeyService(db)
         self.model_provider = model_provider
         self.rows = OrganizationModelPricingRepository(db)
@@ -210,7 +211,6 @@ class OrganizationPricingService:
         self.rows.add_all(list(rows))
         await self.rows.flush()
 
-
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
         """The caller's organization, having checked they may change its rates."""
         organization = await self.organizations.get_active_organization_for_user(user)
@@ -258,9 +258,7 @@ class OrganizationPricingService:
         if model_key in await self.deployment_supplied_keys(organization_id, [model_key]):
             raise OrganizationPricingManagedModelError(model_key)
 
-    async def deployment_supplied_keys(
-        self, organization_id: uuid.UUID, model_keys: Collection[str]
-    ) -> set[str]:
+    async def deployment_supplied_keys(self, organization_id: uuid.UUID, model_keys: Collection[str]) -> set[str]:
         """Which of ``model_keys`` the deployment pays the upstream bill for.
 
         A ``config.providers`` instance always does. A bare key does when a
@@ -283,9 +281,7 @@ class OrganizationPricingService:
             return set()
         byo = await self.provider_keys.get_byo_providers(organization_id=organization_id)
         return {
-            model_key
-            for model_key in model_keys
-            if await self._is_deployment_supplied(organization_id, model_key, byo)
+            model_key for model_key in model_keys if await self._is_deployment_supplied(organization_id, model_key, byo)
         }
 
     async def _is_deployment_supplied(
@@ -387,9 +383,7 @@ class OrganizationPricingService:
         that is what tells a client whether to ask for another one.
         """
         organization_id = await self._readable_organization_id(user)
-        return await self.rows.page_for_organization(
-            organization_id, model_key=model_key, skip=skip, limit=limit
-        )
+        return await self.rows.page_for_organization(organization_id, model_key=model_key, skip=skip, limit=limit)
 
     async def create_for_caller(
         self,
@@ -423,7 +417,6 @@ class OrganizationPricingService:
             output_price_per_million=to_usd(override.output_price_per_million),
             cache_read_price_per_million=to_usd_or_none(override.cache_read_price_per_million),
             cache_write_price_per_million=to_usd_or_none(override.cache_write_price_per_million),
-            cache_write_1h_price_per_million=to_usd_or_none(override.cache_write_1h_price_per_million),
             pricing_tiers=override.pricing_tiers,
             effective_from=effective_from,
             effective_to=effective_to,
@@ -543,7 +536,6 @@ class OrganizationPricingService:
         row.output_price_per_million = to_usd(override.output_price_per_million)
         row.cache_read_price_per_million = to_usd_or_none(override.cache_read_price_per_million)
         row.cache_write_price_per_million = to_usd_or_none(override.cache_write_price_per_million)
-        row.cache_write_1h_price_per_million = to_usd_or_none(override.cache_write_1h_price_per_million)
         row.pricing_tiers = override.pricing_tiers
         row.effective_from = effective_from
         row.effective_to = effective_to
@@ -585,7 +577,6 @@ def validate_rates(override: PricingOverrideInput) -> None:
         "output_price_per_million": override.output_price_per_million,
         "cache_read_price_per_million": override.cache_read_price_per_million,
         "cache_write_price_per_million": override.cache_write_price_per_million,
-        "cache_write_1h_price_per_million": override.cache_write_1h_price_per_million,
     }
     for field, value in rates.items():
         if value is not None and value < 0:

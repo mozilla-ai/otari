@@ -118,9 +118,7 @@ async def test_a_second_refresh_rebuilds_nothing_that_did_not_move(
     assert runner._held[(organization.id, definition.id)].guardrail is first_object
 
 
-async def test_a_definition_that_was_written_to_is_rebuilt(
-    async_db: AsyncSession, builds: list[GuardrailName]
-) -> None:
+async def test_a_definition_that_was_written_to_is_rebuilt(async_db: AsyncSession, builds: list[GuardrailName]) -> None:
     """``updated_at`` carries every write, so the fingerprint needs no second column."""
     organization = await _organization(async_db, slug="runner-edited")
     definition = await _definition(async_db, organization, name="held")
@@ -133,9 +131,7 @@ async def test_a_definition_that_was_written_to_is_rebuilt(
     assert len(builds) == 2
 
 
-async def test_a_definition_that_was_disabled_is_dropped(
-    async_db: AsyncSession, builds: list[GuardrailName]
-) -> None:
+async def test_a_definition_that_was_disabled_is_dropped(async_db: AsyncSession, builds: list[GuardrailName]) -> None:
     """A kill switch that left the built client in memory would not be one."""
     organization = await _organization(async_db, slug="runner-disabled")
     definition = await _definition(async_db, organization, name="held")
@@ -149,9 +145,7 @@ async def test_a_definition_that_was_disabled_is_dropped(
     assert runner.build_state(organization.id, definition.id, definition.updated_at) == "pending"
 
 
-async def test_a_definition_that_was_deleted_is_dropped(
-    async_db: AsyncSession, builds: list[GuardrailName]
-) -> None:
+async def test_a_definition_that_was_deleted_is_dropped(async_db: AsyncSession, builds: list[GuardrailName]) -> None:
     """Nothing points at it any more, so nothing should hold its vendor client."""
     organization = await _organization(async_db, slug="runner-deleted")
     definition = await _definition(async_db, organization, name="held")
@@ -227,9 +221,7 @@ async def test_a_build_that_ran_out_of_time_is_tried_again_on_the_next_tick(
     assert next(iter(runner._held.values())).guardrail is not None
 
 
-async def test_a_build_that_failed_is_not_tried_again(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_a_build_that_failed_is_not_tried_again(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """The other half of the same rule, so the retry above cannot quietly widen."""
     organization = await _organization(async_db, slug="bad-credential")
     await _definition(async_db, organization, name="lakera")

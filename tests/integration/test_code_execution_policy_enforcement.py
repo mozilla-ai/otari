@@ -26,7 +26,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.services.tools import WorkspaceCodeExecutionPolicies
 
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _REQUEST = {
@@ -88,7 +89,7 @@ def _post_with_sandbox_patched(
     seen = _Dispatch()
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         seen.max_iterations = max_iterations
         return _text_response("via-sandbox-loop")
@@ -270,7 +271,7 @@ def test_a_streaming_request_gets_the_same_ceilings(
     seen = _Dispatch()
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.max_iterations = max_iterations
         yield MessageStopEvent(type="message_stop")
@@ -416,10 +417,7 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
     async def failing_resolve(*_args: Any, **_kwargs: Any) -> None:
         raise SQLAlchemyError("connection lost mid-admission")
 
-    monkeypatch.setattr(
-        "gateway.api.routes._pipeline.resolve_workspace_code_execution_policy",
-        failing_resolve,
-    )
+    monkeypatch.setattr(WorkspaceCodeExecutionPolicies, "resolve", failing_resolve)
     # TestClient re-raises a server exception rather than rendering a 500, so the
     # failure arrives here; what matters is the state it left behind.
     with pytest.raises(SQLAlchemyError):
@@ -446,7 +444,7 @@ def test_an_unresolvable_workspace_refuses_rather_than_running_the_sandbox(
     this, and `resolve_workspace_id` always answers, falling back to the default
     workspace. It is pinned anyway because the arm guards a veto, so falling
     through would hand code execution to a workspace whose row refuses it, with
-    nothing to notice. `_resolve_mcp_server_ids` refuses at the same condition.
+    nothing to notice. The MCP server adapter's `resolve_many` refuses at the same condition.
     """
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
 
@@ -683,3 +681,45 @@ def test_a_streaming_request_gets_the_same_image_and_tool_set(
     assert response.status_code == 200
     assert seen["image"] == _IMAGE
     assert seen["allowed_tools"] == frozenset({"code_execution"})
+
+
+@pytest.fixture
+def opt_in_code_execution(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployment where a workspace with no policy has code execution off."""
+    monkeypatch.setattr(test_config, "code_execution_workspace_default", False)
+
+
+@pytest.mark.usefixtures("opt_in_code_execution")
+def test_no_policy_reads_as_off_where_the_deployment_makes_code_execution_opt_in(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    workspace_id = _default_workspace_id(client, master_key_header)
+
+    response = client.get(f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy", headers=master_key_header)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["configured"], body["default_enabled"], body["enabled"]) == (False, False, False)
+
+
+@pytest.mark.usefixtures("opt_in_code_execution")
+def test_no_policy_is_refused_like_a_disabled_one_where_code_execution_is_opt_in(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+
+    refused, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["error"]["message"] == "code execution is not enabled for this workspace"
+    assert seen.max_iterations is None
+
+    _set_policy(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=True)
+    served, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+
+    assert served.status_code == 200
+    assert seen.max_iterations == 10

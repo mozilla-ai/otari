@@ -30,6 +30,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from opentelemetry import trace
@@ -43,13 +44,14 @@ from gateway.ports.code_execution_port import (
     SandboxUnavailableError,
 )
 from gateway.services.code_execution import CONTAINER_ID_PREFIX, ContainerLease, SandboxContainers, new_container_id
-from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tool_usage import ToolUsageTally, is_tool_error
+from gateway.services.traces import RequestTrace
 from gateway.types.code_execution import ResultBlock
 
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from gateway.services.file_service import StagedFile
+    from gateway.services.files import StagedFile
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -61,6 +63,7 @@ __all__ = [
     "CODE_EXECUTION_TOOL_NAME",
     "CODE_EXECUTION_TOOL_NAMES",
     "CONTAINER_ID_PREFIX",
+    "SERVED_TOOL_NAMES",
     "CodeExecution",
     "SandboxBackend",
     "SandboxFiles",
@@ -83,10 +86,15 @@ CODE_EXECUTION_TOOL_NAMES: tuple[str, ...] = (
     "bash_code_execution",
     "text_editor_code_execution",
 )
+# The tool kinds this deployment's sandbox backend actually serves, as opposed to
+# the vocabulary a policy may be written in. One today. A stored list intersects
+# with this, so a list sharing nothing with it narrows to an empty set, which is
+# refused rather than stored (see the workspace code execution policy service).
+SERVED_TOOL_NAMES: tuple[str, ...] = (CODE_EXECUTION_TOOL_NAME,)
 # The execution budget one call gets when nothing narrows it. Public because a
 # workspace code-execution policy floors its own ceiling against this value
 # rather than carrying a second idea of the default (see
-# ``services/tenancy/workspace_code_execution_policy_service.py``).
+# ``services/tools/_code_execution_policy.py``).
 DEFAULT_EXEC_TIMEOUT_S = 60.0
 # Headroom on top of what the calls themselves may spend, for the lease a
 # session is opened with: seeding the uploads and collecting the outputs happen
@@ -241,6 +249,7 @@ class SandboxBackend:
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
         tally: ToolUsageTally | None = None,
+        trace: RequestTrace | None = None,
         files: SandboxFiles | None = None,
         files_base_url: str | None = None,
         container: ContainerLease | None = None,
@@ -267,6 +276,8 @@ class SandboxBackend:
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).
         self._tally = tally
+        # The request's trace, which records each run. None outside a request.
+        self._trace = trace
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
         self._timeout_s = timeout_s
         # How long the lease has to last, as against what one call may spend.
@@ -277,11 +288,7 @@ class SandboxBackend:
             timeout_s * max(max_executions, 1) * _CALLS_PER_ROUND_ALLOWANCE + _SESSION_TTL_SLACK_S,
             _MAX_SESSION_TTL_S,
         )
-        # Optional bearer credential forwarded as `Authorization: Bearer` on every
-        # call to the sandbox backend. Set in hybrid mode so the platform-hosted
-        # /v1/sandbox proxy (which authenticates the caller's workspace token) admits
-        # the request and derives tenancy from it. Unset (and unsent) when the
-        # backend is a standalone exec-service that needs no auth.
+        # Sent as `Authorization: Bearer` on every sandbox call when set.
         self._auth_token = auth_token
         # The sandbox image this session asks for: the workspace's pinned image,
         # else the deployment's, else nothing. Sent as an additive field on
@@ -309,6 +316,11 @@ class SandboxBackend:
         # resumed, else one minted here. Kept across resumes, so the same
         # sandbox has one name for as long as it lives.
         self.container_id = container.container_id if container is not None else new_container_id()
+
+    @property
+    def trace(self) -> RequestTrace | None:
+        """The request's trace, which the tool loop also records each model round on."""
+        return self._trace
 
     async def __aenter__(self) -> SandboxBackend:
         keep_alive_s = self._containers.keep_alive_s(self._resume) if self._containers is not None else None
@@ -515,9 +527,9 @@ class SandboxBackend:
     def take_executions(self) -> list[CodeExecution]:
         """The calls executed since the last take, in order, clearing them.
 
-        Consumed by a loop building native result blocks right after the calls it
-        awaited. Clearing means a later loop round cannot attribute an earlier
-        round's executions to its own calls.
+        Consumed by a loop building native result blocks right after each call it
+        awaited, before it runs the next: a code-execution rendering reads the whole
+        buffer as that one call's, so calls run concurrently would swap results.
         """
         executions, self._executions = self._executions, []
         return executions
@@ -531,17 +543,26 @@ class SandboxBackend:
         if not self.owns_tool(name):
             raise KeyError(f"SandboxBackend does not own tool {name!r}")
         code = str(arguments.get("code") or "")
+        started = datetime.now(UTC)
         try:
             result, block, file_ids = await self._exec_tool(code)
         except Exception:
             self._executions.append(CodeExecution(code=code, result=None))
             if self._tally is not None:
                 self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
+            self._record_span(started, ok=False)
             raise
         self._executions.append(CodeExecution(code=code, result=block, file_ids=file_ids))
         if self._tally is not None:
             self._tally.record_result(CODE_EXECUTION_TOOL_NAME, result)
+        self._record_span(started, ok=not is_tool_error(result))
         return result
+
+    def _record_span(self, started: datetime, *, ok: bool) -> None:
+        if self._trace is not None:
+            self._trace.record_tool_call(
+                tool_name=CODE_EXECUTION_TOOL_NAME, tool_type="otari_code_execution", started=started, ok=ok
+            )
 
     async def _exec_tool(self, code: str) -> tuple[str, ResultBlock, dict[str, str]]:
         if self._session is None:
@@ -606,7 +627,8 @@ def _flatten_result_block(
         parts.append(f"stderr:\n{content.stderr}")
     if content.return_code not in (None, 0):
         parts.append(f"return_code: {content.return_code}")
-    listed = [ref.filename or "?" for ref in content.content]
+    # A reference with no name was never fetched, so there is nothing the model could do with it.
+    listed = [ref.filename for ref in content.content if ref.filename]
     listed += [name for name in [*produced, *file_ids] if name not in listed]
     if listed:
         names = [f"{name} (file_id: {file_ids[name]})" if name in file_ids else name for name in listed]

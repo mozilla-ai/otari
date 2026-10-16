@@ -41,7 +41,8 @@ def memory_root() -> str:
 @pytest.mark.asyncio
 async def test_put_get_roundtrip(memory_root: str) -> None:
     store = FsspecFileStore(memory_root)
-    ref = await store.put("file-abcdef0123", b"hello bytes")
+    ref = await store.allocate("file-abcdef0123")
+    await store.put(ref, b"hello bytes")
     assert ref == "ab/file-abcdef0123"
     assert await store.get(ref) == b"hello bytes"
 
@@ -50,7 +51,8 @@ async def test_put_get_roundtrip(memory_root: str) -> None:
 async def test_put_stream_and_get_stream_roundtrip(memory_root: str) -> None:
     store = FsspecFileStore(memory_root)
     payload = b"x" * (2 * 1024 * 1024 + 5)
-    ref, size = await store.put_stream("file-streamtest01", _iter([payload[:1000], payload[1000:]]))
+    ref = await store.allocate("file-streamtest01")
+    size = await store.put_stream(ref, _iter([payload[:1000], payload[1000:]]))
     assert size == len(payload)
     collected = bytearray()
     async for chunk in store.get_stream(ref):
@@ -66,8 +68,9 @@ async def test_put_stream_removes_partial_blob_on_failure(memory_root: str) -> N
         yield b"partial"
         raise RuntimeError("client went away")
 
+    ref = await store.allocate("file-partial00001")
     with pytest.raises(RuntimeError):
-        await store.put_stream("file-partial00001", _failing())
+        await store.put_stream(ref, _failing())
     assert not fsspec.filesystem("memory").exists("otari-test/pa/file-partial00001")
 
 
@@ -82,7 +85,8 @@ async def test_put_stream_removes_partial_blob_on_cancellation(memory_root: str)
         await asyncio.sleep(30)
         yield b"never"
 
-    task = asyncio.create_task(store.put_stream("file-cancel000001", _slow()))
+    ref = await store.allocate("file-cancel000001")
+    task = asyncio.create_task(store.put_stream(ref, _slow()))
     await started.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -103,7 +107,8 @@ async def test_missing_blob_is_file_not_found(memory_root: str) -> None:
 @pytest.mark.asyncio
 async def test_delete_is_idempotent(memory_root: str) -> None:
     store = FsspecFileStore(memory_root)
-    ref = await store.put("file-deleteme0001", b"x")
+    ref = await store.allocate("file-deleteme0001")
+    await store.put(ref, b"x")
     await store.delete(ref)
     await store.delete(ref)
     with pytest.raises(FileNotFoundError):
@@ -133,7 +138,8 @@ async def test_backend_client_errors_become_oserror(memory_root: str) -> None:
 @pytest.mark.asyncio
 async def test_local_file_protocol_writes_under_the_root(tmp_path: Path) -> None:
     store = FsspecFileStore(f"file://{tmp_path}")
-    ref = await store.put("file-abcdef0123", b"on disk")
+    ref = await store.allocate("file-abcdef0123")
+    await store.put(ref, b"on disk")
     assert (tmp_path / "ab" / "file-abcdef0123").read_bytes() == b"on disk"
     assert await store.get(ref) == b"on disk"
 

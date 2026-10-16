@@ -18,7 +18,11 @@ self-hoster walks on day one:
 3. ``/api/v1/bootstrap`` answers with no credential and reports ``standalone``. It is
    the first request a browser makes, and a second statement of which edition
    booted.
-4. Create a user, then an API key for it (master-key admin surface).
+4. Create a budget that resets on the UTC calendar day, a user on it, then an
+   API key for it (master-key admin surface). The period puts a stored reset
+   time in front of the budget gate on every request, which SQLite reads back
+   without an offset; a gate that compared it to an aware clock refused every
+   request with a 500.
 5. Register a BYO provider credential at runtime, which is stored encrypted.
 6. Create a routing policy whose default candidate fails and whose ``on_failure``
    candidate is that BYO provider.
@@ -264,7 +268,7 @@ def mock_provider(expected_api_key: str) -> Iterator[_MockProviderServer]:
 # --------------------------------------------------------------------------- #
 
 
-def oss_edition_env(base_env: dict[str, str], secret_key: str) -> dict[str, str]:
+def oss_edition_env(base_env: dict[str, str], secret_key: str, pepper: str) -> dict[str, str]:
     """Return the environment the OSS edition boots in.
 
     Settings are dropped rather than overridden with a benign value: an override
@@ -279,6 +283,9 @@ def oss_edition_env(base_env: dict[str, str], secret_key: str) -> dict[str, str]
     # Provider credentials are encrypted at rest, so storing one (step 4) needs a
     # secret key. Generated per run and thrown away with the database.
     env["OTARI_SECRET_KEY"] = secret_key
+    # Provider copies are on by default, and the edition refuses to boot without
+    # the pepper that names a provider account. Generated per run, like the key.
+    env["OTARI_PROVIDER_ACCOUNT_PEPPER"] = pepper
     return env
 
 
@@ -529,12 +536,23 @@ def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> 
 
 
 def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
-    """Create a user and an API key for it, and return the raw key."""
+    """Create a calendar-day budget, a user on it and an API key for it, and return the raw key."""
+    status, body = _request(
+        "POST",
+        f"{base_url}{API_ROOT}/budgets",
+        headers=admin,
+        payload={"name": "OSS edition smoke", "max_budget": 100, "reset_alignment": "calendar_day"},
+    )
+    _expect(status, 200, f"POST {API_ROOT}/budgets", body)
+    budget_id = body.get("budget_id") if isinstance(body, dict) else None
+    if not isinstance(budget_id, str) or not budget_id:
+        raise SmokeFailure(f"POST {API_ROOT}/budgets returned no budget_id: {body!r}")
+
     status, body = _request(
         "POST",
         f"{base_url}{API_ROOT}/users",
         headers=admin,
-        payload={"user_id": names.user_id, "alias": "OSS edition smoke"},
+        payload={"user_id": names.user_id, "alias": "OSS edition smoke", "budget_id": budget_id},
     )
     _expect(status, 200, f"POST {API_ROOT}/users", body)
 
@@ -548,7 +566,7 @@ def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
     key = body.get("key") if isinstance(body, dict) else None
     if not isinstance(key, str) or not key:
         raise SmokeFailure(f"POST {API_ROOT}/keys returned no key: {body!r}")
-    log("Created a user and an API key")
+    log("Created a calendar-day budget, a user on it and an API key")
     return key
 
 
@@ -686,6 +704,7 @@ def main(argv: list[str] | None = None) -> int:
         # A Fernet key is urlsafe-base64 of 32 random bytes, which is why this
         # needs no cryptography import.
         secret_key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+        pepper = secrets.token_urlsafe(32)
 
         try:
             with mock_provider(names.byo_key) as provider:
@@ -699,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
                         names=names,
                     ),
                 )
-                env = oss_edition_env(dict(os.environ), secret_key)
+                env = oss_edition_env(dict(os.environ), secret_key, pepper)
                 with gateway(config_path, env, base_url, log_path):
                     smoke(base_url, provider, mock_base_url, names)
         except SmokeFailure as failure:

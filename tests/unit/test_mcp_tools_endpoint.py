@@ -2,8 +2,8 @@
 
 An application calls this once per server when it prepares a model or workflow
 run, and every proposed call from that server reuses the answer. The response is
-the whole authorized catalog or nothing (R-DISC-5), and it carries neither the
-stored URL, the credential, nor the allowlist itself (R-DISC-2).
+the whole authorized catalog or nothing, and it carries neither the stored URL,
+the credential, nor the allowlist itself.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from fastapi.testclient import TestClient
 from mcp.types import ListToolsResult, ToolAnnotations
 from mcp.types import Tool as MCPTool
 
+from conftest import InstallControlPlane
 from gateway.api.deps import reset_config
-from gateway.api.routes import _platform as platform_module
 from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
@@ -95,7 +95,7 @@ class _Platform:
 
 
 @pytest.fixture
-def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
+def platform(monkeypatch: pytest.MonkeyPatch, control_plane_transport: InstallControlPlane) -> _Platform:
     fake = _Platform()
 
     async def post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
@@ -104,7 +104,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
         payload = {"servers": fake.servers} if fake.status_code == 200 else {"detail": "refused"}
         return httpx.Response(fake.status_code, json=payload)
 
-    monkeypatch.setattr(platform_module, "_post_platform", post)
+    control_plane_transport(post)
     return fake
 
 
@@ -141,7 +141,7 @@ def test_the_live_catalog_is_returned_with_the_stored_server_revision(
         ],
         "warnings": [],
     }
-    assert response.headers["X-Otari-Request-ID"]
+    assert response.headers["Otari-Request-ID"]
 
 
 def test_the_response_discloses_no_url_credential_or_allowlist(
@@ -149,7 +149,7 @@ def test_the_response_discloses_no_url_credential_or_allowlist(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    """R-DISC-2, R-CAT-2: the allowlist's effect shows; its contents never do."""
+    """The allowlist's effect shows; its contents never do."""
     platform.servers = [_stored(allowed_tools=["create_issue", "never_listed"]).model_dump(mode="json")]
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
@@ -165,7 +165,7 @@ def test_a_tool_the_allowlist_excludes_is_not_exposed(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    """R-DISC-1: a server-added tool is not exposed just because it was listed."""
+    """A server-added tool is not exposed just because it was listed."""
     session.tools.append(MCPTool(name="delete_repo", description="danger", inputSchema={"type": "object"}))
     platform.servers = [_stored(allowed_tools=["create_issue"]).model_dump(mode="json")]
 
@@ -179,7 +179,7 @@ def test_an_explicit_empty_allowlist_denies_every_tool_without_connecting(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    """R-RES-4: an operator's deny-all is answered without touching the server."""
+    """An operator's deny-all is answered without touching the server."""
     stored = _stored(allowed_tools=[])
     platform.servers = [stored.model_dump(mode="json")]
 
@@ -252,7 +252,7 @@ def test_an_unusable_descriptor_is_omitted_and_labeled(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    """R-SCHEMA-3: the one permitted partial result, and its siblings survive."""
+    """The one permitted partial result, and its siblings survive."""
     session.tools.append(
         MCPTool(
             name="broken",
@@ -319,7 +319,7 @@ def test_an_unknown_schema_keyword_survives_the_round_trip(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    """R-SCHEMA-2: Otari never truncates, rewrites, or drops a keyword."""
+    """Otari never truncates, rewrites, or drops a keyword."""
     schema = {
         "$schema": "https://example.com/draft/2044-01/schema",
         "type": "object",

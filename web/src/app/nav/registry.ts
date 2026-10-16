@@ -5,6 +5,7 @@ import {
   FiBox,
   FiCode,
   FiDollarSign,
+  FiGitBranch,
   FiGlobe,
   FiGrid,
   FiHome,
@@ -61,8 +62,14 @@ const BASE_NAV_SECTIONS = [
     id: "index",
     items: [
       // Ungated on every axis: the index is the deployment's own front page and
-      // reads whatever it is allowed to.
-      { to: "/", label: "Overview", icon: FiHome },
+      // reads whatever it is allowed to. The one row a caller with no
+      // organization keeps, since it is where they are told how to get in.
+      {
+        to: "/",
+        label: "Overview",
+        icon: FiHome,
+        reachableWithoutOrganization: true,
+      },
     ],
   },
   {
@@ -83,6 +90,13 @@ const BASE_NAV_SECTIONS = [
         label: "Activity",
         surface: "usage",
         icon: FiActivity,
+      },
+      // Agent sessions, read from the trace API rather than the usage log.
+      {
+        to: "/sessions",
+        label: "Sessions",
+        surface: "traces",
+        icon: FiGitBranch,
       },
       {
         to: "/usage",
@@ -161,11 +175,17 @@ const BASE_NAV_SECTIONS = [
         // leads with Policies because `/routing` *is* the policies page, not to
         // make a parent reachable.
         children: [
-          { to: "/tools/web-search", label: "Web search", icon: FiGlobe },
+          {
+            to: "/tools/web-search",
+            label: "Web search",
+            icon: FiGlobe,
+            badge: "Beta",
+          },
           {
             to: "/tools/code-execution",
             label: "Code execution",
             icon: FiCode,
+            badge: "Beta",
           },
           { to: "/tools/mcp-servers", label: "MCP servers", icon: FiServer },
         ],
@@ -656,6 +676,21 @@ export function navLabelForPath(pathname: string): string | undefined {
     (one) => one.to === pathname,
   )
   return child?.label ?? navItemForPath(pathname)?.label
+}
+
+/** Names for the chrome destinations, which no registry entry declares. */
+const CHROME_PAGE_LABELS: Readonly<Record<string, string | undefined>> = {
+  "/docs": "Documentation",
+  "/account": "Account",
+  "/invitations": "Invitations",
+}
+
+/**
+ * What to call the page at this pathname, rail or chrome, for the tab title
+ * and the breadcrumb alike, so the two cannot name one page differently.
+ */
+export function pageLabelForPath(pathname: string): string | undefined {
+  return navLabelForPath(pathname) ?? CHROME_PAGE_LABELS[pathname]
 }
 
 /**

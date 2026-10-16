@@ -42,10 +42,16 @@ To store provider credentials through the dashboard instead, leave
 ## Start
 
 ```bash
+# Provider copies of attached files need a pepper of their own. Compose reads .env.
+grep -qs OTARI_PROVIDER_ACCOUNT_PEPPER .env || echo "OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)" >> .env
 docker compose pull
 docker compose up -d
 curl http://localhost:8000/api/v1/health
 ```
+
+Otari refuses to start without `OTARI_PROVIDER_ACCOUNT_PEPPER` while provider
+copies are on, which they are by default. See
+[Provider copies](configuration.md#provider-copies).
 
 The first startup on an empty database creates an API key and prints it once.
 Find the `tk-` value in the Otari container logs. You can also create a key

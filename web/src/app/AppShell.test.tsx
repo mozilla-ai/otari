@@ -24,6 +24,7 @@ import {
   callerOrganizationMembership,
   HOSTED_SURFACES,
   organizationContext,
+  pendingOrganizationInvitation,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
@@ -83,6 +84,10 @@ function renderShell(
     memberships?: CallerOrganizationMembership[]
     /** Whether the deployment administration surface admits this caller. */
     operator?: boolean
+    /** The caller belongs to no organization, so the context read 404s. */
+    noOrganization?: boolean
+    /** How many invitations are waiting on the caller. */
+    pendingInvitations?: number
   } = {},
 ) {
   const entitlements: Entitlements = {
@@ -117,6 +122,22 @@ function renderShell(
     if (path.includes(`${API_ROOT}/settings`)) {
       return Response.json(options.settings ?? SETTINGS_WITH_PRICING)
     }
+    if (path.startsWith(`${API_ROOT}/organizations/me/pending-memberships`)) {
+      const waiting = Array.from(
+        { length: options.pendingInvitations ?? 0 },
+        (_, index) =>
+          pendingOrganizationInvitation({
+            organization_member_id: `44444444-4444-4444-4444-44444444444${index}`,
+          }),
+      )
+      return Response.json({ data: waiting, count: waiting.length })
+    }
+    if (options.noOrganization && path === `${API_ROOT}/organizations/me`) {
+      return Response.json(
+        { detail: "Organization not found" },
+        { status: 404 },
+      )
+    }
     // The membership context, which carries the caller axis. An operator by
     // default, because eight deployment-wide rows declare that axis and every case
     // below that is about the *surface* or *entitlement* axis wants a whole
@@ -148,6 +169,7 @@ function renderShell(
     // for that same path would be a duplicate route.
     routes: [
       { path: "/providers", element: <div>PROVIDERS PAGE</div> },
+      { path: "/invitations", element: <div>INVITATIONS PAGE</div> },
       {
         path: "/organization/provider-keys",
         element: <div>ORG PROVIDER KEYS PAGE</div>,
@@ -500,6 +522,65 @@ describe("AppShell responsive layout", () => {
   })
 })
 
+describe("AppShell for a caller with no organization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it("draws the index alone, with no way into an organization rail", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), { noOrganization: true })
+
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar" })
+    expect(
+      await within(sidebar).findByRole("link", { name: "Overview" }),
+    ).toBeInTheDocument()
+    // A 404 is no organization, not an unavailable context, which would fail
+    // open onto the operator rows and the organization rail.
+    expect(within(sidebar).getAllByRole("link")).toHaveLength(1)
+    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+  })
+})
+
+describe("the invitations page in the chrome", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it("titles the tab and the breadcrumb", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), { url: "/invitations" })
+
+    expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
+      "Invitations",
+    )
+    expect(document.title).toBe("Invitations · Otari")
+  })
+
+  it("closes the mobile drawer when the switcher opens the inbox", async () => {
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { pendingInvitations: 1 })
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(
+      await screen.findByRole("button", { name: /^Switch workspace/ }),
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "1 invitation waiting" }),
+    )
+
+    expect(await screen.findByText("INVITATIONS PAGE")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Open navigation" }),
+    ).toHaveAttribute("aria-expanded", "false")
+  })
+})
+
 describe("the rail's closing rules", () => {
   // The footer block and the closing band each draw a rule. Between them sits
   // one row, the way onto the organization rail, and on that rail it is gated
@@ -544,6 +625,8 @@ describe("AppShell surface gating", () => {
   it("renders every destination the deployment serves", async () => {
     mockMatchMedia(false)
     await renderShell()
+    // The rail beyond Overview waits on the membership read.
+    await screen.findByRole("button", { name: "Tools" })
     // Every label, not a sample: a surface misspelled on a NAV entry hides that
     // destination in every deployment, and only the full list catches it. Kept
     // as an exact comparison rather than a loop of presence checks, because a
@@ -575,10 +658,9 @@ describe("AppShell surface gating", () => {
     // Same reasoning as above, for the other context: the organization rail is
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
-    // Awaited on Providers rather than on any other row: it is the one that
-    // declares `operatorOnly`, so it arrives with the membership context while
-    // the rest paint with the first render. Waiting on one of those would leave
-    // the snapshot below a race, which it measurably is without this.
+    // Awaited on Providers rather than on any other row: it declares
+    // `operatorOnly`, so it is the last to settle once the membership context
+    // arrives. Waiting on another row would leave the snapshot below a race.
     await within(
       screen.getByRole("navigation", { name: "Sidebar" }),
     ).findByRole("link", { name: "Providers" })
@@ -722,6 +804,14 @@ describe("AppShell entitlement gating", () => {
       await screen.findByText("Deployment providers is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
+    // The sidebar is behind a menu on a phone, so the panel carries its own way
+    // out and its copy names the menu.
+    expect(
+      screen.getByText(/Choose another page from the menu/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Go to Overview" }),
+    ).toBeInTheDocument()
   })
 
   it("leaves an operator-only route to the page, whichever way the gate answers", async () => {
@@ -1107,17 +1197,21 @@ describe("AppShell entitlement gating", () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
     await renderShell()
+    // The rail beyond Overview waits on the membership read.
+    await screen.findByRole("button", { name: "Tools" })
 
     // Shut to start. The panel stays mounted so it has a height to animate from,
     // but it is `hidden` and `aria-hidden` while shut, so its rows are reachable
     // by neither tab nor a screen reader until the group opens.
-    expect(screen.queryByRole("link", { name: "Web search" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Web search, Beta" })).toBeNull()
     expect(screen.getByText("Web search").closest("[hidden]")).not.toBeNull()
 
     await user.click(screen.getByRole("button", { name: "Tools" }))
-    expect(screen.getByRole("link", { name: "Web search" })).toBeInTheDocument()
     expect(
-      screen.getByRole("link", { name: "Code execution" }),
+      screen.getByRole("link", { name: "Web search, Beta" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Code execution, Beta" }),
     ).toBeInTheDocument()
   })
 
@@ -1130,7 +1224,9 @@ describe("AppShell entitlement gating", () => {
     expect(
       await screen.findByRole("button", { name: "Tools", expanded: true }),
     ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Web search" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Web search, Beta" }),
+    ).toBeInTheDocument()
   })
 
   it("signs out from the account menu rather than the page header", async () => {
@@ -1390,15 +1486,17 @@ describe("AppShell entitlement gating", () => {
     // bookmark was the only way back to them.
     window.localStorage.setItem("otari.dashboard.sidebarCollapsed", "1")
     await renderShell()
+    // The rail beyond Overview waits on the membership read.
+    await screen.findByRole("button", { name: "Tools" })
 
     expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
     await user.click(screen.getByRole("button", { name: "Tools" }))
 
     expect(
-      await screen.findByRole("link", { name: "Web search" }),
+      await screen.findByRole("link", { name: "Web search, Beta" }),
     ).toHaveAttribute("href", "/tools/web-search")
     expect(
-      screen.getByRole("link", { name: "Code execution" }),
+      screen.getByRole("link", { name: "Code execution, Beta" }),
     ).toBeInTheDocument()
   })
 

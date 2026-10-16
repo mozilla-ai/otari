@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from gateway.services.web_search_providers import WebSearchProviderError, provider_search
+from gateway.services.web_search_providers import WebSearchProviderError, is_sendable_api_key, provider_search
 
 TAVILY_HOST = "api.tavily.com"
 BRAVE_HOST = "api.search.brave.com"
@@ -151,24 +151,36 @@ async def test_tavily_missing_results_list_is_an_error_not_an_empty_search() -> 
 async def test_upstream_error_status_becomes_a_provider_error() -> None:
     client, _ = _client(httpx.Response(429, text="slow down"))
     async with client:
-        with pytest.raises(WebSearchProviderError, match="429"):
+        with pytest.raises(WebSearchProviderError, match="429") as raised:
             await provider_search(provider="tavily", api_key="tvly-x", query="q", client=client)
+    assert (raised.value.tag, raised.value.status) == ("http_error", 429)
 
 
 @pytest.mark.asyncio
 async def test_transport_failure_becomes_a_provider_error() -> None:
     client, _ = _client(httpx.ConnectError("no route"))
     async with client:
-        with pytest.raises(WebSearchProviderError, match="could not be reached"):
+        with pytest.raises(WebSearchProviderError, match="could not be reached") as raised:
             await provider_search(provider="brave", api_key="brv-x", query="q", client=client)
+    assert (raised.value.tag, raised.value.status) == ("network", None)
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_is_tagged_as_one() -> None:
+    client, _ = _client(httpx.ReadTimeout("slow"))
+    async with client:
+        with pytest.raises(WebSearchProviderError) as raised:
+            await provider_search(provider="tavily", api_key="tvly-x", query="q", client=client)
+    assert (raised.value.tag, raised.value.status) == ("timeout", None)
 
 
 @pytest.mark.asyncio
 async def test_non_json_body_becomes_a_provider_error() -> None:
     client, _ = _client(httpx.Response(200, text="<html>maintenance</html>"))
     async with client:
-        with pytest.raises(WebSearchProviderError, match="not JSON"):
+        with pytest.raises(WebSearchProviderError, match="not JSON") as raised:
             await provider_search(provider="tavily", api_key="tvly-x", query="q", client=client)
+    assert raised.value.tag == "invalid_response"
 
 
 @pytest.mark.asyncio
@@ -203,6 +215,26 @@ async def test_brave_sends_no_freshness_without_a_time_range() -> None:
         await provider_search(provider="brave", api_key="brv-x", query="q", client=client)
 
     assert "freshness" not in recorder.requests[0].url.params
+
+
+@pytest.mark.parametrize(("country", "sent"), [("de", "DE"), ("US", "US"), ("germany", None), ("d1", None)])
+@pytest.mark.asyncio
+async def test_brave_sends_only_a_two_letter_country(country: str, sent: str | None) -> None:
+    client, recorder = _client(httpx.Response(200, json=BRAVE_OK))
+    async with client:
+        await provider_search(provider="brave", api_key="brv-x", query="q", options={"country": country}, client=client)
+
+    assert recorder.requests[0].url.params.get("country") == sent
+
+
+@pytest.mark.asyncio
+async def test_tavily_is_never_sent_a_country_code() -> None:
+    """Tavily names a country in full, so a two-letter code would be refused or misread."""
+    client, recorder = _client(httpx.Response(200, json=TAVILY_OK))
+    async with client:
+        await provider_search(provider="tavily", api_key="tvly-x", query="q", options={"country": "de"}, client=client)
+
+    assert "country" not in json.loads(recorder.requests[0].content)
 
 
 @pytest.mark.asyncio
@@ -262,3 +294,23 @@ async def test_a_caller_ceiling_reaches_the_provider(provider: str) -> None:
     request = recorder.requests[0]
     asked = json.loads(request.content)["max_results"] if provider == "tavily" else request.url.params["count"]
     assert int(asked) == 15
+
+
+@pytest.mark.asyncio
+async def test_a_key_that_cannot_go_in_a_header_is_not_quoted_in_the_error() -> None:
+    """The HTTP client's own error for an illegal header value quotes the whole header."""
+    client, recorder = _client(httpx.Response(200, json=TAVILY_OK))
+    async with client:
+        with pytest.raises(WebSearchProviderError) as raised:
+            await provider_search(provider="tavily", api_key="tvly-SECRET1234\n", query="q", client=client)
+
+    assert "SECRET1234" not in str(raised.value)
+    assert recorder.requests == []
+
+
+@pytest.mark.parametrize(
+    ("api_key", "sendable"),
+    [("tvly-abc", True), ("", False), ("tvly abc", False), ("tvly\nabc", False), ("tvly\x7fabc", False)],
+)
+def test_only_a_key_with_no_whitespace_or_control_character_is_sendable(api_key: str, sendable: bool) -> None:
+    assert is_sendable_api_key(api_key) is sendable

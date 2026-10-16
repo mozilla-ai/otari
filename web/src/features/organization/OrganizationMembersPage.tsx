@@ -3,6 +3,7 @@ import { useMemo, useState } from "react"
 import {
   FiCheckCircle,
   FiEdit2,
+  FiSend,
   FiSlash,
   FiUserMinus,
   FiXCircle,
@@ -10,6 +11,7 @@ import {
 
 import type {
   Budget,
+  BulkInviteOrganizationMembersResult,
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
   MemberAttribution,
@@ -31,12 +33,13 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
+import { TextArea } from "@/design-system/forms/TextArea"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Disclosure } from "@/design-system/navigation/Disclosure"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { budgetLabeler } from "@/features/budgets/budgetLabel"
 import {
@@ -51,9 +54,12 @@ import {
   useUpdateScopedBudget,
 } from "@/shared/api/budgets"
 import {
+  useBulkInviteOrganizationMembers,
+  useDeploymentOperator,
   useInviteOrganizationMember,
   useOrganizationContext,
   useOrganizationMembersPage,
+  useReissueOrganizationMemberInvitation,
   useRemoveOrganizationMember,
   useRevokeOrganizationMemberInvitation,
   useUpdateOrganizationMember,
@@ -74,8 +80,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 import {
   asMembershipRole,
   canManage,
-  isDeploymentOperator,
-  MEMBERSHIP_ROLES,
+  MEMBERSHIP_ROLE_OPTIONS,
   memberLabel,
   memberRowKey,
   membershipChangeBlockedReason,
@@ -129,11 +134,6 @@ interface WorkspacePlacement {
 // the same fact are findable from one another.
 const DEPLOYMENT_WIDE_COLUMNS = new Set(["access", "spend"])
 
-const ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
-  value: role,
-  label: membershipLabel(role),
-}))
-
 /**
  * The frozen dot-and-word: a square mark, an uppercase word in mono, and ink
  * that says how much to care. No chip, because a chip is a box and this page
@@ -157,11 +157,13 @@ function StatusMark({ status }: { status: string }) {
               ink: "text-muted",
               word: membershipLabel(status),
             }
-          : {
-              dot: "bg-text-subtle",
-              ink: "text-subtle",
-              word: membershipLabel(status),
-            }
+          : status === "expired"
+            ? { dot: "bg-warning", ink: "text-muted", word: "Invite expired" }
+            : {
+                dot: "bg-text-subtle",
+                ink: "text-subtle",
+                word: membershipLabel(status),
+              }
   return (
     <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
       <Dot className={dot} />
@@ -170,11 +172,104 @@ function StatusMark({ status }: { status: string }) {
   )
 }
 
+// An invited row whose link has passed its expiry, whether or not anyone opened it.
+function invitationExpired(member: OrganizationMember): boolean {
+  return (
+    member.status === "invited" &&
+    Boolean(member.invitation_expires_at) &&
+    new Date(member.invitation_expires_at ?? "").getTime() <= Date.now()
+  )
+}
+
+// Addresses pasted as a list, separated by commas, semicolons or whitespace,
+// deduplicated without regard to case.
+export function parseAddresses(text: string): string[] {
+  const seen = new Set<string>()
+  return text.split(/[\s,;]+/).filter((address) => {
+    const key = address.toLowerCase()
+    if (address === "" || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+// After an invite or a reissue: whether it was emailed, and the link to share
+// when it was not. A delivered link goes to the invitee's mailbox alone.
+function InvitationLinkDialog({
+  result,
+  isOpen,
+  onClose,
+  title,
+}: {
+  result: InviteOrganizationMemberResult
+  isOpen: boolean
+  onClose: () => void
+  title: string
+}) {
+  const acceptLink = result.accept_link
+    ? absoluteDashboardLink(result.accept_link)
+    : null
+  return (
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title={title}
+      // Dismissable only once the email carried the link. When it did not,
+      // this is the only place the link is shown, so the acknowledgement is
+      // the way out rather than one of two.
+      isDismissable={result.mail_sent}
+      submitLabel="Done"
+      hideCancel
+      onSubmit={onClose}
+      isPending={false}
+    >
+      <InfoBanner>
+        {result.mail_sent ? (
+          <>
+            An email with an accept link was sent to{" "}
+            <strong>{result.email}</strong>.
+          </>
+        ) : result.mail_limited ? (
+          <>
+            Otari held the email back: this organization or this address has had
+            its share of invitation emails for today. Share this link with{" "}
+            <strong>{result.email}</strong> yourself.
+          </>
+        ) : (
+          // Not "mail isn't configured": mail_sent is also false when a
+          // configured transport's send failed, and that copy would send an
+          // operator to debug a configuration that may be fine.
+          <>
+            Otari did not send the email. Share this link with{" "}
+            <strong>{result.email}</strong> yourself.
+          </>
+        )}
+      </InfoBanner>
+      {acceptLink ? (
+        <>
+          <CopyableValue value={acceptLink} label="Accept link">
+            <span className="break-all text-xs">{acceptLink}</span>
+          </CopyableValue>
+          <p className="text-xs text-muted">
+            Whoever opens it can join as {result.email}, and may choose its
+            first password, so send it only to them. It works once, until{" "}
+            {formatDateTime(result.expires_at)}. Lost it? Reissue the invitation
+            from the members list for a new one.
+          </p>
+        </>
+      ) : null}
+    </FormDialog>
+  )
+}
+
 // Adding someone is an address plus a role, and optionally the workspaces to
-// drop them into once they accept. The membership lands `invited`, and every
-// deployment gets an accept link to share: emailed as well where mail can be
-// sent, and the only way in where it cannot, since claiming an identity through
-// signup needs mail and accepting with a password does not.
+// drop them into once they accept. The membership lands `invited`. The accept
+// link is emailed where mail can be sent, and comes back to share only when
+// the email did not go out: the only way in on a deployment without mail,
+// since claiming an identity through signup needs mail and accepting with a
+// password does not.
 function InviteMemberForm({
   isOpen,
   onClose,
@@ -183,6 +278,7 @@ function InviteMemberForm({
   onClose: () => void
 }) {
   const invite = useInviteOrganizationMember()
+  const bulkInvite = useBulkInviteOrganizationMembers()
   const { mail_ready } = useDeployment()
   const workspaces = useWorkspaces()
   const { selected } = useSelectedWorkspace()
@@ -190,7 +286,9 @@ function InviteMemberForm({
   const [role, setRole] = useState<MembershipRole>("member")
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
   const [result, setResult] = useState<InviteOrganizationMemberResult>()
-  const trimmed = email.trim()
+  const [outcomes, setOutcomes] =
+    useState<BulkInviteOrganizationMembersResult>()
+  const addresses = parseAddresses(email)
 
   // Seeded once the workspace list answers, and only then: the default is a
   // starting point the operator can clear, not a value re-imposed on every
@@ -230,8 +328,7 @@ function InviteMemberForm({
     )
 
   const submit = () => {
-    const body: InviteOrganizationMemberRequest = {
-      email: trimmed,
+    const body: Omit<InviteOrganizationMemberRequest, "email"> = {
       role,
       // Omitted rather than sent empty: no assignment is not the same request
       // as an empty list of them.
@@ -245,54 +342,81 @@ function InviteMemberForm({
             )
           : null,
     }
-    invite.mutate(body, { onSuccess: setResult })
+    if (addresses.length === 1) {
+      invite.mutate({ ...body, email: addresses[0] }, { onSuccess: setResult })
+      return
+    }
+    bulkInvite.mutate(
+      { ...body, emails: addresses },
+      { onSuccess: setOutcomes },
+    )
   }
 
-  // After a successful invite: whether it was emailed, and the link either way,
-  // so an operator can forward it even when the email did go out.
-  if (result) {
-    const acceptLink = absoluteDashboardLink(result.accept_link)
+  if (outcomes) {
+    const { invited, failed } = outcomes
+    const unsent = invited.filter((one) => !one.mail_sent).length
+    const limited = invited.some((one) => one.mail_limited)
     return (
       <FormDialog
         isOpen={isOpen}
         onOpenChange={(open) => {
           if (!open) onClose()
         }}
-        title="Invitation"
-        // Dismissable only once the email carried the link. When it did not,
-        // this is the only place the link is shown, so the acknowledgement is
-        // the way out rather than one of two.
-        isDismissable={result.mail_sent}
+        title="Invitations"
+        // Same rule as the single result: a link that was not emailed is shown
+        // only here, so the acknowledgement is the way out.
+        isDismissable={unsent === 0}
         submitLabel="Done"
+        hideCancel
         onSubmit={onClose}
         isPending={false}
       >
         <InfoBanner>
-          {result.mail_sent ? (
-            <>
-              An email with an accept link was sent to{" "}
-              <strong>{result.email}</strong>. You can also share the link
-              yourself.
-            </>
-          ) : (
-            // Not "mail isn't configured": mail_sent is also false when a
-            // configured transport's send failed, and that copy would send an
-            // operator to debug a configuration that may be fine.
-            <>
-              Otari did not send the email. Share this link with{" "}
-              <strong>{result.email}</strong> yourself.
-            </>
-          )}
+          Invited {invited.length} of {invited.length + failed.length}.
+          {unsent > 0
+            ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; share those links yourself.`
+            : null}
+          {limited
+            ? " Some were held back because this organization or an address has had its share of invitation emails for today."
+            : null}
         </InfoBanner>
-        <CopyableValue value={acceptLink} label="Accept link">
-          <span className="break-all text-xs">{acceptLink}</span>
-        </CopyableValue>
-        <p className="text-xs text-muted">
-          Whoever opens it can join as {result.email}, and choose its first
-          password if that address has never signed in, so send it only to them.
-          It works once, until {formatDateTime(result.expires_at)}.
-        </p>
+        <ul className="flex flex-col gap-3">
+          {failed.map((one) => (
+            <li key={one.email} className="flex flex-col gap-1">
+              <strong className="break-all text-sm">{one.email}</strong>
+              <span className="text-xs text-danger">{one.detail}</span>
+            </li>
+          ))}
+          {invited.map((one) => (
+            <li key={one.invitation_id} className="flex flex-col gap-1">
+              <strong className="break-all text-sm">{one.email}</strong>
+              {one.mail_sent || !one.accept_link ? (
+                <span className="text-xs text-muted">Email sent.</span>
+              ) : (
+                <CopyableValue
+                  value={absoluteDashboardLink(one.accept_link)}
+                  label={`Accept link for ${one.email}`}
+                >
+                  <span className="break-all text-xs">
+                    {absoluteDashboardLink(one.accept_link)}
+                  </span>
+                </CopyableValue>
+              )}
+            </li>
+          ))}
+        </ul>
       </FormDialog>
+    )
+  }
+
+  if (result) {
+    return (
+      <InvitationLinkDialog
+        result={result}
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Invitation"
+      />
     )
   }
 
@@ -302,33 +426,38 @@ function InviteMemberForm({
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
-      title="Invitation"
-      submitLabel="Invite member"
+      title="Invite member"
+      submitLabel={
+        addresses.length > 1
+          ? `Invite ${addresses.length} members`
+          : "Invite member"
+      }
       onSubmit={submit}
-      isPending={invite.isPending}
-      isSubmitDisabled={trimmed === ""}
+      isPending={invite.isPending || bulkInvite.isPending}
+      isSubmitDisabled={addresses.length === 0}
       isDirty={isDirty}
-      error={invite.error}
+      error={invite.error ?? bulkInvite.error}
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Email address"
+        <TextArea
+          label="Email addresses"
           value={email}
           onChange={setEmail}
-          placeholder="alice@example.com"
+          placeholder="alice@example.com, bob@example.com"
+          rows={2}
           isRequired
-          autoFocus
+          className="sm:col-span-2"
           description={
             mail_ready
-              ? "An email with an accept link is sent here, and you get the same link to share. The membership becomes active once they follow it."
-              : "This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
+              ? "One or more, separated by commas or new lines. An email with an accept link is sent here. The membership becomes active once they follow it."
+              : "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
           }
         />
         <Select
           label="Role"
           value={role}
           onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
-          options={ROLE_OPTIONS}
+          options={MEMBERSHIP_ROLE_OPTIONS}
           shouldReserveMessage={false}
         />
       </div>
@@ -396,7 +525,7 @@ function MemberEditor({
   defaultByWorkspace: ReadonlyMap<string, WorkspaceBudgetDefault>
   placements: WorkspacePlacement[]
   /**
-   * Whether this caller isOperator the deployment, which two halves of this form
+   * Whether this caller operates the deployment, which two halves of this form
    * need and the rest does not. Model access writes the gateway's own `users`
    * row and a workspace ceiling is a `scoped_budgets` row; both are
    * deployment-wide since #821, while placing somebody in a workspace is the
@@ -673,7 +802,7 @@ function MemberEditor({
                         onChange={(next) =>
                           setRow(workspace.id, { role: next })
                         }
-                        options={ROLE_OPTIONS}
+                        options={MEMBERSHIP_ROLE_OPTIONS}
                         disabled={!row.member}
                       />
                     </td>
@@ -723,6 +852,8 @@ export function OrganizationMembersPage() {
   const update = useUpdateOrganizationMember()
   const remove = useRemoveOrganizationMember()
   const revoke = useRevokeOrganizationMemberInvitation()
+  const reissue = useReissueOrganizationMemberInvitation()
+  const [reissued, setReissued] = useState<InviteOrganizationMemberResult>()
 
   // Three of this page's reads are deployment-wide (`/users`, `/budgets`,
   // `/scoped-budgets`) and have answered 403 to a tenant since #821. They are
@@ -732,7 +863,7 @@ export function OrganizationMembersPage() {
   // (otari#838). What those reads feed is withheld with them rather than left
   // rendering an em dash, which on this table cannot be told apart from "this
   // member has no gateway identity yet".
-  const isOperator = isDeploymentOperator(context.data)
+  const { isOperator } = useDeploymentOperator()
   const updateUser = useUpdateUser()
   // The roster row carries where its member is and what they may spend there,
   // and the operator-only spend figures with it (otari#1381). The page used to
@@ -893,7 +1024,7 @@ export function OrganizationMembersPage() {
                 }
                 value={member.role}
                 disabled={Boolean(blocked) || update.isPending}
-                options={ROLE_OPTIONS}
+                options={MEMBERSHIP_ROLE_OPTIONS}
                 onChange={(value) => {
                   const role = asMembershipRole(value)
                   if (member.organization_member_id && role) {
@@ -928,7 +1059,9 @@ export function OrganizationMembersPage() {
           return spendRow?.blocked ? (
             <StatusMark status="blocked" />
           ) : (
-            <StatusMark status={member.status} />
+            <StatusMark
+              status={invitationExpired(member) ? "expired" : member.status}
+            />
           )
         },
       },
@@ -1007,14 +1140,23 @@ export function OrganizationMembersPage() {
             context: activeContext,
             members: rows,
           })
-          // An invited row's only action is Revoke: it has nothing to demote
-          // or reassign yet, and Remove's own guard (membershipChangeBlockedReason)
-          // already refuses a row with no organization_member_id, which every
-          // invited row here has, so Remove would otherwise render enabled and
-          // do the wrong thing on a pending invitation.
+          // An invited row's actions are about its link, expired or not: Reissue
+          // sends a new one (the way back for a lost link), Revoke withdraws
+          // it. It has nothing to demote or reassign yet, and Remove would do
+          // the wrong thing on a pending invitation.
           if (member.status === "invited" && member.invitation_id) {
+            const invitationId = member.invitation_id
             return (
               <RowActionRow>
+                <RowAction
+                  icon={FiSend}
+                  label="Reissue"
+                  ariaLabel={`Reissue the invitation to ${memberLabel(member)}`}
+                  isDisabled={!manages || reissue.isPending}
+                  onPress={() =>
+                    reissue.mutate(invitationId, { onSuccess: setReissued })
+                  }
+                />
                 <RowAction
                   icon={FiXCircle}
                   label="Revoke"
@@ -1084,6 +1226,8 @@ export function OrganizationMembersPage() {
     isOperator,
     updateUser.isPending,
     updateUser.mutate,
+    reissue.isPending,
+    reissue.mutate,
     placementsByUser,
   ])
 
@@ -1111,10 +1255,35 @@ export function OrganizationMembersPage() {
             member's name and the Spend column, neither of which a caller who
             does not operate the deployment is shown, so they are only told to
             one. */}
-        {isOperator
-          ? "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever isOperator the gateway. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
-          : "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever isOperator the gateway."}
+        Who belongs to this organization and what each of them may do. Owners
+        and admins manage it; members and viewers read the workspaces they
+        belong to.
       </PageIntro>
+
+      <div className="-mt-2 mb-4 max-w-[38.75rem]">
+        <Disclosure heading="How roles work">
+          <div className="flex flex-col gap-2 text-sm text-muted">
+            <p>
+              Roles are fixed. Owners and admins manage the organization (its
+              workspaces, provider keys, guardrails, pricing and this roster)
+              and read its usage in full, while members and viewers read the
+              workspaces they belong to. No role set here reaches the
+              deployment's own pages, such as Settings and Accounts, which
+              belong to whoever operates the gateway.
+            </p>
+            {/* Access and Spend are shown only to an operator, so only an
+                operator is told about them. */}
+            {isOperator ? (
+              <p>
+                Budgets and API keys do not attach to this list; they attach to
+                the gateway identity a member is linked to, which is what lets a
+                key be issued to them by name. A member with no such link yet
+                shows no access or spend, and cannot own a key until one exists.
+              </p>
+            ) : null}
+          </div>
+        </Disclosure>
+      </div>
 
       {/* `remove.error`/`revoke.error` are deliberately absent: their confirm
           dialogs render each mutation's error themselves, and listing it here
@@ -1124,10 +1293,12 @@ export function OrganizationMembersPage() {
           context.error ??
           members.error ??
           update.error ??
-          // The reads and the write the row's own controls use. Without these a
+          // The reads and the writes the row's own controls use. Without these a
           // failed roster renders the access, workspace and spend cells empty as
-          // though the member simply had none, and a refused Block says nothing.
+          // though the member simply had none, and a refused Block or Reissue
+          // says nothing.
           updateUser.error ??
+          reissue.error ??
           workspaces.error
         }
       />
@@ -1149,6 +1320,15 @@ export function OrganizationMembersPage() {
         isOpen={joining}
         onClose={() => setJoining(false)}
       />
+
+      {reissued ? (
+        <InvitationLinkDialog
+          result={reissued}
+          isOpen
+          onClose={() => setReissued(undefined)}
+          title="Invitation reissued"
+        />
+      ) : null}
 
       {/* Keyed on the row: its fields seed from the member on mount only, so
           the next Edit has to arrive at a fresh form. */}
@@ -1172,6 +1352,7 @@ export function OrganizationMembersPage() {
 
       <TableScrollFrame className="otari-members-table">
         <DataTable
+          mobileLayout="cards"
           ariaLabel="Organization members"
           columns={columns}
           rows={rows}

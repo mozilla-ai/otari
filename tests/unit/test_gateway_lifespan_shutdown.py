@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 
 from gateway import main as gateway_main
 from gateway.container import build_container
@@ -34,7 +35,6 @@ from gateway.main import (
     _REFRESHER_STOP_TIMEOUT_SECONDS,
     _create_lifespan,
     _start_lifespan_workers,
-    _stop_refresher,
     _stop_refreshers,
 )
 
@@ -69,7 +69,7 @@ async def test_stop_refresher_returns_when_the_task_absorbs_its_cancellation() -
     await asyncio.sleep(0)  # let it reach its first await
 
     started = asyncio.get_running_loop().time()
-    await asyncio.wait_for(_stop_refresher(task, "test"), timeout=_REFRESHER_STOP_TIMEOUT_SECONDS + 2)
+    await asyncio.wait_for(_stop_refreshers([(task, "test")]), timeout=_REFRESHER_STOP_TIMEOUT_SECONDS + 2)
     elapsed = asyncio.get_running_loop().time() - started
 
     # It waited out the grace period rather than returning instantly, and it
@@ -116,7 +116,7 @@ async def test_stop_refresher_is_prompt_for_a_well_behaved_refresher() -> None:
     await asyncio.sleep(0)
 
     started = asyncio.get_running_loop().time()
-    await _stop_refresher(task, "test")
+    await _stop_refreshers([(task, "test")])
 
     assert asyncio.get_running_loop().time() - started < 1.0
     assert task.cancelled()
@@ -136,7 +136,7 @@ async def test_stop_refresher_logs_an_unexpected_error_instead_of_raising() -> N
     task = asyncio.create_task(explodes())
     await asyncio.sleep(0)
 
-    await _stop_refresher(task, "test")  # must not raise
+    await _stop_refreshers([(task, "test")])  # must not raise
 
     assert task.done()
 
@@ -164,7 +164,7 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
     # create_app would have put the container here. It is built with the config
     # because the file store binding reads it, and the first-run key is minted
     # through its bound key format.
-    app.state.container = build_container(config=config)
+    app.state.container = build_container(config=config, workspace_listener=None)
 
     # No asyncio.timeout wrapper: if shutdown regresses this hangs, and the
     # suite-wide pytest timeout reports it. A short bound here would be
@@ -201,7 +201,7 @@ async def _started_worker_names(config: GatewayConfig, monkeypatch: pytest.Monke
         if attribute.startswith("run_"):
             monkeypatch.setattr(gateway_main, attribute, _recording_refresher(attribute, called))
 
-    workers = _start_lifespan_workers(config, build_container(config=config))
+    workers = _start_lifespan_workers(config, build_container(config=config, workspace_listener=None))
     for task, _worker in workers:
         task.cancel()
     await asyncio.gather(*(task for task, _worker in workers), return_exceptions=True)
@@ -279,3 +279,16 @@ async def test_the_container_sweeper_stops_without_a_sandbox_or_without_reuse(
 
     assert "sandbox container sweep" not in names
     assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "sandbox container sweep"]
+
+
+@pytest.mark.asyncio
+async def test_the_idempotency_sweep_runs_while_the_header_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Records stored before the header was turned off still hold generated content, so they must still expire."""
+    names, _called = await _started_worker_names(_full_config(idempotency_retention_sec=0), monkeypatch)
+
+    assert "idempotency sweep" in names
+
+
+def test_the_idempotency_sweep_cannot_be_turned_off() -> None:
+    with pytest.raises(ValidationError):
+        GatewayConfig(idempotency_sweep_interval_sec=0)

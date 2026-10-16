@@ -14,7 +14,10 @@ import type {
   Workspace,
   WorkspaceMember,
 } from "@/client"
-import { OrganizationMembersPage } from "@/features/organization/OrganizationMembersPage"
+import {
+  OrganizationMembersPage,
+  parseAddresses,
+} from "@/features/organization/OrganizationMembersPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -51,6 +54,7 @@ function mockApi(opts: {
   // cache that is the real order.
   workspacesGate?: Promise<unknown>
   inviteResult?: unknown
+  bulkInviteResult?: unknown
   // The gateway's spend rows. The roster joins them on `attribution_user_id`
   // to show what a member may call and what they have spent, neither of which
   // is a column on the membership itself.
@@ -169,6 +173,9 @@ function mockApi(opts: {
     }
     if (url.includes(`${API_ROOT}/users`)) {
       return jsonResponse(method === "PATCH" ? users[0] : users)
+    }
+    if (url.includes(`${API_ROOT}/organizations/me/member-invitations/bulk`)) {
+      return jsonResponse(opts.bulkInviteResult)
     }
     if (url.includes(`${API_ROOT}/organizations/me/member-invitations`)) {
       if (method === "POST") {
@@ -352,7 +359,7 @@ describe("OrganizationMembersPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
     await pickOption(user, "Role", "Admin")
     // Ticked by default, since a member in no workspace can reach nothing.
     expect(await screen.findByLabelText("Production")).toBeChecked()
@@ -410,14 +417,14 @@ describe("OrganizationMembersPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
     // A draft this far along is dirty, so the way out is through the guard.
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Discard" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
 
     await user.click(screen.getByRole("button", { name: "Invite member" }))
-    expect(await screen.findByLabelText("Email address")).toHaveValue("")
+    expect(await screen.findByLabelText("Email addresses")).toHaveValue("")
   })
 
   it("reads nothing on its own account for the closed dialog", async () => {
@@ -456,7 +463,7 @@ describe("OrganizationMembersPage", () => {
 
     // The seed is a starting point, not a value re-imposed on every render:
     // typing after clearing it must not tick the box again.
-    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
     expect(production).not.toBeChecked()
   })
 
@@ -471,7 +478,7 @@ describe("OrganizationMembersPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
     // Deliberate now rather than the default: clearing the seeded workspace is
     // a choice, and the form says what it costs before the request goes.
     await user.click(await screen.findByLabelText("Production"))
@@ -535,7 +542,7 @@ describe("OrganizationMembersPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
 
     // Now the roster answers and seeds the workspace default.
     release()
@@ -609,7 +616,7 @@ describe("OrganizationMembersPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
     // Scoped: the trigger and the submit say the same thing, which is the label
     // rule, so an unscoped press is ambiguous.
     await user.click(
@@ -641,10 +648,10 @@ describe("OrganizationMembersPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("confirms the send, and still offers the link, when the email went out", async () => {
-    // The link is offered either way, so an operator can forward it over chat
-    // too. The acknowledgement is one way out of two here, since a delivered
-    // invitation leaves nothing behind that only this dialog holds.
+  it("confirms the send, and offers no link, when the email went out", async () => {
+    // A delivered link goes to the invitee's mailbox alone, so the server
+    // returns none. The acknowledgement is one way out of two here, since a
+    // delivered invitation leaves nothing behind that only this dialog holds.
     mockApi({
       members: [OWNER],
       inviteResult: {
@@ -654,7 +661,7 @@ describe("OrganizationMembersPage", () => {
         role: "member",
         status: "invited",
         mail_sent: true,
-        accept_link: "/#/accept-invitation?token=abc123",
+        accept_link: null,
         expires_at: "2026-01-08T00:00:00+00:00",
         created_at: "2026-01-01T00:00:00+00:00",
       },
@@ -665,7 +672,7 @@ describe("OrganizationMembersPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
         name: "Invite member",
@@ -677,14 +684,91 @@ describe("OrganizationMembersPage", () => {
     )
     expect(within(sent).getByText("ada@example.com")).toBeInTheDocument()
     expect(screen.queryByText(/Otari did not send the email/)).toBeNull()
+    expect(screen.queryByText(/#\/accept-invitation/)).toBeNull()
+
+    const dialog = screen.getByRole("dialog")
     expect(
-      screen.getByText(
-        `${window.location.origin}${window.location.pathname}#/accept-invitation?token=abc123`,
-      ),
+      within(dialog).getByRole("heading", { name: "Invitation" }),
     ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: "Done" }),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByRole("button", { name: "Cancel" })).toBeNull()
 
     await user.keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  it("splits pasted addresses on commas, semicolons and whitespace, once each", () => {
+    expect(
+      parseAddresses(
+        " ada@example.com, bob@example.com;\ncy@example.com  ADA@example.com,,",
+      ),
+    ).toEqual(["ada@example.com", "bob@example.com", "cy@example.com"])
+  })
+
+  it("invites several addresses in one call and reports each one", async () => {
+    const invitation = (email: string, mailSent: boolean) => ({
+      invitation_id: `invitation-${email}`,
+      organization_member_id: `membership-${email}`,
+      email,
+      role: "member",
+      status: "invited",
+      mail_sent: mailSent,
+      accept_link: mailSent ? null : `/#/accept-invitation?token=${email}`,
+      expires_at: "2026-01-08T00:00:00+00:00",
+      created_at: "2026-01-01T00:00:00+00:00",
+    })
+    const requests = mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+      bulkInviteResult: {
+        invited: [
+          invitation("ada@example.com", true),
+          invitation("bob@example.com", false),
+        ],
+        failed: [{ email: "taken@example.com", detail: "Already a member" }],
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    await screen.findByLabelText("Production")
+    await user.type(
+      screen.getByLabelText("Email addresses"),
+      "ada@example.com, taken@example.com{Enter}bob@example.com",
+    )
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Invite 3 members",
+      }),
+    )
+
+    expect(await screen.findByText(/Invited 2 of 3/)).toBeInTheDocument()
+    const posts = requests.filter(
+      (request) =>
+        request.method === "POST" && request.url.includes("member-invitations"),
+    )
+    // One request, carrying the role and workspaces for every address.
+    expect(posts).toHaveLength(1)
+    expect(posts[0].url).toContain("/member-invitations/bulk")
+    expect(posts[0].body).toEqual({
+      emails: ["ada@example.com", "taken@example.com", "bob@example.com"],
+      role: "member",
+      workspace_assignments: [{ workspace_id: "ws-1", role: "member" }],
+    })
+    expect(screen.getByText("Already a member")).toBeInTheDocument()
+    expect(screen.getByText("Email sent.")).toBeInTheDocument()
+    // Only the address whose email did not go out gets a link to share.
+    expect(
+      screen.getByText(
+        `${window.location.origin}${window.location.pathname}#/accept-invitation?token=bob@example.com`,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/token=ada@example.com/)).toBeNull()
   })
 
   it("says a link comes back to share when mail cannot be sent", async () => {
@@ -737,6 +821,108 @@ describe("OrganizationMembersPage", () => {
     expect(revoke?.url).toContain(
       `${API_ROOT}/organizations/me/member-invitations/invitation-1`,
     )
+  })
+
+  it("reissues a lost link and shows the new one to share", async () => {
+    const invited = organizationMember({
+      organization_member_id: "invited-membership",
+      user_id: "cccccccc-0000-0000-0000-000000000000",
+      email: "pending@example.com",
+      full_name: null,
+      status: "invited",
+      invitation_id: "invitation-1",
+      invitation_expires_at: "2999-01-01T00:00:00+00:00",
+    })
+    const requests = mockApi({ members: [OWNER, invited] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("pending@example.com")
+    const row = rowFor("pending@example.com")
+    expect(within(row).getByText("INVITED")).toBeInTheDocument()
+    await user.click(
+      within(row).getByRole("button", {
+        name: "Reissue the invitation to pending@example.com",
+      }),
+    )
+
+    const reissue = requests.find((request) => request.method === "POST")
+    expect(reissue?.url).toContain(
+      `${API_ROOT}/organizations/me/member-invitations/invitation-1/reissue`,
+    )
+    expect(
+      await screen.findByRole("dialog", { name: "Invitation reissued" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        `${window.location.origin}${window.location.pathname}#/accept-invitation?token=abc123`,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows an invitation that expired, with Reissue and Revoke still on offer", async () => {
+    // Opening an expired link records the expiry, and the row then offered
+    // Edit and Remove with nothing saying the link was dead.
+    const expired = organizationMember({
+      organization_member_id: "invited-membership",
+      user_id: "cccccccc-0000-0000-0000-000000000000",
+      email: "late@example.com",
+      full_name: null,
+      status: "invited",
+      invitation_id: "invitation-1",
+      invitation_expires_at: "2020-01-01T00:00:00+00:00",
+    })
+    mockApi({ members: [OWNER, expired] })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("late@example.com")
+    const row = rowFor("late@example.com")
+    expect(within(row).getByText("INVITE EXPIRED")).toBeInTheDocument()
+    expect(within(row).getByRole("button", { name: "Revoke" })).toBeEnabled()
+    expect(
+      within(row).getByRole("button", {
+        name: "Reissue the invitation to late@example.com",
+      }),
+    ).toBeEnabled()
+    expect(within(row).queryByRole("button", { name: "Edit" })).toBeNull()
+  })
+
+  it("says when the email was held back by the invitation mail limit", async () => {
+    mockApi({
+      inviteResult: {
+        invitation_id: "invitation-1",
+        organization_member_id: "invited-membership",
+        email: "new@example.com",
+        role: "member",
+        status: "invited",
+        mail_sent: false,
+        mail_limited: true,
+        accept_link: "/#/accept-invitation?token=abc123",
+        expires_at: "2026-01-08T00:00:00+00:00",
+        created_at: "2026-01-01T00:00:00+00:00",
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    await user.type(screen.getByLabelText(/Email addresses/), "new@example.com")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Invite member",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/had its share of invitation emails for today/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        `${window.location.origin}${window.location.pathname}#/accept-invitation?token=abc123`,
+      ),
+    ).toBeInTheDocument()
   })
 
   it("asks for a page of the roster rather than walking it", async () => {
@@ -1005,6 +1191,26 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     vi.restoreAllMocks()
   })
 
+  it.each([
+    ["an operator", true],
+    ["an organization owner who is not one", false],
+  ])(
+    "tells %s whose pages Settings and Accounts are",
+    async (_who, operator) => {
+      mockApi({
+        members: [OWNER],
+        context: organizationContext({ deployment_operator: operator }),
+      })
+      renderPage(<OrganizationMembersPage />)
+
+      expect(
+        await screen.findByText(
+          /which belong to whoever operates the gateway\./,
+        ),
+      ).toBeInTheDocument()
+    },
+  )
+
   it("asks for none of the deployment-wide reads", async () => {
     // /api/v1/users, /api/v1/budgets and /api/v1/scoped-budgets have refused a tenant
     // since #821. An organization owner is one, so the page must not ask: the
@@ -1158,5 +1364,17 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     await screen.findByText("Analyst")
     expect((await screen.findAllByText("All models")).length).toBeGreaterThan(0)
     expect(screen.getByText("Spend")).toBeInTheDocument()
+  })
+
+  it("keeps the intro to the essentials and puts the rest behind How roles work", async () => {
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+
+    expect(
+      await screen.findByText(/Owners and admins manage it/),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "How roles work" }))
+    expect(screen.getByText(/Roles are fixed\./)).toBeInTheDocument()
+    expect(screen.getByText(/Settings and Accounts/)).toBeInTheDocument()
   })
 })

@@ -10,11 +10,16 @@ import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import {
+  isAcceptInvitationPath,
   type PublicAuthPath,
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
-import { publicCatalogPath } from "@/features/models/publicCatalog"
+import {
+  publicCatalogHref,
+  publicCatalogPath,
+  takeRememberedModel,
+} from "@/features/models/publicCatalog"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -98,7 +103,8 @@ export default function App({
  * again.
  */
 function DeploymentRoot({ hash }: { hash: string }) {
-  const { deployment_type, session_type, public_catalog } = useDeployment()
+  const { deployment_type, session_type, public_catalog, open_signup } =
+    useDeployment()
   const { isAuthenticated } = useAuth()
 
   // A hybrid gateway is data-plane only: otari.ai owns its organizations,
@@ -130,7 +136,7 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // keep validating and accepting the first token. The key forces React to
   // tear down and remount on any hash change under this prefix, which is what
   // makes "once" mean once per link rather than once per tab.
-  if (hash.startsWith("#/accept-invitation")) {
+  if (isAcceptInvitationPath(hash)) {
     return (
       <PublicPageTitle page="Accept invitation">
         <AcceptInvitationPage key={hash} />
@@ -148,8 +154,14 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // previous link's result.
   const publicAuth = publicAuthPath(hash)
   if (publicAuth) {
+    // Signup's heading is "Claim your account" where signup is closed, so its
+    // tab says the same.
+    const title =
+      publicAuth === "/signup" && !open_signup
+        ? "Claim account"
+        : PUBLIC_AUTH_TITLES[publicAuth]
     return (
-      <PublicPageTitle page={PUBLIC_AUTH_TITLES[publicAuth]}>
+      <PublicPageTitle page={title}>
         <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
       </PublicPageTitle>
     )
@@ -187,7 +199,23 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // Auth gates the router rather than living inside it: signing in is the one
   // decision no route gets to make. The route table and the shell it renders
   // into are in src/routes, wired up in src/app/router.tsx.
-  //
+  return <SignedInRoot />
+}
+
+/**
+ * The router, for a session. On its first render it reopens the model a
+ * visitor chose on the public catalog before signing in, and only where the
+ * session landed on the home page: a deep link the caller followed wins.
+ * Done before the router mounts, so the home page never flashes first.
+ */
+function SignedInRoot() {
+  useState(() => {
+    const modelId = takeRememberedModel()
+    const path = window.location.hash.replace(/^#/, "")
+    if (modelId && (path === "" || path === "/")) {
+      router.history.replace(publicCatalogHref(modelId).replace(/^#/, ""))
+    }
+  })
   // The selected workspace wraps the router because the shell's switcher and the
   // pages below it read the same selection, and it is seeded from the
   // organization context, which needs a session: inside the auth gate, never

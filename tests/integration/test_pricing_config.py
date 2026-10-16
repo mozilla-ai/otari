@@ -195,6 +195,52 @@ def test_pricing_for_unlisted_provider_is_skipped_not_fatal(
     )
 
 
+def test_pricing_for_a_decision_provider_is_loaded(postgres_url: str, test_db: Session) -> None:
+    """A decisions provider prices its models in ``pricing`` although it is not under ``providers``."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        decision_providers={"typesafe": {"api_key": "test-key"}},
+        pricing={"typesafe:jev-latest": PricingConfig(input_price_per_million=2.0, output_price_per_million=10.0)},
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app):
+            loaded = test_db.query(ModelPricing).filter(ModelPricing.model_key == "typesafe:jev-latest").first()
+            assert loaded is not None
+            assert loaded.input_price_per_million == 2.0
+    finally:
+        dispose_override()
+
+
+def test_pricing_for_a_search_tool_provider_is_loaded(postgres_url: str, test_db: Session) -> None:
+    """A search tool's ``provider:tool`` rate is kept although its provider is not under ``providers``."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        search_tools={"exa-search": {"provider": "exa", "api_key": "test-key"}},
+        pricing={"exa:exa-search": PricingConfig(input_price_per_million=5000.0, output_price_per_million=0.0)},
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app):
+            loaded = test_db.query(ModelPricing).filter(ModelPricing.model_key == "exa:exa-search").first()
+            assert loaded is not None
+            assert loaded.input_price_per_million == 5000.0
+    finally:
+        dispose_override()
+
+
 def test_pricing_loaded_from_config_normalizes_legacy_slash_format(postgres_url: str, test_db: Session) -> None:
     """Test that pricing configured with legacy slash format is normalized to colon format."""
     config = GatewayConfig(
@@ -271,33 +317,30 @@ def test_set_pricing_persists_cache_rates(
     assert data["cache_write_price_per_million"] == 3.75
 
 
-def test_set_pricing_persists_context_tiers_and_1h_cache_rate(
+def test_set_pricing_persists_context_tiers(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """The pricing API round-trips TTL-specific and long-context rates."""
+    """The pricing API round-trips long-context rates."""
     key = "anthropic:claude-sonnet-4"
     payload = {
         "model_key": key,
         "input_price_per_million": 3.0,
         "output_price_per_million": 15.0,
         "cache_write_price_per_million": 3.75,
-        "cache_write_1h_price_per_million": 6.0,
         "pricing_tiers": [
             {
                 "min_input_tokens": 200000,
                 "input_price_per_million": 6.0,
                 "output_price_per_million": 22.5,
                 "cache_read_price_per_million": None,
-                "cache_write_price_per_million": None,
-                "cache_write_1h_price_per_million": 12.0,
+                "cache_write_price_per_million": 4.5,
             }
         ],
     }
     response = client.post(f"{API_ROOT}/pricing", json=payload, headers=master_key_header)
 
     assert response.status_code == 200
-    assert response.json()["cache_write_1h_price_per_million"] == 6.0
     assert response.json()["pricing_tiers"] == payload["pricing_tiers"]
 
     # Omission preserves thresholds during a new price version, while explicit
@@ -525,8 +568,9 @@ async def test_log_usage_finds_pricing_with_legacy_slash_format(async_db: AsyncS
         def __init__(self) -> None:
             self.logs: list[UsageLog] = []
 
-        async def put(self, log: UsageLog) -> None:
+        async def put(self, log: UsageLog) -> bool:
             self.logs.append(log)
+            return True
 
         async def start(self) -> None:
             pass
@@ -569,8 +613,9 @@ async def test_log_usage_finds_pricing_with_colon_format(async_db: AsyncSession)
         def __init__(self) -> None:
             self.logs: list[UsageLog] = []
 
-        async def put(self, log: UsageLog) -> None:
+        async def put(self, log: UsageLog) -> bool:
             self.logs.append(log)
+            return True
 
         async def start(self) -> None:
             pass

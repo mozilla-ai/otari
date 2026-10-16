@@ -80,14 +80,19 @@ def test_the_gate_walks_the_root_the_app_actually_serves() -> None:
     ],
 )
 def test_gateway_env_settings_are_dropped(name: str) -> None:
-    env = smoke.oss_edition_env({name: "set-by-the-developer-shell", "PATH": "/usr/bin"}, "secret")
+    env = smoke.oss_edition_env({name: "set-by-the-developer-shell", "PATH": "/usr/bin"}, "secret", "pepper")
     assert name not in env
     assert env["PATH"] == "/usr/bin", "only the gateway's own settings are scrubbed"
 
 
 def test_secret_key_is_set_for_credential_storage() -> None:
-    env = smoke.oss_edition_env({}, "a-generated-fernet-key")
+    env = smoke.oss_edition_env({}, "a-generated-fernet-key", "pepper")
     assert env["OTARI_SECRET_KEY"] == "a-generated-fernet-key"
+
+
+def test_the_provider_account_pepper_is_set_for_provider_copies() -> None:
+    env = smoke.oss_edition_env({"OTARI_PROVIDER_ACCOUNT_PEPPER": "from-the-shell"}, "key", "a-generated-pepper")
+    assert env["OTARI_PROVIDER_ACCOUNT_PEPPER"] == "a-generated-pepper"
 
 
 # --------------------------------------------------------------------------- #

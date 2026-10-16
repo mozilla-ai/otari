@@ -26,6 +26,9 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button")
     expect(trigger.tagName).toBe("DIV")
     expect(trigger).toHaveTextContent("2 hours ago")
+    // Reachable like a button, but not dressed as one: text under the pointer
+    // stays text.
+    expect(trigger).toHaveClass("cursor-default")
   })
 
   it("hands a control the trigger's props instead of wrapping it", () => {
@@ -69,5 +72,15 @@ describe("Tooltip", () => {
     // The exact value: `design/overlays.md` states it, so moving it has to move
     // the sentence that documents it too.
     expect(root.mock.calls[0]?.[0]?.delay).toBe(300)
+  })
+
+  it("opens at once when a call site asks it to", () => {
+    const root = vi.spyOn(HeroTooltip, "Root")
+    render(
+      <Tooltip content="gw-AbC3dE…7xKp" delay={0}>
+        <span>(7xKp)</span>
+      </Tooltip>,
+    )
+    expect(root.mock.calls[0]?.[0]?.delay).toBe(0)
   })
 })

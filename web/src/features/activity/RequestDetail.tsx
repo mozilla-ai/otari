@@ -9,12 +9,14 @@ import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   buildTokenComposition,
   computeToolCost,
+  describeSkip,
   describeSource,
   findPricingSelector,
   formatLatencyCell,
   formatTokenCount,
   formatToolUsage,
   formatUSD,
+  isSkippedAttempt,
   listToolUsage,
   sortChargeLines,
 } from "./activityModel"
@@ -37,22 +39,38 @@ export function RequestDetail({
    * Null for a caller who does not operate the deployment. Pricing a model is a
    * deployment-wide write (`/pricing`), so offering the button to a tenant
    * would be offering a refusal; the sentence beside it is still theirs to read,
-   * because "this row cost nothing" is a fact about their own request.
+   * because "this row cost nothing" is a fact about their own request. The
+   * endpoint goes with the model, so the price can open in the unit that
+   * endpoint is billed in.
    */
-  onPriceModel: ((model: string) => void) | null
+  onPriceModel: ((model: string, endpoint: string) => void) | null
 }) {
   const memberLabels = useMemberAttributionLabels()
-  // A row with no cost (cost IS NULL, the same test the "Priced?" filter uses)
-  // is either a model the gateway has no price for or a request refused before
-  // it could be billed. Both are the same fix, and the row holds what the
-  // selector was, which a provider without model discovery would never have put
-  // in the catalog. A $0 cost is a real price, so it is deliberately not
-  // treated as uncosted.
-  const isUncosted = entry.cost === null
+  // A served request with no cost (cost IS NULL, the same test the "Priced?"
+  // filter uses) was metered without a price, and pricing the model is the fix;
+  // the row holds the selector, which a provider without model discovery would
+  // never have put in the catalog. A failed attempt carries no cost because
+  // nothing was billed, whatever the cause (a provider 404 for an unknown model,
+  // a provider 402 for an exhausted balance), so offering a price there points
+  // at the wrong fix; its error, shown above, names the cause, including the
+  // gateway's own refusal of an unpriced model. A $0 cost is a real price, so it
+  // is deliberately not treated as uncosted.
+  const isUnpricedServed = entry.status === "success" && entry.cost === null
   const pricingKey = findPricingSelector(entry)
+  const isSkipped = isSkippedAttempt(entry)
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
-      {entry.error_message ? (
+      {/* A skip is the walk moving past a full model, not a failure, so it is
+          worded and styled as a note rather than an error. */}
+      {isSkipped ? (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-overline">Skipped</span>
+          <p className="rounded-lg border border-border bg-surface p-3 text-xs text-foreground">
+            {describeSkip(entry)}. Routing moved this request to the next
+            candidate without calling this one.
+          </p>
+        </div>
+      ) : entry.error_message ? (
         <div className="flex flex-col gap-1.5">
           <span className="text-overline">
             Error{entry.status_code !== null ? ` (${entry.status_code})` : ""}
@@ -138,20 +156,29 @@ export function RequestDetail({
         <DetailField label="1h cache writes">
           {formatTokenCount(entry.cache_write_1h_tokens ?? null)}
         </DetailField>
+        <DetailField label="Reasoning tokens">
+          {formatTokenCount(entry.reasoning_tokens ?? null)}
+        </DetailField>
         <DetailField label="Total time">
           {formatLatencyCell(entry.latency_ms)}
+        </DetailField>
+        {/* Provider-reported compute time, best-effort (Groq, Ollama today).
+            formatLatencyCell's null placeholder means not reported, not zero.
+            Diagnostic only: Total time above stays the canonical measure. */}
+        <DetailField label="Provider time">
+          {formatLatencyCell(entry.provider_latency_ms)}
         </DetailField>
         <DetailField label="Request ID" copyValue={entry.id}>
           {entry.id}
         </DetailField>
       </div>
-      {isUncosted ? (
+      {isUnpricedServed ? (
         <div className="flex flex-wrap items-center gap-3">
           {onPriceModel ? (
             <Button
               size="sm"
               variant="ghost"
-              onPress={() => onPriceModel(pricingKey)}
+              onPress={() => onPriceModel(pricingKey, entry.endpoint)}
             >
               Price this model
             </Button>

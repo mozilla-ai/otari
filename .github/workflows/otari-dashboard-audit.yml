@@ -1,0 +1,131 @@
+name: Otari Dashboard Audit
+
+# Checks web/pnpm-lock.yaml against the npm advisory database with `pnpm audit`.
+#
+# GitHub's own coverage of the dashboard is gone, not just thin: Dependabot
+# documents pnpm support only through v10, web/ requires a newer pnpm, and the
+# dependency graph no longer reads the lockfile at all. It lists pnpm's own
+# binaries and none of the ~600 packages the dashboard installs. So no alert is
+# raised for a vulnerable dashboard dependency, and one raised earlier is closed
+# as "fixed" once the graph loses sight of the package, which is how a high
+# js-yaml advisory sat unpatched for weeks behind a resolved alert (#1001).
+#
+# Two triggers, for the two ways a lockfile becomes vulnerable:
+#   - a PR that changes the dashboard's dependencies fails here if it leaves a
+#     high or critical advisory behind;
+#   - a weekly run catches an advisory published against a lockfile nobody
+#     touched. A red scheduled run is easy to miss, so that run also keeps one
+#     tracking issue in sync: opened or updated while anything high or critical
+#     is open, closed once nothing is.
+#
+# The threshold is high because nearly everything here is a build or test tool
+# (the shipped bundle is static files), and a moderate advisory in a transitive
+# test dependency should not block an unrelated dependency PR. The tracking
+# issue and the run summary list every severity, so lower ones stay visible.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'web/package.json'
+      - 'web/pnpm-lock.yaml'
+      - 'web/pnpm-workspace.yaml'
+      - '.github/workflows/otari-dashboard-audit.yml'
+  schedule:
+    # Mondays at 07:00 UTC, after otari-lock-refresh.yml's 06:00 slot.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    # Same pin as otari-dashboard.yml: the pnpm web/package.json declares.
+    # `pnpm audit` reads the lockfile and queries the registry, so nothing is
+    # installed and no dependency code runs in this job.
+    - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      with:
+        package_json_file: web/package.json
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 'lts/*'
+
+    # One registry query, read twice: the JSON for the report and the counts
+    # for the verdict. A query that fails writes no counts, and `jq -e` then
+    # fails the step on the null, so an unreachable registry reads as an error
+    # rather than as a clean audit.
+    - name: Audit the lockfile
+      id: audit
+      run: |
+        pnpm audit --json > "$RUNNER_TEMP/audit.json" || true
+        blocking=$(jq -e '.metadata.vulnerabilities | .high + .critical' "$RUNNER_TEMP/audit.json")
+        {
+          echo '| Severity | Package | Vulnerable | Patched | Advisory |'
+          echo '| --- | --- | --- | --- | --- |'
+          jq -r '{critical: 0, high: 1, moderate: 2, low: 3, info: 4} as $rank
+            | [.advisories[]] | sort_by($rank[.severity], .module_name) | .[]
+            | "| \(.severity) | `\(.module_name)` | `\(.vulnerable_versions)` | `\(.patched_versions)` | [\(.github_advisory_id)](\(.url)) |"' \
+            "$RUNNER_TEMP/audit.json"
+        } > "$RUNNER_TEMP/report.md"
+        echo "blocking=$blocking" >> "$GITHUB_OUTPUT"
+        {
+          echo '## Dashboard dependency audit'
+          echo
+          jq -r '.metadata.vulnerabilities | "critical \(.critical), high \(.high), moderate \(.moderate), low \(.low)"' "$RUNNER_TEMP/audit.json"
+          echo
+          cat "$RUNNER_TEMP/report.md"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Sync the tracking issue
+      if: github.event_name != 'pull_request'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        BLOCKING: ${{ steps.audit.outputs.blocking }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        title='Dashboard dependencies have open high-severity advisories'
+        number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" \
+          --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+        if [ "$BLOCKING" -gt 0 ]; then
+          {
+            echo "\`pnpm audit\` found $BLOCKING high or critical advisories in \`web/pnpm-lock.yaml\`."
+            echo 'Dependabot does not cover the dashboard (#1001), so nothing else will open a PR for these.'
+            echo
+            echo 'Most are fixed inside the existing ranges: `pnpm --dir web update <package>`, then rerun `pnpm --dir web audit`.'
+            echo 'A package still flagged after that is pinned exactly by its parent, so update the parent instead.'
+            echo
+            cat "$RUNNER_TEMP/report.md"
+            echo
+            echo "Last checked by $RUN_URL"
+          } > "$RUNNER_TEMP/issue.md"
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/issue.md"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/issue.md"
+          fi
+        elif [ -n "$number" ]; then
+          gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "No high or critical advisories remain as of $RUN_URL."
+        fi
+
+    - name: Fail on high or critical advisories
+      if: steps.audit.outputs.blocking != '0'
+      env:
+        BLOCKING: ${{ steps.audit.outputs.blocking }}
+      run: |
+        echo "::error::pnpm audit found $BLOCKING high or critical advisories; see the run summary."
+        exit 1

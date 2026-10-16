@@ -3,10 +3,20 @@ import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { isValidModelKey } from "@/features/models/modelKey"
+import {
+  PRICING_UNIT_OPTIONS,
+  type PricingUnit,
+  pricingUnitOf,
+  toEnteredRate,
+  toStoredRate,
+  unitRateLabel,
+} from "@/features/models/pricingUnit"
 import { useModels } from "@/shared/api/models"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
   useCreateOrganizationPricing,
   useReplaceOrganizationPricing,
@@ -15,12 +25,10 @@ import {
 import {
   deploymentManagedPrefixes,
   findOverlapping,
-  isValidModelKey,
   managedModelReason,
   parseRate,
   periodBlockedReason,
 } from "./pricingOverride"
-import { isDeploymentOperator } from "./roles"
 
 // The form behind both Add and Edit. One component rather than two, because the
 // only difference is whether the model key is editable: the endpoint replaces a
@@ -33,9 +41,9 @@ export interface PricingOverrideDraft {
   output_price_per_million: number
   cache_read_price_per_million: number | null
   cache_write_price_per_million: number | null
-  cache_write_1h_price_per_million: number | null
   effective_from: string | null
   effective_to: string | null
+  unit: PricingUnit
 }
 
 interface RateFieldProps {
@@ -126,8 +134,7 @@ export function PricingOverrideDialog({
   // the card's own gate. The query key is shared, so an opener who may edit
   // finds it already warm from the card.
   const catalog = useModels(isOpen)
-  const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
+  const { isOperator } = useDeploymentOperator()
   const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
   const save = (draft: PricingOverrideDraft) => {
     const onDone = { onSuccess: onSaved }
@@ -154,33 +161,43 @@ export function PricingOverrideDialog({
   // Seeded on mount only, because the caller remounts this on each open. Not a
   // nicety: these values set money, and inheriting the last row's rates into a
   // different model is the expensive kind of mistake.
+  const seedUnit = pricingUnitOf(editing?.unit)
   const seed = {
     modelKey: editing?.model_key ?? initialModelKey,
-    input: rateToInput(editing?.input_price_per_million),
+    unit: seedUnit,
+    // A request or image rate is shown per thousand, the way it was entered.
+    input: rateToInput(
+      editing === undefined || seedUnit === "tokens"
+        ? editing?.input_price_per_million
+        : toEnteredRate(editing.input_price_per_million, seedUnit),
+    ),
     output: rateToInput(editing?.output_price_per_million),
     cacheRead: rateToInput(editing?.cache_read_price_per_million),
     cacheWrite: rateToInput(editing?.cache_write_price_per_million),
-    cacheWrite1h: rateToInput(editing?.cache_write_1h_price_per_million),
     from: toLocalInput(editing?.effective_from),
     to: toLocalInput(editing?.effective_to),
   }
   const [modelKey, setModelKey] = useState(seed.modelKey)
+  const [unit, setUnit] = useState<PricingUnit>(seed.unit)
+  // Switching the unit swaps the rate fields, and a remounted field must not
+  // pull focus out of the radio group the operator is still in.
+  const [unitChanged, setUnitChanged] = useState(false)
+  const focusFirstRate = editing !== undefined && !unitChanged
   const [input, setInput] = useState(seed.input)
   const [output, setOutput] = useState(seed.output)
   const [cacheRead, setCacheRead] = useState(seed.cacheRead)
   const [cacheWrite, setCacheWrite] = useState(seed.cacheWrite)
-  const [cacheWrite1h, setCacheWrite1h] = useState(seed.cacheWrite1h)
   const [from, setFrom] = useState(seed.from)
   const [to, setTo] = useState(seed.to)
   // One predicate naming every field, so what "unsaved" means cannot drift
   // from what the form holds.
   const { isDirty } = useDirtySnapshot({
     modelKey,
+    unit,
     input,
     output,
     cacheRead,
     cacheWrite,
-    cacheWrite1h,
     from,
     to,
   })
@@ -189,7 +206,6 @@ export function PricingOverrideDialog({
   const outputRate = parseRate(output)
   const cacheReadRate = parseRate(cacheRead)
   const cacheWriteRate = parseRate(cacheWrite)
-  const cacheWrite1hRate = parseRate(cacheWrite1h)
 
   const keyInvalid = !isValidModelKey(modelKey)
   // Judged on the key the request would carry: the one being typed on the add
@@ -213,14 +229,16 @@ export function PricingOverrideDialog({
           excludeId: editing?.id,
         })
 
+  // A request or image price is one rate: there is no output, and no cache.
+  const isTokens = unit === "tokens"
   const ratesInvalid =
     inputRate === undefined ||
     Number.isNaN(inputRate) ||
-    outputRate === undefined ||
-    Number.isNaN(outputRate) ||
-    Number.isNaN(cacheReadRate ?? 0) ||
-    Number.isNaN(cacheWriteRate ?? 0) ||
-    Number.isNaN(cacheWrite1hRate ?? 0)
+    (isTokens &&
+      (outputRate === undefined ||
+        Number.isNaN(outputRate) ||
+        Number.isNaN(cacheReadRate ?? 0) ||
+        Number.isNaN(cacheWriteRate ?? 0)))
 
   // A replacement states the whole row, so the endpoint requires a start: an
   // omitted one would otherwise be defaulted to now and move a stored period.
@@ -258,7 +276,21 @@ export function PricingOverrideDialog({
     blockedReason !== undefined
 
   const submit = () => {
-    if (isInvalid || inputRate === undefined || outputRate === undefined) return
+    if (isInvalid || inputRate === undefined) return
+    if (!isTokens) {
+      save({
+        model_key: modelKey.trim(),
+        input_price_per_million: toStoredRate(inputRate, unit),
+        output_price_per_million: 0,
+        cache_read_price_per_million: null,
+        cache_write_price_per_million: null,
+        effective_from: fromLocalInput(from),
+        effective_to: fromLocalInput(to),
+        unit,
+      })
+      return
+    }
+    if (outputRate === undefined) return
     save({
       model_key: modelKey.trim(),
       input_price_per_million: inputRate,
@@ -269,11 +301,9 @@ export function PricingOverrideDialog({
       cache_write_price_per_million: Number.isNaN(cacheWriteRate ?? 0)
         ? null
         : (cacheWriteRate ?? null),
-      cache_write_1h_price_per_million: Number.isNaN(cacheWrite1hRate ?? 0)
-        ? null
-        : (cacheWrite1hRate ?? null),
       effective_from: fromLocalInput(from),
       effective_to: fromLocalInput(to),
+      unit,
     })
   }
 
@@ -316,42 +346,59 @@ export function PricingOverrideDialog({
           description="For example openai:gpt-4o. A provider instance name works too."
         />
       )}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <RateField
-          label="Input, per 1M tokens"
-          value={input}
-          onChange={setInput}
-          isRequired
-          // The first field on the edit path: the model key's own `Field`, which
-          // carries `autoFocus` on the add path, is replaced by a read-only
-          // block there, and focus was landing on the frame's Close control.
-          autoFocus={editing !== undefined}
-        />
-        <RateField
-          label="Output, per 1M tokens"
-          value={output}
-          onChange={setOutput}
-          isRequired
-        />
-        <RateField
-          label="Cache read, per 1M tokens"
-          value={cacheRead}
-          onChange={setCacheRead}
-          description="Leave blank to price cached reads as fresh input."
-        />
-        <RateField
-          label="Cache write, per 1M tokens"
-          value={cacheWrite}
-          onChange={setCacheWrite}
-          description="Leave blank to price cache writes as fresh input."
-        />
-        <RateField
-          label="Cache write, 1 hour TTL"
-          value={cacheWrite1h}
-          onChange={setCacheWrite1h}
-          description="Anthropic's longer cache TTL. Blank falls back to the ordinary cache-write rate."
-        />
-      </div>
+      <RadioGroup
+        label="Priced per"
+        orientation="horizontal"
+        value={unit}
+        onChange={(value) => {
+          setUnitChanged(true)
+          setUnit(pricingUnitOf(value))
+        }}
+        options={PRICING_UNIT_OPTIONS}
+        description="What the rate bills: tokens the provider reports, each call (or rerank search unit), or each image returned. Price audio and moderation models per request."
+      />
+      {isTokens ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <RateField
+            label="Input, per 1M tokens"
+            value={input}
+            onChange={setInput}
+            isRequired
+            // The first field on the edit path: the model key's own `Field`, which
+            // carries `autoFocus` on the add path, is replaced by a read-only
+            // block there, and focus was landing on the frame's Close control.
+            autoFocus={focusFirstRate}
+          />
+          <RateField
+            label="Output, per 1M tokens"
+            value={output}
+            onChange={setOutput}
+            isRequired
+          />
+          <RateField
+            label="Cache read, per 1M tokens"
+            value={cacheRead}
+            onChange={setCacheRead}
+            description="Leave blank to price cached reads as fresh input."
+          />
+          <RateField
+            label="Cache write, per 1M tokens"
+            value={cacheWrite}
+            onChange={setCacheWrite}
+            description="Leave blank to price cache writes as fresh input."
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <RateField
+            label={unitRateLabel(unit)}
+            value={input}
+            onChange={setInput}
+            isRequired
+            autoFocus={focusFirstRate}
+          />
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <TextField
           value={from}

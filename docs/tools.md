@@ -7,8 +7,8 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 - `otari_web_fetch`, a bounded public-web fetcher
 
 Code execution and Search need separate backends. Fetch runs in the gateway.
-Search and Fetch may be combined, but web tools cannot be combined with code
-execution or MCP servers.
+One request may declare any of them together, and MCP servers beside them: see
+[Combining tools](#combining-tools).
 
 Inspect the tools available on a running deployment:
 
@@ -23,21 +23,96 @@ Unavailable but recognized tools remain in the response with
 ## Who runs a tool
 
 An `otari_*` type is executed by Otari. A provider-native web-search type is
-forwarded to the provider unless [interception](#web-search-interception) is on.
+forwarded to the provider unless [interception](#web-search-interception) or the
+request's `Otari-Web-Search` header says otherwise. Anthropic's web-fetch type
+is forwarded unless the request's [`Otari-Web-Fetch`](#anthropics-web-fetch)
+header says otherwise.
 A provider-native code-execution type is decided by the request's
-[executor](#code-execution-executor). Function tools remain the caller's
-responsibility.
+[executor](#code-execution-executor). Each is decided for every attempt on its
+own, so a fallback can run Otari's tool where the first model ran its own.
+Function tools remain the caller's responsibility.
+
+In [hybrid mode](modes.md) each attempt the platform plans is decided the same
+way, except that none is skipped, because the control plane expects a report for
+every attempt it planned: a request one of whose attempts Otari's tool could
+not serve (the workspace has the tool off, say) is decided as a whole, as it was
+before: search and fetch run on Otari for every attempt if any attempt needs
+it, and code execution follows the first attempt, so a first model that runs
+the code itself keeps it. A refusal then refuses the request. A route with one attempt is dispatched as it
+always was, and the control plane's code-execution and Web Access policies are
+each asked once per request.
 
 ### Web-search interception
 
-Some clients can declare only provider-native search types. Set
-`web_search_intercept: true` to execute `web_search`,
-`web_search_<date>`, and `web_search_preview` through Otari's configured
-backend. A function named `web_search` is never intercepted.
+Some clients can declare only provider-native search types: `web_search`,
+`web_search_<date>`, and `web_search_preview`. By default such a declaration is
+forwarded to the provider. Set `web_search_intercept: true` to run every one of
+them on Otari's configured backend instead. Interception is off by default
+because enabling it changes who performs searches for providers that already
+support a native search tool.
 
-Interception is off by default because enabling it changes who performs searches
-for providers that already support a native search tool. It requires
-`web_search_url`.
+Without interception, a request can choose for itself with the
+`Otari-Web-Search` header:
+
+- `auto` is decided per attempt: the provider's own search on an attempt whose
+  model runs the keyword natively, Otari's on an attempt whose model does not.
+  Only Anthropic's dated keyword (`web_search_<date>`) on `/api/v1/messages`
+  against an Anthropic model, and OpenAI's `web_search` / `web_search_preview`
+  on `/api/v1/responses` against an OpenAI model, count as native. So a request
+  written for Claude's search keeps searching when its model is swapped, or
+  falls back, to one with no search of its own, and on Messages a dated keyword
+  is still answered with `server_tool_use` / `web_search_tool_result` blocks. A
+  request its first model answers natively opens and pays for no search.
+- `otari` always runs it on Otari's backend.
+- `provider` always forwards it and never runs Otari's search, so on a
+  fallback to a model that cannot run the keyword itself, that attempt fails
+  like any other. Use `auto` to keep the provider's search and run Otari's only
+  on a fallback that needs it.
+
+An attempt that runs Otari's search follows the rules for a gateway-run search
+below. One that cannot be served that way (the workspace has search off, or no
+price under `require_pricing`) is skipped and recorded as `Skipped:` in the
+activity log, and the request fails only when no model is left.
+
+The header can add a claim but never remove one: with `web_search_intercept`
+on, every search runs on Otari's backend whatever the header says, and
+`provider` is refused with a 403, because interception is what puts every
+search under the workspace's web-search policy and tool pricing.
+
+Whenever Otari runs the search, the rules for a gateway-run search apply: the
+workspace's web-search policy and tool pricing. All of this
+requires a search backend (`web_search_provider` or `web_search_url`); without
+one, the declaration is forwarded unchanged. A function named `web_search` is
+never claimed.
+
+### Anthropic's web fetch
+
+Anthropic's fetch keyword (`web_fetch_<date>`) is forwarded to the provider by
+default, so a request that falls back to a model with no fetch of its own sends
+it a tool nobody runs. The `Otari-Web-Fetch` header takes it over the same way
+`Otari-Web-Search` does for search, with the same three values:
+
+- `auto` is decided per attempt: Anthropic's own fetch on an attempt to an
+  Anthropic model on `/api/v1/messages`, the only place the keyword is native,
+  and Otari's on any other. On Messages the result still comes back as
+  `server_tool_use` / `web_fetch_tool_result` blocks. A fallback that cannot be
+  served by Otari's fetch is skipped, as for search.
+- `otari` always runs it on Otari.
+- `provider` always forwards it and never runs Otari's fetch, so on a
+  fallback to a model that cannot run the keyword itself, that attempt fails
+  like any other. Use `auto` to keep Anthropic's fetch and run Otari's only on
+  a fallback that needs it.
+
+It is a header of its own, not part of `Otari-Web-Search`, because the two
+tools are native in different places and a request may want one taken over and
+not the other. There is no deployment-wide toggle like `web_search_intercept`
+for fetch. A claimed declaration is an [Otari fetch](#web-fetch): it needs
+`web_fetch_enabled` (without it the keyword is forwarded unchanged), follows the
+workspace policy and pricing, and honors the declaration's `max_uses`,
+`allowed_domains` and `blocked_domains`. The URL in the returned blocks omits
+its query string and fragment, as the tool result does. When such a turn is
+echoed back on a later request, Otari drops its own fetch blocks before calling
+the model, as it does for search.
 
 ### Bounding the searches one request runs
 
@@ -54,8 +129,10 @@ here, so a float that happens to be whole is rejected too.
 
 Past the cap, the model is told the search was refused and can answer without it.
 An Anthropic-native declaration is answered in its own vocabulary, a
-`web_search_tool_result` carrying `error_code: max_uses_exceeded`; every other
-caller gets the same `[tool error]` string a failed tool produces. Even without
+`web_search_tool_result` carrying `error_code: max_uses_exceeded`. Otherwise the
+model gets the same `[tool error]` string a failed tool produces, and a Chat
+Completions client sees the search in `otari_tool_calls` as `failed`, with the
+tag `call_limit`. Even without
 `max_uses`, requests remain bounded by `max_tool_iterations` and the shared
 [10-call Search and Fetch limit](#web-fetch).
 
@@ -85,9 +162,12 @@ With `require_pricing: true`, an unpriced gateway-run tool is refused before the
 model call. A failed tool invocation is recorded but not charged. Charges settle
 on the final usage row alongside model tokens.
 
-Direct `POST /api/v1/search` uses a different price key,
+Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
-without a model tool loop.
+without a model tool loop. A search a workspace's
+[organization search key](#organization-search-keys) served is priced under
+`otari:web_search` instead, since the deployment cannot price the organization's
+own provider account. A provider's reported cost, when it reports one, comes first.
 
 ## What clients receive
 
@@ -95,11 +175,60 @@ Otari consumes its own tool calls, sends results back to the model, and returns
 the final answer.
 
 Responses and Messages can expose native server-tool result blocks when their
-wire format expects them. Chat Completions returns only the final assistant
-message. Calls for tools the client must execute are preserved.
+wire format expects them. Chat Completions has no such blocks, so Otari reports
+its web searches and fetches in a field of its own, `otari_tool_calls`, at the
+top level of the response and of each streamed chunk: a search with its query
+and the sources it found, a fetch with the URL it read, and a failure with what
+may be shown about it. See [Web tool calls on Chat
+Completions](api-reference.md#web-tool-calls-on-chat-completions). Code execution
+and MCP calls are not reported there, so Chat Completions returns only the final
+assistant message for them. Calls for tools the client must execute are preserved.
+The dashboard Playground's own completion route is the one exception: its stream
+also reports every gateway-run call and its result in an `otari_tool_activity`
+field beside each chunk's `choices`, so the page can show them.
 
 For gateway-run MCP activity in Messages streams, see
 [Messages streaming activity](mcp.md#messages-streaming-activity).
+
+## Combining tools
+
+One request may declare any mix of `otari_web_search`, `otari_web_fetch`,
+`otari_code_execution` and MCP servers (`mcp_servers` or `mcp_server_ids`), on
+Chat Completions, Messages and Responses, streamed or not. The model is offered
+all of them at once and may call any of them in the same tool loop, for example
+searching, fetching a page and then running code on what it found. Each call
+runs on the tool it names, and each tool keeps the rules it has alone:
+
+- Its workspace policy and its pricing apply. A declared tool its policy refuses
+  is never dropped while the others run: an attempt that needs it is refused as
+  it would be alone, and [Who runs a tool](#who-runs-a-tool) says what that
+  means on a fallback chain.
+- A `max_uses` caps only its own tool: once search reaches its cap, the model is
+  told so for each further search while code and MCP calls keep running.
+- Each built-in comes back in the same native result blocks or items as it does
+  alone ([What clients receive](#what-clients-receive)), and so does MCP activity.
+- Usage counts each tool's calls under the tool's own name.
+
+The tools share one loop, so its limit is shared too: `max_tool_iterations`
+bounds the rounds of the whole request, and so does a workspace code policy's
+`max_iterations` when the request runs code on Otari's sandbox.
+
+A tool declared in a provider's own words is still [decided per
+attempt](#who-runs-a-tool), so on a fallback chain one attempt may run the
+provider's own code execution beside Otari's search, and another run both on
+Otari, in the same loop.
+
+What one tool returns reaches the model before its next call, so a fetched page
+or a search result can steer what the model asks of the sandbox or an MCP
+server. Declare together only tools you would let untrusted web content drive.
+
+A built-in tool's name belongs to the built-in in a request where Otari runs it,
+on any of the request's attempts. When a connected MCP server exposes a tool of
+the same name (`web_search`, `web_fetch` or `code_execution`), the request is
+refused with a `400` naming the tool, before any model is called or a sandbox is
+opened. Leave that tool out of the server's `allowed_tools`, or declare only one
+of the two. In a request where Otari runs no built-in of that name, the server's
+tool of that name runs as usual.
 
 ## Code execution
 
@@ -148,8 +277,8 @@ This is the same contract as Anthropic's `container` and OpenAI's
   `code_interpreter` tool entry. Every `code_interpreter_call` item carries the
   id as `container_id`; send it back as `"container": "otari_cntr_…"` on that
   entry.
-- On every dialect, the response headers `X-Otari-Container-Id` and
-  `X-Otari-Container-Expires-At` name it, and the `otari_code_execution` tool
+- On every dialect, the response headers `Otari-Container-Id` and
+  `Otari-Container-Expires-At` name it, and the `otari_code_execution` tool
   entry takes a `container` string, `"auto"` or an id.
 
 `sandbox_container_idle_ttl_sec` (600 by default) is how long a held sandbox
@@ -218,36 +347,60 @@ declaration asks for:
 
 | Executor | Who runs the code |
 | --- | --- |
-| `auto` (default) | The provider, when it runs that tool natively for the dispatched model and wire format; otherwise Otari's sandbox. A request naming a container Otari minted runs here, since the sandbox it names is here (see [Reusing a sandbox across requests](#reusing-a-sandbox-across-requests)). |
+| `auto` (default) | Decided per attempt: the provider, when the model that attempt goes to runs that tool natively in that wire format; otherwise Otari's sandbox. A request naming a container Otari minted runs here, since the sandbox it names is here (see [Reusing a sandbox across requests](#reusing-a-sandbox-across-requests)). |
 | `otari` | Always Otari's sandbox. |
-| `provider` | Always the provider; the declaration is forwarded untouched. |
+| `provider` | Always the provider; the declaration is forwarded untouched and Otari's sandbox is never used. On a fallback to a model that cannot run it, that attempt fails like any other. Use `auto` to keep the provider's tool and use the sandbox only on a fallback that needs it. |
 
 `auto` is what makes a model swap transparent. An Anthropic Messages request
 carrying `code_execution_20250825` runs natively against an Anthropic model, and
 the same request against an open model runs on the sandbox, with the same
-`server_tool_use` and `code_execution_tool_result` blocks coming back. An
-`anthropic-beta` header travels only as far as it can be honored: against a
+`server_tool_use` and `code_execution_tool_result` blocks coming back.
+
+Fallbacks are decided the same way, one attempt at a time. A routing policy or
+catalog ID that falls back from Claude to Claude on Vertex or Bedrock sends
+Anthropic its own tool, and only if Anthropic fails before any output does the
+fallback run the code on the sandbox; a request Anthropic answers never opens
+or pays for one. A fallback that cannot run on the sandbox (code execution off
+for the workspace, no sandbox price under `require_pricing`, or a container id
+from another provider) is skipped rather than refusing the whole request, and
+the request is refused only when no attempt can run. A
+request that also declares `otari_code_execution` decides every attempt alike
+instead, running the code on the sandbox unless every model runs it natively.
+[Hybrid mode](#who-runs-a-tool) skips no attempt.
+
+An `anthropic-beta` header travels only as far as it can be honored: against a
 provider with no Messages API of its own it is dropped rather than refused,
 because a beta names an Anthropic feature that provider was never going to
 serve, and refusing it would make the request fail purely because its model
-changed. On
-Responses a claimed `code_interpreter` is answered with a `code_interpreter_call`
-item. Chat Completions has no native shape, so a claimed declaration there
-resolves inside the tool loop and only the final message is returned.
+changed. On Responses a claimed `code_interpreter` is answered with a
+`code_interpreter_call` item per run, in the order the calls ran among the
+gateway's other native items (a `web_search_call`, say). Chat Completions has no
+native shape, so a claimed declaration there resolves inside the tool loop and
+only the final message is returned.
 
 Gemini runs code natively on both Chat Completions and Messages, so under `auto`
 a Gemini model keeps the bare `code_execution` form on either format, and
 Anthropic's `code_execution_<date>` on Messages. Otari rewrites the declaration
 into Gemini's own `{"code_execution": {}}` for each attempt that goes to Gemini
-(a fallback to another provider still receives it as written), and a request
-may also send `{"code_execution": {}}` itself. On Messages the run comes back as
-the same `server_tool_use` and `code_execution_tool_result` blocks Anthropic
-returns. On Chat Completions, which has no native shape, it comes back on the
-assistant message as `extra_content.google.code_execution`: a list of
-`executable_code`, `code_execution_result` and `code_execution_output` items in
-the order Gemini produced them. For every other provider nothing runs natively
-on Chat Completions, and the bare form is no other provider's, so under `auto`
-those run on the sandbox.
+(a fallback to another provider still receives it as written). A request may
+also send `{"code_execution": {}}` itself; Otari reads it as the bare form, so a
+workspace pin or a fallback with no native code execution decides it the same
+way. On Messages the run comes back as the same `server_tool_use` and
+`code_execution_tool_result` blocks Anthropic returns. On Chat Completions,
+which has no native shape, it comes back on the assistant message as
+`extra_content.google.code_execution`: a list of `executable_code`,
+`code_execution_result` and `code_execution_output` items in the order Gemini
+produced them. For every other provider nothing runs natively on Chat
+Completions, and the bare form is no other provider's, so under `auto` those run
+on the sandbox.
+
+The executor also decides where an attached file goes. Code running on Otari's
+sandbox is given the file from Otari's own store, and code running in the
+provider's container is given a short-lived copy at that provider, because such
+a container reads only files that provider holds. Either way the file reaches
+the code rather than only the model, and an attempt that falls back to the other
+place is given the file there. See
+[Files and code execution](files.md#files-and-code-execution).
 
 Three layers choose the executor. The workspace pin wins over both of the
 others; the header wins over the deployment default:
@@ -285,9 +438,10 @@ into Otari's store under the provider's own ID. See
 session still lives for one request, so a `container` id from a previous turn
 addresses the provider's container, not the sandbox.
 
-In hybrid mode the control plane's policy is consulted only once the decision
-already points at the sandbox, so a declaration the provider serves natively is
-never turned into a 403 for a workspace the control plane has not enabled.
+In hybrid mode a workspace the control plane has not enabled still has a
+declaration its provider runs natively served by that provider. A route with a
+fallback that would need the sandbox is decided as a whole, by the first
+attempt (see [Who runs a tool](#who-runs-a-tool)).
 
 **Upgrading from 0.6.** A deployment with `sandbox_url` set that forwarded
 `code_interpreter`, `code_execution_<date>` or `code_execution` to a provider
@@ -307,13 +461,21 @@ A workspace policy can disable code execution or narrow the deployment limits:
 - `executor`, the one field that is a choice rather than a narrowing (see above)
 
 Manage it under
-`/api/v1/workspaces/{workspace_id}/code-execution-policy` or from Tools. A policy
+`/api/v1/workspaces/{workspace_id}/code-execution-policy`. The dashboard's Code
+execution page sets `enabled`; every other field is set through the API. A policy
 cannot enable a missing deployment backend or exceed the deployment limits.
 Workspace-selected images must come from
 `sandbox_allowed_session_images` or the deployment's own session image.
 
-The authenticating API key determines the workspace. With no policy, deployment
-defaults apply. In hybrid mode, the control plane resolves the policy instead.
+The authenticating API key determines the workspace. A workspace with no policy
+gets what `code_execution_workspace_default` says: `true`, deployment defaults
+apply; `false`, code execution is off until a workspace owner or admin turns it
+on, and the request is refused as if a disabled policy were stored. Unset, it is
+`true` everywhere except a hosted control plane, where it is `false`. The
+Playground's tools menu and the policy endpoint's `default_enabled` field read
+the same setting. A hosted control plane also gives each workspace it creates
+an enabled policy, so a new workspace starts with code execution on there. In hybrid mode, the control plane resolves
+the policy instead.
 
 ## Web retrieval
 
@@ -336,8 +498,8 @@ model-facing function accepts exactly one field:
 Otari retrieves one public HTTP or HTTPS URL, validates every redirect, and
 extracts HTML, textual formats (including Markdown, JSON, XML, and JavaScript),
 or text-bearing PDF content. Private, loopback, link-local, and otherwise unsafe
-destinations are rejected. Provider-native Fetch declarations are passed
-through unchanged rather than intercepted.
+destinations are rejected. Anthropic's own fetch keyword is passed through
+unchanged unless the request [asks Otari to run it](#anthropics-web-fetch).
 
 The tool result contains the display-safe source URL, the content type, an
 optional requested URL when redirects changed the destination, extracted
@@ -363,6 +525,23 @@ injection. For example, a malicious page may instruct the model to encode
 conversation or tool data into a later Fetch URL on an attacker-controlled
 domain. Disable Fetch or restrict allowed domains when that residual egress risk
 is unacceptable.
+
+### Fetch providers
+
+A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
+names a provider for `otari_web_fetch` and for enriching search results. Neither
+runs on fetch instances yet, so the built-in fetcher above still does both;
+`POST /api/v1/search-tools/{name}/test` with a `url` tries one.
+
+- **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
+  reports what each fetch costs (`costDollars.total`).
+- **Tabstack** (`tabstack`) needs an API key, read from the instance's
+  `api_key`, such as `${TABSTACK_API_KEY}`, and reports no cost. Tabstack's
+  [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
+  page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
+  whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
+  Tabstack documents up to 15 seconds a page at its default `effort` and up to
+  60 at `effort: max`, so give the instance a `timeout` to match.
 
 ### Web search
 
@@ -461,21 +640,61 @@ A runnable example lives under `demo/web-search/`.
 A workspace web-access policy can:
 
 - disable `otari_web_search`, `otari_web_fetch`, and `POST /api/v1/search`
-- lower `max_results`
+- lower `max_results`, for `otari_web_search` and `POST /api/v1/search`; unset,
+  only the provider's own maximum bounds it
 - narrow allowed domains or add blocked domains for Search results and Fetch
   destinations, including redirects
 - provide a default purpose hint
 - supply provider options
 
-Manage it under `/api/v1/workspaces/{workspace_id}/web-search` or from Tools.
+Manage it under `/api/v1/workspaces/{workspace_id}/web-search`. The dashboard's
+Web search page sets `enabled`, `max_results` and the domain lists; the purpose
+hint and provider options are set through the API.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
 backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
 remains available subject to deployment and workspace policy when no Search
 backend is configured.
 
-The policy also applies to direct search where relevant. In hybrid mode, the
+On direct search, the policy's switch and its `max_results` apply; its domain
+lists, purpose hint and provider options do not. In hybrid mode, the
 connected control plane supplies workspace search configuration.
+
+A workspace with no policy gets what `web_search_workspace_default` says: `true`,
+nothing is narrowed; `false`, web access (all three doors above) is
+off until a workspace owner or admin turns it on, and a request is refused as if
+a disabled policy were stored, whatever search key the organization holds. The
+Playground's tools menu and the policy endpoint's `default_enabled` field read
+the same setting. Unset, it is `true` everywhere except a hosted control plane,
+where it is `false`, so there web access is something a workspace turns on.
+
+### Organization search keys
+
+An organization can bring its own key for a search provider (`tavily` or
+`brave`), so its workspaces' searches are paid by its own search account and
+count against its own quota, rather than the deployment's. Organization owners
+and admins manage the keys under `/api/v1/organizations/me/web-search-keys`: add,
+rename or replace a key, archive it, and make one key per provider the
+organization's default. Only the last four characters of a key are ever shown.
+
+Each workspace searches with one key, for model-initiated search and for a
+[direct search](#direct-search) that names no tool:
+
+1. the key the workspace pinned as its own, if any;
+2. otherwise an organization default, Tavily before Brave;
+3. otherwise the organization's oldest key.
+
+A key the workspace turned off, an archived key, or one this deployment cannot
+decrypt is passed over. A workspace with no usable key uses the deployment's
+search exactly as before. A workspace's owners and admins pin or turn off keys
+under `/api/v1/workspaces/{workspace_id}/web-search-keys`, which any member of
+the workspace can read to see which key it uses.
+
+A key changes who pays for a search, not whether search is available: the
+deployment must still have web search configured, and the workspace's
+web-access policy still applies. In hybrid mode the control plane chooses the
+key and returns it with the workspace's policy; see
+[Web Access resolution](hybrid-mode-protocol.md#web-access-resolution).
 
 ## Direct search
 
@@ -486,3 +705,36 @@ through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
 search can share one backend. They remain distinct surfaces with separate
 pricing keys.
+
+A direct search that names no tool runs on the workspace's usable
+[organization search key](#organization-search-keys), if it has one, in place of
+the deployment's default tool. That tool must still be configured, and the request
+is still allowlisted, rate-limited and timed out as that tool and logged under its
+name, while the search is priced under `otari:web_search`. A search that names a
+tool, in the path or in `search_tool_name`, runs on that tool with its own key. A
+Brave key localizes results to the request's `country`; Tavily takes a country by
+its full name, so a Tavily key does not.
+
+The request, the response and the errors are in the
+[API reference](api-reference.md#search).
+
+### Search providers
+
+- **Exa** (`exa`) needs an API key, read from the tool's `api_key`, such as
+  `${EXA_API_KEY}`, and reports what each search costs (`costDollars.total`), which
+  is what the search is billed at. Exa's [pricing](https://exa.ai/docs/admin/pricing),
+  read 2026-10-13, is per search, covering up to 10 results, and every result past
+  10 adds to it, so a workspace's `max_results` ceiling also bounds what one search
+  can cost. A search with no results reported a cost of 0 when the adapter was
+  written.
+- **Mojeek** (`mojeek`) needs an API key, read from the tool's `api_key`, such as
+  `${MOJEEK_API_KEY}`. Mojeek takes the key and the query in the request URL,
+  which Otari keeps out of its logs. It reports no cost, so a search is billed at
+  the tool's rate, `mojeek:<search-tool-name>`. Mojeek's
+  [pricing](https://www.mojeek.com/services/search/web-search-api/), read
+  2026-10-13, is per search, in pounds before taxes: £2 per 1,000 on the Startup
+  plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what
+  your plan costs you. A search returns at most 10 results, the Startup plan's
+  limit, whatever the plan, and its hits carry a snippet but no page text.
+- **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
+  at the tool's rate.

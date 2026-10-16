@@ -31,12 +31,14 @@ from gateway.api.deps import (
     verify_catalog_reader,
     verify_catalog_reader_or_public,
     verify_master_key,
+    verify_service_key,
 )
 from gateway.api.routes import (
     agent_telemetry,
     aliases,
     budgets,
     catalog,
+    end_users,
     hooks,
     keys,
     mail,
@@ -80,21 +82,25 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 # The routers a caller reaches without operator standing, and the dependency
 # each admits them with instead. Listed so the gate can be asserted *off* them:
 # putting it on the whole of `models.py`, `pricing.py`, `providers.py`,
-# `tool_settings.py` or `usage.py` is the plausible wrong fix, and it would take
-# the dashboard's Models and Pricing pages, the organization forms' lists of BYO
-# providers and of built-in guardrails, and a data-plane gateway's usage report
-# with it. An entry here is not enforced by the totality case below, which sees
-# only that a router declares some gate in `_ROUTER_LEVEL_GATES`; a router split
-# off the operator one has to be added by hand.
+# `search_tools.py`, `tool_settings.py` or `usage.py` is the plausible wrong fix,
+# and it would take the dashboard's Models and Pricing pages, the organization
+# forms' lists of BYO providers, of search providers and of built-in guardrails,
+# and a data-plane gateway's usage report with it. An entry here is not
+# enforced by the totality case below, which sees only that a router declares
+# some gate in `_ROUTER_LEVEL_GATES`; a router split off the operator one has
+# to be added by hand.
 _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("catalog", catalog.router, verify_catalog_reader_or_public),
+    ("end_users", end_users.router, verify_service_key),
+    ("end_users.budgets", end_users.budgets_router, verify_service_key),
     ("models.catalog", models.catalog_router, verify_catalog_reader),
     ("pricing.catalog", pricing.catalog_router, verify_catalog_reader),
     ("providers.catalog", providers.catalog_router, verify_catalog_reader),
+    ("search_tools.catalog", search_tools.catalog_router, verify_catalog_reader),
     ("tool_settings.catalog", tool_settings.catalog_router, verify_catalog_reader),
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
-    ("usage.ingest", usage.ingest_router, verify_api_key_or_master_key),
+    ("usage.key", usage.key_router, verify_api_key_or_master_key),
     ("hooks", hooks.router, hooks.verify_hook_caller),
 ]
 
@@ -108,14 +114,17 @@ _DATA_PLANE = "data plane: an API key or the master key, checked per route or in
 _PUBLIC_AUTH = "public auth: reached before the caller holds any credential"
 
 _UNGATED_ROUTERS: dict[str, str] = {
+    "agent_routing.router": _DATA_PLANE,
     "audio.router": _DATA_PLANE,
     "batches.router": _DATA_PLANE,
     "chat.router": _DATA_PLANE,
     "embeddings.router": _DATA_PLANE,
+    "decisions.router": _DATA_PLANE,
     "files.router": _DATA_PLANE,
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
     "messages.router": _DATA_PLANE,
+    "models.hybrid_router": "the caller's key is forwarded to the control plane, which verifies it and scopes the list",
     "moderations.router": _DATA_PLANE,
     "otlp.router": _DATA_PLANE,
     "rerank.router": _DATA_PLANE,
@@ -126,6 +135,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "auth_session.router": _PUBLIC_AUTH,
     "auth_signup.router": _PUBLIC_AUTH,
     "auth_webauthn.router": _PUBLIC_AUTH,
+    "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
     "bootstrap.router": "unauthenticated on purpose: how a browser learns which mode it reached",
     "health.router": "unauthenticated liveness and readiness",
@@ -149,6 +159,7 @@ _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
         verify_catalog_reader,
         verify_catalog_reader_or_public,
         verify_master_key,
+        verify_service_key,
     }
 )
 
@@ -170,7 +181,7 @@ def _resolves(dependant: Dependant, gate: Callable[..., Any]) -> bool:
 
 
 def _route_id(name: str, route: APIRoute) -> str:
-    return f"{name} {'/'.join(sorted(route.methods))} {route.path or '/'}"
+    return f"{name} {'/'.join(sorted(route.methods or ()))} {route.path or '/'}"
 
 
 def _routes(routers: list[tuple[str, APIRouter]]) -> Iterator[Any]:

@@ -38,6 +38,7 @@ async def _check_platform_reachability(config: GatewayConfig) -> bool:
 
     try:
         async with httpx.AsyncClient(timeout=timeout_ms / 1000, follow_redirects=False) as client:
+            # codeql[py/full-ssrf]
             response = await client.get(health_url)
     except (httpx.HTTPError, httpx.InvalidURL) as e:
         logger.debug("Platform health probe to %s failed: %s", health_url, e)

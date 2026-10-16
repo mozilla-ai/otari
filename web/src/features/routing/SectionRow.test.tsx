@@ -8,24 +8,22 @@ import { bootstrap } from "@/tests/fixtures"
 import { SectionRow } from "./SectionRow"
 
 // The row reads the model catalog, which is a query. Mocked at the transport so
-// the real hook runs and picks its own branch: a provider that listed cleanly
-// and matches the row's value has nothing to say, and one that could not be
-// listed does. `failed` is derived from a provider's `ok`, not from a separate
-// field, so an unhealthy provider is how the hint is reached.
+// the real hook runs and picks its own branch: a catalog that answered has
+// nothing to say about a row whose value it lists, and one that could not be
+// read does.
 function mockCatalog({ isHealthy }: { isHealthy: boolean }) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(
-      JSON.stringify({
-        providers: [
-          {
-            provider: "openai",
-            ok: isHealthy,
-            models: isHealthy ? [{ key: "openai/gpt-4o" }] : [],
-          },
-        ],
-      }),
-      { status: 200 },
-    ),
+    isHealthy
+      ? new Response(
+          JSON.stringify({
+            count: 1,
+            models: [{ id: "openai/gpt-4o", selectors: ["openai:gpt-4o"] }],
+          }),
+          { status: 200 },
+        )
+      : new Response(JSON.stringify({ detail: "unavailable" }), {
+          status: 503,
+        }),
   )
 }
 
@@ -46,7 +44,7 @@ describe("SectionRow", () => {
   it("renders the controls it is given", () => {
     mockCatalog({ isHealthy: true })
     renderRow(
-      <SectionRow id="row-hint" modelValue="openai/gpt-4o">
+      <SectionRow id="row-hint" modelValue="openai:gpt-4o">
         <button type="button">Pick a model</button>
       </SectionRow>,
     )
@@ -58,7 +56,7 @@ describe("SectionRow", () => {
   it("says nothing under a row whose catalog listed cleanly", async () => {
     mockCatalog({ isHealthy: true })
     renderRow(
-      <SectionRow id="row-hint" modelValue="openai/gpt-4o">
+      <SectionRow id="row-hint" modelValue="openai:gpt-4o">
         <button type="button">Pick a model</button>
       </SectionRow>,
     )
@@ -73,13 +71,13 @@ describe("SectionRow", () => {
   it("carries the catalog's hint under the whole row, announced with the field", async () => {
     mockCatalog({ isHealthy: false })
     renderRow(
-      <SectionRow id="row-hint" modelValue="openai/gpt-4o">
+      <SectionRow id="row-hint" modelValue="openai:gpt-4o">
         <button type="button">Pick a model</button>
       </SectionRow>,
     )
     // Under the row rather than inside the picker: a wrapped sentence beside an
     // input lifts that field's line clear of the siblings it shares a row with.
-    const hint = await screen.findByText(/Could not list models for openai/)
+    const hint = await screen.findByText(/Could not read the model list/)
     expect(hint).toHaveAttribute("id", "row-hint")
   })
 })

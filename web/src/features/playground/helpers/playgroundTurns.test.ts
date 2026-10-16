@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
+import type { ToolActivity } from "@/shared/api/playground"
 import {
   appendErrorTurn,
   appendStreamDelta,
+  foldToolActivity,
   patchLastAssistantTurn,
   shouldFollowToBottom,
   turnsForRegenerate,
@@ -43,6 +45,86 @@ describe("appendStreamDelta", () => {
     const input = [question]
     appendStreamDelta(input, { content: "x" })
     expect(input).toEqual([question])
+  })
+
+  it("starts the assistant turn on a tool call that arrives before any text", () => {
+    const turns = appendStreamDelta([question], {
+      toolActivity: {
+        type: "tool_call",
+        id: "c1",
+        name: "web_search",
+        arguments: '{"query":"x"}',
+      },
+    })
+    expect(turns[1]).toMatchObject({
+      role: "assistant",
+      content: "",
+      toolCalls: [{ id: "c1", name: "web_search" }],
+    })
+    expect(turns[1]?.toolCalls?.[0]?.result).toBeUndefined()
+  })
+})
+
+describe("foldToolActivity", () => {
+  const call: ToolActivity = {
+    type: "tool_call",
+    id: "c1",
+    name: "web_search",
+    arguments: "{}",
+  }
+  const result = (overrides: Partial<ToolActivity> = {}): ToolActivity =>
+    ({
+      type: "tool_result",
+      id: "c1",
+      name: "web_search",
+      content: "found it",
+      isTruncated: false,
+      isError: false,
+      ...overrides,
+    }) as ToolActivity
+
+  it("fills the call a result belongs to, by id", () => {
+    const second: ToolActivity = { ...call, id: "c2" } as ToolActivity
+    let calls = foldToolActivity([], call)
+    calls = foldToolActivity(calls, second)
+    calls = foldToolActivity(calls, result({ id: "c2" }))
+    expect(calls.map((c) => c.result)).toEqual([undefined, "found it"])
+  })
+
+  it("matches by name, earliest first, when the model sent no id", () => {
+    const anonymous = { ...call, id: "" } as ToolActivity
+    let calls = foldToolActivity([], anonymous)
+    calls = foldToolActivity(calls, anonymous)
+    calls = foldToolActivity(calls, result({ id: "", content: "one" }))
+    calls = foldToolActivity(calls, result({ id: "", content: "two" }))
+    expect(calls.map((c) => c.result)).toEqual(["one", "two"])
+  })
+
+  it("records a failed and a shortened result", () => {
+    const calls = foldToolActivity(
+      foldToolActivity([], call),
+      result({ isError: true, isTruncated: true }),
+    )
+    expect(calls[0]).toMatchObject({ isError: true, isTruncated: true })
+  })
+
+  it("keeps a result whose call was never seen", () => {
+    expect(foldToolActivity([], result())).toEqual([
+      {
+        id: "c1",
+        name: "web_search",
+        arguments: "",
+        result: "found it",
+        isError: false,
+        isTruncated: false,
+      },
+    ])
+  })
+
+  it("never mutates the list it was given", () => {
+    const input = foldToolActivity([], call)
+    foldToolActivity(input, result())
+    expect(input[0]?.result).toBeUndefined()
   })
 })
 
@@ -174,6 +256,25 @@ describe("wireMessages", () => {
     ]
     expect(wireMessages(turns)).toEqual([
       { role: "assistant", content: "hello" },
+    ])
+  })
+
+  it("sends a question's attachments as file parts after its text", () => {
+    const turns: ChatTurn[] = [
+      {
+        role: "user",
+        content: "Summarize this",
+        attachments: [{ fileId: "file-1", filename: "report.pdf", bytes: 10 }],
+      },
+    ]
+    expect(wireMessages(turns)).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Summarize this" },
+          { type: "file", file: { file_id: "file-1", filename: "report.pdf" } },
+        ],
+      },
     ])
   })
 })

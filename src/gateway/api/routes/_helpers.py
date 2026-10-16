@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
@@ -11,12 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
+from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
 from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
-from gateway.services.routing.decide import RoutingSignal
+from gateway.services.routing import RoutingSignal
+from gateway.services.traces import RequestTrace
 from gateway.services.url_safety import UnsafeURLError
 from gateway.services.workspace_scope import default_workspace_id
 
@@ -25,7 +29,7 @@ if TYPE_CHECKING:
     from gateway.db import APIKey
 
 
-GUARDRAILS_RESULT_HEADER = "X-Otari-Guardrails"
+GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
 """Response header carrying a compact JSON summary of guardrail verdicts when a
 ``monitor``-mode (or otherwise non-blocking) check ran."""
 
@@ -270,6 +274,7 @@ async def apply_input_guardrails(
     credentials: Mapping[str, str] | None = None,
     mandated: Collection[str] | None = None,
     in_process: Mapping[str, InProcessGuardrail | None] | None = None,
+    trace: RequestTrace | None = None,
 ) -> None:
     """Enforce the input guardrails for a request before the provider call.
 
@@ -324,6 +329,7 @@ async def apply_input_guardrails(
     # the env var when no config is threaded in (e.g. unit tests). A dashboard
     # override mutates config, so it hot-applies on the next request.
     default_url = (config.guardrails_url if config is not None else None) or otari_env("GUARDRAILS_URL") or None
+    started = datetime.now(UTC)
     try:
         verdict = await run_input_guardrails(
             guardrails,
@@ -336,12 +342,26 @@ async def apply_input_guardrails(
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except GuardrailsNotReachableError as exc:
+        if trace is not None:
+            ended = datetime.now(UTC)
+            for guardrail in guardrails:
+                trace.record_guardrail(
+                    profile=guardrail.profile, mode=guardrail.mode, valid=None, started=started, ended=ended
+                )
         # The full reason, endpoint included, goes to the log; the caller gets
         # the error's `public_detail`, which names the profile and nothing else.
         # An organization's guardrail endpoint is not the caller's to see
         # (otari#654), and it is not theirs to fix either.
         logger.warning("guardrail check could not be evaluated: %s", exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.public_detail) from exc
+
+    if trace is not None:
+        # The checks run concurrently, so each span covers the whole evaluation.
+        ended = datetime.now(UTC)
+        for result in verdict.results:
+            trace.record_guardrail(
+                profile=result.profile, mode=result.mode, valid=result.valid, started=started, ended=ended
+            )
 
     if verdict.blocked:
         raise HTTPException(
@@ -365,10 +385,7 @@ async def apply_input_guardrails(
         # Non-blocking: surface the verdict for observability (monitor mode, or
         # a passing block-mode check). Header value is kept compact and free of
         # the freeform `explanation` to avoid oversized / non-ASCII headers.
-        summary = [
-            {"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score}
-            for r in verdict.results
-        ]
+        summary = [{"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score} for r in verdict.results]
         response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(summary, separators=(",", ":"))
 
 
@@ -386,12 +403,42 @@ async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID
     """
     if workspace_id is None:
         return await default_workspace_id(db)
-    named = (
-        await db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id))
-    ).scalar_one_or_none()
+    named = (await db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id))).scalar_one_or_none()
     if named is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workspace '{workspace_id}' not found",
         )
     return named
+
+
+@contextmanager
+def retryable_on_database_outage(what: str) -> Iterator[None]:
+    """Answer a database outage while storing an idempotent batch with a 503 to retry.
+
+    For ingest only: every row it writes is keyed, so a sender that retries a
+    batch this refused stores each event once. An OTLP exporter retries a 503 and
+    drops the batch on a 500. A row the database refuses for what it holds is not
+    an outage, and is raised unchanged.
+    """
+    try:
+        yield
+    except DATA_ERRORS:
+        raise
+    except DATABASE_ERRORS as exc:
+        logger.warning("%s: database unavailable, asking the sender to retry: %s", what, describe_database_error(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not store the batch right now. Retry it.",
+            headers={"Retry-After": "2"},
+        ) from exc
+
+
+def database_error(operation: str, exc: BaseException) -> HTTPException:
+    """Log a failed database operation safely and return the generic 500 for the client.
+
+    Logs the error's class, SQLSTATE and constraint only, never its message or a
+    traceback, which carry the statement's values (see ``describe_database_error``).
+    """
+    logger.error("%s failed: %s", operation, describe_database_error(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")

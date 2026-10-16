@@ -7,7 +7,7 @@ policy it has (a human approval prompt, an administrator rule, trusted
 read-only auto-authorization), and then asks Otari to execute that one exact
 call.
 
-**Otari does not verify a human approval and does not claim to** (R-AUTH-4).
+**Otari does not verify a human approval and does not claim to**.
 The calling application is the authorization boundary. What Otari enforces
 independently is authentication, that the stored server is one the authenticated
 workspace may reach, the stored tool allowlist, URL safety, and its own
@@ -39,9 +39,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from gateway.api.deps import extract_credential_token, get_config, get_db_if_needed, verify_api_key_or_master_key
-from gateway.api.routes._platform import (
-    _resolve_platform_mcp_server,
+from gateway.api.deps import (
+    McpServerPortDep,
+    extract_credential_token,
+    get_config,
+    get_db_if_needed,
+    verify_api_key_or_master_key,
 )
 
 # ``GatewayConfig`` and ``AsyncSession`` are imported at runtime rather than
@@ -49,11 +52,14 @@ from gateway.api.routes._platform import (
 # resolves a route signature at import time to decide what each parameter is.
 # Left as strings it cannot resolve, it reads both dependencies as query
 # parameters and every request fails validation before the handler runs.
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
+from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
+from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
 
@@ -92,7 +98,6 @@ from gateway.services.mcp_stateless import (
     execute_stored_tool,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_server
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.workspace_scope import resolve_workspace_id
 
@@ -112,7 +117,7 @@ TOOLS_ENDPOINT = "/v1/mcp/servers/{mcp_server_id}/tools"
 EXECUTE_LABEL = "mcp.execute"
 TOOLS_LABEL = "mcp.list_tools"
 
-# One fixed safe message per error code (R-ERR-1). Nothing here varies with the
+# One fixed safe message per error code. Nothing here varies with the
 # request, the resolver answer, or the remote server: a message that varied
 # would be the leak the whole error contract exists to prevent.
 SAFE_DETAILS: dict[str, str] = {
@@ -141,14 +146,14 @@ SAFE_DETAILS: dict[str, str] = {
 # The two failures that are transient by construction: a per-process slot did
 # not free up inside the admission deadline. Everything else this contract
 # returns is a decision, a bound, or an outcome Otari cannot know, and none of
-# those get better by being sent again (R-ERR-4). The one other status carrying
+# those get better by being sent again. The one other status carrying
 # this header is the 429, which keeps the limiter's own value.
 _RETRYABLE_CAPACITY_CODES = frozenset({CODE_CAPACITY_UNAVAILABLE, CODE_DISCOVERY_CAPACITY_UNAVAILABLE})
 RETRY_AFTER_ONE = {"Retry-After": "1"}
 
 
 class McpErrorBody(BaseModel):
-    """The one error shape both stored-server endpoints return (R-ERR-1)."""
+    """The one error shape both stored-server endpoints return."""
 
     detail: str
     code: str
@@ -186,9 +191,9 @@ class _McpRoute(APIRoute):
                     request_id,
                     headers=RETRY_AFTER_ONE if exc.code in _RETRYABLE_CAPACITY_CODES else None,
                 )
-            except StarletteHTTPException as exc:
-                code, execution_state, status_code = _classify(exc)
-                retry_after = (exc.headers or {}).get("Retry-After")
+            except (StarletteHTTPException, ControlPlaneError) as exc:
+                code, execution_state, status_code = _classify(exc.status_code)
+                retry_after = _retry_hint(exc)
                 return _error_response(
                     code,
                     execution_state,
@@ -196,7 +201,7 @@ class _McpRoute(APIRoute):
                     request_id,
                     headers={"Retry-After": retry_after} if retry_after else None,
                 )
-            response.headers["X-Otari-Request-ID"] = request_id
+            response.headers[REQUEST_ID_HEADER] = request_id
             return response
 
         return handler
@@ -216,40 +221,47 @@ def _error_response(
         execution_state=execution_state,
         request_id=request_id,
     )
-    response_headers = {"X-Otari-Request-ID": request_id}
+    response_headers = {REQUEST_ID_HEADER: request_id}
     if headers:
         response_headers.update(headers)
     return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"), headers=response_headers)
 
 
-def _classify(exc: StarletteHTTPException) -> tuple[str, ExecutionState, int]:
-    """Map an authentication or platform refusal onto this contract's enums.
+def _classify(status_code: int) -> tuple[str, ExecutionState, int]:
+    """Map an authentication or control plane refusal onto this contract's enums.
 
     Every one of these is raised before dispatch, so all of them are
     ``not_started``. The platform's own detail is dropped rather than forwarded:
-    it may describe a workspace, a plan, or a stored server, and R-ERR-1 lets
-    nothing platform-side through.
+    it may describe a workspace, a plan, or a stored server, and each error code
+    carries one fixed message so that nothing platform-side gets through.
     """
-    if exc.status_code in {400, 422}:
+    if status_code in {400, 422}:
         return CODE_INVALID_REQUEST, ExecutionState.NOT_STARTED, 422
-    if exc.status_code == 401:
+    if status_code == 401:
         return CODE_AUTHENTICATION_FAILED, ExecutionState.NOT_STARTED, 401
-    if exc.status_code == 402:
+    if status_code == 402:
         return CODE_PAYMENT_REQUIRED, ExecutionState.NOT_STARTED, 402
-    if exc.status_code == 403:
+    if status_code == 403:
         return CODE_FORBIDDEN, ExecutionState.NOT_STARTED, 403
-    if exc.status_code == 404:
+    if status_code == 404:
         return CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404
-    if exc.status_code == 421:
+    if status_code == 421:
         # The key names another regional deployment. The host it names travels
         # in the detail, which this contract drops like every other detail, so a
         # caller learns where to go from any endpoint outside this contract.
         return CODE_MISDIRECTED_REQUEST, ExecutionState.NOT_STARTED, 421
-    if exc.status_code == 429:
+    if status_code == 429:
         return CODE_RATE_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 429
-    if exc.status_code == 503:
+    if status_code == 503:
         return CODE_SERVICE_UNAVAILABLE, ExecutionState.NOT_STARTED, 503
     return CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502
+
+
+def _retry_hint(exc: StarletteHTTPException | ControlPlaneError) -> str | None:
+    """The ``Retry-After`` hint the refusal carries."""
+    if isinstance(exc, StarletteHTTPException):
+        return (exc.headers or {}).get("Retry-After")
+    return exc.retry_after if isinstance(exc, ControlPlaneRefusedError) else None
 
 
 router = APIRouter(prefix="/mcp", tags=["mcp"], route_class=_McpRoute)
@@ -258,7 +270,7 @@ router = APIRouter(prefix="/mcp", tags=["mcp"], route_class=_McpRoute)
 class McpExecuteRequest(BaseModel):
     """One stored server, and the exact call the application authorized.
 
-    No inline server fields (R-REQ-4): a caller registers a remote MCP server
+    No inline server fields: a caller registers a remote MCP server
     through the control plane once and refers to it by id afterwards, which
     keeps URLs, credentials, revocation and allowlist policy on Otari's side of
     the boundary instead of in every request.
@@ -320,7 +332,7 @@ async def _authenticate(
 ) -> _Principal:
     """Authenticate, and rate-limit the principal before any outbound access.
 
-    In hybrid mode the user token passes through to the platform resolver, which authorizes and rate-limits (R-ADM-2).
+    In hybrid mode the user token passes through to the platform resolver, which authorizes and rate-limits.
     A 429 from the platform resolver is passed on to the caller.
     In standalone mode the key is authenticated and the request is charged to that key's bucket.
     A master-key request is refused with a 404, because it has no workspace and would reach one tenant's servers.
@@ -339,7 +351,7 @@ async def _authenticate(
         raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
     # The key's own bucket, falling back to the key when it names no user, so
     # every user-less key does not share one bucket keyed on ``"None"``.
-    check_rate_limit(raw_request, api_key.user_id or api_key.id)
+    await check_rate_limit(raw_request, api_key.user_id or api_key.id)
     await _refuse_blocked_user(db, api_key)
     return _Principal(user_token=None, workspace_id=await resolve_workspace_id(db, api_key))
 
@@ -366,34 +378,27 @@ async def _refuse_blocked_user(db: AsyncSession, api_key: APIKey) -> None:
 
 async def _resolve_server(
     principal: _Principal,
-    db: AsyncSession | None,
-    config: GatewayConfig,
+    mcp_server_port: McpServerPort,
     mcp_server_id: uuid.UUID,
 ) -> ResolvedMcpServer:
-    """Resolve the stored server, applying the outcome ladder both modes share (R-RES-1).
+    """Resolve the stored server, applying the outcome ladder both modes share.
 
     No MCP network access happens here or in anything it raises, so a refusal on
     these grounds never reaches the remote server.
     """
-    if config.is_hybrid_mode:
-        server = await _resolve_platform_mcp_server(config, principal.user_token or "", mcp_server_id)
-    else:
-        if db is None or principal.workspace_id is None:  # pragma: no cover - _authenticate settles both
-            raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
-        try:
-            resolved = await resolve_workspace_mcp_server(
-                db,
-                workspace_id=principal.workspace_id,
-                server_id=mcp_server_id,
-            )
-        except (SecretDecryptionError, SecretBoxUnavailableError):
-            # Connecting without the credential the workspace configured would
-            # send an unauthenticated request to a server that expects one.
-            logger.warning("Stateless MCP stored credential unavailable server_id=%s", mcp_server_id)
-            raise McpExecutionError(CODE_CREDENTIALS_UNAVAILABLE, ExecutionState.NOT_STARTED, 500) from None
-        if resolved is None:
-            raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
-        server = resolved
+    scope = McpServerScope(workspace_id=principal.workspace_id, user_token=principal.user_token)
+    try:
+        resolved = await mcp_server_port.resolve_one(scope, mcp_server_id)
+    except McpServerResolutionFailedError:
+        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
+    except (SecretDecryptionError, SecretBoxUnavailableError):
+        # Connecting without the credential the workspace configured would send
+        # an unauthenticated request to a server that expects one.
+        logger.warning("Stateless MCP stored credential unavailable server_id=%s", mcp_server_id)
+        raise McpExecutionError(CODE_CREDENTIALS_UNAVAILABLE, ExecutionState.NOT_STARTED, 500) from None
+    if resolved is None:
+        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
+    server = resolved
 
     if not server.enabled:
         # Indistinguishable from an id naming no server, on purpose: a caller
@@ -403,7 +408,7 @@ async def _resolve_server(
 
 
 def _require_allowed(server: ResolvedMcpServer, tool_name: str) -> None:
-    """Apply the stored allowlist to one tool name (R-RES-4).
+    """Apply the stored allowlist to one tool name.
 
     ``None`` admits every live tool, the meaning the column already carries in
     the managed loop; an explicit empty list is a deny-all, so it refuses here
@@ -414,7 +419,7 @@ def _require_allowed(server: ResolvedMcpServer, tool_name: str) -> None:
 
 
 async def _require_safe_url(server: ResolvedMcpServer) -> None:
-    """Run the existing MCP SSRF policy over the resolved URL (R-TRANSPORT-3)."""
+    """Run the existing MCP SSRF policy over the resolved URL."""
     try:
         await validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
     except UnsafeURLError:
@@ -426,7 +431,7 @@ class McpToolDefinition(BaseModel):
 
     ``annotations`` is the remote server's own metadata, passed through as
     untrusted data. Otari never turns ``readOnlyHint`` into an authorization
-    decision (R-RISK-1); each application owns its risk policy, and a server
+    decision; each application owns its risk policy, and a server
     cannot waive an application's approval gate by labeling itself read-only.
     """
 
@@ -440,7 +445,7 @@ class McpToolDefinition(BaseModel):
 
 
 class McpToolWarning(BaseModel):
-    """One tool that was omitted, and the code that omitted it (R-SCHEMA-3)."""
+    """One tool that was omitted, and the code that omitted it."""
 
     tool_name: str
     code: str
@@ -450,7 +455,7 @@ class McpToolsResponse(BaseModel):
     """The authorized catalog for one stored server.
 
     Carries no server URL, no credential, and no allowlist entry that the live
-    catalog did not return (R-DISC-2). ``server_revision`` is what an
+    catalog did not return. ``server_revision`` is what an
     application persists with a proposed call and sends back to
     ``/api/v1/mcp/execute``, so a stored-configuration change between the two is
     refused rather than executed.
@@ -490,6 +495,7 @@ async def list_mcp_tools(
     mcp_server_id: uuid.UUID,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    mcp_server_port: McpServerPortDep,
 ) -> McpToolsResponse:
     """List the tools a stored MCP server exposes to the authenticated workspace.
 
@@ -510,11 +516,11 @@ async def list_mcp_tools(
     try:
         async with asyncio.timeout(mcp_stateless.DISCOVERY_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
-            server = await _resolve_server(principal, db, config, mcp_server_id)
+            server = await _resolve_server(principal, mcp_server_port, mcp_server_id)
 
             if server.allowed_tools == []:
                 # An operator's explicit deny-all is a complete answer already,
-                # so this opens no connection at all (R-RES-4).
+                # so this opens no connection at all.
                 response = McpToolsResponse(
                     server_id=server.id,
                     server_revision=server.revision,
@@ -603,6 +609,7 @@ async def execute_mcp_tool(
     request: McpExecuteRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    mcp_server_port: McpServerPortDep,
 ) -> CallToolResult:
     """Execute one caller-authorized tool call against a stored MCP server.
 
@@ -629,11 +636,11 @@ async def execute_mcp_tool(
     try:
         async with asyncio.timeout(mcp_stateless.EXECUTION_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
-            server = await _resolve_server(principal, db, config, request.mcp_server_id)
+            server = await _resolve_server(principal, mcp_server_port, request.mcp_server_id)
             _require_allowed(server, request.tool_name)
             if request.server_revision != server.revision:
                 # In memory, over the resolution both modes already needed, so this
-                # costs no database, platform or MCP round trip (R-RES-2).
+                # costs no database, platform or MCP round trip.
                 raise McpExecutionError(CODE_SERVER_CHANGED, ExecutionState.NOT_STARTED, 409)
 
             # Before DNS, before the concurrency wait, and before any MCP network I/O:
@@ -677,7 +684,7 @@ def _log_outcome(
     started: float,
     timings: dict[str, float],
 ) -> None:
-    """Record timings, outcome and correlation ids, and nothing else (R-OBS-1, R-OBS-2).
+    """Record timings, outcome and correlation IDs, and nothing else.
 
     Both ids are opaque: the caller's ``client_execution_id`` is a canonical
     UUID validated at parse time, and the Otari request id is generated here.

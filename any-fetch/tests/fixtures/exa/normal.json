@@ -1,0 +1,30 @@
+{
+  "status": 200,
+  "body": {
+    "requestId": "25726dea54ea5c3daab107b6a8dd70ad",
+    "results": [
+      {
+        "id": "https://docs.python.org/3/whatsnew/3.14.html",
+        "title": "What’s new in Python 3.14 — Python 3.14.8 documentation",
+        "url": "https://docs.python.org/3/whatsnew/3.14.html",
+        "author": null,
+        "text": "What’s new in Python 3.14 — Python 3.14.8 documentation\n\n# What’s new in Python 3.14¶\n\nEditors:\n: Adam Turner and Hugo van Kemenade\n\nThis article explains the new features in Python 3.14, compared to 3.13. Python 3.14 was released on 7 October 2025. For full details, see the changelog.\n\nPEP 745 – Python 3.14 release schedule\n\n## Summary – Release highlights¶\n\nPython 3.14 is the latest stable release of the Python programming language, with a mix of changes to the language, the implementation, and the standard library. The biggest changes include template string literals, deferred evaluation of ",
+        "image": "https://docs.python.org/3.14/_images/social_previews/summary_whatsnew_3.14_67b5e57a.png"
+      }
+    ],
+    "statuses": [
+      {
+        "id": "https://docs.python.org/3/whatsnew/3.14.html",
+        "status": "success",
+        "source": "cached"
+      }
+    ],
+    "costDollars": {
+      "total": 0.001,
+      "contents": {
+        "text": 0.001
+      }
+    },
+    "searchTime": 13.385711000300944
+  }
+}

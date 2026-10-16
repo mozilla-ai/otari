@@ -3,6 +3,7 @@ import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
+import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
@@ -163,6 +164,19 @@ export function WorkspaceMcpServersCard({
       header: "Name",
       isRowHeader: true,
       cell: (row) => <span className="font-medium">{row.name}</span>,
+    },
+    {
+      id: "server_id",
+      header: "ID",
+      // What a request names in `mcp_server_ids`. Truncated because a UUID
+      // would crowd the URL column; the copy and the tooltip carry all of it.
+      cell: (row) => (
+        <CopyableValue value={row.id} label={`id for ${row.name}`}>
+          <code className="font-mono text-xs" title={row.id}>
+            {row.id.slice(0, 8)}…
+          </code>
+        </CopyableValue>
+      ),
     },
     {
       id: "url",

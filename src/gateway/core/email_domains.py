@@ -47,6 +47,7 @@ PUBLIC_EMAIL_DOMAINS = frozenset(
     }
 )
 
+
 def _ascii(domain: str) -> str:
     """Punycode an internationalized domain, or hand back what came in.
 

@@ -13,6 +13,7 @@ credential this deployment stores rather than only verifies, so no key surface
 hands it back, rotates it, or lists it beside the keys somebody actually manages.
 """
 
+import json
 import uuid
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
@@ -26,10 +27,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.usage_source import SERVED_HERE_SLUG
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.usage import UsageLog
+from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 
@@ -37,6 +38,7 @@ from .conftest import build_test_client
 
 _DATA_PLANE = "https://gateway.example.test"
 _COMPLETIONS = f"{API_ROOT}/playground/chat/completions"
+_COMPLETION_REQUEST = {"model": "openai:gpt-4o", "messages": [{"role": "user", "content": "hi"}]}
 
 # Bound before any test patches the name, so the factory below builds a real
 # client rather than calling itself.
@@ -138,6 +140,7 @@ def _answer_from_the_data_plane(
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
         seen["authorization"] = request.headers.get("authorization")
+        seen["body"] = json.loads(request.content)
         return httpx.Response(
             status_code,
             stream=_Stream(payload),
@@ -150,13 +153,13 @@ def _answer_from_the_data_plane(
     monkeypatch.setattr(httpx, "AsyncClient", build)
 
 
-def _send(client: TestClient, token: str, workspace_id: uuid.UUID) -> httpx2.Response:
+def _send(client: TestClient, token: str, workspace_id: uuid.UUID, **body: object) -> httpx2.Response:
     client.cookies.set(SESSION_COOKIE_NAME, token)
     try:
         return client.post(
             _COMPLETIONS,
             params={"workspace_id": str(workspace_id)},
-            json={"model": "openai:gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+            json={**_COMPLETION_REQUEST, **body},
         )
     finally:
         client.cookies.clear()
@@ -216,6 +219,26 @@ def test_the_forwarded_key_stands_for_the_caller_and_their_workspace(
     # cannot do, so it is held the way provider credentials are.
     assert minted.internal_secret is not None
     assert seen["authorization"] == f"Bearer {decrypt_secret(minted.internal_secret)}"
+
+
+def test_a_body_user_is_not_forwarded(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The data plane derives the end-user identifier from the key's own user.
+
+    A ``user`` that reached it would win over that user, so a member could take
+    on the identifier an API key's end user is known by upstream.
+    """
+    _, workspace_id, token = caller
+    seen: dict[str, object] = {}
+    _answer_from_the_data_plane(monkeypatch, seen)
+
+    response = _send(hosted_client, token, workspace_id, user="shared-tag-alpha")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert seen["body"] == _COMPLETION_REQUEST
 
 
 def test_the_key_is_minted_once_and_reused(
@@ -567,3 +590,69 @@ def test_a_real_gateway_request_still_closes_it(
     after = _activation(hosted_client, token, workspace_id)
     assert after["status"] != "waiting"
     assert after["activation_attempt"] is not None
+
+
+def test_files_are_not_offered_where_the_data_plane_could_not_read_them(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    """A file stored on the control plane is not in the data plane's store, so the upload is refused."""
+    _, workspace_id, token = caller
+    params = {"workspace_id": str(workspace_id)}
+    hosted_client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        tools = hosted_client.get(f"{API_ROOT}/playground/tools", params=params)
+        upload = hosted_client.post(
+            f"{API_ROOT}/playground/files",
+            params=params,
+            files={"file": ("report.txt", b"numbers", "text/plain")},
+        )
+    finally:
+        hosted_client.cookies.clear()
+
+    assert tools.status_code == status.HTTP_200_OK
+    assert tools.json()["files"]["enabled"] is False
+    assert upload.status_code == status.HTTP_404_NOT_FOUND
+
+
+def _code_execution(client: TestClient, token: str, workspace_id: uuid.UUID) -> dict[str, object]:
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        response = client.get(f"{API_ROOT}/playground/tools", params={"workspace_id": str(workspace_id)})
+    finally:
+        client.cookies.clear()
+    assert response.status_code == 200, response.text
+    answer: dict[str, object] = response.json()["code_execution"]
+    return answer
+
+
+def test_code_execution_is_off_for_a_workspace_that_never_turned_it_on(
+    hosted_client: TestClient, caller: tuple[uuid.UUID, uuid.UUID, str]
+) -> None:
+    """The platform's reading: no row is off, and the control plane's own sandbox config is not asked."""
+    _, workspace_id, token = caller
+    assert _code_execution(hosted_client, token, workspace_id) == {
+        "configured": True,
+        "enabled": False,
+        "reason": "Not turned on for this workspace.",
+    }
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_code_execution_follows_the_workspace_s_own_row(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+    db_session_factory: Callable[[], Session],
+    enabled: bool,
+) -> None:
+    _, workspace_id, token = caller
+    session = db_session_factory()
+    try:
+        session.add(WorkspaceCodeExecutionPolicy(workspace_id=workspace_id, enabled=enabled))
+        session.commit()
+    finally:
+        session.close()
+
+    answer = _code_execution(hosted_client, token, workspace_id)
+    assert answer["configured"] is True
+    assert answer["enabled"] is enabled

@@ -1,12 +1,14 @@
 import { Button } from "@heroui/react"
 import type { LinkProps } from "@tanstack/react-router"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, Navigate, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useEffect, useMemo, useState } from "react"
 import type { UsageEntry } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageError } from "@/design-system/feedback/PageError"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -18,7 +20,8 @@ import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { TrendChip } from "@/design-system/metrics/TrendChip"
 import { scopeLabel } from "@/features/budgets/organizationBudget"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
-import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
+import { canManage } from "@/features/organization/roles"
 import {
   allocationStrip,
   type BudgetHealth,
@@ -26,7 +29,11 @@ import {
   providerHealthStatus,
 } from "@/features/overview/overview"
 import { useModels } from "@/shared/api/models"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+  usePendingOrganizationInvitations,
+} from "@/shared/api/organizations"
 import { useOverviewSummary } from "@/shared/api/overview"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import {
@@ -42,7 +49,7 @@ import {
   formatUsd,
 } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
+import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 const DAY_MS = 86_400_000
 const PERIOD_DAYS = 30
@@ -331,27 +338,99 @@ function UsageKpiCells({
  * neighbor and each query happy with its own. It also costs no request, since
  * the shell reads this context before it paints.
  *
- * So it fails toward the scoped page, the direction the hooks behind those tiles
- * already fail in: the narrower surface understates rather than refusing, and
- * reports its own error where this page can show it. An errored context is an
- * answer, not a wait, for `useUsageScope`'s reason: holding the page on a
- * loading state that no retry clears renders nothing at all.
+ * So an errored context lands on the operator page, as it does for the usage
+ * hooks behind its tiles and for every other operator gate
+ * (`useDeploymentOperator`): its panels report their own refusals, where the
+ * reverse would hide the deployment's state from the one caller who owns it.
+ * An errored context is an answer, not a wait: holding the page on a loading
+ * state that no retry clears renders nothing at all.
+ *
+ * The one failure that is not sent there is a caller with no organization,
+ * who has no deployment to operate and no organization to report on.
  */
 export function OverviewIndex() {
-  const context = useOrganizationContext()
+  const { answer, isSettled } = useDeploymentOperator()
+  const hasNoOrganization = answer === "no-organization"
+  // Somebody who signed up or signed in before accepting the invitation that
+  // created their account: the inbox is the page that can fix it, so they are
+  // sent there rather than left to find it in the switcher.
+  const invitations = usePendingOrganizationInvitations(hasNoOrganization)
 
-  // `isFetched`, not `isPending`: a query that errored with no data goes back to
-  // pending on its next fetch, and the page below this line mounts a second
-  // observer of the same context (the usage hooks), whose mount is what asks for
-  // that fetch. Reading the transient state would swing the page back to this
-  // spinner, unmount the observer, and start the round again forever.
-  if (!context.isFetched) {
+  if (!isSettled || (hasNoOrganization && invitations.isPending)) {
     return <PageLoading />
   }
-  if (!isDeploymentOperator(context.data)) {
+  if (hasNoOrganization && invitations.isError) {
+    // The overview below cannot serve this identity either, so the one way
+    // forward is offered rather than a page of failed reads.
+    return (
+      <PageError error={invitations.error}>
+        Your invitations could not be loaded.{" "}
+        <Link to="/invitations" className="text-link hover:text-link-hover">
+          Open your invitations
+        </Link>{" "}
+        to try again.
+      </PageError>
+    )
+  }
+  if (hasNoOrganization) {
+    return (invitations.data ?? []).length > 0 ? (
+      <Navigate to="/invitations" replace />
+    ) : (
+      <NoOrganizationOverview />
+    )
+  }
+  if (answer === "not-operator") {
     return <OrganizationOverview />
   }
   return <OperatorOverviewIndex />
+}
+
+/**
+ * The landing page for a signed-in caller who belongs to no organization and
+ * has no invitation waiting.
+ *
+ * Creating an organization is offered only where signup is open: where it is
+ * closed the server refuses a caller with no membership, so the way in is an
+ * invitation from an owner.
+ */
+function NoOrganizationOverview() {
+  const { open_signup } = useDeployment()
+  const [creating, setCreating] = useState(false)
+  // Keys the form so each open starts from an empty draft.
+  const [creatingCount, setCreatingCount] = useState(0)
+
+  return (
+    <div className="flex flex-col">
+      <PageIntro title="Overview" />
+      <EmptyState
+        title="You're not a member of an organization yet"
+        description={
+          open_signup
+            ? "Ask an owner of an organization to invite you, or create one of your own. Invitations you receive are listed under Invitations."
+            : "Ask an owner of an organization to invite you. Invitations you receive are listed under Invitations."
+        }
+        actionLabel={open_signup ? "Create organization" : undefined}
+        onAction={() => {
+          setCreatingCount((count) => count + 1)
+          setCreating(true)
+        }}
+      >
+        <Link
+          to="/invitations"
+          className="inline-flex min-h-11 items-center self-start text-sm text-muted underline underline-offset-2 hover:text-foreground"
+        >
+          View invitations <span aria-hidden>→</span>
+        </Link>
+      </EmptyState>
+      {open_signup ? (
+        <CreateOrganizationForm
+          key={creatingCount}
+          isOpen={creating}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
+    </div>
+  )
 }
 
 /**
@@ -368,7 +447,7 @@ export function OverviewIndex() {
  *
  * Two things the operator page has are deliberately absent. The attention strip
  * reads provider health and the deployment's budgets, neither of which is this
- * caller's to see. And there is no `isDeploymentOperator` anywhere below this
+ * caller's to see. And there is no `useDeploymentOperator` anywhere below this
  * line: this *is* the non-operator branch, so asking again is how otari-ai#2080
  * happened.
  */
@@ -392,6 +471,9 @@ function OrganizationOverview() {
   // collection fetched to produce one number (otari#1425); the gateway scopes
   // and judges them now, and withholds the ceilings a member may not see.
   const summary = useOverviewSummary(scope)
+  // Only an answered, explicitly empty list says so. A context still loading,
+  // or one without the field, establishes nothing about workspaces.
+  const hasNoWorkspace = context.data?.workspace_memberships?.length === 0
 
   const periodSeries = period.data?.series ?? []
   const ceilingHealth = allocationStrip(summary.data?.ceilings, {
@@ -423,6 +505,12 @@ function OrganizationOverview() {
 
   const activeKeys = summary.data?.active_keys ?? 0
   const activeMembers = summary.data?.active_members ?? 0
+
+  const needsFirstSteps =
+    models.isSuccess &&
+    models.data.data.length === 0 &&
+    recent.isSuccess &&
+    (recent.data?.length ?? 0) === 0
 
   // Recent activity is excluded for the operator page's reason: it renders its
   // own inline banner, so including it here would double-report. The previous
@@ -464,6 +552,20 @@ function OrganizationOverview() {
       {/* Offered to whoever manages the workspace, which on a multi-tenant
           deployment is this caller. It decides for itself whether to render. */}
       <SetupGuide canServeRequests={(models.data?.data.length ?? 0) > 0} />
+
+      {/* The guide holds back until a request could succeed; without this a new
+          account with nothing to route to has no next step. Waits for the
+          catalog and the log so it never flashes in on a set-up account. */}
+      {needsFirstSteps ? (
+        <GetStartedStrip
+          description={
+            managesSpend
+              ? "Add a provider key to start serving models, then create an API key and send your first request."
+              : "Ask an owner or admin of this organization to add a provider key. Once models are available, you can create an API key and send a request."
+          }
+          action={managesSpend ? "organization-provider-key" : null}
+        />
+      ) : null}
 
       <ErrorBanner error={loadError} />
 
@@ -526,6 +628,7 @@ function OrganizationOverview() {
         activeKeys={summary.data ? activeKeys : null}
         activeMembers={summary.data ? activeMembers : null}
         links={railLinks(managesSpend)}
+        hasNoWorkspace={hasNoWorkspace}
       />
     </div>
   )
@@ -607,6 +710,17 @@ export function OverviewPage({
   const budget = allocationStrip(summary.data?.budgets, {
     none: "No budgets configured",
     noneCapped: "No capped budgets",
+    // A deployment budget enforced through a scoped budget is named after what
+    // it caps when nobody named it, the way the ceilings strip names its rows.
+    // No roster is loaded here, and a deployment budget can cap any tenant's
+    // organization, so the labels stay generic rather than naming the caller's.
+    nameOf: (worst) =>
+      worst.scope_type
+        ? scopeLabel(
+            { scope_type: worst.scope_type, scope_id: worst.scope_id ?? "" },
+            { organizationName: "An organization", workspaces: [] },
+          )
+        : undefined,
   })
   const providerHealth = providerHealthStatus(health.data)
 
@@ -718,7 +832,9 @@ export function OverviewPage({
               : isEmpty
                 ? "NO BUDGETS SET"
                 : summary.data?.budgets
-                  ? "no budgets set"
+                  ? summary.data.budgets.total_count === 0
+                    ? "no budgets set"
+                    : "no budget caps spend"
                   : "no data"
           }
           // `SpendMeter`, not the plain accent `Meter`: a one-color bar would
@@ -798,13 +914,13 @@ function OverviewHeader({
 // both provider pages and this prefers the deployment's own, which is not the
 // obvious answer once there are two. It is the right one because of who reaches
 // this button: `OverviewIndex` hands a caller who does not operate the
-// deployment to `OrganizationOverview`, which draws no getting-started strip, so
-// the only person who can press this is the operator, and `/providers` is where
-// a fresh gateway is set up and carries the first-run panel that continues the
-// flow. Gating on the caller here too would restate a rule already guaranteed
-// one level up. Hosted and a control plane report no `providers` surface, so
-// naming it unconditionally would point an operator at the shell's "not
-// available here" panel.
+// deployment to `OrganizationOverview`, which links to the organization's
+// provider-key page, so the only person who can press this is the operator, and
+// `/providers` is where a fresh gateway is set up and carries the first-run
+// panel that continues the flow. Gating on the caller here too would restate a
+// rule already guaranteed one level up. Hosted and a control plane report no
+// `providers` surface, so naming it unconditionally would point an operator at
+// the shell's "not available here" panel.
 //
 // Only correct for *adding* one, which is why provider health does not use it:
 // `/providers/health` reports on `config.providers`, the process-global
@@ -816,7 +932,14 @@ function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
   return serves("providers") ? "/providers" : "/organization/provider-keys"
 }
 
-function GetStartedStrip() {
+function GetStartedStrip({
+  description = "Add a provider to begin serving models. Once it is configured, this page will show your gateway\u2019s traffic, spend, and health.",
+  action = "provider",
+}: {
+  description?: string
+  /** The button, or none for a caller who may not act on it. */
+  action?: "provider" | "organization-provider-key" | null
+}) {
   const navigate = useNavigate()
   const addProviderRoute = useAddProviderRoute()
 
@@ -832,19 +955,27 @@ function GetStartedStrip() {
         <Dot className="mt-2.5 bg-accent" />
         <div>
           <h2 className="text-display-sub">Get started with Otari</h2>
-          <p className="mt-1 text-sm text-muted">
-            Add a provider to begin serving models. Once it is configured, this
-            page will show your gateway&rsquo;s traffic, spend, and health.
-          </p>
+          <p className="mt-1 text-sm text-muted">{description}</p>
         </div>
       </div>
-      <Button
-        variant="primary"
-        className="shrink-0"
-        onPress={() => navigate({ to: addProviderRoute })}
-      >
-        Add your first provider
-      </Button>
+      {action === null ? null : (
+        <Button
+          variant="primary"
+          className="shrink-0"
+          onPress={() =>
+            navigate({
+              to:
+                action === "provider"
+                  ? addProviderRoute
+                  : "/organization/provider-keys",
+            })
+          }
+        >
+          {action === "provider"
+            ? "Add your first provider"
+            : "Add a provider key"}
+        </Button>
+      )}
     </Section>
   )
 }
@@ -1325,11 +1456,14 @@ function ActivitySplit({
   activeKeys,
   activeMembers,
   links,
+  hasNoWorkspace = false,
 }: {
   recent: ReturnType<typeof useUsageLogs>
   activeKeys: number | null
   activeMembers: number | null
   links: readonly RailDestination[]
+  /** A member in no workspace yet, whose rail has no workspace to count. */
+  hasNoWorkspace?: boolean
 }) {
   return (
     <div className="flex flex-col lg:flex-row lg:items-stretch">
@@ -1345,6 +1479,7 @@ function ActivitySplit({
           activeKeys={activeKeys}
           activeMembers={activeMembers}
           links={links}
+          hasNoWorkspace={hasNoWorkspace}
         />
       </div>
     </div>
@@ -1388,26 +1523,40 @@ function WorkspaceRail({
   activeKeys,
   activeMembers,
   links,
+  hasNoWorkspace,
 }: {
   activeKeys: number | null
   activeMembers: number | null
   links: readonly RailDestination[]
+  hasNoWorkspace: boolean
 }) {
   return (
     <section className="flex flex-col gap-6 pt-6 lg:pl-6">
-      <div>
-        <h2 className="text-title">This workspace</h2>
-        <dl className="mt-3 flex gap-8 lg:flex-col lg:gap-4">
-          <RailStat
-            label="Active keys"
-            value={activeKeys === null ? "—" : formatNumber(activeKeys)}
-          />
-          <RailStat
-            label="Active members"
-            value={activeMembers === null ? "—" : formatNumber(activeMembers)}
-          />
-        </dl>
-      </div>
+      {hasNoWorkspace ? (
+        // Counts here would describe a workspace this caller is not in. Told
+        // the way the Members page tells the same state.
+        <div>
+          <h2 className="text-title">No workspace yet</h2>
+          <p className="mt-3 text-sm text-pretty text-muted">
+            You do not belong to a workspace in this organization yet. An owner
+            or admin can add you to one.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <h2 className="text-title">This workspace</h2>
+          <dl className="mt-3 flex gap-8 lg:flex-col lg:gap-4">
+            <RailStat
+              label="Active keys"
+              value={activeKeys === null ? "—" : formatNumber(activeKeys)}
+            />
+            <RailStat
+              label="Active members"
+              value={activeMembers === null ? "—" : formatNumber(activeMembers)}
+            />
+          </dl>
+        </div>
+      )}
       <div>
         <h2 className="text-overline">Go to</h2>
         <ul className="mt-1 flex flex-col">

@@ -103,6 +103,17 @@
 :root,
 .light,
 [data-theme="light"] {
+  /* Trace timeline bar fills (features/traces only): each type's chart slot hue
+     at one lightness, light enough for the one dark ink of the in-bar duration. */
+  --color-trace-bar-tool: #c67f4d;
+  --color-trace-bar-agent: #a280c8;
+  --color-trace-bar-generation: #20a3bc;
+  --color-trace-bar-span: #899499;
+  --color-trace-bar-guardrail: #65a467;
+  --color-trace-bar-mcp: #c77595;
+  --color-trace-bar-ink: #08090a;
+  --trace-switch-track: var(--color-surface-subtle);
+  --trace-switch-thumb: var(--color-surface);
   /* ── Surfaces — four levels, two families, staggered ──────────────────
      Four neutral levels, with the surface family sitting one rung ABOVE
      the background family rather than sharing rungs with it. Two pairs
@@ -472,6 +483,19 @@
 
 .dark,
 [data-theme="dark"] {
+  --color-trace-bar-tool: #e89960;
+  --color-trace-bar-agent: #c09aeb;
+  --color-trace-bar-generation: #37c1de;
+  --color-trace-bar-span: #a5b0b5;
+  --color-trace-bar-guardrail: #7ec27c;
+  --color-trace-bar-mcp: #ea8db2;
+  --color-trace-bar-ink: #08090a;
+  --trace-switch-track: var(--color-surface-alt);
+  --trace-switch-thumb: color-mix(
+    in oklab,
+    var(--color-foreground) 20%,
+    var(--color-surface)
+  );
   /* ── Surfaces — the light block's stagger, mirrored ─────────────────────
      The same four levels and the same one-rung offset between the two
      families, read the other way up:
@@ -802,6 +826,14 @@
   --color-chart-ramp-2: var(--color-chart-ramp-2);
   --color-chart-ramp-3: var(--color-chart-ramp-3);
   --color-chart-ramp-4: var(--color-chart-ramp-4);
+  /* The trace timeline's bar fills, one per span type, and the ink drawn on them. */
+  --color-trace-bar-tool: var(--color-trace-bar-tool);
+  --color-trace-bar-agent: var(--color-trace-bar-agent);
+  --color-trace-bar-generation: var(--color-trace-bar-generation);
+  --color-trace-bar-span: var(--color-trace-bar-span);
+  --color-trace-bar-guardrail: var(--color-trace-bar-guardrail);
+  --color-trace-bar-mcp: var(--color-trace-bar-mcp);
+  --color-trace-bar-ink: var(--color-trace-bar-ink);
   /* Registered so a status dot can be `bg-text-subtle`. Same latent shape as
      the tier above: it has been a plain `:root` variable, reachable from this
      stylesheet and from the `text-subtle` utility, and from nowhere else. A dot
@@ -1438,6 +1470,19 @@ main {
   }
 }
 
+/* Text-field focus ring. HeroUI's `.input` is `outline-none` in the components
+   layer, which beats `@layer base`, so the utilities layer draws the ring.
+   Keyed on react-aria's `data-focus-visible` and not `:focus-visible`: the
+   browser matches the pseudo-class on a mouse click into a text field too, and
+   a click should not ring the field. */
+@layer utilities {
+  .input[data-focus-visible="true"],
+  .textarea[data-focus-visible="true"] {
+    outline: 2px solid var(--focus-ring-ink, var(--color-focus));
+    outline-offset: 2px;
+  }
+}
+
 /* Ring ink, chosen by the GROUND being ringed rather than by a list of
    variants. A control whose own fill is an accent or a status color takes the
    theme's ink; everything else keeps `--color-focus`, which is the fallback in
@@ -1736,6 +1781,84 @@ main {
   border-color: var(--field-border);
 }
 
+/* The feedback dialog's motion, keyed on the `data-feedback-*` hooks the
+   component renders. Every number is a `--feedback-*` property read through its
+   default, so a value set on `:root` retunes it without touching the component.
+   Enter only: the compose unmounts at once, and what arrives in its place
+   animates in. The frame's own enter and exit are HeroUI's modal motion. */
+@keyframes otari-feedback-enter {
+  from {
+    opacity: 0;
+    translate: 0 var(--feedback-from-offset, 0);
+    scale: var(--feedback-from-scale, 1);
+  }
+}
+
+/* The thank-you arriving in the frame the compose just left. */
+[data-feedback-view="sent"] {
+  --feedback-from-offset: var(--feedback-swap-offset, 0.25rem);
+  animation: otari-feedback-enter var(--feedback-swap-duration, 200ms)
+    var(--feedback-swap-ease, ease-out) both;
+}
+
+[data-feedback-part="mark"] {
+  --feedback-from-offset: 0;
+  --feedback-from-scale: var(--feedback-mark-scale-from, 0.9);
+  animation: otari-feedback-enter var(--feedback-mark-duration, 250ms)
+    var(--feedback-swap-ease, ease-out) var(--feedback-mark-delay, 60ms) both;
+}
+
+/* Title then body, one stagger apart. */
+[data-feedback-part="title"],
+[data-feedback-part="body"] {
+  --feedback-from-offset: var(--feedback-text-offset, 0.25rem);
+  animation: otari-feedback-enter var(--feedback-swap-duration, 200ms)
+    var(--feedback-swap-ease, ease-out) var(--feedback-text-delay, 100ms) both;
+}
+[data-feedback-part="body"] {
+  animation-delay: calc(
+    var(--feedback-text-delay, 100ms) +
+    var(--feedback-text-stagger, 60ms)
+  );
+}
+
+/* The guard taking the footer. */
+[data-feedback-footer="guard"] > * {
+  --feedback-from-offset: var(--feedback-guard-offset, 0.125rem);
+  animation: otari-feedback-enter var(--feedback-guard-duration, 150ms)
+    var(--feedback-swap-ease, ease-out) both;
+}
+
+/* The spinner replaces the label while a send is in flight.
+   `--feedback-spinner-delay` can hold the label for quick sends. */
+[data-feedback-send="pending"] [data-feedback-send-label] {
+  animation: otari-feedback-hide 0s linear var(--feedback-spinner-delay, 0ms)
+    both;
+}
+[data-feedback-send="pending"] [data-feedback-send-spinner] {
+  animation: otari-feedback-enter 0s linear var(--feedback-spinner-delay, 0ms)
+    both;
+}
+@keyframes otari-feedback-hide {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: no motion at all. The house reset above loses to the
+   shorthands here on specificity, so this block zeroes them itself; the `both`
+   fill still lands every element in its end state. */
+@media (prefers-reduced-motion: reduce) {
+  [data-feedback-view],
+  [data-feedback-part],
+  [data-feedback-footer] > * {
+    --feedback-from-offset: 0;
+    --feedback-from-scale: 1;
+    animation-duration: 0.01ms;
+    animation-delay: 0s;
+  }
+}
+
 .otari-toolbar .button--ghost,
 .otari-actions .button--ghost,
 .otari-pagination .button--ghost,
@@ -1765,9 +1888,20 @@ main {
 .otari-auth-actions .button--ghost:not(.button--sm):not(.button--icon-only) {
   min-height: 2.75rem;
   padding-inline: 0.75rem;
+  /* The 12px of padding is the target, not the look: pulled out by it plus the
+     row's own 1px so the label's right edge lines up with the card's content
+     edge instead of sitting 13px inside it. The target keeps its width. */
+  margin-inline-end: -13px;
   --button-fg: var(--color-link);
   --button-bg-hover: transparent;
   --button-bg-pressed: transparent;
+}
+/* The same pull on the leading side, for a ghost action that is the first item in
+   the row (a lone Help, where there is no link beside it): its label lines up with
+   the card's content edge as a link's does, and its target keeps its width. */
+.otari-auth-actions
+.button--ghost:not(.button--sm):not(.button--icon-only):first-child {
+  margin-inline-start: -13px;
 }
 .otari-auth-actions
   .button--ghost:not(.button--sm):not(.button--icon-only):is(
@@ -1960,12 +2094,13 @@ main {
    so a ring at a 2px offset draws around the chevron and overhangs the field's
    own edge on the trailing and block sides instead of following the control.
 
-   The control is the input group, and HeroUI already rings its
-   `[data-slot="input"]` on focus. That is the same moment: react-aria focuses
+   The control is the input group, and its `.input` wears the field ring
+   (`.input[data-focus-visible]`, above). That is the same moment: react-aria focuses
    the input when the trigger is pressed and keeps the trigger out of the tab
    order, so an open combo box always wears that ring and a keyboard user is
    never left without one. The rule below is the other half, and the two agree:
-   the overlay chevron draws no ring of its own in either state. */
+   the overlay chevron draws no ring of its own in either state. HeroUI draws
+   none for the input itself, which is why the ring is ours. */
 /* 6px, not 8: the menu belongs to the control, and the gap was wide enough to
    read as two unrelated things. Measured rather than derived: the offset is
    HeroUI's and it moved when the trigger lost 2px of height in a table row, so
@@ -2405,7 +2540,18 @@ main {
 
    The selection box is held with them rather than left to scroll: it acts on the
    row, and a checkbox that has slid away from the row it selects is worse than
-   no pin at all. */
+   no pin at all.
+
+   The box is only there when some row on the page is bulk-editable, so the
+   offsets start from a variable that drops to zero when Time is the first
+   column. Fixed offsets pushed every held lane a box-width right of where it
+   sits, and Model then covered the start of Routing. */
+.otari-activity-table {
+  --activity-pin-start: 3rem;
+}
+.otari-activity-table:has(.table__column[data-key="time"]:first-child) {
+  --activity-pin-start: 0rem;
+}
 .otari-activity-table .table__column:first-child,
 .otari-activity-table .table__row .table__cell:first-child {
   position: sticky;
@@ -2414,35 +2560,122 @@ main {
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="time"],
-.otari-activity-table .table__cell[data-key="time"] {
+.otari-activity-table .table__cell[data-column="time"] {
   position: sticky;
-  left: 3rem;
+  left: var(--activity-pin-start);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="user"],
-.otari-activity-table .table__cell[data-key="user"] {
+.otari-activity-table .table__cell[data-column="user"] {
   position: sticky;
-  left: 10.5rem;
+  left: calc(var(--activity-pin-start) + 7.5rem);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="model"],
-.otari-activity-table .table__cell[data-key="model"] {
+.otari-activity-table .table__cell[data-column="model"] {
   position: sticky;
-  left: 19.875rem;
+  left: calc(var(--activity-pin-start) + 16.875rem);
   z-index: 1;
   background-color: var(--color-background);
 }
 /* One boundary, at the edge of the held region, and only while it is holding
    something back. */
 .otari-activity-table[data-scrolled="true"] .table__column[data-key="model"],
-.otari-activity-table[data-scrolled="true"] .table__cell[data-key="model"] {
+.otari-activity-table[data-scrolled="true"] .table__cell[data-column="model"] {
   border-right: 1px solid var(--color-control-border);
+}
+/* Sessions: one row per agent session, dense on a desk. Last activity and Name
+   are held while the measures scroll, from md up; below md the table is cards. */
+.otari-sessions-table .otari-table.table-root {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-sessions-table .table__row .table__cell {
+  height: 2.75rem;
+  padding-block: 0;
+}
+/* Every row is one line high. A cell's height is only a floor, so a wrapped
+   chip, duration or header would grow its row; the scroll frame takes the
+   width instead. */
+.otari-sessions-table .table__column,
+.otari-sessions-table .table__cell[data-column] {
+  white-space: nowrap;
+}
+.otari-sessions-table .table__column[data-key="last_activity"] {
+  width: 11.375rem;
+  min-width: 11.375rem;
+}
+.otari-sessions-table .table__column[data-key="name"] {
+  min-width: 10rem;
+}
+.otari-sessions-table .table__column[data-key="levels"] {
+  width: 6rem;
+  min-width: 6rem;
+}
+.otari-sessions-table .table__column[data-key="latency"] {
+  width: 6rem;
+  min-width: 6rem;
+}
+.otari-sessions-table .table__column[data-key="tokens"] {
+  width: 11rem;
+  min-width: 11rem;
+}
+.otari-sessions-table .table__column[data-key="cost"] {
+  width: 6.5rem;
+  min-width: 6.5rem;
+}
+.otari-sessions-table .table__column[data-key="tags"] {
+  width: 6rem;
+  min-width: 6rem;
+}
+@media (min-width: 48rem) {
+  .otari-sessions-table .table__row .table__cell {
+    height: 1.75rem;
+  }
+  .otari-sessions-table .table__column[data-key="last_activity"],
+  .otari-sessions-table .table__cell[data-column="last_activity"] {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: var(--color-background);
+  }
+  .otari-sessions-table .table__column[data-key="name"],
+  .otari-sessions-table .table__cell[data-column="name"] {
+    position: sticky;
+    left: 11.375rem;
+    z-index: 1;
+    background-color: var(--color-background);
+  }
+  .otari-sessions-table[data-scrolled="true"] .table__column[data-key="name"],
+  .otari-sessions-table[data-scrolled="true"] .table__cell[data-column="name"] {
+    border-right: 1px solid var(--color-control-border);
+  }
+}
+/* The row open in the panel. On the cells, pinned ones included: every cell
+   paints its own background over the row's. */
+.otari-sessions-table .table__row.is-peeked .table__cell {
+  background-color: var(--color-surface-subtle);
+}
+/* The session panel's rows and resize handles sit flush with a scrolling
+   pane, which would clip the base ring's outward 2px, so theirs is drawn
+   inside. */
+.otari-trace-ring:focus-visible {
+  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
+  outline-offset: -2px;
+}
+/* The timeline bar of the span open in the panel. */
+.otari-trace-mark--selected {
+  outline: 1px solid var(--color-text);
 }
 .otari-mcp-table .table__row .table__cell {
   height: 3.25rem;
   padding-block: 0;
+}
+.otari-mcp-table .table__column[data-key="server_id"] {
+  width: 9.5rem;
+  min-width: 9.5rem;
 }
 .otari-mcp-table .table__column[data-key="token"] {
   width: 8.75rem;
@@ -2476,27 +2709,40 @@ main {
 .otari-budgets-table .table__column[data-key="default-for"] {
   min-width: 11.25rem;
 }
-/* The selection box travels with the row it acts on, and the identity beside
-   it, for the reason the activity table pins both. */
+/* The identity pins so the lanes scroll under it. */
 .otari-budgets-table .table__column:first-child,
 .otari-budgets-table .table__row .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
   background-color: var(--color-background);
+  width: 14rem;
+  min-width: 14rem;
 }
-.otari-budgets-table .table__column[data-key="budget"],
-.otari-budgets-table .table__cell[data-key="budget"] {
-  position: sticky;
-  left: 3rem;
-  z-index: 1;
-  background-color: var(--color-background);
-  width: 16.25rem;
-  min-width: 16.25rem;
-}
-.otari-budgets-table[data-scrolled="true"] .table__column[data-key="budget"],
-.otari-budgets-table[data-scrolled="true"] .table__cell[data-key="budget"] {
+.otari-budgets-table[data-scrolled="true"] .table__column:first-child,
+.otari-budgets-table[data-scrolled="true"]
+  .table__row
+  .table__cell:first-child {
   border-right: 1px solid var(--color-control-border);
+}
+.otari-budgets-table .table__column[data-key="owner"] {
+  width: 8.75rem;
+  min-width: 8.75rem;
+}
+.otari-budgets-table .table__column[data-key="id"] {
+  width: 8.75rem;
+  min-width: 8.75rem;
+}
+.otari-budgets-table .table__column[data-key="limit"] {
+  width: 8.75rem;
+  min-width: 8.75rem;
+}
+.otari-budgets-table .table__column[data-key="reset"] {
+  width: 6.25rem;
+  min-width: 6.25rem;
+}
+.otari-budgets-table .table__cell {
+  white-space: nowrap;
 }
 .otari-accounts-table .table__row .table__cell {
   height: 3.625rem;
@@ -2523,7 +2769,7 @@ main {
   min-width: 12.5rem;
 }
 .otari-accounts-table .table__column[data-key="account"],
-.otari-accounts-table .table__cell[data-key="account"] {
+.otari-accounts-table .table__cell[data-column="account"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2532,7 +2778,8 @@ main {
   min-width: 18.75rem;
 }
 .otari-accounts-table[data-scrolled="true"] .table__column[data-key="account"],
-.otari-accounts-table[data-scrolled="true"] .table__cell[data-key="account"] {
+.otari-accounts-table[data-scrolled="true"]
+  .table__cell[data-column="account"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-workspaces-table .table__row .table__cell {
@@ -2554,7 +2801,7 @@ main {
   min-width: 6rem;
 }
 .otari-workspaces-table .table__column[data-key="name"],
-.otari-workspaces-table .table__cell[data-key="name"] {
+.otari-workspaces-table .table__cell[data-column="name"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2563,7 +2810,7 @@ main {
   min-width: 27.5rem;
 }
 .otari-workspaces-table[data-scrolled="true"] .table__column[data-key="name"],
-.otari-workspaces-table[data-scrolled="true"] .table__cell[data-key="name"] {
+.otari-workspaces-table[data-scrolled="true"] .table__cell[data-column="name"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-provider-keys-table .table__row .table__cell {
@@ -2600,7 +2847,7 @@ main {
   min-width: 18rem;
 }
 .otari-provider-keys-table .table__column[data-key="name"],
-.otari-provider-keys-table .table__cell[data-key="name"] {
+.otari-provider-keys-table .table__cell[data-column="name"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2608,7 +2855,8 @@ main {
 }
 .otari-provider-keys-table[data-scrolled="true"]
   .table__column[data-key="name"],
-.otari-provider-keys-table[data-scrolled="true"] .table__cell[data-key="name"] {
+.otari-provider-keys-table[data-scrolled="true"]
+  .table__cell[data-column="name"] {
   border-right: 1px solid var(--color-control-border);
 }
 /* The organization's guardrail definitions. Name, guardrail and checks absorb
@@ -2662,7 +2910,7 @@ main {
   width: 12rem;
   min-width: 12rem;
 }
-.otari-guardrail-mandates-table .table__cell[data-key="on_unavailable"] {
+.otari-guardrail-mandates-table .table__cell[data-column="on_unavailable"] {
   white-space: nowrap;
 }
 .otari-guardrail-mandates-table .table__column[data-key="actions"] {
@@ -2727,7 +2975,7 @@ main {
   min-width: 9rem;
 }
 .otari-members-table .table__column[data-key="member"],
-.otari-members-table .table__cell[data-key="member"] {
+.otari-members-table .table__cell[data-column="member"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2736,7 +2984,7 @@ main {
 /* One boundary, at the edge of the held lane, and only while it is holding
    something back. */
 .otari-members-table[data-scrolled="true"] .table__column[data-key="member"],
-.otari-members-table[data-scrolled="true"] .table__cell[data-key="member"] {
+.otari-members-table[data-scrolled="true"] .table__cell[data-column="member"] {
   border-right: 1px solid var(--color-control-border);
 }
 /* Key lanes stay fixed while the name absorbs the available width. */
@@ -2761,10 +3009,9 @@ main {
 .otari-keys-table .table__column[data-key="owner"] {
   width: 10.625rem;
 }
-.otari-keys-table .table__column[data-key="key"] {
-  width: 11.25rem;
+.otari-keys-table .table__column[data-key="budget"] {
+  width: 10rem;
 }
-.otari-keys-table .table__column[data-key="created"],
 .otari-keys-table .table__column[data-key="expires"] {
   width: 6.875rem;
 }
@@ -2854,8 +3101,7 @@ main {
 /* A relative time is short but wraps at this lane width ("4 minutes ago" is
    three words), and a wrapped cell is the one thing that can break the row
    pitch below. */
-.otari-overview-activity .table__cell[data-key="time"],
-.otari-overview-activity .table__row .table__cell:first-child {
+.otari-overview-activity .table__cell[data-column="time"] {
   white-space: nowrap;
 }
 .otari-overview-activity .table__column[data-key="key"] {

@@ -11,7 +11,7 @@ import {
 } from "react-icons/fi"
 import type { ApiKey } from "@/client"
 import { TOOLTIP_OPEN_DELAY_MS } from "@/design-system/overlays/Tooltip"
-import { formatDateTime } from "@/shared/helpers/format"
+import { formatDateTimeMinutes } from "@/shared/helpers/format"
 import { keyFingerprint } from "./secretCaption"
 
 export function KeyActionsMenu({
@@ -19,6 +19,7 @@ export function KeyActionsMenu({
   triggerRef,
   onAction,
   owner,
+  hasIdentity,
   hasDetails,
   isPending,
   onToggle,
@@ -31,9 +32,15 @@ export function KeyActionsMenu({
   onAction: () => void
   owner?: string
   /**
-   * Created, Last used, Expires and Models are lanes on the wide table; below it
-   * they leave the row, and the menu is the only place they can still be read
-   * whole.
+   * The key's name, owner and fingerprint, whole. Only for the phone list,
+   * which truncates them and has no hover to recover them; the table shows them
+   * in its own lanes.
+   */
+  hasIdentity?: boolean
+  /**
+   * Last used, Expires and Models are lanes on the wide table; below it they
+   * leave the row, and the menu is the only place they can still be read whole.
+   * Created has no lane at any width, so the menu always shows it.
    */
   hasDetails?: boolean
   isPending: boolean
@@ -101,57 +108,67 @@ export function KeyActionsMenu({
         className="otari-key-actions-menu"
       >
         <div className="flex flex-col gap-1 border-b border-border px-3 py-3">
-          <p className="break-words text-body">{name}</p>
-          {owner ? <p className="break-all text-caption">{owner}</p> : null}
-          <p className="break-all text-mono-caption text-muted">
-            {keyFingerprint(apiKey) ?? "No key prefix"}
-          </p>
-          {hasDetails ? (
-            <dl className="flex flex-col gap-1 pt-2 text-caption">
-              <div>
-                <dt className="inline">Created: </dt>
-                <dd className="inline">{formatDateTime(apiKey.created_at)}</dd>
-              </div>
-              <div>
-                <dt className="inline">Last used: </dt>
-                <dd className="inline">
-                  {apiKey.last_used_at
-                    ? formatDateTime(apiKey.last_used_at)
-                    : "never"}
-                </dd>
-              </div>
-              <div>
-                <dt className="inline">Expires: </dt>
-                <dd className="inline">
-                  {apiKey.expires_at
-                    ? formatDateTime(apiKey.expires_at)
-                    : "never"}
-                </dd>
-              </div>
-              <div>
-                <dt className="inline">Models: </dt>
-                <dd className="inline break-words">
-                  {apiKey.allowed_models === null
-                    ? "All models"
-                    : apiKey.allowed_models.join(", ") || "No models"}
-                </dd>
-              </div>
-              {apiKey.exclude_from_budget ? (
+          {hasIdentity ? (
+            <>
+              <p className="break-words text-body">{name}</p>
+              {owner ? <p className="break-all text-caption">{owner}</p> : null}
+              <p className="break-all text-mono-caption text-muted">
+                {keyFingerprint(apiKey) ?? "No key prefix"}
+              </p>
+            </>
+          ) : null}
+          <dl
+            className={`flex flex-col gap-1 text-caption ${hasIdentity ? "pt-2" : ""}`}
+          >
+            <div>
+              <dt className="inline">Created: </dt>
+              <dd className="inline">
+                {formatDateTimeMinutes(apiKey.created_at)}
+              </dd>
+            </div>
+            {hasDetails ? (
+              <>
                 <div>
-                  <dt className="inline">Budget: </dt>
-                  <dd className="inline">Exempt</dd>
-                </div>
-              ) : null}
-              {apiKey.reject_user_mismatch !== null ? (
-                <div>
-                  <dt className="inline">User matching: </dt>
+                  <dt className="inline">Last used: </dt>
                   <dd className="inline">
-                    {apiKey.reject_user_mismatch ? "Strict" : "Lenient"}
+                    {apiKey.last_used_at
+                      ? formatDateTimeMinutes(apiKey.last_used_at)
+                      : "never"}
                   </dd>
                 </div>
-              ) : null}
-            </dl>
-          ) : null}
+                <div>
+                  <dt className="inline">Expires: </dt>
+                  <dd className="inline">
+                    {apiKey.expires_at
+                      ? formatDateTimeMinutes(apiKey.expires_at)
+                      : "never"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="inline">Models: </dt>
+                  <dd className="inline break-words">
+                    {apiKey.allowed_models === null
+                      ? "All models"
+                      : apiKey.allowed_models.join(", ") || "No models"}
+                  </dd>
+                </div>
+                {apiKey.exclude_from_budget ? (
+                  <div>
+                    <dt className="inline">Budget: </dt>
+                    <dd className="inline">Exempt</dd>
+                  </div>
+                ) : null}
+                {apiKey.reject_user_mismatch !== null ? (
+                  <div>
+                    <dt className="inline">User matching: </dt>
+                    <dd className="inline">
+                      {apiKey.reject_user_mismatch ? "Strict" : "Lenient"}
+                    </dd>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </dl>
         </div>
         <Dropdown.Menu
           aria-label={`Actions for ${name}`}

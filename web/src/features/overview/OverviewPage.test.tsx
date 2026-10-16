@@ -16,13 +16,14 @@ import {
   OverviewIndex,
   OverviewPage,
 } from "@/features/overview/OverviewPage"
-import { API_ROOT } from "@/shared/api/client"
+import { API_ROOT, defaultQueryRetry } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
   HOSTED_SURFACES,
   organizationContext,
+  pendingOrganizationInvitation,
   seriesPoint,
   usageTotals,
   workspaceActivation,
@@ -64,6 +65,7 @@ function summary(
     by_endpoint: [],
     by_provider: [],
     by_tool: [],
+    by_tag: [],
     errors_by_status_code: [],
     series,
   }
@@ -124,6 +126,8 @@ interface Bodies {
   activation?: unknown
   /** Model ids the caller's catalog reports, which is what the guide gates on. */
   models?: string[]
+  /** Answers the catalog with a server error instead of a list. */
+  modelsFail?: boolean
 }
 
 /** The catalog shape `${API_ROOT}/models` answers, which is the setup guide's gate. */
@@ -552,6 +556,74 @@ describe("OverviewPage", () => {
     )
   })
 
+  it("tells budgets that cap no spend apart from no budgets at all", async () => {
+    // A budget limiting only tokens or requests has no spend share to show,
+    // and "no budgets set" beside it would contradict the Budgets page.
+    mockApi({
+      overview: {
+        budgets: strip({ capped_count: 0, total_count: 2, worst: null }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("no budget caps spend")).toBeInTheDocument()
+    expect(screen.queryByText("no budgets set")).not.toBeInTheDocument()
+  })
+
+  it("names an unnamed budget enforced through a scoped budget after what it caps", async () => {
+    // A deployment budget attached to an API key arrives with the scope it
+    // caps and no name of its own; the tile says "An API key" rather than an
+    // id fingerprint, the way the ceilings strip names its rows.
+    mockApi({
+      overview: {
+        budgets: strip({
+          near_count: 1,
+          worst: {
+            budget_id: "b-key-cap",
+            name: null,
+            spent: 9,
+            allocated: 10,
+            scope_type: "api_token",
+            scope_id: "eeecba57-49c3-4e40-b3c1-d170aeed55c8",
+          },
+        }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("90.0%")).toBeInTheDocument()
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Worst budget usage: An API key (eeecba57…)",
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("does not name a deployment budget's organization ceiling after the caller's organization", async () => {
+    // A deployment budget can cap any tenant's organization, so the tile keeps
+    // the label generic instead of claiming the caller's own.
+    mockApi({
+      overview: {
+        budgets: strip({
+          near_count: 1,
+          worst: {
+            budget_id: "b-org-cap",
+            name: null,
+            spent: 9,
+            allocated: 10,
+            scope_type: "organization",
+            scope_id: "4c1f0e2a-7a77-4d0f-9b35-3c1b6f7c2d11",
+          },
+        }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(
+      await screen.findByRole("progressbar", {
+        name: "Worst budget usage: An organization (whole organization)",
+      }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/This organization/)).not.toBeInTheDocument()
+  })
+
   it("summarizes provider health and surfaces problems in the status strip", async () => {
     mockApi({
       health: {
@@ -741,10 +813,9 @@ describe("OverviewIndex routing", () => {
   })
 
   it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
-    // The deployment's own credentials. Standalone serves both provider pages
-    // now, and this one stays right because only a deployment operator reaches
-    // this strip at all: a caller who is not one gets `OrganizationOverview`,
-    // which does not draw it.
+    // The deployment's own credentials: only a deployment operator is sent to
+    // `/providers`, since `OrganizationOverview` links to the organization's
+    // provider-key page.
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(<OverviewIndex />)
@@ -907,6 +978,7 @@ function mockScopedApi(b: Bodies): string[] {
       return jsonResponse(b.activation ?? workspaceActivation())
     }
     if (url.includes(`${API_ROOT}/models`)) {
+      if (b.modelsFail) return jsonResponse({ detail: "catalog down" }, 500)
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     return jsonResponse({ detail: "forbidden" }, 403)
@@ -1283,7 +1355,10 @@ describe("the tenant Overview's chart and rail", () => {
   })
 
   it("offers a member only the destinations that will serve them", async () => {
-    mockScopedApi({ context: { role: "member" }, period: { cost: 200 } })
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "member" },
+      period: { cost: 200 },
+    })
     renderPage(<OverviewIndex />)
     await screen.findByText("$200.00")
 
@@ -1304,7 +1379,10 @@ describe("the tenant Overview's chart and rail", () => {
   })
 
   it("offers an admin all four", async () => {
-    mockScopedApi({ context: { role: "admin" }, period: { cost: 200 } })
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "admin" },
+      period: { cost: 200 },
+    })
     renderPage(<OverviewIndex />)
     await screen.findByText("$200.00")
 
@@ -1313,6 +1391,41 @@ describe("the tenant Overview's chart and rail", () => {
     const inRail = within(rail as HTMLElement)
     expect(inRail.getByRole("link", { name: "Budgets" })).toBeInTheDocument()
     expect(inRail.getByRole("link", { name: "Members" })).toBeInTheDocument()
+  })
+
+  // A member in no workspace used to read "This workspace" over counts for a
+  // workspace they are not in.
+  it("says so, rather than counting, for a member in no workspace", async () => {
+    mockScopedApi({
+      context: { role: "member", workspace_memberships: [] },
+      period: { cost: 200 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    const rail = (await screen.findByText("No workspace yet")).closest(
+      "section",
+    )
+    expect(rail).not.toBeNull()
+    const inRail = within(rail as HTMLElement)
+    expect(
+      inRail.getByText(/You do not belong to a workspace in this organization/),
+    ).toBeInTheDocument()
+    expect(inRail.queryByText("Active keys")).not.toBeInTheDocument()
+    expect(screen.queryByText("This workspace")).not.toBeInTheDocument()
+  })
+
+  it("keeps the counts when the context does not say which workspaces the member is in", async () => {
+    // Undefined is dropped when the mock serializes the body, so the field is absent.
+    mockScopedApi({
+      context: { role: "member", workspace_memberships: undefined },
+      period: { cost: 200 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    expect(await screen.findByText("This workspace")).toBeInTheDocument()
+    expect(screen.queryByText("No workspace yet")).not.toBeInTheDocument()
   })
 })
 
@@ -1360,11 +1473,11 @@ describe("OverviewIndex operator-ness", () => {
     ).toBe(false)
   })
 
-  it("lands a failed context on the scoped page, where its tiles already read", async () => {
-    // The failure the two sources used to disagree about: the context read is
-    // what the usage hooks scope off, so a page that decided operator-ness some
-    // other way would render the deployment-wide panels above tiles quietly
-    // serving this caller's own organization, with nothing on screen to say so.
+  it("lands a failed context on the operator page, where its tiles read too", async () => {
+    // Every operator gate fails open on a failed read (otari#876), and the page
+    // and the usage hooks behind its tiles take that answer from one place, so
+    // the operator panels never sit above tiles serving the caller's own
+    // organization.
     const requested: string[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
@@ -1372,59 +1485,41 @@ describe("OverviewIndex operator-ness", () => {
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({ detail: "context exploded" }, 500)
       }
-      if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
-        if (url.includes("bucket=hour"))
-          return jsonResponse(summary({ cost: 5 }))
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse(summary({ cost: 200, request_count: 2000 }))
       }
-      if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
-        return jsonResponse([])
+      if (url.includes(`${API_ROOT}/providers/health`)) {
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
       }
-      return jsonResponse({ detail: "forbidden" }, 403)
+      if (url.includes(`${API_ROOT}/providers`)) {
+        return jsonResponse({ providers: [{ provider: "openai" }] })
+      }
+      return jsonResponse([])
     })
     renderPage(<OverviewIndex />)
 
-    // The scoped page, rendering scoped numbers: an errored context is an
-    // answer, so the page is not stranded on its loading state either.
-    expect(await screen.findByText("$200.00")).toBeInTheDocument()
-    expect(screen.getByText("$5.00")).toBeInTheDocument()
     expect(
-      screen.queryByText(
+      await screen.findByText(
         "At-a-glance spend, traffic, and health across the gateway.",
       ),
-    ).not.toBeInTheDocument()
-    expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
+    ).toBeInTheDocument()
+    expect(
+      requested.some((url) => url.includes(`${API_ROOT}/organizations/me/`)),
+    ).toBe(false)
 
-    // And it settled there. The usage hooks behind those tiles observe the same
-    // errored context, and their mount asks it to refetch; a page reading the
-    // transient pending state would flip back to its spinner, unmount them, and
-    // ask again without end. The tiles asserted above are what such a page never
-    // reaches, and this is the request storm underneath it.
+    // And it settled there. The usage hooks observe the same errored context,
+    // and their mount asks it to refetch; a page reading that transient pending
+    // state would flip back to its spinner, unmount them, and ask again
+    // without end.
     expect(
       requested.filter((url) => url.endsWith(`${API_ROOT}/organizations/me`))
         .length,
     ).toBeLessThan(4)
-
-    // And it asked nothing the deployment-wide page would have: not the gate,
-    // and no endpoint outside the surface the hooks fell back to. /v1/overview
-    // is the exception the scoped-surface test above explains: it is scoped by
-    // the identity asking rather than by its prefix.
-    const asked = requested.filter(
-      (url) =>
-        !url.endsWith(`${API_ROOT}/organizations/me`) &&
-        !url.includes(`${API_ROOT}/overview`),
-    )
-    expect(asked.length).toBeGreaterThan(0)
-    for (const url of asked) {
-      expect(url).toContain(`${API_ROOT}/organizations/me/`)
-    }
-    // The ceilings among them: an errored context names no role, and the page
-    // withholds a read the server may refuse rather than painting its refusal.
-    expect(
-      asked.some((url) =>
-        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
-      ),
-    ).toBe(false)
   })
 })
 
@@ -1512,5 +1607,232 @@ describe("the setup guide on either Overview", () => {
       screen.queryByRole("heading", { name: "Send your first request" }),
     ).not.toBeInTheDocument()
     expect(requested.some((url) => url.includes("/activation"))).toBe(false)
+  })
+})
+
+describe("the first-steps strip on the tenant Overview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  const GET_STARTED = "Get started with Otari"
+
+  it("points an admin of a brand-new organization at adding a provider key", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES, models: [] })
+    const user = userEvent.setup()
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText(GET_STARTED)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Add a provider key" }))
+    expect(await screen.findByTestId("loc")).toHaveTextContent(
+      "/organization/provider-keys",
+    )
+  })
+
+  it("tells a member who to ask, and offers no button they cannot use", async () => {
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "member" },
+      models: [],
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText(GET_STARTED)).toBeInTheDocument()
+    expect(screen.getByText(/Ask an owner or admin/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Add a provider key" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("is absent once there is something to route to, where the guide takes over", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await screen.findByRole("heading", { name: "Send your first request" })
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+
+  it("is absent when the account already has traffic", async () => {
+    mockScopedApi({
+      context: TWO_WORKSPACES,
+      models: [],
+      logs: [
+        {
+          id: "1",
+          user_id: null,
+          api_key_id: null,
+          timestamp: "2026-07-22T00:00:00Z",
+          model: "gpt-5.6",
+          provider: "openai",
+          endpoint: "/v1/chat/completions",
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          cost: 0.5,
+          status: "success",
+          error_message: null,
+          latency_ms: 120,
+        },
+      ],
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+
+  it("stays out of the way when the catalog cannot be read", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES, modelsFail: true })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
+    })
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+})
+
+describe("OverviewIndex for an identity with no organization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function mockWithoutOrganization(
+    invitations: ReturnType<typeof pendingOrganizationInvitation>[] | "fails",
+  ) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
+        return jsonResponse({ detail: "Organization not found" }, 404)
+      }
+      if (url.includes(`${API_ROOT}/organizations/me/pending-memberships`)) {
+        if (invitations === "fails") {
+          // A 404 is the one failure the hook does not retry, which keeps this fast.
+          return jsonResponse({ detail: "Not Found" }, 404)
+        }
+        return jsonResponse({ data: invitations, count: invitations.length })
+      }
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
+        return jsonResponse(summary({}))
+      }
+      if (url.includes(`${API_ROOT}/providers/health`)) {
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
+      }
+      if (url.includes(`${API_ROOT}/providers`)) {
+        return jsonResponse({ providers: [{ provider: "openai" }] })
+      }
+      return jsonResponse([])
+    })
+  }
+
+  function renderHome({
+    openSignup = false,
+    client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    }),
+  } = {}) {
+    return render(
+      <QueryClientProvider client={client}>
+        <DeploymentProvider
+          value={bootstrap({
+            deployment_type: "hosted",
+            surfaces: HOSTED_SURFACES,
+            open_signup: openSignup,
+          })}
+        >
+          <OverviewIndex />
+        </DeploymentProvider>
+      </QueryClientProvider>,
+      {
+        wrapper: withRouter({
+          url: "/",
+          routes: [{ path: "/invitations", element: <LocationProbe /> }],
+        }),
+      },
+    )
+  }
+
+  const EMPTY_STATE = "You're not a member of an organization yet"
+
+  it("sends an invitee who signed up before accepting to their invitations", async () => {
+    mockWithoutOrganization([pendingOrganizationInvitation()])
+
+    renderHome()
+
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/invitations")
+  })
+
+  it("offers the invitations page when they cannot be loaded", async () => {
+    mockWithoutOrganization("fails")
+
+    renderHome()
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Open your invitations" }),
+    ).toHaveAttribute("href", "/invitations")
+    expect(
+      screen.queryByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).not.toBeInTheDocument()
+  })
+
+  it("says how to get in when nothing is waiting, rather than the operator page", async () => {
+    mockWithoutOrganization([])
+
+    renderHome()
+
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    // The deployment-wide page fails open on an unreadable context, and a 404
+    // is not one: it is the server saying there is no organization.
+    expect(
+      screen.queryByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).toBeNull()
+    expect(
+      screen.getByRole("link", { name: /View invitations/ }),
+    ).toHaveAttribute("href", "/invitations")
+    // Signup is closed, so the server would refuse to create one.
+    expect(
+      screen.queryByRole("button", { name: "Create organization" }),
+    ).toBeNull()
+  })
+
+  it("offers to create an organization where signup is open", async () => {
+    mockWithoutOrganization([])
+
+    renderHome({ openSignup: true })
+
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Create organization" }),
+    ).toBeInTheDocument()
+  })
+
+  it("does not retry the 404 that says there is no organization", async () => {
+    mockWithoutOrganization([])
+    // The app's own default, which would retry a 404 twice.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: defaultQueryRetry } },
+    })
+
+    renderHome({ client })
+
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    const contextReads = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([input]) =>
+        String(input).endsWith(`${API_ROOT}/organizations/me`),
+      )
+    expect(contextReads).toHaveLength(1)
   })
 })

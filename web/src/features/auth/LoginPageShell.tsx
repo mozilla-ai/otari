@@ -1,45 +1,80 @@
 import { type ReactNode, useRef } from "react"
-import { FiMonitor, FiMoon, FiSun } from "react-icons/fi"
+import { FiMoon, FiSun } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
-import { THEME_PREFERENCES, useTheme } from "@/shared/hooks/useTheme"
+import { AuthShellSlot } from "@/features/auth/overlayAuthShellSlot"
+import { siteHomeHref } from "@/features/models/publicCatalog"
+import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useTheme } from "@/shared/hooks/useTheme"
+import { authShellPage } from "./authShellSlot"
 import { LoginBackground } from "./background/LoginBackground"
 import savedBackground from "./background/login-background.json"
 
-export function LoginPageShell({ children }: { children: ReactNode }) {
+function BrandMark() {
+  const href = siteHomeHref(useDeployment())
+  const mark = (
+    <>
+      <img
+        src={`${import.meta.env.BASE_URL}favicon.svg`}
+        alt=""
+        width={273}
+        height={250}
+        className="h-6 w-[1.638rem]"
+      />
+      <span className="text-title transition-colors group-hover:text-muted motion-reduce:transition-none">
+        Otari
+      </span>
+    </>
+  )
+  if (!href) return <div className="flex items-center gap-3">{mark}</div>
+  return (
+    <a
+      href={href}
+      aria-label="Otari home"
+      className="group -mx-1 flex min-h-11 items-center gap-3 px-1"
+    >
+      {mark}
+    </a>
+  )
+}
+
+export function LoginPageShell({
+  children,
+  isBusy = false,
+}: {
+  children: ReactNode
+  /** Whether a request of the page's own is in flight, for the header slot. */
+  isBusy?: boolean
+}) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const { preference, setPreference } = useTheme()
-  const next =
-    THEME_PREFERENCES[
-      (THEME_PREFERENCES.indexOf(preference) + 1) % THEME_PREFERENCES.length
-    ]
-  const ThemeIcon =
-    preference === "system" ? FiMonitor : preference === "dark" ? FiMoon : FiSun
+  const { resolved, toggle } = useTheme()
+  const isDark = resolved === "dark"
+  const ThemeIcon = isDark ? FiMoon : FiSun
 
   return (
     <div className="relative isolate flex min-h-svh flex-col bg-background">
       <header className="relative z-10 flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-4 md:px-6">
-        <div className="flex items-center gap-3">
-          <img
-            src={`${import.meta.env.BASE_URL}favicon.svg`}
-            alt=""
-            width={273}
-            height={250}
-            className="h-6 w-[1.638rem]"
-          />
-          <span className="text-title">Otari</span>
-        </div>
+        <BrandMark />
         {/* No `md:` step down: the header is `min-h-14`, so a 44px target fits
             inside it at every width without moving the row. */}
-        <IconButton
-          variant="ghost"
-          isIconOnly
-          label={`Appearance: ${preference}. Switch to ${next}.`}
-          onPress={() => setPreference(next)}
-        >
-          <ThemeIcon aria-hidden />
-        </IconButton>
+        <div className="flex items-center gap-1">
+          <AuthShellSlot
+            page={authShellPage(window.location.hash)}
+            isBusy={isBusy}
+          />
+          <IconButton
+            variant="ghost"
+            isIconOnly
+            label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+            onPress={toggle}
+          >
+            <ThemeIcon aria-hidden />
+          </IconButton>
+        </div>
       </header>
-      <main className="relative isolate flex flex-1 flex-col items-center justify-center px-4 py-4">
+      {/* Pinned to the top rather than centered: the card changes height when a
+            folded form opens or an error appears, and a centered card would
+            move its heading with every change. */}
+      <main className="relative isolate flex flex-1 flex-col items-center px-4 py-4 md:pt-15">
         <LoginBackground panelRef={panelRef} config={savedBackground} />
         <div
           ref={panelRef}

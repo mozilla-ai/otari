@@ -2,7 +2,8 @@
 
 The wire shapes for a deployment's organization-scoped provider credentials:
 the keys themselves, a workspace's departure from its organization's default,
-and the models a key offers with the rate each is charged at.
+and the models a key offers with the rate each is charged at. Also the
+endpoints a workspace or one of its users owns.
 
 They are SQLModel rather than plain Pydantic because they are read straight off
 the rows in ``models/provider_keys.py``, whose tables are SQLModel too.
@@ -18,6 +19,7 @@ from sqlmodel import Field, SQLModel
 
 from gateway.models.pricing import PriceSource
 from gateway.models.provider_keys import OrgProviderKey
+from gateway.models.providers import ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -63,18 +65,34 @@ class OrgProviderKeyPublic(SQLModel):
             "cannot read is still listed, because deleting or replacing it is what fixes it."
         )
     )
+    offered_count: int = Field(
+        description=(
+            "How many models the organization offers on this key. Zero means the key has never been "
+            "refreshed, so it is unnarrowed and reaches whatever its provider serves."
+        )
+    )
+    serving_count: int = Field(
+        description=(
+            "How many of the offered models have their serving switch on. A key offering models and "
+            "serving none refuses every request through it until one is switched on."
+        )
+    )
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, key: OrgProviderKey, *, usable: bool) -> OrgProviderKeyPublic:
+    def from_row(
+        cls, key: OrgProviderKey, *, usable: bool, offered_count: int = 0, serving_count: int = 0
+    ) -> OrgProviderKeyPublic:
         """Read one row for the API. Never includes the key, only ``last4``.
 
         ``usable`` is passed in rather than derived here: answering it means
         decrypting, which belongs to the service layer that owns the secret box.
         Required rather than defaulted so a caller cannot report a key as working
-        without having asked.
+        without having asked. The two counts come from the offered-models table,
+        and default to a key that offers nothing, which is the one a row has
+        before its first refresh.
 
         ``client_args`` is arbitrary JSON an admin can set (Bedrock's
         ``region_name``, other client kwargs), and a credential-shaped field
@@ -95,6 +113,8 @@ class OrgProviderKeyPublic(SQLModel):
             last4=key.last4,
             is_org_default=key.is_org_default,
             usable=usable,
+            offered_count=offered_count,
+            serving_count=serving_count,
             archived_at=key.archived_at,
             created_at=key.created_at,
             updated_at=key.updated_at,
@@ -177,10 +197,12 @@ class OrgProviderKeyModelPublic(SQLModel):
 
     ``price_source`` says which rung of ``services.pricing_service`` answered:
     ``organization`` for a rate an admin set, ``defaults`` for the
-    community-maintained rate this surface seeded or the genai-prices fallback,
+    community-maintained rate this surface seeded or the models.dev fallback,
     ``deployment`` for the deployment's own price list, and None when nothing
     prices the model yet. ``pricing_id`` names the organization's own row where
     there is one, so a client can edit that rate without re-deriving the key.
+    ``unit`` says what the rates are per, as on a pricing row: tokens, requests
+    or images, so a per-request rate is not read as a per-token one.
     """
 
     id: uuid.UUID
@@ -190,9 +212,9 @@ class OrgProviderKeyModelPublic(SQLModel):
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
+    unit: str = "tokens"
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
@@ -238,6 +260,90 @@ class OrgProviderAvailableModelsPublic(SQLModel):
     discovery_unsupported: bool = False
 
 
+_ENDPOINT_NAME_DESC = (
+    "What callers put before the colon to reach this endpoint, as '<name>:<model>'. Letters, digits, '.', '_' "
+    "and '-', starting with a letter or digit. It may not be a provider's name or a configured instance's."
+)
+_ENDPOINT_PROVIDER_DESC = (
+    "The implementation that speaks to the endpoint: 'openai' for an OpenAI-compatible server, 'anthropic' for an "
+    "Anthropic-compatible one. Whichever it is, callers may use any of the chat, responses and messages routes."
+)
+_ENDPOINT_API_BASE_DESC = (
+    "Base URL of the endpoint. Refused when it resolves to a private, loopback, link-local or reserved address."
+)
+_ENDPOINT_DEFAULT_PARAMS_DESC = (
+    "Fields added to every request body sent to this endpoint, beneath the caller's own: a field the caller sets "
+    "wins. For fields the gateway does not model, such as vLLM's 'chat_template_kwargs'. Credential and "
+    "transport fields are refused."
+)
+
+
+class ProviderEndpointCreateRequest(SQLModel):
+    """What a caller sends to create an owned endpoint. The key is stored encrypted."""
+
+    name: str = Field(max_length=64, description=_ENDPOINT_NAME_DESC)
+    provider: str = Field(max_length=64, description=_ENDPOINT_PROVIDER_DESC)
+    api_base: str = Field(max_length=1024, description=_ENDPOINT_API_BASE_DESC)
+    api_key: str | None = Field(default=None, description="Sent to the endpoint. Never returned, only its last four.")
+    default_params: dict[str, Any] | None = Field(default=None, description=_ENDPOINT_DEFAULT_PARAMS_DESC)
+    workspace_id: uuid.UUID | None = Field(
+        default=None, description="Workspace that owns the endpoint. Omit for the deployment's default workspace."
+    )
+    user_id: str | None = Field(
+        default=None,
+        description=(
+            "User that owns the endpoint. Omit for one every caller in the workspace reaches. A user's endpoint "
+            "shadows a workspace-wide one of the same name for that user alone."
+        ),
+    )
+
+
+class ProviderEndpointUpdateRequest(SQLModel):
+    """A partial update. Only what is set is applied; an explicit null ``api_key`` clears it."""
+
+    name: str | None = Field(default=None, max_length=64, description=_ENDPOINT_NAME_DESC)
+    provider: str | None = Field(default=None, max_length=64, description=_ENDPOINT_PROVIDER_DESC)
+    api_base: str | None = Field(default=None, max_length=1024, description=_ENDPOINT_API_BASE_DESC)
+    api_key: str | None = None
+    default_params: dict[str, Any] | None = Field(default=None, description=_ENDPOINT_DEFAULT_PARAMS_DESC)
+
+
+class ProviderEndpointPublic(SQLModel):
+    """The API-facing shape. Never carries the key, only whether one is set."""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    user_id: str | None = None
+    name: str
+    provider: str
+    api_base: str
+    last4: str | None = None
+    default_params: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(cls, row: ProviderEndpoint) -> ProviderEndpointPublic:
+        """Read one row for the API, masking credential-shaped ``default_params`` entries."""
+        return cls(
+            id=row.id,
+            workspace_id=row.workspace_id,
+            user_id=row.user_id,
+            name=row.name,
+            provider=row.provider,
+            api_base=row.api_base,
+            last4=row.last4,
+            default_params=redact_secret_like_values(row.default_params),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class ProviderEndpointsPublic(SQLModel):
+    data: list[ProviderEndpointPublic]
+    count: int
+
+
 __all__ = [
     "OrgProviderAvailableModelsPublic",
     "OrgProviderKeyCreateRequest",
@@ -249,6 +355,10 @@ __all__ = [
     "OrgProviderKeyUpdateRequest",
     "OrgProviderKeysPublic",
     "OrgProviderModelsRefreshPublic",
+    "ProviderEndpointCreateRequest",
+    "ProviderEndpointPublic",
+    "ProviderEndpointUpdateRequest",
+    "ProviderEndpointsPublic",
     "WorkspaceProviderKeyOverridePublic",
     "WorkspaceProviderKeyOverrideRequest",
     "WorkspaceProviderKeyOverridesPublic",

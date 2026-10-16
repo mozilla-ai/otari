@@ -39,7 +39,7 @@ providers from configuration or stored credentials.
 SQLite is useful for evaluation. Use PostgreSQL for a durable deployment.
 
 Standalone supports local aliases and routing policies, including failover,
-weighted routing, conditional selection, and learned routing. Multi-provider
+weighted and priority routing, conditional selection, and learned routing. Multi-provider
 fallback is therefore available without otari.ai when you configure a policy.
 
 ## Hosted
@@ -78,7 +78,12 @@ export OTARI_AI_TOKEN=gw_your_gateway_token
 otari serve
 ```
 
-Hybrid serves health, bootstrap, Chat Completions, Messages, and Responses. It
+Hybrid serves health, bootstrap, Chat Completions, Messages, Responses,
+embeddings, rerank, image generation, audio transcription and speech,
+moderations, direct MCP tool execution (`POST /api/v1/mcp/execute`), and the
+guardrail hook check (`POST /api/v1/hooks/check`). Files, batches, direct search
+and decision calls (`/decisions`, `/systemone`, `/routing/recommend`) are
+standalone only. It
 does not initialize the local management database or use local provider
 configuration. Clients authenticate with an otari.ai user
 token, accepted in the same header forms as standalone mode
@@ -101,6 +106,24 @@ Hybrid mode can receive two kinds of provider credential:
 Managed model identifiers use the catalog values published by otari.ai. otari.ai
 refuses a managed credential to a self-hosted gateway, so platform-owned secrets
 never leave mozilla.ai's infrastructure.
+
+## Deployment-paid credentials in standalone
+
+A build that binds `ModelProviderPort` through `OTARI_BOOTSTRAP` can serve a
+model on a credential the deployment owns, once an organization's own key, a
+stored provider and `config.yml` have all missed. The deployment pays that
+upstream bill, so the request also goes through `BillingPort`. Before the
+provider call, the organization is granted any credit it is owed and refused
+with `402` (`insufficient_funds`) when it has no funds paid in. When the
+request settles, its cost, including the cost an abandoned or failed request
+still owes, is charged to the organization. No funds are held while the
+request runs, so concurrent requests can take an organization below zero. A
+request on any other credential never reaches either port, and the core's
+billing adapter does nothing, so a deployment with no overlay is unaffected.
+
+Today this covers Chat Completions, Messages, Responses and the Playground for a
+plain model or a single-target alias or policy. A routing policy with fallback
+candidates and the pass-through endpoints never reach `ModelProviderPort`.
 
 ## Internal protocol
 

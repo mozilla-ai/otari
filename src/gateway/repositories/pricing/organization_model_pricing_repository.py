@@ -3,7 +3,7 @@
 Serves the surface that offers models on an organization's provider key, which
 needs to say what each offered model currently costs and to move the rates it
 seeded itself. Reads only the two lower rungs of
-`services.pricing_service.find_model_pricing`'s ladder; the genai-prices
+`services.pricing_service.find_model_pricing`'s ladder; the models.dev
 fallback is not a table and is resolved by that module.
 
 Built on the Unit of Work. Flushes, never commits.
@@ -150,17 +150,21 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
             await self.db.execute(select(func.count()).select_from(OrganizationModelPricing).where(*where))
         ).scalar_one()
         rows = (
-            await self.db.execute(
-                select(OrganizationModelPricing)
-                .where(*where)
-                .order_by(
-                    col(OrganizationModelPricing.model_key),
-                    col(OrganizationModelPricing.effective_from).desc(),
+            (
+                await self.db.execute(
+                    select(OrganizationModelPricing)
+                    .where(*where)
+                    .order_by(
+                        col(OrganizationModelPricing.model_key),
+                        col(OrganizationModelPricing.effective_from).desc(),
+                    )
+                    .offset(skip)
+                    .limit(limit)
                 )
-                .offset(skip)
-                .limit(limit)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return list(rows), int(total)
 
     async def flush(self) -> None:

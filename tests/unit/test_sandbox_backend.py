@@ -557,7 +557,8 @@ async def test_file_refs_are_listed(monkeypatch: pytest.MonkeyPatch) -> None:
     async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "savefig()"})
 
-    assert "files: chart.png, ?" in result
+    assert "files: chart.png\n" in f"{result}\n"
+    assert "?" not in result
 
 
 @pytest.mark.asyncio
@@ -729,7 +730,7 @@ async def test_session_handle_violation_message_omits_the_payload(monkeypatch: p
         ),
         pytest.param(
             {"stdout": "ok", "return_code": 0, "content": [{"filename": None}, "bare-id"]},
-            "stdout:\nok\nfiles: ?",
+            "stdout:\nok",
             id="file-ref-unnameable",
         ),
     ],
@@ -910,7 +911,7 @@ async def test_served_tool_names_is_what_the_backend_actually_advertises() -> No
     advertising nothing, which is the silently-successful request both guards
     exist to prevent.
     """
-    from gateway.services.tenancy.workspace_code_execution_policy_service import SERVED_TOOL_NAMES
+    from gateway.services.sandbox_backend import SERVED_TOOL_NAMES
 
     backend = _sandbox()
     advertised = tuple(tool["function"]["name"] for tool in backend.openai_tools)
@@ -982,7 +983,7 @@ class _FakeFiles:
 
 
 def _staged(file_id: str = "file-csv", filename: str = "data.csv") -> Any:
-    from gateway.services.file_service import StagedFile
+    from gateway.services.files import StagedFile
 
     return StagedFile(file_id, filename, "text/csv", f"x/{file_id}")
 

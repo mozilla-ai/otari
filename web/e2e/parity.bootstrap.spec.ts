@@ -31,6 +31,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
       "routing",
       "settings",
       "tools",
+      "traces",
       "usage",
       "users",
       "workspaces",
@@ -53,6 +54,9 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // No legal pages configured here; see docs/configuration.md#legal-pages.
     terms_url: null,
     privacy_url: null,
+    // No site of its own here, so the public catalog's logo links to the
+    // catalog; see docs/configuration.md#the-public-site.
+    site_url: null,
     // Sign-ins are open, which is the resting state: maintenance mode is a
     // stored row an operator sets to freeze them during a redeploy, and
     // nothing in this environment sets it.
@@ -61,8 +65,10 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // WebAuthn relying-party ID and the account page offers no passkey form.
     // Distinct from `passkey` in sign_in_methods above, which additionally
     // needs a registered passkey; see docs/access-control.md.
+    passkeys_enabled: true,
     passkeys_ready: false,
     oauth_providers: [],
+    feedback_enabled: true,
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
     mail_ready: false,

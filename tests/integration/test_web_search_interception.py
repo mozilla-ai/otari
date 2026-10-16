@@ -24,19 +24,20 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.services.tools import WEB_FETCH_HEADER, WEB_SEARCH_HEADER
 
 from .conftest import MODEL_NAME
 
 
-def _completion(*, tool_call: bool) -> ChatCompletion:
-    """A provider response, optionally asking for the gateway's web_search tool."""
+def _completion(*, tool_call: bool, tool: str = "web_search", arguments: str = '{"query": "otari"}') -> ChatCompletion:
+    """A provider response, optionally asking for one of the gateway's web tools."""
     tool_calls = (
         [
             ChatCompletionMessageFunctionToolCall(
                 id="call_1",
                 type="function",
-                function=Function(name="web_search", arguments='{"query": "otari"}'),
+                function=Function(name=tool, arguments=arguments),
             )
         ]
         if tool_call
@@ -285,3 +286,68 @@ def test_invalid_max_uses_is_rejected_instead_of_becoming_uncapped(
     assert response.status_code == 400, response.text
     assert response.json() == {"detail": "web_search max_uses must be a non-negative integer"}
     assert search.await_count == 0
+
+
+def test_auto_claims_a_search_keyword_no_provider_runs_without_interception(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Chat Completions has no native search, so `Otari-Web-Search: auto` runs the
+    keyword on the backend rather than sending it to a provider that cannot serve it."""
+    search = AsyncMock(return_value="search results for otari")
+    with (
+        patch(
+            "gateway.services.mcp_loop.acompletion",
+            new=AsyncMock(side_effect=[_completion(tool_call=True), _completion(tool_call=False)]),
+        ),
+        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers={**api_key_header, WEB_SEARCH_HEADER: "auto"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert search.await_count == 1, "the keyword was forwarded instead of claimed"
+
+
+def test_auto_claims_anthropics_fetch_keyword_on_chat_completions(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """Chat Completions has no native fetch, so `Otari-Web-Fetch: auto` runs the keyword on Otari."""
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    fetch = AsyncMock(return_value="page text")
+    with (
+        patch(
+            "gateway.services.mcp_loop.acompletion",
+            new=AsyncMock(
+                side_effect=[
+                    _completion(tool_call=True, tool="web_fetch", arguments='{"url": "https://example.com"}'),
+                    _completion(tool_call=False),
+                ]
+            ),
+        ),
+        patch("gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool", new=fetch),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "read example.com"}],
+                "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}],
+            },
+            headers={**api_key_header, WEB_FETCH_HEADER: "auto"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["choices"][0]["message"]["content"] == "done"
+    assert fetch.await_count == 1, "the keyword was forwarded instead of claimed"

@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -17,6 +18,7 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 })
 
 const STATE_KEY = "otari.oauth.state"
+const RETURN_KEY = "otari.oauth.return-hash"
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -72,8 +74,8 @@ afterEach(() => {
   vi.restoreAllMocks()
   window.sessionStorage.clear()
   window.localStorage.clear()
-  // The success path now hands the tab back to "#/", so a test that signs in
-  // would otherwise leave that hash set for the next one.
+  // The success path changes the hash, so a test that signs in would otherwise
+  // leave it set for the next one.
   window.location.hash = ""
 })
 
@@ -91,10 +93,12 @@ describe("OAuthCallbackPage", () => {
     expect(url).toBe(`${API_ROOT}/auth/oauth/google/callback`)
     // The code and the state, and no redirect URI: that one is the gateway's
     // own. The state goes back so the gateway can check it against the pending
-    // authorization it recorded, which is the half this tab cannot do.
+    // authorization it recorded, which is the half this tab cannot do. No terms
+    // were accepted before this flow left, so none are claimed.
     expect(JSON.parse(String(init?.body))).toEqual({
       code: "the-code",
       state: "the-state",
+      terms_accepted: false,
     })
     await waitFor(() =>
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
@@ -113,6 +117,89 @@ describe("OAuthCallbackPage", () => {
 
     await screen.findByText("SIGNED IN")
     expect(window.sessionStorage.getItem(STATE_KEY)).toBeNull()
+  })
+
+  it("returns to the page the sign-in started from", async () => {
+    // An emailed link to a page behind the sign-in screen, followed signed out:
+    // the sign-in screen stood in for that page, and the provider's round trip
+    // must not lose it.
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    window.sessionStorage.setItem(RETURN_KEY, "#/organization/billing")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
+    )
+
+    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+    await screen.findByText("SIGNED IN")
+    expect(window.location.hash).toBe("#/organization/billing")
+    expect(window.sessionStorage.getItem(RETURN_KEY)).toBeNull()
+  })
+
+  it.each([
+    ["nothing was remembered", undefined],
+    ["the page renders ahead of the router", "#/verify-email?token=t"],
+    ["the value is not a hash path", "https://evil.example/#/keys"],
+  ])("goes home when %s", async (_, remembered) => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    if (remembered !== undefined) {
+      window.sessionStorage.setItem(RETURN_KEY, remembered)
+    }
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
+    )
+
+    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+    await screen.findByText("SIGNED IN")
+    expect(window.location.hash).toBe("#/")
+    expect(window.sessionStorage.getItem(RETURN_KEY)).toBeNull()
+  })
+
+  it.each([
+    [
+      "the provider declined",
+      "#/auth/google/callback?error=access_denied&state=the-state",
+      () => {},
+    ],
+    [
+      "the gateway refused the code",
+      "#/auth/google/callback?code=the-code&state=the-state",
+      () =>
+        vi
+          .spyOn(globalThis, "fetch")
+          .mockResolvedValue(
+            jsonResponse({ detail: "Not registered here." }, 401),
+          ),
+    ],
+  ])("keeps the page for a retry when %s", async (_, hash, stubFetch) => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    window.sessionStorage.setItem(RETURN_KEY, "#/organization/billing")
+    stubFetch()
+
+    renderCallback(hash)
+
+    await screen.findByRole("heading", {
+      name: "That sign-in did not complete",
+    })
+    // The sign-in screen stands in for that page, so a retry from there
+    // remembers it afresh; storage keeps nothing for a later sign-in.
+    expect(
+      screen.getByRole("link", { name: "Back to sign in" }),
+    ).toHaveAttribute("href", "#/organization/billing")
+    expect(window.sessionStorage.getItem(RETURN_KEY)).toBeNull()
+    expect(window.location.hash).toBe("")
+  })
+
+  it("sends a failed sign-in back home when the page is not one to return to", async () => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    window.sessionStorage.setItem(RETURN_KEY, "#/reset-password?token=t")
+
+    renderCallback("#/auth/google/callback?error=access_denied&state=the-state")
+
+    expect(
+      await screen.findByRole("link", { name: "Back to sign in" }),
+    ).toHaveAttribute("href", "#/")
   })
 
   it("refuses a state that does not match, without spending the code", async () => {
@@ -205,6 +292,128 @@ describe("OAuthCallbackPage", () => {
     expect(screen.queryByText("SIGNED IN")).toBeNull()
   })
 
+  describe("on a deployment that publishes terms", () => {
+    const TERMS_KEY = "otari.oauth.terms-accepted"
+    const realLocation = window.location
+
+    function renderWithTerms(hash: string) {
+      return render(
+        <AppProviders>
+          <DeploymentProvider
+            value={bootstrap({
+              oauth_providers: ["google"],
+              terms_url: "https://otari.example.com/terms",
+            })}
+          >
+            <Harness hash={hash} />
+          </DeploymentProvider>
+        </AppProviders>,
+      )
+    }
+
+    const termsRefusal = () =>
+      jsonResponse(
+        {
+          detail: "Accept the terms of service to continue",
+          code: "terms_not_accepted",
+        },
+        400,
+      )
+
+    afterEach(() => {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: realLocation,
+      })
+    })
+
+    it("sends the acceptance the page that started the flow took, once", async () => {
+      window.sessionStorage.setItem(STATE_KEY, "the-state")
+      window.sessionStorage.setItem(TERMS_KEY, "true")
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }))
+
+      renderWithTerms("#/auth/google/callback?code=the-code&state=the-state")
+
+      expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+      const [, init] = fetchMock.mock.calls[0] ?? []
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        terms_accepted: true,
+      })
+      expect(window.sessionStorage.getItem(TERMS_KEY)).toBeNull()
+    })
+
+    it("asks for the terms a new account needs instead of ending at a refusal", async () => {
+      window.sessionStorage.setItem(STATE_KEY, "the-state")
+      window.sessionStorage.setItem(RETURN_KEY, "#/organization/billing")
+      const assign = vi.fn()
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...realLocation, assign },
+      })
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(termsRefusal())
+        .mockResolvedValueOnce(
+          jsonResponse({
+            authorization_url: "https://accounts.google.com/o/oauth2/auth?x=1",
+            state: "the-next-state",
+          }),
+        )
+      const user = userEvent.setup()
+
+      renderWithTerms("#/auth/google/callback?code=the-code&state=the-state")
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "Accept the terms to continue",
+        }),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("link", { name: "terms of service" }),
+      ).toHaveAttribute("href", "https://otari.example.com/terms")
+      // Either way on keeps the page the refused sign-in started from.
+      expect(
+        screen.getByRole("link", { name: "Back to sign in" }),
+      ).toHaveAttribute("href", "#/organization/billing")
+      const again = screen.getByRole("button", { name: "Sign in with Google" })
+      expect(again).toBeDisabled()
+
+      await user.click(
+        screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+      )
+      await user.click(again)
+
+      await waitFor(() =>
+        expect(assign).toHaveBeenCalledWith(
+          "https://accounts.google.com/o/oauth2/auth?x=1",
+        ),
+      )
+      // A fresh round trip, which this time carries the acceptance back.
+      expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+        `${API_ROOT}/auth/oauth/google/authorize`,
+      )
+      expect(window.sessionStorage.getItem(STATE_KEY)).toBe("the-next-state")
+      expect(window.sessionStorage.getItem(TERMS_KEY)).toBe("true")
+      expect(window.sessionStorage.getItem(RETURN_KEY)).toBe(
+        "#/organization/billing",
+      )
+    })
+
+    it("falls back to the gateway's wording where this tab knows no terms", async () => {
+      window.sessionStorage.setItem(STATE_KEY, "the-state")
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(termsRefusal())
+
+      renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+      expect(
+        await screen.findByText("Accept the terms of service to continue"),
+      ).toBeInTheDocument()
+      expect(screen.queryByRole("checkbox")).toBeNull()
+    })
+  })
+
   it("spends the code once under StrictMode, which mounts every effect twice", async () => {
     // `main.tsx` renders the app inside StrictMode, so in development every
     // effect body runs twice on mount. A code is single-use, so without the
@@ -247,5 +456,126 @@ describe("OAuthCallbackPage", () => {
     // One outcome in total, so the second pass produced neither a second
     // sign-in nor a refusal.
     expect(recordEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it("tells the person when the sign-in removed their earlier password", async () => {
+    // Rendered without the harness's gate, the way `DeploymentRoot` mounts it:
+    // the page keeps rendering after `login()`, which is what lets it say this.
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    window.location.hash = "#/auth/google/callback"
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        expires_at: "2026-09-01T00:00:00Z",
+        password_removed: true,
+      }),
+    )
+
+    render(
+      <AppProviders>
+        <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
+          <OAuthCallbackPage
+            provider="google"
+            hash="#/auth/google/callback?code=the-code&state=the-state"
+          />
+        </DeploymentProvider>
+      </AppProviders>,
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "You're signed in" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /the password set on this account before then was removed/,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Set a new password" }),
+    ).toHaveAttribute("href", "#/account")
+    expect(screen.getByRole("link", { name: "Continue" })).toHaveAttribute(
+      "href",
+      "#/",
+    )
+    // The notice waits for the person instead of moving them on, even though
+    // this tab now holds a session.
+    expect(window.location.hash).toBe("#/auth/google/callback")
+  })
+
+  it.each([
+    [
+      "the page the sign-in started from",
+      "#/organization/billing",
+      "#/organization/billing",
+    ],
+    [
+      "home when that page is not one to return to",
+      "#/reset-password?token=t",
+      "#/",
+    ],
+  ])("continues from that notice to %s", async (_, remembered, continueTo) => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    window.sessionStorage.setItem(RETURN_KEY, remembered)
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        expires_at: "2026-09-01T00:00:00Z",
+        password_removed: true,
+      }),
+    )
+
+    render(
+      <AppProviders>
+        <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
+          <OAuthCallbackPage
+            provider="google"
+            hash="#/auth/google/callback?code=the-code&state=the-state"
+          />
+        </DeploymentProvider>
+      </AppProviders>,
+    )
+
+    expect(
+      await screen.findByRole("link", { name: "Continue" }),
+    ).toHaveAttribute("href", continueTo)
+  })
+
+  it("replaces its own history entry on success, so Back skips it", async () => {
+    window.location.hash =
+      "#/auth/google/callback?code=the-code&state=the-state"
+    const entries = window.history.length
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
+    )
+
+    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+    await screen.findByText("SIGNED IN")
+    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    expect(window.history.length).toBe(entries)
+  })
+
+  it("sends a tab that is already signed in to the dashboard rather than refusing a spent state", async () => {
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    window.location.hash = "#/auth/google/callback?code=the-code&state=spent"
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+
+    // Mounted bare: the harness would hide the page behind the signed-in marker.
+    render(
+      <AppProviders>
+        <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
+          <OAuthCallbackPage
+            provider="google"
+            hash="#/auth/google/callback?code=the-code&state=spent"
+          />
+        </DeploymentProvider>
+      </AppProviders>,
+    )
+
+    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    expect(
+      screen.queryByRole("heading", { name: "That sign-in did not complete" }),
+    ).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(recordEvent).not.toHaveBeenCalled()
   })
 })

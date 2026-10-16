@@ -1,5 +1,5 @@
 import { AlertDialog, Button, buttonVariants, Input } from "@heroui/react"
-import { useEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import type { ConfigField, UpdateSettingsRequest } from "@/client"
 import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -14,12 +14,14 @@ import { Toolbar } from "@/design-system/layout/Toolbar"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
+import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
   useReencryptProviderCredentials,
   useStoredProviders,
 } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -44,14 +46,54 @@ function isSubsequence(needle: string, haystack: string): boolean {
 // substring of the field's key/description/group or a fuzzy subsequence of its
 // key (so "mctts" finds "model_cache_ttl_seconds"). An empty query matches all.
 export function fieldMatches(field: ConfigField, query: string): boolean {
+  return textMatches(
+    `${field.key} ${field.description ?? ""} ${field.group}`,
+    field.key,
+    query,
+  )
+}
+
+function textMatches(text: string, name: string, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (q === "") return true
-  const haystack =
-    `${field.key} ${field.description ?? ""} ${field.group}`.toLowerCase()
-  const key = field.key.toLowerCase().replace(/[^a-z0-9]/g, "")
+  const haystack = text.toLowerCase()
+  const key = name.toLowerCase().replace(/[^a-z0-9]/g, "")
   return q
     .split(/\s+/)
     .every((term) => haystack.includes(term) || isSubsequence(term, key))
+}
+
+// The server's `SettingsGroup.RATE_LIMITING`. The rules card follows it.
+const RATE_LIMITING_GROUP = "Rate limiting & CORS"
+
+/** Whether a search finds the rate limit rules card, which no config field stands for. */
+export function rateLimitRulesMatch(query: string): boolean {
+  return textMatches(
+    `rate_limits rate limit rules requests tokens per minute in flight ${RATE_LIMITING_GROUP}`,
+    "rate_limits",
+    query,
+  )
+}
+
+/**
+ * The index of the shown group the rules card follows, or -1 to put it first.
+ *
+ * It follows the rate limiting group, and when a filter hides that group it
+ * keeps its place among the groups still shown. A deployment whose settings
+ * name no such group gets the card after them all.
+ */
+export function rulesCardAfter(
+  shown: { name: string }[],
+  all: { name: string }[],
+): number {
+  const order = all.map((group) => group.name)
+  const anchor = order.indexOf(RATE_LIMITING_GROUP)
+  if (anchor === -1) return shown.length - 1
+  return shown.reduce(
+    (after, group, index) =>
+      order.indexOf(group.name) <= anchor ? index : after,
+    -1,
+  )
 }
 
 // The text a control shows over a committed server value.
@@ -571,6 +613,7 @@ function groupFields(
 export function SettingsPage() {
   const settings = useSettings()
   const updateSettings = useUpdateSettings()
+  const { deployment_type } = useDeployment()
 
   const data = settings.data
   const isPending = updateSettings.isPending
@@ -606,6 +649,15 @@ export function SettingsPage() {
       (settableOnly ? field.settable : true) && fieldMatches(field, search),
   )
   const groups = groupFields(filtered)
+  // Shown under "Settable only" too: the rules are editable even though the
+  // rows in the group beside them are startup-only. Not before the settings
+  // answer, or the card would render first and then move under its group.
+  // Not on a hosted control plane, which serves no request a rule could limit.
+  const showRules =
+    data !== undefined &&
+    deployment_type !== "hosted" &&
+    rateLimitRulesMatch(search)
+  const rulesAfter = rulesCardAfter(groups, groupFields(allFields))
 
   return (
     <div className="flex flex-col">
@@ -641,27 +693,28 @@ export function SettingsPage() {
         </p>
       ) : null}
 
-      {data && filtered.length === 0 ? (
+      {data && filtered.length === 0 && !showRules ? (
         <p className="text-sm text-muted">No settings match your search.</p>
       ) : null}
 
       {settings.isLoading ? <PageLoading /> : null}
 
-      {groups.map((group) => (
-        <SettingsGroup
-          key={group.name}
-          title={group.name}
-          count={group.fields.length}
-        >
-          {group.fields.map((field) => (
-            <ConfigRow
-              key={field.key}
-              field={field}
-              patch={patch}
-              disabled={!data || isPending}
-            />
-          ))}
-        </SettingsGroup>
+      {showRules && rulesAfter === -1 ? <RateLimitsCard /> : null}
+
+      {groups.map((group, index) => (
+        <Fragment key={group.name}>
+          <SettingsGroup title={group.name} count={group.fields.length}>
+            {group.fields.map((field) => (
+              <ConfigRow
+                key={field.key}
+                field={field}
+                patch={patch}
+                disabled={!data || isPending}
+              />
+            ))}
+          </SettingsGroup>
+          {showRules && index === rulesAfter ? <RateLimitsCard /> : null}
+        </Fragment>
       ))}
 
       {data ? (

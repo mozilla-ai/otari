@@ -15,6 +15,7 @@ runs on is the kind of shortcut that makes a green test mean less than it looks.
 from collections.abc import Generator
 
 import pytest
+from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 
 from gateway.api.routes.hosted_mode import DATA_PLANE_PREFIXES
@@ -42,6 +43,8 @@ INFERENCE_PATHS = (
     # Discovery and execution both belong to the data plane: a hosted control
     # plane holds no MCP session and runs no tool.
     f"{API_ROOT}/mcp/execute",
+    # One decision call, billed here like /decisions.
+    f"{API_ROOT}/routing/recommend",
 )
 
 EXPECTED_DETAIL = (
@@ -137,12 +140,17 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
         f"{API_ROOT}/keys",
         f"{API_ROOT}/usage",
         f"{API_ROOT}/organizations/me/provider-keys",
+        # An organization's own web search keys, which its hybrid gateways search with.
+        f"{API_ROOT}/organizations/me/web-search-keys",
         # Discovery, not dispatch, and a surface bootstrap publishes for a
         # hosted deployment, so it stays mounted.
         f"{API_ROOT}/models",
         # The catalog that POST /api/v1/search dispatches against: management,
         # and the one prefix a careless /api/v1/search stub could shadow.
         f"{API_ROOT}/search-tools",
+        # The policy table beside the /routing/recommend stub, which must not
+        # reach it.
+        f"{API_ROOT}/routing/policies",
     ):
         response = hosted_client.get(path)
 
@@ -168,7 +176,7 @@ def test_non_hosted_modes_keep_serving_inference(mode: str | None, postgres_url:
     """
     config = _config(postgres_url, mode)
     assert not config.is_hosted_mode
-    served = {route.path for route in create_app(config).routes if hasattr(route, "path")}
+    served = {route.path for route in iter_route_contexts(create_app(config).routes) if route.path}
 
     # Each path as the data plane spells it, with no prefix fallback: a looser
     # match would pass on a route that had moved out from under the caller.
@@ -197,7 +205,7 @@ def test_every_gated_router_has_a_stub_standing_in_for_it(postgres_url: str) -> 
 
     def mounted(mode: str) -> set[str]:
         app = create_app(_config(postgres_url, mode))
-        return {route.path for route in app.routes if hasattr(route, "path")}
+        return {route.path for route in iter_route_contexts(app.routes) if route.path}
 
     dropped = mounted("standalone") - mounted("hosted")
     assert dropped, "hosted mode dropped no routes at all, so the gate is not doing anything"

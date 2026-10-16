@@ -9,6 +9,7 @@
 // a judgment about one question.
 
 import type {
+  PlaygroundMessage,
   SavePlaygroundComparisonRequest,
   SavePlaygroundConversationRequest,
 } from "@/client"
@@ -51,8 +52,35 @@ export function buildConversationRequest(params: {
       role: turn.role,
       content: turn.content,
       ...(turn.reasoning === undefined ? {} : { reasoning: turn.reasoning }),
+      ...(turn.attachments?.length
+        ? {
+            attachments: turn.attachments.map((attachment) => ({
+              file_id: attachment.fileId,
+              filename: attachment.filename,
+              bytes: attachment.bytes,
+            })),
+          }
+        : {}),
     })),
   }
+}
+
+/** A saved transcript's turns, as the page holds them. */
+export function turnsFromSavedMessages(
+  messages: PlaygroundMessage[],
+): ChatTurn[] {
+  return messages.map((message) => ({
+    role: message.role === "assistant" ? "assistant" : "user",
+    content: message.content,
+    reasoning: message.reasoning ?? undefined,
+    attachments: message.attachments.length
+      ? message.attachments.map((attachment) => ({
+          fileId: attachment.file_id,
+          filename: attachment.filename,
+          bytes: attachment.bytes,
+        }))
+      : undefined,
+  }))
 }
 
 export interface RatedExchange {

@@ -1,0 +1,18 @@
+{
+  "name": "otari",
+  "owner": {
+    "name": "Mozilla AI"
+  },
+  "metadata": {
+    "description": "Plugins that connect a coding agent to Otari, the open-source LLM gateway."
+  },
+  "plugins": [
+    {
+      "name": "otari-router",
+      "source": "./plugins/otari-router",
+      "description": "Asks an Otari gateway which model each Claude Code subagent should run on, and starts it there.",
+      "category": "productivity",
+      "tags": ["otari", "model-routing", "cost", "subagents", "llm-gateway"]
+    }
+  ]
+}

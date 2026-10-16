@@ -15,8 +15,9 @@ The invariants worth defending, and why:
 * A policy never routes a caller to a model their key is not allowed to use.
 """
 
+import asyncio
 import json
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -36,10 +37,22 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    ATTEMPT_COUNT_HEADER,
+    FALLBACK_HEADER,
+    MODEL_HEADER,
+    PROVIDER_HEADER,
+    RESPONSE_DURATION_HEADER,
+    GatewayConfig,
+)
+from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_ERROR
 from gateway.models.routing import RoutingConfig
+from gateway.services import catalog as selectors
 
 from .conftest import build_test_client
+from .test_scoped_budgets import _a_budget_id, _a_workspace_id
 
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
 
@@ -113,6 +126,11 @@ def routing_config(postgres_url: str) -> GatewayConfig:
                         "select": [{"default": "openai:gpt-5-mini"}],
                         "on_failure": ["anthropic:claude-haiku-4-5"],
                     },
+                    # A fallback on another provider, then one back on the head's provider.
+                    "fast_three": {
+                        "select": [{"default": "openai:gpt-5-mini"}],
+                        "on_failure": ["anthropic:claude-haiku-4-5", "openai:gpt-5-nano"],
+                    },
                     # A one-candidate policy: the alias-equivalent shape.
                     "solo": {"select": [{"default": "openai:gpt-5-mini"}]},
                     # Budget tier-down.
@@ -153,6 +171,17 @@ def _awaited_model(mock: AsyncMock) -> str:
     return model
 
 
+def _served_by(resp: Any) -> tuple[str | None, str | None, str | None, str | None]:
+    """The serving instance and model, attempt count and fallback flag a response's headers carry."""
+    headers = resp.headers
+    return (
+        headers.get(PROVIDER_HEADER),
+        headers.get(MODEL_HEADER),
+        headers.get(ATTEMPT_COUNT_HEADER),
+        headers.get(FALLBACK_HEADER),
+    )
+
+
 def _usage_rows(client: TestClient) -> list[dict[str, Any]]:
     resp = client.get(f"{API_ROOT}/usage", headers=HEADERS)
     assert resp.status_code == 200, resp.text
@@ -172,9 +201,10 @@ def test_policy_routes_to_its_default_target(client: TestClient) -> None:
         resp = _chat(client, "fast")
 
     assert resp.status_code == 200, resp.text
-    # The caller sees the policy name, never the underlying model.
+    # The body names the policy, and only the headers name the model behind it.
     assert resp.json()["model"] == "fast"
     assert _awaited_model(mock) == "openai:gpt-5-mini"
+    assert _served_by(resp) == ("openai", "gpt-5-mini", "1", "false")
     # Billing keys on the resolved target.
     rows = _usage_rows(client)
     assert len(rows) == 1
@@ -193,6 +223,53 @@ def test_single_candidate_policy_matches_naming_the_model_directly(client: TestC
         direct = _chat(client, "openai:gpt-5-mini")
 
     assert via_policy.status_code == direct.status_code == 429
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["non-stream", "stream"])
+@pytest.mark.parametrize(
+    ("model", "header"), [("gpt-5-mini", "gpt-5-mini"), ("gpt-5-m\u00efni", None)], ids=["ascii", "non-ascii"]
+)
+def test_a_plain_model_names_the_instance_and_model_that_served_it(
+    client: TestClient, stream: bool, model: str, header: str | None
+) -> None:
+    _create_user(client)
+
+    async def provider(**kwargs: Any) -> Any:
+        if not stream:
+            return _completion("gpt-5-mini")
+
+        async def chunks() -> Any:
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
+                created=0,
+                model="gpt-5-mini",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    with patch("gateway.api.routes.chat.acompletion", new=provider):
+        resp = _chat(client, f"openai:{model}", stream=stream)
+        resp.read()
+
+    assert resp.status_code == 200, resp.text
+    # A name a header cannot carry is left out rather than failing a response the provider gave.
+    assert _served_by(resp) == ("openai", header, "1", "false")
+    assert int(resp.headers[RESPONSE_DURATION_HEADER]) >= 0
+
+
+def test_a_failed_request_names_no_serving_instance(client: TestClient) -> None:
+    _create_user(client)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_http_error(503))):
+        resp = _chat(client, "fast")
+
+    assert resp.status_code == 502
+    assert _served_by(resp) == (None, None, None, None)
+    assert RESPONSE_DURATION_HEADER not in resp.headers
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +294,8 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
     # Relabeled to the policy, so a fallover is invisible to the caller's code.
     assert resp.json()["model"] == "fast"
+    # ...but not to a caller reading the headers, which name what served it.
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
 
     # Two rows: the attempt that served, plus the failure the policy absorbed.
     rows = _usage_rows(client)
@@ -244,6 +323,77 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     assert served[0]["request_group_id"] is not None
 
 
+def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:
+    """A fault no retry of the same candidate fixes can still be one the next candidate does not have."""
+    _create_user(client)
+    calls: list[str] = []
+
+    async def broken_adapter(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise KeyError("content")
+        return _completion("claude-haiku-4-5")
+
+    with patch("gateway.api.routes.chat.acompletion", new=broken_adapter):
+        resp = _chat(client, "fast")
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert "x-should-retry" not in resp.headers
+
+
+def _empty_completion(model: str) -> ChatCompletion:
+    """A 200 from the provider with nothing in it: no choices, usage still reported."""
+    return ChatCompletion(
+        id="cmpl-empty",
+        choices=[],
+        created=0,
+        model=model,
+        object="chat.completion",
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=0, total_tokens=10),
+    )
+
+
+def test_an_empty_completion_is_a_provider_error(client: TestClient) -> None:
+    _create_user(client)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_empty_completion("gpt-5-mini"))):
+        resp = _chat(client, "openai:gpt-5-mini")
+
+    assert resp.status_code == 502, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == PROVIDER_ERROR
+    assert resp.json()["code"] == PROVIDER_ERROR
+    assert resp.json()["detail"] == "The provider returned a completion with no choices"
+    rows = _usage_rows(client)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "error"
+    assert rows[0]["status_code"] == 502
+    assert rows[0]["error_message"] == "The provider returned a completion with no choices"
+
+
+def test_an_empty_completion_fails_over_to_the_next_candidate(client: TestClient) -> None:
+    _create_user(client)
+    calls: list[str] = []
+
+    async def empty_then_served(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-5-mini":
+            return _empty_completion("gpt-5-mini")
+        return _completion("claude-haiku-4-5")
+
+    with patch("gateway.api.routes.chat.acompletion", new=empty_then_served):
+        resp = _chat(client, "fast")
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert resp.json()["choices"][0]["message"]["content"] == "hello"
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    rows = _usage_rows(client)
+    absorbed = [r for r in rows if r["status"] == "absorbed"]
+    assert [r["model"] for r in absorbed] == ["gpt-5-mini"]
+    assert absorbed[0]["error_message"] == "The provider returned a completion with no choices"
+    assert [r["model"] for r in rows if r["status"] == "success"] == ["claude-haiku-4-5"]
+
+
 def test_all_candidates_failing_is_a_generic_502(client: TestClient) -> None:
     """A multi-candidate fallthrough must not attribute one provider's status to
     the whole plan.
@@ -256,7 +406,10 @@ def test_all_candidates_failing_is_a_generic_502(client: TestClient) -> None:
 
 
 def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
-    """Provider failures fall through before a response is committed."""
+    """Provider failures fall through before a response is committed.
+
+    Every candidate rejected the request alike, so the caller gets that rejection.
+    """
     _create_user(client)
     calls: list[str] = []
 
@@ -267,7 +420,7 @@ def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
     with patch("gateway.api.routes.chat.acompletion", new=bad_request):
         resp = _chat(client, "fast")
 
-    assert resp.status_code == 502
+    assert resp.status_code == 400
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
 
 
@@ -286,8 +439,22 @@ def test_an_auth_failure_burns_the_chain(client: TestClient) -> None:
         direct = _chat(client, "openai:gpt-5-mini")
 
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
-    assert resp.status_code == 502
-    assert direct.status_code == 502
+    # The gateway's credentials are at fault, so neither answer is a retryable 5xx.
+    assert resp.status_code == 424
+    assert direct.status_code == 424
+
+
+def test_a_request_whose_size_did_not_grow_takes_no_top_up(client: TestClient) -> None:
+    """A top-up costs a lookup and a ledger write, so a request whose normalization added nothing skips it."""
+    _create_user(client)
+    with (
+        patch("gateway.api.routes._pipeline.increase_reservation", new=AsyncMock()) as top_up,
+        patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))),
+    ):
+        resp = _chat(client, "openai:gpt-5-mini")
+
+    assert resp.status_code == 200, resp.text
+    top_up.assert_not_awaited()
 
 
 def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -> None:
@@ -304,7 +471,7 @@ def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -
 
             yield ChatCompletionChunk(
                 id="c1",
-                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
                 created=0,
                 model="claude-haiku-4-5",
                 object="chat.completion.chunk",
@@ -319,8 +486,45 @@ def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -
 
     assert resp.status_code == 200
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    # The walk runs before the stream opens, so the headers already know who serves it.
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
     # Chunks are relabeled to the policy name too.
     assert '"model":"fast"' in body.replace(" ", "")
+
+
+def test_streaming_fails_over_when_the_stream_fails_on_its_first_read(client: TestClient) -> None:
+    """A provider whose stream opens and then fails before any chunk has sent the client nothing either."""
+    _create_user(client)
+    calls: list[str] = []
+
+    async def lazily_failing_stream(**kwargs: Any) -> Any:
+        calls.append(kwargs["model"])
+        failing = kwargs["model"] == "openai:gpt-5-mini"
+
+        async def chunks() -> Any:
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            if failing:
+                raise _http_error(503)
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
+                created=0,
+                model="claude-haiku-4-5",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    with patch("gateway.api.routes.chat.acompletion", new=lazily_failing_stream):
+        resp = _chat(client, "fast", stream=True)
+        body = resp.text
+
+    assert resp.status_code == 200
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    assert '"error"' not in body
 
 
 # ---------------------------------------------------------------------------
@@ -1366,7 +1570,7 @@ def test_a_streamed_fallover_correlates_both_of_its_rows(client: TestClient) -> 
 
             yield ChatCompletionChunk(
                 id="c1",
-                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
                 created=0,
                 model="claude-haiku-4-5",
                 object="chat.completion.chunk",
@@ -1405,7 +1609,7 @@ def test_messages_endpoint_fails_over(client: TestClient, stream: bool) -> None:
 
             yield ChatCompletionChunk(
                 id="c1",
-                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
                 created=0,
                 model="claude-haiku-4-5",
                 object="chat.completion.chunk",
@@ -1430,6 +1634,7 @@ def test_messages_endpoint_fails_over(client: TestClient, stream: bool) -> None:
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
 
 
 def test_responses_endpoint_fails_over(client: TestClient) -> None:
@@ -1446,7 +1651,11 @@ def test_responses_endpoint_fails_over(client: TestClient) -> None:
             id="resp-1", object="response", created_at=0, model="claude-haiku-4-5", output=[], usage=None
         )
 
-    with patch("gateway.api.routes.responses.aresponses", new=flaky):
+    # Anthropic has no Responses API, so the fallback attempt goes through the chat completions bridge.
+    with (
+        patch("gateway.api.routes.responses.aresponses", new=flaky),
+        patch("gateway.services.inference._responses_bridge.aresponses_via_chat_completions", new=flaky),
+    ):
         resp = client.post(
             f"{API_ROOT}/responses",
             json={"model": "fast", "input": "hi", "user": "test-user"},
@@ -1455,6 +1664,116 @@ def test_responses_endpoint_fails_over(client: TestClient) -> None:
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+
+
+# ---------------------------------------------------------------------------
+# Provider retries
+# ---------------------------------------------------------------------------
+
+
+def _client_retries(kwargs: Mapping[str, Any]) -> Any:
+    return (kwargs.get("client_args") or {}).get("max_retries", "sdk default")
+
+
+def _failing_over_retries(client: TestClient, endpoint: str) -> list[Any]:
+    """The client retry count each candidate of the ``fast`` policy was dispatched with."""
+    retries: list[Any] = []
+
+    async def flaky(**kwargs: Any) -> Any:
+        retries.append(_client_retries(kwargs))
+        model = kwargs["model"]
+        if model in ("openai:gpt-5-mini", "gpt-5-mini"):
+            raise _http_error(429)
+        if endpoint == "messages":
+            return _message_response()
+        if endpoint == "responses":
+            from any_llm.types.responses import Response as ProviderResponse
+
+            return ProviderResponse.model_construct(
+                id="resp-1", object="response", created_at=0, model="claude-haiku-4-5", output=[], usage=None
+            )
+        return _completion("claude-haiku-4-5")
+
+    if endpoint == "messages":
+        with patch("gateway.api.routes.messages.amessages", new=flaky):
+            resp = client.post(
+                f"{API_ROOT}/messages",
+                json={
+                    "model": "fast",
+                    "max_tokens": 16,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "metadata": {"user_id": "test-user"},
+                },
+                headers=HEADERS,
+            )
+    elif endpoint == "responses":
+        with (
+            patch("gateway.api.routes.responses.aresponses", new=flaky),
+            patch("gateway.services.inference._responses_bridge.aresponses_via_chat_completions", new=flaky),
+        ):
+            resp = client.post(
+                f"{API_ROOT}/responses", json={"model": "fast", "input": "hi", "user": "test-user"}, headers=HEADERS
+            )
+    else:
+        with patch("gateway.api.routes.chat.acompletion", new=flaky):
+            resp = _chat(client, "fast")
+    assert resp.status_code == 200, resp.text
+    return retries
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "messages", "responses"])
+def test_a_policy_that_can_fail_over_dispatches_without_client_retries(client: TestClient, endpoint: str) -> None:
+    """An SDK retrying a 429 would hold the request on a candidate the policy already says to leave."""
+    _create_user(client)
+
+    assert _failing_over_retries(client, endpoint) == [0, 0]
+
+
+def test_streaming_failover_dispatches_without_client_retries(client: TestClient) -> None:
+    _create_user(client)
+    retries: list[Any] = []
+
+    async def flaky_stream(**kwargs: Any) -> Any:
+        retries.append(_client_retries(kwargs))
+        raise _http_error(429)
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky_stream):
+        _chat(client, "fast", stream=True)
+
+    assert retries == [0, 0]
+
+
+def test_a_single_candidate_keeps_the_sdk_retry_default(client: TestClient) -> None:
+    _create_user(client)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat(client, "openai:gpt-5-mini").status_code == 200
+        assert _chat(client, "solo").status_code == 200
+
+    assert [_client_retries(call.kwargs) for call in mock.await_args_list] == ["sdk default", "sdk default"]
+
+
+@pytest.fixture
+def retrying_client(routing_config: GatewayConfig) -> Generator[TestClient]:
+    """``fast`` again, with a deployment retry count and an instance that overrides it."""
+    providers = {**routing_config.providers, "anthropic": {"api_key": "sk-ant", "max_retries": 1}}
+    yield from build_test_client(routing_config.model_copy(update={"provider_max_retries": 3, "providers": providers}))
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "messages", "responses"])
+def test_configured_retries_reach_every_candidate(retrying_client: TestClient, endpoint: str) -> None:
+    _create_user(retrying_client)
+
+    assert _failing_over_retries(retrying_client, endpoint) == [3, 1]
+
+
+def test_configured_retries_reach_a_single_candidate(retrying_client: TestClient) -> None:
+    _create_user(retrying_client)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat(retrying_client, "openai:gpt-5-mini").status_code == 200
+
+    assert mock.await_args is not None
+    assert _client_retries(mock.await_args.kwargs) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -1630,3 +1949,320 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     # And the money is in the ledger, not only on the row.
     user = client.get(f"{API_ROOT}/users/test-user", headers=HEADERS).json()
     assert user["spend"] == pytest.approx(0.01)
+
+
+# ---------------------------------------------------------------------------
+# A catalog ID falls back across its offerings
+# ---------------------------------------------------------------------------
+
+_CATALOG_ID = "acme/m1"
+
+
+@pytest.fixture
+def catalog_client(routing_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
+    """A client whose selector index holds two offerings of one catalog ID, and is not rebuilt under the test."""
+
+    async def _idle(*_args: Any, **_kwargs: Any) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("gateway.main.run_selector_index_refresher", _idle)
+    rows = [
+        selectors.OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
+        selectors.OfferingRow("openai:m1-a", "openai", "openai", 1.0),
+    ]
+    identities = {_CATALOG_ID: (_CATALOG_ID, tuple(row.selector for row in rows))}
+    for client in build_test_client(routing_config):
+        selectors.set_selector_index(selectors.build_selector_index(rows, identities))
+        yield client
+    selectors.reset_selector_index()
+
+
+def test_a_catalog_id_falls_back_to_its_next_offering(catalog_client: TestClient) -> None:
+    _create_user(catalog_client)
+    calls: list[str] = []
+
+    async def flaky(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:m1-a":
+            raise _http_error(503)
+        return _completion("m1-b")
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky):
+        resp = _chat(catalog_client, _CATALOG_ID)
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:m1-a", "anthropic:m1-b"]
+    assert resp.json()["model"] == _CATALOG_ID
+    rows = _usage_rows(catalog_client)
+    served = [r for r in rows if r["status"] == "success"]
+    absorbed = [r for r in rows if r["status"] == "absorbed"]
+    assert [(r["provider"], r["model"], r["attempt_position"], r["selection_reason"]) for r in served] == [
+        ("anthropic", "m1-b", 2, "on_failure")
+    ]
+    assert served[0]["policy_name"] == _CATALOG_ID
+    assert [(r["provider"], r["model"], r["attempt_position"]) for r in absorbed] == [("openai", "m1-a", 1)]
+
+
+def test_a_catalog_id_every_offering_rejects_returns_the_rejection(catalog_client: TestClient) -> None:
+    _create_user(catalog_client)
+    calls: list[str] = []
+
+    async def bad_request(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        raise _http_error(400)
+
+    with patch("gateway.api.routes.chat.acompletion", new=bad_request):
+        resp = _chat(catalog_client, _CATALOG_ID)
+
+    assert resp.status_code == 400
+    assert calls == ["openai:m1-a", "anthropic:m1-b"]
+
+
+def test_a_catalog_id_reaches_the_offering_a_key_may_use(catalog_client: TestClient) -> None:
+    _create_user(catalog_client)
+    key_resp = catalog_client.post(
+        f"{API_ROOT}/keys",
+        json={"user_id": "test-user", "allowed_models": ["anthropic:m1-b"]},
+        headers=HEADERS,
+    )
+    assert key_resp.status_code == 200, key_resp.text
+    scoped = {API_KEY_HEADER: f"Bearer {key_resp.json()['key']}"}
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("m1-b"))) as mock:
+        resp = catalog_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": _CATALOG_ID, "messages": [{"role": "user", "content": "hi"}]},
+            headers=scoped,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert _awaited_model(mock) == "anthropic:m1-b"
+    assert [(r["model"], r["selection_reason"]) for r in _usage_rows(catalog_client)] == [("m1-b", "catalog")]
+
+
+_LEGACY_ID = "openai/gpt-x"
+_SOLO_ID = "openai/gpt-solo"
+
+
+@pytest.fixture
+def legacy_catalog_client(routing_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
+    """``openai/gpt-x`` is the legacy spelling of ``openai:gpt-x`` and the catalog ID of a model Azure also serves.
+
+    The index ranks Azure first, so a plan led by ``openai:gpt-x`` follows the name rather than the ranking.
+    """
+
+    async def _idle(*_args: Any, **_kwargs: Any) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("gateway.main.run_selector_index_refresher", _idle)
+    config = routing_config.model_copy(
+        update={
+            "providers": {
+                **routing_config.providers,
+                "azure": {
+                    "provider_type": "azureopenai",
+                    "api_key": "sk-azure",
+                    "api_base": "https://example.openai.azure.com",
+                },
+            }
+        }
+    )
+    rows = [
+        selectors.OfferingRow("azure:gpt-x", "azure", "azureopenai", 1.0),
+        selectors.OfferingRow("openai:gpt-x", "openai", "openai", None),
+        selectors.OfferingRow("openai:gpt-solo", "openai", "openai", 1.0),
+    ]
+    identities = {
+        _LEGACY_ID: (_LEGACY_ID, ("azure:gpt-x", "openai:gpt-x")),
+        _SOLO_ID: (_SOLO_ID, ("openai:gpt-solo",)),
+    }
+    for client in build_test_client(config):
+        selectors.set_selector_index(selectors.build_selector_index(rows, identities))
+        yield client
+    selectors.reset_selector_index()
+
+
+def _openai_unavailable(calls: list[str]) -> Any:
+    async def dispatch(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"].startswith("openai:"):
+            raise _http_error(503)
+        return _completion("gpt-x")
+
+    return dispatch
+
+
+def test_a_legacy_spelling_of_a_catalog_id_falls_back_after_the_offering_it_names(
+    legacy_catalog_client: TestClient,
+) -> None:
+    _create_user(legacy_catalog_client)
+    calls: list[str] = []
+
+    with patch("gateway.api.routes.chat.acompletion", new=_openai_unavailable(calls)):
+        resp = _chat(legacy_catalog_client, _LEGACY_ID)
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-x", "azureopenai:gpt-x"]
+    assert resp.json()["model"] == _LEGACY_ID
+    rows = _usage_rows(legacy_catalog_client)
+    served = [r for r in rows if r["status"] == "success"]
+    absorbed = [r for r in rows if r["status"] == "absorbed"]
+    assert [(r["provider"], r["model"], r["attempt_position"], r["selection_reason"]) for r in served] == [
+        ("azure", "gpt-x", 2, "on_failure")
+    ]
+    assert served[0]["policy_name"] == _LEGACY_ID
+    assert [(r["provider"], r["model"], r["attempt_position"]) for r in absorbed] == [("openai", "gpt-x", 1)]
+
+
+def test_a_legacy_spelling_of_a_catalog_id_is_served_by_the_offering_it_names(
+    legacy_catalog_client: TestClient,
+) -> None:
+    _create_user(legacy_catalog_client)
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-x"))) as mock:
+        resp = _chat(legacy_catalog_client, _LEGACY_ID)
+
+    assert resp.status_code == 200, resp.text
+    assert _awaited_model(mock) == "openai:gpt-x"
+    assert [(r["provider"], r["selection_reason"], r["policy_name"]) for r in _usage_rows(legacy_catalog_client)] == [
+        ("openai", "catalog", _LEGACY_ID)
+    ]
+
+
+def test_the_colon_spelling_of_an_offering_never_falls_back(legacy_catalog_client: TestClient) -> None:
+    _create_user(legacy_catalog_client)
+    calls: list[str] = []
+
+    with patch("gateway.api.routes.chat.acompletion", new=_openai_unavailable(calls)):
+        resp = _chat(legacy_catalog_client, "openai:gpt-x")
+
+    assert resp.status_code != 200
+    assert calls == ["openai:gpt-x"]
+    assert [r["policy_name"] for r in _usage_rows(legacy_catalog_client)] == [None]
+
+
+def test_a_legacy_spelling_of_a_single_offering_model_never_falls_back(legacy_catalog_client: TestClient) -> None:
+    _create_user(legacy_catalog_client)
+    calls: list[str] = []
+
+    with patch("gateway.api.routes.chat.acompletion", new=_openai_unavailable(calls)):
+        resp = _chat(legacy_catalog_client, _SOLO_ID)
+
+    assert resp.status_code != 200
+    assert calls == ["openai:gpt-solo"]
+    assert [r["policy_name"] for r in _usage_rows(legacy_catalog_client)] == [None]
+
+
+def test_a_legacy_spelling_gains_no_offering_the_keys_allow_list_excludes(legacy_catalog_client: TestClient) -> None:
+    _create_user(legacy_catalog_client)
+    key_resp = legacy_catalog_client.post(
+        f"{API_ROOT}/keys",
+        json={"user_id": "test-user", "allowed_models": ["openai:gpt-x"]},
+        headers=HEADERS,
+    )
+    assert key_resp.status_code == 200, key_resp.text
+    calls: list[str] = []
+
+    with patch("gateway.api.routes.chat.acompletion", new=_openai_unavailable(calls)):
+        resp = legacy_catalog_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": _LEGACY_ID, "messages": [{"role": "user", "content": "hi"}]},
+            headers={API_KEY_HEADER: f"Bearer {key_resp.json()['key']}"},
+        )
+
+    assert resp.status_code != 200
+    assert calls == ["openai:gpt-x"]
+
+
+def _cap_anthropic_spend(client: TestClient) -> None:
+    """Price the anthropic fallback, and give a workspace budget narrowed to anthropic no room for it."""
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "anthropic:claude-haiku-4-5",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 5.0,
+        },
+        headers=HEADERS,
+    )
+    assert priced.status_code == 200, priced.text
+    created = client.post(
+        f"{API_ROOT}/scoped-budgets",
+        json={
+            "scope_type": "workspace",
+            "scope_id": _a_workspace_id(client, HEADERS),
+            "provider_key_id": "anthropic",
+            "budget_id": _a_budget_id(client, HEADERS, max_budget=0.000001),
+        },
+        headers=HEADERS,
+    )
+    assert created.status_code == 200, created.text
+
+
+def test_a_fallback_is_skipped_when_its_providers_cap_is_full(client: TestClient) -> None:
+    """A cap narrowed to the fallback's provider binds the fallback, though the head's provider has none."""
+    _create_user(client)
+    _cap_anthropic_spend(client)
+    calls: list[str] = []
+
+    async def flaky(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise _http_error(503)
+        return _completion("gpt-5-nano")
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky):
+        resp = _chat(client, "fast_three")
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "openai:gpt-5-nano"]
+    assert [r["model"] for r in _usage_rows(client) if r["status"] == "success"] == ["gpt-5-nano"]
+
+
+def test_a_failure_before_a_skipped_last_fallback_is_logged_once(client: TestClient) -> None:
+    """The head's failure is not absorbed by a fallback that was never sent the request."""
+    _create_user(client)
+    _cap_anthropic_spend(client)
+
+    async def flaky(**kwargs: Any) -> ChatCompletion:
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise _http_error(503)
+        return _completion("claude-haiku-4-5")
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky):
+        resp = _chat(client, "fast")
+
+    assert resp.status_code == 502, resp.text
+    head_rows = [r for r in _usage_rows(client) if r["model"] == "gpt-5-mini"]
+    assert [r["status"] for r in head_rows] == ["error"]
+
+
+def test_a_streamed_fallback_is_skipped_when_its_providers_cap_is_full(client: TestClient) -> None:
+    _create_user(client)
+    _cap_anthropic_spend(client)
+    calls: list[str] = []
+
+    async def flaky_stream(**kwargs: Any) -> Any:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise _http_error(503)
+
+        async def chunks() -> Any:
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                created=0,
+                model="gpt-5-nano",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky_stream):
+        resp = _chat(client, "fast_three", stream=True)
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "openai:gpt-5-nano"]

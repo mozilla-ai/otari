@@ -286,6 +286,28 @@ class TestDiscoverAllModels:
         assert result[0][1].id == "gpt-4o"
 
     @pytest.mark.asyncio
+    async def test_configured_listing_kwargs_reach_the_sdk(self) -> None:
+        """A listing kwarg an instance configures is forwarded to any-llm's ``alist_models``."""
+        config = self._make_config(providers={"cohere": {"api_key": "co-test"}})
+        listing = AsyncMock(return_value=[_make_model("rerank-v3.5", owned_by="cohere")])
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+            patch(
+                "gateway.services.model_discovery_service.get_provider_kwargs",
+                return_value={"api_key": "co-test", "page_size": 50},
+            ),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_all_models(config)
+
+        assert [model.id for _, model in result] == ["rerank-v3.5"]
+        assert listing.await_args is not None
+        assert listing.await_args.kwargs["page_size"] == 50
+
+    @pytest.mark.asyncio
     async def test_uses_cache_on_hit(self) -> None:
         config = self._make_config(providers={"openai": {"api_key": "sk-test"}})
         cached_models = [_make_model("gpt-4o")]

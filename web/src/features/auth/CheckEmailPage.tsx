@@ -1,12 +1,17 @@
+import { useState } from "react"
+
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
+import { readSignInAddress } from "./signInAddress"
 
 /**
  * `#/check-email`: where signup and a verification resend both land.
  *
- * It makes no request and knows nothing about the address. That is the point:
- * both routes behind it answer the same sentence whether or not there was an
- * identity to act on, so this page has to be written in the same conditional
- * or it would leak, on the client, the fact the server declined to state.
+ * It makes no request and knows nothing about the address beyond what the
+ * visitor typed on the page before. That is the point: both routes behind it
+ * answer the same sentence whether or not there was an identity to act on, so
+ * this page has to be written in the same conditional or it would leak, on the
+ * client, the fact the server declined to state. Naming the typed address
+ * tells the visitor nothing the server said, only which inbox to open.
  *
  * `?type=resend` only changes which of the two sentences reads naturally; a
  * missing or unrecognized value falls back to the signup wording rather than
@@ -15,14 +20,16 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
  */
 export function CheckEmailPage({ hash }: { hash: string }) {
   const type = new URLSearchParams(hash.split("?")[1] ?? "").get("type")
+  const [email] = useState(readSignInAddress)
+  const address = email === "" ? "that address" : email
 
   return (
     <PublicAuthLayout
       title="Check your email"
       description={
         type === "resend"
-          ? "If that address is registered and still unverified, a fresh verification link is on its way."
-          : "If that address is on this gateway's roster and unclaimed, a verification link is on its way."
+          ? `If ${address} has an account waiting to be verified, we have sent it a new verification link.`
+          : `If you can sign up with ${address}, we have sent it a verification link.`
       }
       footer={
         <>

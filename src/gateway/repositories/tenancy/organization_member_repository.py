@@ -4,10 +4,12 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import (
     Organization,
@@ -19,29 +21,11 @@ from gateway.models.tenancy import (
     WorkspaceMember,
 )
 from gateway.repositories.base_repository import BaseRepository
-from gateway.repositories.tenancy.user_repository import user_alphabetical_order
+from gateway.repositories.tenancy.user_repository import user_alphabetical_order, user_matches_search
 
 # Statuses a membership can hold and still belong on the roster. Removal
 # suspends rather than deletes, so "suspended" is the one that drops off.
 LISTABLE_STATUSES = ("active", "invited")
-
-
-_LIKE_ESCAPE = "\\"
-
-
-def _contains_pattern(term: str) -> str:
-    """A case-folded ``LIKE`` pattern matching ``term`` anywhere.
-
-    The wildcards are escaped, so searching for ``100%`` finds the members whose
-    name contains that text rather than every member: a picker takes whatever
-    somebody types, and an unescaped ``%`` or ``_`` there is a wildcard nobody
-    asked for.
-    """
-
-    escaped = term.lower()
-    for character in (_LIKE_ESCAPE, "%", "_"):
-        escaped = escaped.replace(character, _LIKE_ESCAPE + character)
-    return f"%{escaped}%"
 
 
 class OrganizationMemberRepository(
@@ -49,7 +33,7 @@ class OrganizationMemberRepository(
 ):
     """Repository for organization membership rows."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession | UnitOfWork):
         super().__init__(db, OrganizationMember)
 
     async def get_by_organization_and_user(
@@ -129,22 +113,33 @@ class OrganizationMemberRepository(
         result = await self.db.execute(statement.order_by(col(OrganizationMember.created_at)))
         return list(result.scalars().all())
 
-    async def get_first_active_for_user(self, user_id: uuid.UUID) -> OrganizationMember | None:
+    async def get_first_active_for_user(self, user_id: uuid.UUID, *, lock: bool = False) -> OrganizationMember | None:
         """Return a user's oldest active membership, or None.
 
         The id breaks a tie, for the same reason ``get_active_owner`` does it:
         two memberships written in one transaction share a ``created_at``, and
         this decides which organization a stale pointer is repaired onto, so it
         must not be able to answer differently on two reads.
+
+        ``lock`` holds that membership until the caller's
+        transaction ends, for a write that is allowed only while one exists:
+        a removal suspends the row, so it waits, and one that committed first
+        fails the re-checked ``active`` condition.
+
+        NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
         """
-        result = await self.db.execute(
+        statement = (
             select(OrganizationMember)
             .where(
                 col(OrganizationMember.user_id) == user_id,
                 col(OrganizationMember.status) == "active",
             )
             .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
+            .limit(1)
         )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
         return result.scalars().first()
 
     async def get_organization_id(self, organization_member_id: uuid.UUID) -> uuid.UUID | None:
@@ -180,6 +175,23 @@ class OrganizationMemberRepository(
         await self.db.flush()
         await self.db.refresh(member)
         return member
+
+    async def add_if_absent(
+        self, *, organization_id: uuid.UUID, user_id: uuid.UUID, role: str
+    ) -> tuple[OrganizationMember, bool]:
+        """Stage an active membership unless one exists, and say whether this call created it.
+
+        A concurrent insert of the same membership is settled in a savepoint, so the loser's conflict
+        does not end the caller's transaction.
+        """
+        try:
+            async with self.db.begin_nested():
+                return await self.create_membership(organization_id=organization_id, user_id=user_id, role=role), True
+        except IntegrityError:
+            existing = await self.get_by_organization_and_user(organization_id, user_id)
+            if existing is None:
+                raise
+            return existing, False
 
     async def update_membership(
         self,
@@ -250,13 +262,7 @@ class OrganizationMemberRepository(
             col(OrganizationMember.status).in_(LISTABLE_STATUSES),
         ]
         if term := (search or "").strip():
-            pattern = _contains_pattern(term)
-            filters.append(
-                or_(
-                    func.lower(col(User.full_name)).like(pattern, escape=_LIKE_ESCAPE),
-                    func.lower(col(User.email)).like(pattern, escape=_LIKE_ESCAPE),
-                )
-            )
+            filters.append(user_matches_search(term))
 
         count_result = await self.db.execute(
             select(func.count())
@@ -336,9 +342,7 @@ class OrganizationMemberRepository(
         if status is not None:
             conditions.append(col(OrganizationMember.status) == status)
 
-        count_result = await self.db.execute(
-            select(func.count()).select_from(OrganizationMember).where(*conditions)
-        )
+        count_result = await self.db.execute(select(func.count()).select_from(OrganizationMember).where(*conditions))
         count = count_result.scalar_one()
 
         result = await self.db.execute(
@@ -350,8 +354,6 @@ class OrganizationMemberRepository(
             .limit(limit)
         )
         return [(member, organization) for member, organization in result.all()], count
-
-
 
     async def placements_for_users(
         self,

@@ -8,11 +8,13 @@ database.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.models.tenancy import (
     Organization,
@@ -22,6 +24,7 @@ from gateway.models.tenancy import (
     WorkspaceMemberUpdate,
 )
 from gateway.repositories.tenancy import (
+    InvitationRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
@@ -208,6 +211,74 @@ async def test_a_local_identity_can_be_created_deactivated(async_db: AsyncSessio
     assert identity.default_organization_id == organization.id
 
 
+async def test_an_identity_is_created_for_a_free_address(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+
+    identity = await UserRepository(async_db).try_create(
+        email=" Nova@Example.com ",
+        full_name="Nova",
+        active_organization_id=organization.id,
+    )
+
+    assert identity is not None
+    assert identity.email == "nova@example.com"
+    assert identity.full_name == "Nova"
+    assert identity.is_active is True
+    assert identity.default_organization_id == organization.id
+
+
+async def test_a_taken_address_creates_nothing_and_leaves_the_transaction_usable(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    holder = await _identity(async_db, organization, email="nova@example.com")
+    users = UserRepository(async_db)
+
+    created = await users.try_create(
+        email="NOVA@example.com",
+        full_name="Somebody else",
+        active_organization_id=organization.id,
+    )
+
+    assert created is None
+    found = await users.get_by_email("nova@example.com")
+    assert found is not None
+    assert found.id == holder.id
+
+
+async def test_a_locked_identity_is_read_fresh(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    identity = await _identity(async_db, organization, full_name="Before", email="nova@example.com")
+    await async_db.execute(
+        update(User)
+        .where(col(User.id) == identity.id)
+        .values(full_name="After")
+        .execution_options(synchronize_session=False)
+    )
+    assert identity.full_name == "Before"
+
+    locked = await UserRepository(async_db).get_locked(identity.id)
+
+    assert locked is not None
+    assert locked.full_name == "After"
+
+
+async def test_staged_changes_are_written_with_the_transaction(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    identity = await _identity(async_db, organization, email="nova@example.com")
+    users = UserRepository(async_db)
+
+    identity_id = identity.id
+
+    identity.full_name = "Nova"
+    identity.oauth_provider = "google"
+    users.stage(identity)
+    await async_db.commit()
+
+    written = await users.get_locked(identity_id)
+    assert written is not None
+    assert written.full_name == "Nova"
+    assert written.oauth_provider == "google"
+
+
 async def test_get_by_slug(async_db: AsyncSession) -> None:
     organization = await _organization(async_db, slug="acme")
 
@@ -231,6 +302,23 @@ async def test_membership_is_unique_per_user_and_organization(async_db: AsyncSes
 
     with pytest.raises(IntegrityError):
         await repository.create_membership(organization_id=organization.id, user_id=user.id, role="member")
+
+
+async def test_a_membership_added_if_absent_is_created_once(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    user = await _identity(async_db, organization)
+    repository = OrganizationMemberRepository(async_db)
+
+    first, created = await repository.add_if_absent(organization_id=organization.id, user_id=user.id, role="member")
+    second, created_again = await repository.add_if_absent(
+        organization_id=organization.id, user_id=user.id, role="admin"
+    )
+
+    assert (created, created_again) == (True, False)
+    assert second.id == first.id
+    assert second.role == "member"
+    # The conflict was settled in a savepoint, so the transaction still accepts writes.
+    assert await OrganizationRepository(async_db).get_by_slug(organization.slug) is not None
 
 
 async def test_active_membership_lookup_ignores_suspended_rows(async_db: AsyncSession) -> None:
@@ -517,3 +605,55 @@ async def test_identity_lookup_by_email(async_db: AsyncSession) -> None:
     assert (await repository.get_by_email("operator@example.com")) is not None
     assert (await repository.get_by_email("operator@example.com")).id == user.id  # type: ignore[union-attr]
     assert await repository.get_by_email("nobody@example.com") is None
+
+
+# =============================================================================
+# Invitations
+# =============================================================================
+
+
+async def test_each_membership_answers_its_newest_pending_or_expired_invitation(async_db: AsyncSession) -> None:
+    """Re-inviting leaves expired rows behind; the roster gets the current one per membership, and only that."""
+    organization = await _organization(async_db)
+    members = OrganizationMemberRepository(async_db)
+    invitations = InvitationRepository(async_db)
+    start = datetime.now(UTC) - timedelta(days=30)
+
+    async def membership(email: str) -> uuid.UUID:
+        user = await _identity(async_db, organization, email=email)
+        row = await members.create_membership(
+            organization_id=organization.id, user_id=user.id, role="member", status="invited"
+        )
+        return row.id
+
+    async def invite(membership_id: uuid.UUID, *, day: int, status: str) -> uuid.UUID:
+        row = await invitations.create_invitation(
+            organization_id=organization.id,
+            organization_member_id=membership_id,
+            email=f"{membership_id}@example.com",
+            invited_by_user_id=None,
+            token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
+            workspace_assignments=[],
+            expires_at=start + timedelta(days=day + 7),
+        )
+        # Rows written in one transaction share a timestamp, so each gets its own.
+        await invitations.update_status(row, {"status": status, "created_at": start + timedelta(days=day)})
+        return row.id
+
+    reinvited = await membership("reinvited@example.com")
+    for day in range(5):
+        await invite(reinvited, day=day, status="expired")
+    pending = await invite(reinvited, day=5, status="pending")
+    await invite(reinvited, day=6, status="cancelled")
+    lapsed = await membership("lapsed@example.com")
+    await invite(lapsed, day=0, status="expired")
+    newest_expired = await invite(lapsed, day=1, status="expired")
+    revoked = await membership("revoked@example.com")
+    await invite(revoked, day=0, status="cancelled")
+
+    current = await invitations.get_current_by_organization_members([reinvited, lapsed, revoked])
+
+    assert {membership_id: invitation.id for membership_id, invitation in current.items()} == {
+        reinvited: pending,
+        lapsed: newest_expired,
+    }

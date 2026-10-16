@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -13,6 +13,20 @@ import {
 } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
+
+// The badge seam, kept real unless a case sets a label: the cases about the
+// name and the rows see this build's monogram, and the one about the seam
+// sees what a build that draws something else there would.
+const badge = vi.hoisted(() => ({ label: "" }))
+vi.mock("@/app/nav/overlayAccountBadge", async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import("@/app/nav/overlayAccountBadge")>()
+  return {
+    AccountBadge: (props: { initials: string }) =>
+      badge.label ? <span>EU</span> : <real.AccountBadge {...props} />,
+    useAccountBadgeLabel: () => badge.label,
+  }
+})
 
 // The trigger names the person, and the person is a field on the membership
 // context, so it is stubbed at fetch like the sidebar's own read of it. Every
@@ -57,12 +71,14 @@ function CallerProbe() {
 // mounts it at "/" and resolves the first location before the assertions run.
 type MenuOptions = Partial<DeploymentBootstrap> & {
   deploymentLanding?: string
+  onOpenFeedback?: () => void
   onOpenDeploymentLevel?: () => void
 }
 
 async function renderMenu({
   deploymentLanding,
   onOpenDeploymentLevel,
+  onOpenFeedback,
   ...overrides
 }: MenuOptions = {}) {
   await renderWithRouter(
@@ -72,6 +88,7 @@ async function renderMenu({
           isCollapsed={false}
           deploymentLanding={deploymentLanding as never}
           onOpenDeploymentLevel={onOpenDeploymentLevel}
+          onOpenFeedback={onOpenFeedback}
         />
         <CallerProbe />
       </DeploymentProvider>
@@ -98,6 +115,37 @@ afterEach(() => {
 })
 
 describe("AccountMenu", () => {
+  it("ends the appearance row in an empty chevron-width slot, so its value lines up with a row that ends in a chevron", async () => {
+    // A guard on the structure: the row an edition adds under the account (the
+    // data region) ends in a 16px chevron, and the value of this row has to stop
+    // where that one does. jsdom measures nothing, so the slot is what is pinned.
+    mockCaller(OPERATOR)
+    await openMenu()
+
+    const row = await screen.findByRole("button", { name: /^Appearance:/ })
+    const slot = row.lastElementChild
+    expect(slot).toHaveAttribute("aria-hidden", "true")
+    expect(slot).toHaveClass("size-4", "shrink-0", "-ml-0.5")
+    expect(slot).toBeEmptyDOMElement()
+    expect(row).toHaveTextContent(/Light|Dark/)
+  })
+
+  it("draws the icon of the theme the row names, and swaps it with the value", async () => {
+    mockCaller(OPERATOR)
+    await openMenu()
+
+    const row = await screen.findByRole("button", { name: /^Appearance:/ })
+    // Sun is the only one of the two with a circle in it.
+    const isSun = () => row.querySelector("svg circle") !== null
+    const wasLight = /Light/.test(row.textContent ?? "")
+    expect(isSun()).toBe(wasLight)
+
+    await userEvent.setup().click(row)
+    const after = await screen.findByRole("button", { name: /^Appearance:/ })
+    expect(/Light/.test(after.textContent ?? "")).toBe(!wasLight)
+    expect(after.querySelector("svg circle") !== null).toBe(!wasLight)
+  })
+
   it("keeps Playground reachable on mobile before Documentation", async () => {
     mockCaller(OPERATOR)
     await openMenu()
@@ -305,6 +353,34 @@ describe("AccountMenu", () => {
 
     expect(screen.getByText("Signed in")).toBeInTheDocument()
   })
+
+  it("names a caller with no organization from their profile", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith("/auth/profile")
+        ? Response.json({
+            ...OPERATOR,
+            email: "ada@example.com",
+            full_name: null,
+          })
+        : Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    await openMenu()
+
+    expect(await screen.findByText("ada@example.com")).toBeInTheDocument()
+    // Playground is workspace-scoped, and this caller has no workspace.
+    expect(screen.queryByRole("link", { name: "Playground" })).toBeNull()
+  })
+
+  it("asks for no profile when the context already names the caller", async () => {
+    mockCaller({ full_name: "Ada Lovelace" })
+    await renderMenu()
+
+    expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument()
+    const profileReads = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([input]) => String(input).endsWith("/auth/profile"))
+    expect(profileReads).toHaveLength(0)
+  })
   describe("the Deployment row", () => {
     it("offers one row that opens the deployment rail, with the mark it opens", async () => {
       mockCaller(OPERATOR)
@@ -351,5 +427,54 @@ describe("AccountMenu", () => {
         .click(screen.getByRole("button", { name: "Deployment" }))
       expect(onOpen).toHaveBeenCalledTimes(1)
     })
+  })
+})
+
+it("opens feedback from a phone-only row right after Documentation", async () => {
+  mockCaller(OPERATOR)
+  const onOpenFeedback = vi.fn()
+  await openMenu({ feedback_enabled: true, onOpenFeedback })
+  const trigger = screen.getByRole("button", { name: "Feedback" })
+  // From md up the top bar carries it, as it carries Documentation.
+  expect(trigger).toHaveClass("md:hidden")
+  expect(trigger.previousElementSibling).toBe(
+    screen.getByRole("link", { name: "Documentation" }),
+  )
+  await userEvent.setup().click(trigger)
+  expect(onOpenFeedback).toHaveBeenCalledOnce()
+})
+
+it("hides the feedback row when the deployment has feedback off", async () => {
+  mockCaller(OPERATOR)
+  await openMenu({ feedback_enabled: false, onOpenFeedback: vi.fn() })
+  expect(
+    screen.queryByRole("button", { name: "Feedback" }),
+  ).not.toBeInTheDocument()
+})
+
+describe("the badge seam", () => {
+  afterEach(() => {
+    badge.label = ""
+  })
+
+  it("draws this build's monogram and adds nothing to the name", async () => {
+    mockCaller({ full_name: "Ada Lovelace" })
+    await renderMenu()
+
+    const trigger = await screen.findByRole("button", {
+      name: "Account: Ada Lovelace",
+    })
+    expect(within(trigger).queryByText("EU")).toBeNull()
+  })
+
+  it("draws what a build contributes and folds its words into the name", async () => {
+    badge.label = "Europe region"
+    mockCaller({ full_name: "Ada Lovelace" })
+    await renderMenu()
+
+    const trigger = await screen.findByRole("button", {
+      name: "Account: Ada Lovelace, Europe region",
+    })
+    expect(within(trigger).getByText("EU")).toBeInTheDocument()
   })
 })

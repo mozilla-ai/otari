@@ -18,21 +18,29 @@ from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choi
 from any_llm.types.files import AsyncFileDownload
 from any_llm.utils.messages_compat import chat_completion_to_message_response
 
-from gateway.services.files.provider_files import (
+from gateway.adapters.provider_file_adapter import (
     _TIMEOUT,
-    FileOverBudgetError,
-    ProviderCredential,
-    ProviderFile,
-    ProviderFileClient,
-    ProviderFileUnavailableError,
+    AnyLlmProviderFiles,
+    _AnyLlmFileSession,
     _container_file_request,
     _declared_size,
+)
+from gateway.exceptions.files_exceptions import FileOverBudgetError, ProviderFileUnavailableError
+from gateway.services.files._provider_files import (
     anthropic_produced_files,
     produced_files_for,
     responses_produced_files,
-    serves_files,
     store_inline_outputs,
 )
+from gateway.types.provider_account import ResolvedCredential
+from gateway.types.provider_file import ProviderFile
+
+
+@pytest.fixture(autouse=True)
+def _no_sdk_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset the base URLs the provider SDKs fall back to, so a developer's shell cannot redirect a read."""
+    for name in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _anthropic_reply(*outputs: list[dict[str, str]]) -> SimpleNamespace:
@@ -100,14 +108,14 @@ def test_responses_citations_carry_the_container_and_the_name() -> None:
 
 
 def test_only_providers_otari_can_read_back_are_recorded() -> None:
-    assert serves_files("anthropic")
-    assert serves_files("openai")
-    assert not serves_files("nebius")
+    assert AnyLlmProviderFiles().serves(LLMProvider.ANTHROPIC)
+    assert AnyLlmProviderFiles().serves(LLMProvider.OPENAI)
+    assert not AnyLlmProviderFiles().serves(LLMProvider.NEBIUS)
 
 
 def test_openai_download_is_keyed_on_the_container() -> None:
     url, headers = _container_file_request(
-        ProviderFile(file_id="cfile_1", container_id="cntr_1"), ProviderCredential(api_key="sk-test")
+        ProviderFile(file_id="cfile_1", container_id="cntr_1"), ResolvedCredential(api_key="sk-test")
     )
 
     assert url == "https://api.openai.com/v1/containers/cntr_1/files/cfile_1/content"
@@ -118,7 +126,7 @@ def test_an_openai_file_with_no_container_cannot_be_read() -> None:
     # The download is keyed on the container, so a row without one has no URL
     # to build; refusing here is what keeps ``containers/None/...`` off the wire.
     with pytest.raises(ProviderFileUnavailableError, match="names no container"):
-        _container_file_request(ProviderFile(file_id="cfile_1"), ProviderCredential(api_key="sk-test"))
+        _container_file_request(ProviderFile(file_id="cfile_1"), ResolvedCredential(api_key="sk-test"))
 
 
 def test_a_streamed_messages_result_block_names_its_files() -> None:
@@ -169,7 +177,7 @@ def test_a_citation_field_that_is_not_text_is_dropped() -> None:
 
 def test_an_id_stays_one_path_segment() -> None:
     url, _ = _container_file_request(
-        ProviderFile(file_id="../cfile_1", container_id="cntr/1"), ProviderCredential(api_key="sk-test")
+        ProviderFile(file_id="../cfile_1", container_id="cntr/1"), ResolvedCredential(api_key="sk-test")
     )
 
     assert url == "https://api.openai.com/v1/containers/cntr%2F1/files/..%2Fcfile_1/content"
@@ -190,11 +198,11 @@ async def test_an_anthropic_id_that_could_escape_its_path_reaches_no_provider(
 
 
 def test_a_provider_whose_files_otari_cannot_read_is_refused() -> None:
-    # serves_files names the set; refusing here is what stops a third provider's
+    # The adapter names the set it serves; refusing here is what stops a third provider's
     # credential reaching OpenAI's container endpoint.
     with pytest.raises(LookupError, match="nebius"):
-        ProviderFileClient(
-            provider=LLMProvider.NEBIUS, provider_instance="nebius", credential=ProviderCredential(api_key="sk-test")
+        _AnyLlmFileSession(
+            provider=LLMProvider.NEBIUS, provider_instance="nebius", credential=ResolvedCredential(api_key="sk-test")
         )
 
 
@@ -277,10 +285,10 @@ def _serving(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[httpx.Reques
 
 def _client(
     provider: str = "anthropic", api_base: str | None = None, client_args: dict[str, Any] | None = None
-) -> ProviderFileClient:
+) -> _AnyLlmFileSession:
     member = LLMProvider(provider)
-    credential = ProviderCredential(api_key="sk-test", api_base=api_base, client_args=client_args or {})
-    return ProviderFileClient(provider=member, provider_instance=provider, credential=credential)
+    credential = ResolvedCredential(api_key="sk-test", api_base=api_base, client_args=client_args or {})
+    return _AnyLlmFileSession(provider=member, provider_instance=provider, credential=credential)
 
 
 def _metadata(filename: str = "bar_plot.png") -> dict[str, Any]:
@@ -415,45 +423,58 @@ async def test_read_refuses_an_openai_file_with_no_container() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_filename_reads_anthropic_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filename_of_reads_anthropic_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
 
-    assert await _client().get_filename("file_01abc") == "bar_plot.png"
+    assert await _client().filename_of("file_01abc") == "bar_plot.png"
     assert seen[0].url.path == "/v1/files/file_01abc"
 
 
 @pytest.mark.asyncio
-async def test_get_filename_is_none_when_the_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filename_of_is_none_when_the_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     _serving(monkeypatch, lambda request: httpx.Response(404))
 
-    assert await _client().get_filename("file_01abc") is None
+    assert await _client().filename_of("file_01abc") is None
 
 
 @pytest.mark.asyncio
-async def test_get_filename_is_none_when_the_metadata_is_not_an_object(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filename_of_is_none_when_the_metadata_is_not_an_object(monkeypatch: pytest.MonkeyPatch) -> None:
     # A body no reader expects costs the caller the name, never the file it holds.
     _serving(monkeypatch, lambda request: httpx.Response(200, json=["bar_plot.png"]))
 
-    assert await _client().get_filename("file_01abc") is None
+    assert await _client().filename_of("file_01abc") is None
 
 
 @pytest.mark.asyncio
-async def test_get_filename_asks_nothing_of_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filename_of_asks_nothing_of_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     # OpenAI's citation already names the file, so there is no metadata call to make.
     seen = _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
 
-    assert await _client("openai").get_filename("cfile_1") is None
+    assert await _client("openai").filename_of("cfile_1") is None
     assert seen == []
 
 
-def test_for_run_needs_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
-    config: Any = SimpleNamespace()
-    monkeypatch.setattr("gateway.services.files.provider_files.get_provider_kwargs", lambda *args, **kwargs: {})
+@pytest.mark.asyncio
+async def test_a_file_the_provider_returns_is_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
 
-    with pytest.raises(LookupError):
-        ProviderFileClient.for_run(config, provider="anthropic", provider_instance="anthropic", workspace_id=None)
+    assert await _client().holds("file_01abc") is True
+
+
+@pytest.mark.asyncio
+async def test_a_file_the_provider_does_not_find_is_not_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = {"type": "error", "error": {"type": "not_found_error", "message": "File not found"}}
+    _serving(monkeypatch, lambda request: httpx.Response(404, json=error))
+
+    assert await _client().holds("file_01gone") is False
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_that_fails_otherwise_keeps_the_file_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = {"type": "error", "error": {"type": "api_error", "message": "unavailable"}}
+    _serving(monkeypatch, lambda request: httpx.Response(500, json=error))
+
+    assert await _client().holds("file_01abc") is True
 
 
 _PNG = "iVBORw0KGgo="  # base64 of the PNG signature, eight bytes
@@ -488,6 +509,11 @@ class _Store:
         return self.answer
 
 
+def _execution_result(reply: Any) -> dict[str, Any]:
+    result = next(block for block in reply.content if block.type == "code_execution_tool_result")
+    return cast(dict[str, Any], result.model_dump()["content"])
+
+
 @pytest.mark.asyncio
 async def test_a_bridged_gemini_reply_names_its_produced_file_like_anthropic_does() -> None:
     reply = chat_completion_to_message_response(_gemini_completion())
@@ -495,12 +521,22 @@ async def test_a_bridged_gemini_reply_names_its_produced_file_like_anthropic_doe
 
     await store_inline_outputs("messages", reply, store)
 
-    result = next(block for block in reply.content if block.type == "code_execution_tool_result")
-    dumped = result.model_dump()["content"]
+    dumped = _execution_result(reply)
     assert store.stored == [(b"\x89PNG\r\n\x1a\n", "image/png")]
     assert dumped["content"] == [{"type": "code_execution_output", "file_id": "file-1"}]
     assert "inline_outputs" not in dumped
     assert [file.file_id for file in produced_files_for("messages", reply)] == ["file-1"]
+
+
+@pytest.mark.asyncio
+async def test_a_bridged_output_that_could_not_be_stored_keeps_its_bytes() -> None:
+    reply = chat_completion_to_message_response(_gemini_completion())
+
+    await store_inline_outputs("messages", reply, _Store(answer=None))
+
+    dumped = _execution_result(reply)
+    assert dumped["content"] == []
+    assert dumped["inline_outputs"] == [{"mime_type": "image/png", "data": _PNG}]
 
 
 @pytest.mark.asyncio

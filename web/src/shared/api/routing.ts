@@ -1,23 +1,28 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useIsFetching,
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   AliasResponse,
+  AutomaticFallbacksResponse,
   CreateAliasRequest,
-  ExplainPolicyRequest,
-  ExplainPolicyResponse,
-  RankCandidatesRequest,
-  RankCandidatesResponse,
   RouterStatus,
   RoutingPolicyResponse,
   SetRoutingPolicyRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
   ALIASES,
+  AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
   ROUTER_STATUS,
   ROUTING_POLICIES,
+  workspaceMeta,
 } from "@/shared/api/queryKeys"
 
 // Which of the two routing surfaces this caller may read, the `useKeysScope`
@@ -26,20 +31,20 @@ import {
 // deployment; the `/organizations/me/*` two answer the same shapes for the
 // caller's own organization (otari-ai#1942, otari-ai#1969). The bases are part
 // of every query key they feed, so a demotion cannot serve the wider list from
-// cache, and an errored context falls through to the narrower surface.
+// cache, and an errored context takes the wider one, as every operator gate
+// does (`useDeploymentOperator`).
 export function useRoutingScope(): {
   policies: string
   aliases: string
   isReady: boolean
 } {
-  const context = useOrganizationContext()
-  const isDeploymentWide = context.data?.deployment_operator === true
+  const { isOperator: isDeploymentWide, isSettled } = useDeploymentOperator()
   return {
     policies: isDeploymentWide
       ? "/routing/policies"
       : "/organizations/me/routing-policies",
     aliases: isDeploymentWide ? "/aliases" : "/organizations/me/aliases",
-    isReady: context.isSuccess || context.isError,
+    isReady: isSettled,
   }
 }
 
@@ -72,6 +77,7 @@ export function useAliases(workspaceId?: string) {
   const scope = useRoutingScope()
   return useQuery({
     queryKey: [ALIASES, scope.aliases, workspaceId ?? null],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<AliasResponse[]>(inWorkspace(scope.aliases, workspaceId)),
     staleTime: 60_000,
@@ -83,6 +89,7 @@ export function useRoutingPolicies(workspaceId?: string) {
   const scope = useRoutingScope()
   return useQuery({
     queryKey: [ROUTING_POLICIES, scope.policies, workspaceId ?? null],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<RoutingPolicyResponse[]>(
         inWorkspace(scope.policies, workspaceId),
@@ -92,9 +99,36 @@ export function useRoutingPolicies(workspaceId?: string) {
   })
 }
 
+// The models the caller's organization used in the last 30 days, each with the
+// offerings its catalog ID tries in order. One endpoint for every caller: the
+// server scopes the traffic to the workspaces the caller may see.
+export function useAutomaticFallbacks() {
+  return useQuery({
+    queryKey: [AUTOMATIC_FALLBACKS],
+    queryFn: () =>
+      apiFetch<AutomaticFallbacksResponse>(
+        "/organizations/me/automatic-fallbacks",
+      ),
+    staleTime: 60_000,
+  })
+}
+
+// Whether a routing write or a refetch of the routing lists is in flight, so a
+// form that writes a whole policy from the cached copy can wait for it.
+export function useRoutingSyncing(): boolean {
+  const writing =
+    useIsMutating({ mutationKey: [ROUTING_POLICIES] }) +
+    useIsMutating({ mutationKey: [ALIASES] })
+  const refetching =
+    useIsFetching({ queryKey: [ROUTING_POLICIES] }) +
+    useIsFetching({ queryKey: [ALIASES] })
+  return writing + refetching > 0
+}
+
 export function useSetRoutingPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [ROUTING_POLICIES],
     mutationFn: (body: SetRoutingPolicyRequest) =>
       apiFetch<RoutingPolicyResponse>("/routing/policies", {
         method: "POST",
@@ -163,6 +197,7 @@ function invalidateRoutingLists(
 export function useSetOrganizationRoutingPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [ROUTING_POLICIES],
     mutationFn: (body: SetRoutingPolicyRequest & { workspace_id: string }) =>
       apiFetch<RoutingPolicyResponse>("/organizations/me/routing-policies", {
         method: "POST",
@@ -193,6 +228,7 @@ export function useDeleteOrganizationRoutingPolicy() {
 export function useCreateOrganizationAlias() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [ALIASES],
     mutationFn: (body: CreateAliasRequest & { workspace_id: string }) =>
       apiFetch<AliasResponse>("/organizations/me/aliases", {
         method: "POST",
@@ -220,20 +256,6 @@ export function useDeleteOrganizationAlias() {
   })
 }
 
-/** Compile a policy (saved or draft) without dispatching anything.
- *
- *  A mutation rather than a query: it is an explicit "check this now" action on
- *  inputs the operator is editing, not cacheable server state. */
-export function useExplainPolicy() {
-  return useMutation({
-    mutationFn: (body: ExplainPolicyRequest) =>
-      apiFetch<ExplainPolicyResponse>("/routing/policies/explain", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-  })
-}
-
 // --- Learned routing ------------------------------------------------------
 
 /** How warm a user's routing memory is.
@@ -255,26 +277,10 @@ export function useRouterStatus(userId: string | null) {
   })
 }
 
-/** Record how well each candidate did, which is what the router later votes over. */
-export function useRankCandidates() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: RankCandidatesRequest) =>
-      apiFetch<RankCandidatesResponse>("/routing/preferences/rank", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
-      // One more example may have crossed the seed count, which changes whether
-      // the policy routes at all.
-      void queryClient.invalidateQueries({ queryKey: [ROUTER_STATUS] })
-    },
-  })
-}
-
 export function useCreateAlias() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [ALIASES],
     mutationFn: (body: CreateAliasRequest) =>
       apiFetch<AliasResponse>("/aliases", {
         method: "POST",

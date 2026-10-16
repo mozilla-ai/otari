@@ -78,6 +78,10 @@ commit_preprocessors = [
   # commit parser and flip commit.conventional to false, which silently
   # drops the scope from the rendered line.
   { pattern = '(?m) \(#\d+\)$', replace = "" },
+  # GitHub merges a security advisory's private fork as "Merge commit from
+  # fork" and lists the fork's commits as bullets. The first bullet becomes the
+  # subject, so the fix renders instead of being skipped as a merge.
+  { pattern = '^Merge commit from fork\n\n\* ([^\n]+)[\s\S]*$', replace = "${1}" },
 ]
 
 commit_parsers = [

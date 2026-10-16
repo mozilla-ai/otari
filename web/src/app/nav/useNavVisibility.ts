@@ -1,5 +1,5 @@
 /**
- * Composes the three gates a registry entry can declare.
+ * Composes the gates a registry entry can declare.
  *
  * The predicate form, because a section's heading has to disappear along with
  * its last visible item, and a wrapper component (`EntitlementGate`) cannot tell
@@ -12,12 +12,13 @@
  * stay two mechanisms rather than one. The third, `operatorOnly`, is not about
  * the deployment at all but about who is signed in, and it is answered by the
  * server reporting the caller's own standing rather than by a rule of its own.
+ * `reachableWithoutOrganization` rides on the same read: its 404 says the
+ * caller belongs to no organization, and then only the rows that opt in show.
  */
 
 import { useMemo } from "react"
 
-import { isDeploymentOperator } from "@/features/organization/roles"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 
@@ -50,13 +51,10 @@ export function useNavVisibility(): (item: NavItem) => boolean {
   // its 404 could not become a second reading of `surfaces`; this read is not
   // that request, and each operator-only row still declares the surface it
   // needs, which `isRouteVisible` composes below.
-  const organization = useOrganizationContext()
-  // Through `roles.isDeploymentOperator` rather than reading the field, so the
-  // client keeps one spelling of the predicate for the same reason the server
-  // does: it already requires an explicit `true`, so an older gateway that omits
-  // the field reads as not an operator rather than as an answer.
-  const isOperator = isDeploymentOperator(organization.data)
-  const answerUnavailable = organization.isError
+  //
+  // Through `useDeploymentOperator`, the one answer the pages read too, so a row
+  // and the page behind it cannot disagree about a failed read (otari#876).
+  const { answer, isOperator } = useDeploymentOperator()
 
   return useMemo(() => {
     // Both values wait for an explicit yes, so neither kind of row is shown and
@@ -71,12 +69,20 @@ export function useNavVisibility(): (item: NavItem) => boolean {
         return true
       }
       return item.operatorOnly === "unlisted"
-        ? isOperator
-        : isOperator || answerUnavailable
+        ? answer === "operator"
+        : isOperator
     }
 
+    // While the read is in flight, draw only the rows a caller with no
+    // organization keeps. Right after an invitee's first sign-in that 404 is
+    // the answer coming, and drawing the member rail first flashes every row
+    // they are about to lose; a member instead sees the rest arrive late.
+    if (answer === "no-organization" || answer === "pending") {
+      return (item: NavItem) =>
+        item.reachableWithoutOrganization === true && isRouteVisible(item)
+    }
     return (item: NavItem) => isRouteVisible(item) && allowedByCaller(item)
-  }, [isRouteVisible, isOperator, answerUnavailable])
+  }, [isRouteVisible, answer, isOperator])
 }
 
 /**

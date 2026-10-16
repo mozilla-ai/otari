@@ -9,10 +9,9 @@ name: Otari Lock Refresh
 # every dependency here is floored rather than pinned, and `uv lock` preserves an
 # existing resolution unless something forces a change, so a floored package stays
 # at whatever version happened to be current the day it was first locked. That is
-# not hypothetical: genai-prices sat at 0.1.0 from the day it was added while six
-# releases shipped upstream, and because it carries a *dataset* (model prices),
-# the stale resolution silently mispriced requests rather than merely missing a
-# feature. CI and the Docker image both install with --frozen, so the lockfile is
+# not hypothetical: a floored package sat at its first-locked version while six
+# releases shipped upstream, and a stale resolution can quietly miss fixes
+# rather than fail. CI and the Docker image both install with --frozen, so the lockfile is
 # what ships.
 #
 # The refresh runs the resolution-sensitive checks itself before opening anything,
@@ -69,7 +68,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: 3.14
           activate-environment: true
@@ -80,7 +79,7 @@ jobs:
           PACKAGE: ${{ github.event.inputs.package }}
         run: |
           # --dry-run first, purely for the summary: it names each package and
-          # both versions ("Update genai-prices v0.1.0 -> v0.1.6"), which a diff
+          # both versions ("Update httpx v0.28.0 -> v0.28.1"), which a diff
           # of uv.lock does not, because the name and the version sit on separate
           # lines of the entry.
           if [ -n "${PACKAGE}" ]; then
@@ -110,11 +109,11 @@ jobs:
 
       - name: Lint
         if: steps.relock.outputs.changed == 'true'
-        run: make lint
+        run: make lint-python
 
       - name: Typecheck
         if: steps.relock.outputs.changed == 'true'
-        run: make typecheck
+        run: make typecheck-python
 
       - name: Unit tests
         if: steps.relock.outputs.changed == 'true'
@@ -154,7 +153,7 @@ jobs:
             changed: these are the newest versions the existing constraints already
             allowed, which Dependabot does not open PRs for.
 
-            The workflow ran `make lint`, `make typecheck`, the unit and
+            The workflow ran `make lint-python`, `make typecheck-python`, the unit and
             integration suites, and the OSS-edition smoke gate against this
             resolution before opening the PR. See the run summary for the
             package-level diff.

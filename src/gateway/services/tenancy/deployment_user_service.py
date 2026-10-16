@@ -21,7 +21,7 @@ makes the bootstrap operator a superuser: the marker is what still admits an
 operator whose flag was cleared, by hand or by another operator, and it is the
 reason this surface cannot lock a deployment out of itself. Everyone else is
 refused with 404 rather than 403; see
-:class:`~gateway.services.tenancy.errors.DeploymentAdministrationUnavailableError`
+:class:`~gateway.exceptions.identity_exceptions.DeploymentAdministrationUnavailableError`
 for why the status is the one it is.
 
 **What it refuses.** Two lockout guards, both narrow and both directional, so a
@@ -45,6 +45,13 @@ import uuid
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.identity_exceptions import (
+    BootstrapOperatorProtectedError,
+    DeploymentAdministrationUnavailableError,
+    DeploymentUserNotFoundError,
+    DeploymentUserSelfChangeError,
+    EmptyDeploymentUserUpdateError,
+)
 from gateway.models.tenancy import (
     DeploymentUserOrganizationPublic,
     DeploymentUserPublic,
@@ -56,13 +63,6 @@ from gateway.models.tenancy import (
 )
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
-from gateway.services.tenancy.errors import (
-    BootstrapOperatorProtectedError,
-    DeploymentAdministrationUnavailableError,
-    DeploymentUserNotFoundError,
-    DeploymentUserSelfChangeError,
-    EmptyDeploymentUserUpdateError,
-)
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 
 
@@ -98,11 +98,12 @@ class DeploymentUserService:
         actor: User,
         skip: int = 0,
         limit: int = 100,
+        search: str | None = None,
     ) -> DeploymentUsersPublic:
         """List every identity on the deployment, with the organizations it belongs to."""
         await self._require_administration_access(actor)
 
-        rows, count = await self.users.list_all(skip=skip, limit=limit)
+        rows, count = await self.users.list_all(skip=skip, limit=limit, search=search)
         # One query for the page's memberships rather than one per row, the same
         # shape the organization roster uses to resolve its own joins.
         organizations = await self.members.get_by_users_with_organizations(user.id for user in rows)
@@ -134,7 +135,8 @@ class DeploymentUserService:
         transaction, rather than leaving them to be refused when a cookie next
         comes back: ``resolve_dashboard_session`` does refuse them, but it only
         runs when the browser asks, so until then the rows are alive and
-        reactivating would hand back every cookie the account held.
+        reactivating would hand back every cookie the account held. Its pending
+        verification and reset links go for the same reason.
         """
         await self._require_administration_access(actor)
         if request.is_active is None and request.is_superuser is None:
@@ -160,6 +162,11 @@ class DeploymentUserService:
 
         if request.is_active is not None:
             target.is_active = request.is_active
+        if request.is_active is False:
+            target.email_verification_token_hash = None
+            target.email_verification_token_expires_at = None
+            target.password_reset_token_hash = None
+            target.password_reset_token_expires_at = None
         if request.is_superuser is not None:
             target.is_superuser = request.is_superuser
         self.db.add(target)

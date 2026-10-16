@@ -1,0 +1,27 @@
+schema_version: "1.0"
+policy:
+  id: otari/architecture/business-rule-outside-a-service
+  description: Core, repositories, schemas, models and exceptions hold no business rules.
+
+gates:
+
+  - id: business-rule-outside-a-service
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    when_changed:
+      - "src/gateway/core/**"
+      - "src/gateway/exceptions/**"
+      - "src/gateway/models/**"
+      - "src/gateway/repositories/**"
+      - "src/gateway/schemas/**"
+    rubric: >-
+      Judge only code this diff adds under src/gateway/core/, repositories/, schemas/,
+      models/ or exceptions/. Fail if it adds a business rule there. A business rule decides
+      what the product allows or does. A query filter that a use case asks for, the
+      mapping of a row to a schema, the closed vocabulary of a column, the HTTP
+      status of an error class, and the guard of a conditional write that must run as one
+      statement (a counter that may grow only while it stays under its cap) are not
+      business rules. This is the "Must not" column in DOMAINS.md, "The target shape".
+      Pass if the diff adds no business rule in these layers.
+    accept_warnings: [judge-gate-cap]

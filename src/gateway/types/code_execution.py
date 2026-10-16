@@ -65,10 +65,16 @@ def _file_refs_only(value: Any) -> Any:
     view the same field carries the file's text instead, and it may be ``null``
     when nothing was produced. Neither names a file, so neither contributes a
     filename, and neither is worth failing an otherwise successful call over.
+    An object naming neither a ``file_id`` nor a ``filename`` is discarded too,
+    rather than read as a blank reference.
     """
     if not isinstance(value, list):
         return []
-    return [entry for entry in value if isinstance(entry, dict)]
+    return [
+        entry
+        for entry in value
+        if isinstance(entry, dict) and (_rendered_text(entry.get("file_id")) or _rendered_text(entry.get("filename")))
+    ]
 
 
 _RenderedStr = Annotated[str, BeforeValidator(_rendered_text)]

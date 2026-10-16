@@ -1,7 +1,7 @@
 """The cost-math core: exact arithmetic, both cached-token conventions, one rounding.
 
-``tests/unit/test_compute_cost.py`` pins the request path's behavior through
-``_compute_cost``. This file tests the core underneath it directly, where the
+``tests/unit/test_compute_cost.py`` pins the request path's total, calling
+``calculate_metered_cost`` with a usage object. This file tests the core underneath it directly, where the
 cached-token convention is an argument rather than a property of a usage
 carrier, and where the guards against a corrupt rate live.
 """
@@ -19,6 +19,8 @@ from gateway.core.metered_pricing import (
     effective_rates,
     estimate_metered_cost,
     price_billable_usage,
+    price_request,
+    priced_per_request,
     quantize_cost,
     to_decimal,
 )
@@ -31,7 +33,6 @@ def _pricing(**overrides: Any) -> SimpleNamespace:
         "output_price_per_million": Decimal("60"),
         "cache_read_price_per_million": None,
         "cache_write_price_per_million": None,
-        "cache_write_1h_price_per_million": None,
         "pricing_tiers": [],
     }
     rates.update(overrides)
@@ -138,7 +139,6 @@ def test_a_1h_write_is_a_subset_of_the_write_total() -> None:
     )
 
     assert usage.cache_write_1h_tokens == 100
-    assert usage.cache_write_base_tokens == 0
 
 
 def test_an_inclusive_payload_that_contradicts_itself_loses_its_cache_discount() -> None:
@@ -213,7 +213,7 @@ def test_an_unusable_base_rate_refuses_to_price(rate: Any) -> None:
         effective_rates(_pricing(input_price_per_million=rate), 1_000)
 
 
-def test_an_unpriced_1h_write_bills_at_the_ordinary_cache_write_rate() -> None:
+def test_a_1h_write_bills_at_the_ordinary_cache_write_rate() -> None:
     cost = calculate_token_cost(
         _pricing(cache_write_price_per_million=Decimal("3.75")),
         input_tokens=0,
@@ -292,10 +292,7 @@ def test_a_meter_with_no_units_gets_no_charge_line() -> None:
 
 
 def test_an_estimate_reserves_the_dearest_rate_a_prompt_token_could_attract() -> None:
-    pricing = _pricing(
-        cache_write_price_per_million=Decimal("37.5"),
-        cache_write_1h_price_per_million=Decimal("60"),
-    )
+    pricing = _pricing(cache_write_price_per_million=Decimal("37.5"))
 
     plain = estimate_metered_cost(pricing, estimated_input_tokens=1_000, estimated_output_tokens=0)
     five_minute = estimate_metered_cost(
@@ -307,7 +304,7 @@ def test_an_estimate_reserves_the_dearest_rate_a_prompt_token_could_attract() ->
 
     assert plain == Decimal("0.030000")
     assert five_minute == Decimal("0.037500")
-    assert one_hour == Decimal("0.060000")
+    assert one_hour == Decimal("0.037500")
 
 
 def test_an_estimate_never_prices_below_the_input_rate() -> None:
@@ -319,3 +316,57 @@ def test_an_estimate_never_prices_below_the_input_rate() -> None:
     )
 
     assert estimate == Decimal("0.030000")
+
+
+def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> None:
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+
+    cost, meters, lines = price_request(pricing)
+
+    assert priced_per_request(pricing)
+    assert cost == Decimal("0.005")
+    assert meters == {"requests": 1}
+    assert lines == [{"meter": "request", "units": 1, "unit_rate": 0.005, "cost": 0.005}]
+
+
+def test_a_per_request_charge_line_agrees_with_the_settled_cost() -> None:
+    """A rate below a micro-dollar per request rounds once, and the line shows the rounded amount."""
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("1.5"), unit="requests"))
+
+    assert cost == Decimal("0.000002")
+    assert lines == [{"meter": "request", "units": 1, "unit_rate": 0.000002, "cost": 0.000002}]
+
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("0.4"), unit="requests"))
+
+    assert (cost, lines) == (Decimal("0"), [])
+
+
+def test_a_free_per_request_rate_writes_no_charge_line() -> None:
+    cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="requests"))
+
+    assert (cost, meters, lines) == (Decimal("0"), {"requests": 1}, [])
+
+
+def test_a_per_request_rate_refuses_an_unusable_rate() -> None:
+    with pytest.raises(ValueError, match="no usable per-request rate"):
+        price_request(_pricing(input_price_per_million=None, unit="requests"))
+
+
+def test_a_per_request_rate_is_estimated_at_one_request() -> None:
+    """The reservation holds what the request settles at, not a token estimate."""
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+
+    estimate = estimate_metered_cost(pricing, estimated_input_tokens=1_000_000, estimated_output_tokens=4096)
+
+    assert estimate == Decimal("0.005")
+
+
+@pytest.mark.parametrize("unit", ["tokens", "images", None])
+def test_a_rate_not_priced_per_request_keeps_token_pricing(unit: str | None) -> None:
+    """``tokens`` (and a row with no unit) is priced exactly as before; ``images`` is not rerouted here."""
+    pricing = _pricing(unit=unit) if unit is not None else _pricing()
+
+    assert not priced_per_request(pricing)
+    assert estimate_metered_cost(
+        pricing, estimated_input_tokens=1_000_000, estimated_output_tokens=1_000_000
+    ) == Decimal("90")

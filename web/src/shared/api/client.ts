@@ -1,20 +1,75 @@
-// Thin fetch wrapper for the gateway's management API. The dashboard is served
-// from the same origin as the API, so paths are relative ("/models") and the
-// HttpOnly session cookie minted at sign-in rides along automatically (fetch
-// defaults to credentials: "same-origin"). A credential is sent exactly once, to
-// POST /v1/auth/session, and is never written to browser storage: it lives in
-// the sign-in form's state until the request goes out and is gone on reload.
+// Thin fetch wrapper for the gateway's management API. In this build the
+// dashboard is served from the same origin as the API, so paths are relative
+// ("/models") and the HttpOnly session cookie minted at sign-in rides along
+// automatically; `overlayRequestPolicy` is where a build that reaches the API
+// on another origin says so, and every request here asks it. A credential is
+// sent exactly once, to POST /v1/auth/session, and is never written to browser
+// storage: it lives in the sign-in form's state until the request goes out and
+// is gone on reload.
 
-import type { OAuthAuthorizeResponse, OAuthCallbackRequest } from "@/client"
+import type { QueryClient } from "@tanstack/react-query"
+import type {
+  OAuthAuthorizeResponse,
+  OAuthCallbackRequest,
+  OAuthSessionResponse,
+} from "@/client"
+import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 
 export class ApiError extends Error {
   status: number
+  /** The refusal's `Otari-Error-Code`, or `""` where it carries none. */
+  code: string
 
-  constructor(status: number, message: string) {
-    super(message)
+  constructor(
+    status: number,
+    message: string,
+    code = "",
+    options?: { cause?: unknown },
+  ) {
+    super(message, options)
     this.name = "ApiError"
     this.status = status
+    this.code = code
+  }
+}
+
+/**
+ * The dashboard's default retry policy for a failed query: twice, except for
+ * an auth failure, which will not fix itself. `app/provider.tsx` installs it,
+ * and a hook that refuses one more status composes with it rather than
+ * restating it.
+ */
+export function defaultQueryRetry(failureCount: number, error: unknown) {
+  if (
+    error instanceof ApiError &&
+    (error.status === 401 || error.status === 403)
+  ) {
+    return false
+  }
+  return failureCount < 2
+}
+
+/**
+ * The client's own retry policy, plus a 404: for a read whose 404 is an answer
+ * rather than a failure, so asking again only holds the page behind the
+ * backoff. Composed with the client's default rather than with
+ * `defaultQueryRetry` directly, so a client configured otherwise keeps its
+ * policy for every other status.
+ */
+export function retryUnlessNotFound(queryClient: QueryClient) {
+  const fallback = queryClient.getDefaultOptions().queries?.retry
+  return (failureCount: number, error: Error): boolean => {
+    if (error instanceof ApiError && error.status === 404) {
+      return false
+    }
+    if (typeof fallback === "function") {
+      return fallback(failureCount, error)
+    }
+    if (typeof fallback === "number") {
+      return failureCount < fallback
+    }
+    return fallback ?? defaultQueryRetry(failureCount, error)
   }
 }
 
@@ -38,7 +93,17 @@ export const API_ROOT = "/api/v1"
 export const DASHBOARD_BUILD_PATH = "/dashboard-build.json"
 
 function apiUrl(path: string): string {
-  return `${API_ROOT}${path}`
+  return `${requestPolicy().origin}${API_ROOT}${path}`
+}
+
+// Every management request goes out through here, so the one decision about
+// where the API is and which credential reaches it is made once. A caller's
+// own `credentials` is kept, which nothing here passes today.
+function request(path: string, init: RequestInit): Promise<Response> {
+  return fetch(apiUrl(path), {
+    credentials: requestPolicy().credentials,
+    ...init,
+  })
 }
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
@@ -50,19 +115,26 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 // the shape every refusal this gateway writes has and the shape an intermediary
 // answering for it does not. Callers that only need something to display take
 // `message`; the one caller that has to tell a gateway refusal from a proxy's
-// own status takes `detail`.
+// own status takes `detail`. `code` is the body's stable error code, or `""`.
 async function readRefusal(
   response: Response,
-): Promise<{ detail: string | null; message: string }> {
+): Promise<{ detail: string | null; message: string; code: string }> {
   let detail: string | null = null
   let message: string | null = null
+  let code = ""
   try {
-    const data = JSON.parse(await response.text()) as { detail?: unknown }
+    const data = JSON.parse(await response.text()) as {
+      detail?: unknown
+      code?: unknown
+    }
     if (typeof data.detail === "string") {
       detail = data.detail
       message = data.detail
     } else if (data.detail != null) {
       message = JSON.stringify(data.detail)
+    }
+    if (typeof data.code === "string") {
+      code = data.code
     }
   } catch {
     // Body was not JSON; fall through to the status text.
@@ -71,6 +143,7 @@ async function readRefusal(
     detail,
     message:
       message ?? (response.statusText || `Request failed (${response.status})`),
+    code,
   }
 }
 
@@ -121,7 +194,7 @@ export async function createSession(
       : { email: credential.email, password: credential.password }
   let response: Response
   try {
-    response = await fetch(apiUrl("/auth/session"), {
+    response = await request("/auth/session", {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -245,23 +318,41 @@ export async function startOAuthSignIn(
 
 // Finish an OAuth sign-in: spend the authorization code for a session cookie.
 //
-// The code travels alone. The redirect URI is the gateway's own, derived from
-// its configured public base URL rather than sent from here, and the `state`
-// was already checked in this browser against the value it stored: posting it
-// would only let the gateway compare a value to itself.
+// No redirect URI: the gateway derives its own from its configured public base
+// URL. `terms_accepted` says whether the person accepted the published terms
+// before leaving, which a sign-in that creates their account needs; the gateway
+// ignores it otherwise. A refusal for want of them throws an `ApiError` whose
+// `code` is `terms_not_accepted`.
+//
+// `passwordRemoved` carries the gateway's `password_removed`: the first
+// provider sign-in on an address nobody had proven removes the password set on
+// it before then, and the person has to be told rather than find out at the
+// next password sign-in.
 export async function completeOAuthSignIn(
   provider: string,
   code: string,
   state: string,
-): Promise<SignInResult> {
-  const payload: OAuthCallbackRequest = { code, state }
+  termsAccepted: boolean,
+): Promise<SignInResult & { passwordRemoved: boolean }> {
+  const payload: OAuthCallbackRequest = {
+    code,
+    state,
+    terms_accepted: termsAccepted,
+  }
   const finished = await publicPost(
     `/auth/oauth/${encodeURIComponent(provider)}/callback`,
     payload,
   )
-  return finished.isOk
-    ? { isOk: true }
-    : { isOk: false, message: finished.message, status: finished.status }
+  if (!finished.isOk) {
+    return {
+      isOk: false,
+      message: finished.message,
+      status: finished.status,
+      passwordRemoved: false,
+    }
+  }
+  const session = finished.body as Partial<OAuthSessionResponse> | undefined
+  return { isOk: true, passwordRemoved: session?.password_removed === true }
 }
 
 // One unauthenticated GET, with the same error handling `publicPost` gives its
@@ -274,7 +365,7 @@ async function publicGet(path: string): Promise<{
 }> {
   let response: Response
   try {
-    response = await fetch(apiUrl(path), {
+    response = await request(path, {
       method: "GET",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -322,7 +413,7 @@ async function publicPost(
 }> {
   let response: Response
   try {
-    response = await fetch(apiUrl(path), {
+    response = await request(path, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -348,7 +439,8 @@ async function publicPost(
     }
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   return {
     isOk: true,
@@ -364,7 +456,7 @@ async function publicPost(
 // cookie with this call's expiring one (see #557).
 export async function deleteSession(): Promise<void> {
   try {
-    await fetch(apiUrl("/auth/session"), {
+    await request("/auth/session", {
       method: "DELETE",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
@@ -435,6 +527,10 @@ async function readJson<T>(
       throw new ApiError(
         response.status,
         `The gateway's reply was not JSON (HTTP ${response.status}). Something between this page and the gateway answered in its place, so whether the request was carried out is unknown.`,
+        "",
+        // The message deliberately leaves out what the intermediary returned;
+        // this keeps it for whoever is debugging.
+        { cause: error },
       )
     }
     throw error
@@ -488,7 +584,13 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set("Accept", "application/json")
-  if (init.body != null && !headers.has("Content-Type")) {
+  // A form body's content type carries the multipart boundary, which only the
+  // browser knows, so it is left for the browser to write.
+  if (
+    init.body != null &&
+    !(init.body instanceof FormData) &&
+    !headers.has("Content-Type")
+  ) {
     headers.set("Content-Type", "application/json")
   }
   const signal = init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
@@ -501,7 +603,7 @@ export async function apiFetch<T>(
 
   let response: Response
   try {
-    response = await fetch(apiUrl(path), { ...init, headers, signal })
+    response = await request(path, { ...init, headers, signal })
   } catch (error) {
     if (isTimeout(error)) {
       throw new ApiError(0, timeoutMessage)
@@ -570,7 +672,7 @@ export async function apiStream(
 
   let response: Response
   try {
-    response = await fetch(apiUrl(path), { ...init, headers })
+    response = await request(path, { ...init, headers })
   } catch (error) {
     // An abort is the caller's own Stop control, not a fault, so it is left to
     // propagate as itself rather than being reported as an unreachable gateway.

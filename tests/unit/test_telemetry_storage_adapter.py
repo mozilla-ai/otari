@@ -1,20 +1,23 @@
 """Unit coverage for the core TelemetryStoragePort adapter's batch-insert path.
 
-The escalation this exercises (one bulk insert, then survivors only, then
-row-at-a-time) is what turns a uniqueness collision into a reported duplicate
-rather than a failed export, so it is asserted on the round trips it issues and
-not only on the counts it returns.
+Run against a real SQLite database rather than a mocked session, because what
+matters is what the insert leaves in the table: a replayed or overlapping export
+stores each record once and reports the rest as duplicates, without failing.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import event, func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlmodel import SQLModel
 
+import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
+from gateway.models.usage import AgentTelemetry
 from gateway.ports.telemetry_storage_port import TelemetryFilter, TelemetryRecord
 
 _TS = datetime(2026, 8, 6, tzinfo=UTC)
@@ -30,166 +33,134 @@ def _record(dedup_key: str, source: str = "claude_code") -> TelemetryRecord:
     )
 
 
-def _adapter(db: AsyncMock) -> DatabaseTelemetryStorageAdapter:
-    return DatabaseTelemetryStorageAdapter(cast(AsyncSession, db))
+@asynccontextmanager
+async def _session(*, foreign_keys: bool = False) -> AsyncIterator[AsyncSession]:
+    """A session on a fresh in-memory SQLite schema."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    if foreign_keys:
+
+        def _enforce(dbapi_connection: Any, _record: Any) -> None:
+            dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+        event.listen(engine.sync_engine, "connect", _enforce)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            yield session
+    finally:
+        # aiosqlite runs each connection on its own thread, so an undisposed
+        # engine leaks one per test.
+        await engine.dispose()
 
 
-def _existing(*dedup_keys: str) -> MagicMock:
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = list(dedup_keys)
-    return result
+async def _stored(db: AsyncSession) -> list[tuple[str, str]]:
+    rows = await db.execute(select(AgentTelemetry.source, AgentTelemetry.dedup_key).order_by(AgentTelemetry.dedup_key))
+    return [(source, key) for source, key in rows.all()]
 
 
 @pytest.mark.asyncio
-async def test_record_batches_non_colliding_records_in_one_bulk_insert() -> None:
-    """N non-colliding records issue one add_all + commit(), not N nested savepoints."""
-    db = AsyncMock()
-    db.add_all = MagicMock()
+async def test_record_stores_every_new_record() -> None:
+    async with _session() as db:
+        result = await DatabaseTelemetryStorageAdapter(db).record(
+            api_key_id="key-1",
+            user_id="alice",
+            records=tuple(_record(f"dedup-{i}") for i in range(5)),
+        )
 
-    result = await _adapter(db).record(
-        api_key_id="key-1", user_id="alice", records=tuple(_record(f"dedup-{i}") for i in range(5))
-    )
-
-    assert result.accepted == 5
-    assert result.duplicate == 0
-    db.add_all.assert_called_once()
-    assert len(db.add_all.call_args[0][0]) == 5
-    db.commit.assert_awaited_once()
+        assert (result.accepted, result.duplicate) == (5, 0)
+        assert len(await _stored(db)) == 5
 
 
 @pytest.mark.asyncio
 async def test_record_attributes_every_row_to_the_exporting_key_and_user() -> None:
-    """Attribution comes from the port call, not from the record."""
-    db = AsyncMock()
-    db.add_all = MagicMock()
+    async with _session() as db:
+        await DatabaseTelemetryStorageAdapter(db).record(
+            api_key_id="key-1", user_id="alice", records=(_record("dedup-0"),)
+        )
 
-    await _adapter(db).record(api_key_id="key-1", user_id="alice", records=(_record("dedup-0"),))
-
-    row = db.add_all.call_args[0][0][0]
-    assert (row.api_key_id, row.user_id) == ("key-1", "alice")
-    # The dedup-only fields are not columns; the key derived from them is what is stored.
-    assert row.dedup_key == "dedup-0"
-    assert not hasattr(row, "tool_use_id")
+        row = (await db.execute(select(AgentTelemetry))).scalar_one()
+        assert (row.api_key_id, row.user_id, row.name) == ("key-1", "alice", "tool_result")
 
 
 @pytest.mark.asyncio
-async def test_record_batches_each_source_separately() -> None:
-    """The uniqueness constraint is (source, dedup_key), so batches are per source."""
-    db = AsyncMock()
-    db.add_all = MagicMock()
+async def test_record_keys_duplicates_by_source() -> None:
+    """The same dedup key from two sources is two records."""
+    async with _session() as db:
+        result = await DatabaseTelemetryStorageAdapter(db).record(
+            api_key_id="key-1",
+            user_id="alice",
+            records=(_record("dedup-0", "claude_code"), _record("dedup-0", "codex")),
+        )
 
-    result = await _adapter(db).record(
-        api_key_id="key-1",
-        user_id="alice",
-        records=(_record("dedup-0", "claude_code"), _record("dedup-0", "codex")),
-    )
-
-    assert result.accepted == 2
-    assert db.add_all.call_count == 2
+        assert (result.accepted, result.duplicate) == (2, 0)
+        assert await _stored(db) == [("claude_code", "dedup-0"), ("codex", "dedup-0")]
 
 
 @pytest.mark.asyncio
-async def test_record_retries_only_survivors_after_a_collision() -> None:
-    """A collision with an already-stored row is reported as a duplicate, not a
-    failure, and the retry bulk-inserts only the surviving records."""
-    db = AsyncMock()
-    db.add_all = MagicMock()
-    db.execute.side_effect = [_existing("dedup-0")]
-    db.commit.side_effect = [IntegrityError("insert", {}, Exception("dup")), None]
+async def test_record_reports_a_replayed_export_as_duplicates() -> None:
+    """An exporter resending a batch stores nothing twice and does not fail."""
+    async with _session() as db:
+        adapter = DatabaseTelemetryStorageAdapter(db)
+        records = tuple(_record(f"dedup-{i}") for i in range(3))
+        await adapter.record(api_key_id="key-1", user_id="alice", records=records)
 
-    result = await _adapter(db).record(
-        api_key_id="key-1", user_id="alice", records=(_record("dedup-0"), _record("dedup-1"))
-    )
+        result = await adapter.record(api_key_id="key-1", user_id="alice", records=records)
 
-    assert result.accepted == 1
-    assert result.duplicate == 1
-    assert db.add_all.call_count == 2
-    survivors = db.add_all.call_args_list[1][0][0]
-    assert [row.dedup_key for row in survivors] == ["dedup-1"]
-    db.rollback.assert_awaited_once()
+        assert (result.accepted, result.duplicate) == (0, 3)
+        assert len(await _stored(db)) == 3
 
 
 @pytest.mark.asyncio
-async def test_record_reports_all_duplicates_when_nothing_survives_the_first_collision() -> None:
-    """Every record in the batch already exists: no retry insert is attempted,
-    the whole batch is reported as duplicate."""
-    db = AsyncMock()
-    db.add_all = MagicMock()
-    db.execute.side_effect = [_existing("dedup-0")]
-    db.commit.side_effect = [IntegrityError("insert", {}, Exception("dup"))]
+async def test_record_stores_only_the_new_part_of_an_overlapping_export() -> None:
+    async with _session() as db:
+        adapter = DatabaseTelemetryStorageAdapter(db)
+        await adapter.record(api_key_id="key-1", user_id="alice", records=(_record("dedup-0"),))
 
-    result = await _adapter(db).record(api_key_id="key-1", user_id="alice", records=(_record("dedup-0"),))
+        result = await adapter.record(
+            api_key_id="key-1",
+            user_id="alice",
+            records=(_record("dedup-0"), _record("dedup-1"), _record("dedup-2")),
+        )
 
-    assert result.accepted == 0
-    assert result.duplicate == 1
-    db.add_all.assert_called_once()
-    db.rollback.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_record_falls_back_to_row_at_a_time_after_a_second_collision() -> None:
-    """When the retry bulk insert also collides (a still-racing writer landed more
-    rows in the window), the still-colliding remainder is inserted row-at-a-time
-    and only the rows that still fail are reported as duplicate."""
-    db = AsyncMock()
-    db.add_all = MagicMock()
-    db.add = MagicMock()
-    db.execute.side_effect = [_existing("dedup-0")]
-    db.commit.side_effect = [
-        IntegrityError("insert", {}, Exception("dup")),  # whole-batch insert
-        IntegrityError("insert", {}, Exception("dup")),  # retry bulk insert of survivors
-        None,  # row-at-a-time: dedup-1 succeeds
-        IntegrityError("insert", {}, Exception("dup")),  # row-at-a-time: dedup-2 still collides
-    ]
-
-    result = await _adapter(db).record(
-        api_key_id="key-1",
-        user_id="alice",
-        records=(_record("dedup-0"), _record("dedup-1"), _record("dedup-2")),
-    )
-
-    assert result.accepted == 1
-    assert result.duplicate == 2
-    assert db.add_all.call_count == 2
-    assert db.add.call_count == 2
-    assert db.rollback.await_count == 3
+        assert (result.accepted, result.duplicate) == (2, 1)
+        assert [key for _, key in await _stored(db)] == ["dedup-0", "dedup-1", "dedup-2"]
 
 
 @pytest.mark.asyncio
 async def test_record_drops_in_export_repeats_before_the_insert() -> None:
-    """A record repeated inside one export never reaches the database.
+    async with _session() as db:
+        result = await DatabaseTelemetryStorageAdapter(db).record(
+            api_key_id="key-1",
+            user_id="alice",
+            records=(_record("dedup-0"), _record("dedup-1"), _record("dedup-0")),
+        )
 
-    Letting it through fails the whole bulk insert on the uniqueness constraint and
-    drops the batch into the row-at-a-time fallback, so a single repeated record
-    turns an N-row export into N commits.
-    """
-    db = AsyncMock()
-    db.add_all = MagicMock()
+        assert (result.accepted, result.duplicate) == (2, 1)
+        assert len(await _stored(db)) == 2
 
-    result = await _adapter(db).record(
-        api_key_id="key-1",
-        user_id="alice",
-        records=(_record("dedup-0"), _record("dedup-1"), _record("dedup-0")),
-    )
 
-    assert result.accepted == 2
-    assert result.duplicate == 1
-    db.add_all.assert_called_once()
-    assert [row.dedup_key for row in db.add_all.call_args[0][0]] == ["dedup-0", "dedup-1"]
-    db.commit.assert_awaited_once()
-    db.rollback.assert_not_awaited()
+@pytest.mark.asyncio
+async def test_record_counts_rows_the_database_refuses_instead_of_failing_the_export() -> None:
+    """A refusal other than the unique key (here a missing user) falls back to row at a time."""
+    async with _session(foreign_keys=True) as db:
+        result = await DatabaseTelemetryStorageAdapter(db).record(
+            api_key_id="no-such-key",
+            user_id="nobody",
+            records=(_record("dedup-0"), _record("dedup-1")),
+        )
+
+        assert (result.accepted, result.duplicate) == (0, 2)
+        assert await _stored(db) == []
 
 
 @pytest.mark.asyncio
 async def test_record_stores_nothing_for_an_empty_export() -> None:
-    db = AsyncMock()
-    db.add_all = MagicMock()
+    async with _session() as db:
+        result = await DatabaseTelemetryStorageAdapter(db).record(api_key_id="key-1", user_id="alice", records=())
 
-    result = await _adapter(db).record(api_key_id="key-1", user_id="alice", records=())
-
-    assert (result.accepted, result.duplicate, result.rejected) == (0, 0, 0)
-    db.add_all.assert_not_called()
-    db.commit.assert_not_awaited()
+        assert (result.accepted, result.duplicate, result.rejected) == (0, 0, 0)
+        assert (await db.execute(select(func.count()).select_from(AgentTelemetry))).scalar_one() == 0
 
 
 @pytest.mark.asyncio

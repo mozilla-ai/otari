@@ -39,7 +39,6 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -51,6 +50,7 @@ from gateway.api.deps import (
     get_db,
     verify_master_key,
 )
+from gateway.api.routes._helpers import database_error
 from gateway.api.routes.keys import (
     _KEY_EXCEEDS_USER_DETAIL,
     NOT_INTERNAL,
@@ -60,6 +60,8 @@ from gateway.api.routes.keys import (
 )
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
@@ -69,7 +71,7 @@ from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tenancy.errors import WorkspaceNotFoundError
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(
@@ -144,13 +146,16 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
     """The organization this request acts in, and the owner id it acts as.
 
     The organization is the caller's own ``active_organization_id``, resolved
-    through ``get_active_organization_for_user`` so a pointer with no live
-    membership behind it refuses rather than resolving; moving between
+    through ``get_active_organization_for_user``: a pointer with no live
+    membership behind it falls back to the caller's oldest live membership, and
+    refuses when there is none; moving between
     organizations is ``POST /api/v1/organizations/me/switch``. The owner id is the
     identity's UUID rendered as a string, the attribution convention
     ``get_or_create_attribution_user`` documents.
     """
-    organization = await OrganizationService(db, membership_listener=None).get_active_organization_for_user(identity)
+    organization = await OrganizationService(
+        db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+    ).get_active_organization_for_user(identity)
     return organization.id, str(identity.id)
 
 
@@ -171,7 +176,7 @@ async def create_own_key(
     workspace must be visible to the caller (a member of it, or an organization
     owner/admin, who see every workspace). The secret is returned once.
     """
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     organization = await organizations.get_active_organization_for_user(identity)
 
     if request.workspace_id is not None:
@@ -223,9 +228,7 @@ async def create_own_key(
     # then refuses a request whose owner is deleted. Reviving it is therefore
     # restoring spend, which is not a member's to do for themselves, so this
     # refuses where ``POST /api/v1/keys`` refuses the same owner.
-    revoked = (
-        await db.execute(select(User.deleted_at).where(User.user_id == str(identity.id)))
-    ).scalar_one_or_none()
+    revoked = (await db.execute(select(User.deleted_at).where(User.user_id == str(identity.id)))).scalar_one_or_none()
     if revoked is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -270,12 +273,9 @@ async def create_own_key(
     db.add(db_key)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("create own key", exc) from None
     await db.refresh(db_key)
 
     if first_key and identity.email is not None:
@@ -376,12 +376,9 @@ async def update_own_key(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("update own key", exc) from None
     await db.refresh(key)
 
     return KeyInfo.from_model(key)
@@ -411,12 +408,9 @@ async def rotate_own_key(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("rotate own key", exc) from None
     await db.refresh(key)
 
     key_info = KeyInfo.from_model(key)
@@ -439,9 +433,6 @@ async def delete_own_key(
     await db.delete(key)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("delete own key", exc) from None

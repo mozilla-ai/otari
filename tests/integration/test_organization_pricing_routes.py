@@ -23,6 +23,13 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.exceptions import TenancyValidationError
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError
+from gateway.exceptions.pricing_exceptions import (
+    OrganizationPricingManagedModelError,
+    OrganizationPricingNotFoundError,
+    OrganizationPricingOverlapError,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
@@ -43,19 +50,14 @@ from gateway.services.organization_pricing_service import (
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import credential_ladder_exhausted, get_provider_kwargs
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrganizationPricingManagedModelError,
-    OrganizationPricingNotFoundError,
-    OrganizationPricingOverlapError,
-    TenancyValidationError,
-)
 from gateway.services.tenancy.org_provider_key_service import refresh_org_provider_cache, reset_org_provider_cache
 from gateway.services.workspace_scope import (
     organization_for_key_id,
     organization_for_workspace_id,
     reset_key_workspace_cache,
 )
+
+from .conftest import build_test_client
 
 _ENDPOINT = f"{API_ROOT}/organizations/me/pricing"
 _MODEL_KEY = "openai:gpt-4o"
@@ -526,7 +528,6 @@ def _rates(**overrides: Any) -> PricingOverrideInput:
         "output_price_per_million": 5.0,
         "cache_read_price_per_million": None,
         "cache_write_price_per_million": None,
-        "cache_write_1h_price_per_million": None,
         "pricing_tiers": [],
         "effective_from": datetime.now(UTC),
         "effective_to": None,
@@ -998,7 +999,6 @@ async def test_any_member_may_read_the_overrides(async_db: AsyncSession, role: s
         "output_price_per_million",
         "cache_read_price_per_million",
         "cache_write_price_per_million",
-        "cache_write_1h_price_per_million",
     ],
 )
 async def test_a_negative_rate_is_refused_at_the_service_boundary(async_db: AsyncSession, field: str) -> None:
@@ -1387,3 +1387,61 @@ async def test_an_update_that_fails_for_another_reason_is_not_reported_as_a_conf
             )
     finally:
         module.validate_rates = original
+
+
+# =============================================================================
+# What the model listing says a request settles at
+# =============================================================================
+
+
+@pytest.fixture
+def listing_client(postgres_url: str, clean_database: None) -> Iterator[TestClient]:
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        auto_migrate=False,
+        require_pricing=False,
+        # The listing is the priced rows and the alias, so no provider is dialed.
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-fake"}},
+        aliases={"fast": "openai:gpt-4o"},
+    )
+    yield from build_test_client(config)
+
+
+def test_the_model_listing_states_the_organizations_own_rate(
+    listing_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """``GET /api/v1/models`` prices a model the way settlement does, the organization's override first."""
+    for model_key, rate in (("openai:gpt-4o", 10.0), ("openai:gpt-4o-mini", 1.0), ("openai:gpt-4.1", 3.0)):
+        response = listing_client.post(
+            f"{API_ROOT}/pricing",
+            json={"model_key": model_key, "input_price_per_million": rate, "output_price_per_million": rate},
+            headers=master_key_header,
+        )
+        assert response.status_code == status.HTTP_200_OK, response.text
+    # The alias target and a listed model, each at the organization's own rate.
+    for model_key in ("openai:gpt-4o", "openai:gpt-4o-mini"):
+        response = listing_client.post(_ENDPOINT, json=_body(model_key=model_key), headers=master_key_header)
+        assert response.status_code == status.HTTP_201_CREATED, response.text
+    created = listing_client.post(f"{API_ROOT}/keys", json={"key_name": "member"}, headers=master_key_header)
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+    for header in (master_key_header, {"Authorization": f"Bearer {created.json()['key']}"}):
+        listing = listing_client.get(f"{API_ROOT}/models", headers=header)
+        assert listing.status_code == status.HTTP_200_OK, listing.text
+        by_id = {model["id"]: model for model in listing.json()["data"]}
+        assert by_id["openai:gpt-4o-mini"]["pricing_source"] == "organization"
+        assert by_id["openai:gpt-4o-mini"]["pricing"]["input_price_per_million"] == 2.5
+        assert by_id["fast"]["pricing_source"] == "organization"
+        assert by_id["fast"]["pricing"]["input_price_per_million"] == 2.5
+        assert by_id["openai:gpt-4.1"]["pricing_source"] == "configured"
+        assert by_id["openai:gpt-4.1"]["pricing"]["input_price_per_million"] == 3.0
+
+        for model_id in ("fast", "openai:gpt-4o-mini"):
+            single = listing_client.get(f"{API_ROOT}/models/{model_id}", headers=header)
+            assert single.status_code == status.HTTP_200_OK, single.text
+            assert single.json()["pricing_source"] == "organization"
+            assert single.json()["pricing"]["input_price_per_million"] == 2.5

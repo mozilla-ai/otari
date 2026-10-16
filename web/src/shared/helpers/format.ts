@@ -56,6 +56,8 @@ export function formatUnitRate(value: number): string {
 // `undefined` rather than a placeholder when the row recorded none, so a table
 // cell can render the em dash that keeps it aligned and a stat card can drop
 // the figure instead.
+export function formatLatency(ms: number): string
+export function formatLatency(ms: number | null | undefined): string | undefined
 export function formatLatency(
   ms: number | null | undefined,
 ): string | undefined {
@@ -144,6 +146,33 @@ export function formatDateTime(iso: string | null | undefined): string {
   return date.toLocaleString()
 }
 
+// A date and a time to the minute, where the seconds are noise.
+export function formatDateTimeMinutes(iso: string | null | undefined): string {
+  if (!iso) {
+    return "—"
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return date.toLocaleString(undefined, {
+    dateStyle: "short",
+    timeStyle: "short",
+  })
+}
+
+// The time of day alone, for rows that already sit under their date.
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso) {
+    return "—"
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return date.toLocaleTimeString()
+}
+
 // The heading a dated row sits under in a history list: "Today", "Yesterday",
 // or the date, with the year only when it is not the current one.
 //
@@ -227,4 +256,18 @@ export function deltaFraction(
 ): number | null {
   if (previous === undefined || previous === 0) return null
   return (current - previous) / previous
+}
+
+const fileSize = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
+const FILE_SIZE_UNITS = ["B", "kB", "MB", "GB"] as const
+
+// A file's size in the largest unit it reaches, counted in 1024s: 82.2 kB.
+export function formatFileSize(bytes: number): string {
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < FILE_SIZE_UNITS.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${fileSize.format(value)} ${FILE_SIZE_UNITS[unit]}`
 }

@@ -1,269 +1,98 @@
 import { Button } from "@heroui/react"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useMemo, useRef, useState } from "react"
-import { FiEdit2, FiList, FiTrash2 } from "react-icons/fi"
+import { FiEdit2, FiEye, FiList, FiTrash2 } from "react-icons/fi"
 
-import type { AliasResponse, PolicySpec, RoutingPolicyResponse } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Dot } from "@/design-system/indicators/Dot"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { DocsLink } from "@/design-system/navigation/DocsLink"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
-import { useOrganizationContext } from "@/shared/api/organizations"
 import {
-  useAliases,
+  useAutomaticFallbacks,
   useDeleteAlias,
   useDeleteOrganizationAlias,
   useDeleteOrganizationRoutingPolicy,
   useDeleteRoutingPolicy,
-  useRoutingPolicies,
 } from "@/shared/api/routing"
+import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
-import { PolicyForm } from "./PolicyForm"
+import { AutomaticFallbacks } from "./AutomaticFallbacks"
+import { CreatePolicyDialog } from "./CreatePolicyDialog"
+import { BackupsCell, MainModelCell } from "./PolicyCells"
+import type { Intent } from "./policyDraft"
 import {
-  computeShares,
   findCandidates,
   findFallthroughTarget,
   findRouterBackend,
-  findWeights,
+  isEditableInForm,
   KNN_BACKEND,
-  normalizeBackend,
   type RoutingRow,
-  WEIGHTED_BACKEND,
+  rowKeyOf,
 } from "./policyModel"
-
-/** Present an alias as the one-target policy it is. */
-function aliasAsRow(alias: AliasResponse): RoutingRow {
-  return {
-    kind: "alias",
-    name: alias.name,
-    spec: { select: [{ default: alias.target }] },
-    source: alias.source,
-    user_id: alias.user_id,
-    // Carried, not dropped: an edit or a delete goes back to the workspace the
-    // row lives in, and a row without it falls back to the *selected* workspace,
-    // which for an admin whose list spans the organization is a different one.
-    workspace_id: alias.workspace_id,
-    is_dynamic: false,
-    created_at: alias.created_at,
-    updated_at: alias.updated_at,
-  }
-}
-
-// Scope is part of the identity, so it is part of the row key: the same policy
-// name can exist globally and per user, and keying on the name alone would
-// collapse those rows into one. Same reasoning (and encoding) as the alias table.
-const rowKeyOf = (row: RoutingRow): string =>
-  JSON.stringify([row.kind, row.user_id, row.name])
-
-/** Whether this form can represent a spec without losing part of it.
- *
- *  The editor reconstructs a spec from four pieces of state, so anything it does
- *  not model (a `user_id`/`key_id` condition, a comparator other than `gte`, a
- *  `budget_remaining_usd` threshold, a router entry) would be silently dropped on
- *  save. Offering Edit on such a policy would quietly destroy the operator's
- *  config, so those are shown read-only until the form covers them. Refusing to
- *  edit is recoverable; a silent lossy save is not.
- */
-function isEditableInForm(spec: PolicySpec): boolean {
-  // The form re-emits `select` as conditions, then the router, then the default.
-  // Selection is order-sensitive server-side (the first matching entry wins), so a
-  // spec whose router sits *before* its conditions would come back with different
-  // behavior than it went in with. Refusing to edit is recoverable; a silent
-  // semantic change on Save is not.
-  const routerIndex = spec.select.findIndex(
-    (entry) => entry.router !== undefined,
-  )
-  const lastConditionIndex = spec.select.reduce(
-    (last, entry, index) => (entry.when !== undefined ? index : last),
-    -1,
-  )
-  if (
-    routerIndex !== -1 &&
-    lastConditionIndex !== -1 &&
-    routerIndex < lastConditionIndex
-  )
-    return false
-  return spec.select.every((entry) => {
-    if (entry.default !== undefined) return entry.when === undefined
-    // A router entry is editable: the form models the backend, its pool and (for
-    // the weighted backend) the split, which is the whole entry. An unknown backend
-    // is still shown read-only, because saving it back through one of these
-    // controls would silently rewrite it as a backend the operator did not choose.
-    if (entry.router !== undefined) {
-      if ((entry.candidates?.length ?? 0) === 0) return false
-      const backend = normalizeBackend(entry.router)
-      if (backend === KNN_BACKEND) return true
-      // A weighted entry without weights cannot be saved back (the API refuses it),
-      // so the form would have to invent a split. Read-only says so instead.
-      return (
-        backend === WEIGHTED_BACKEND &&
-        Object.keys(entry.weights ?? {}).length > 0
-      )
-    }
-    const when = entry.when
-    if (when === undefined || entry.target === undefined) return false
-    const keys = Object.keys(when)
-    return (
-      keys.length === 1 &&
-      keys[0] === "budget_used_pct" &&
-      when.budget_used_pct?.gte !== undefined
-    )
-  })
-}
-
-/** What to call the backend that decides, for a chip or a one-line summary.
- *
- *  Named per backend rather than "Dynamic", because the backend's name is what tells
- *  the reader what to do next (teach it, or move the shares). A backend this build
- *  does not know gets the neutral word: it is routed, and claiming it learns would be
- *  a guess about a backend added after this line was written.
- */
-function routerLabelOf(spec: PolicySpec): string {
-  const backend = findRouterBackend(spec)
-  if (backend === WEIGHTED_BACKEND) return "Weighted"
-  if (backend === KNN_BACKEND) return "Learned"
-  return "Routed"
-}
-
-/** One line summarising what a policy serves, for the table. */
-function servesSummary(policy: RoutingPolicyResponse): string {
-  const chain = policy.spec.on_failure ?? []
-  const pool = findCandidates(policy.spec)
-  if (pool.length > 0 && findRouterBackend(policy.spec) === WEIGHTED_BACKEND) {
-    // The split shape, not the model names: two provider:model strings do not fit a
-    // table cell, and the shares are what distinguishes one weighted policy from
-    // another. The pool is spelled out in the editor and in explain.
-    const declared = findWeights(policy.spec)
-    const target = findFallthroughTarget(policy.spec)
-    const full = pool.includes(target) ? pool : [...pool, target]
-    const split = computeShares(full.map((selector) => declared[selector] ?? 0))
-      .map((share) => `${Math.round(share)}%`)
-      .join(" / ")
-    return `Weighted · ${split} across ${full.length} models`
-  }
-  if (pool.length > 0) {
-    return `${routerLabelOf(policy.spec)} · ${pool.length} candidates, ${findFallthroughTarget(policy.spec)} by default`
-  }
-  if (policy.is_dynamic) {
-    const total = 1 + chain.length
-    return `Chosen per request · ${total} candidate${total === 1 ? "" : "s"}`
-  }
-  const target = findFallthroughTarget(policy.spec)
-  return chain.length > 0 ? `${target}  +${chain.length} on failure` : target
-}
-
-// ---------------------------------------------------------------------------
-// Editor
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
-/** The affirmative kind mark: an accent dot and the word, in mono. */
-function KindMark({ label }: { label: string }) {
-  return (
-    <span className="flex items-center gap-2 text-mono-caption text-foreground">
-      <Dot className="bg-accent" />
-      {label.toUpperCase()}
-    </span>
-  )
-}
+import { useRoutingRows } from "./useRoutingRows"
 
 export function RoutingPage() {
-  // Scoped to the selected workspace, like keys and usage (otari-ai#2087).
-  // Resolution is workspace-keyed (`services/policy_store`), so a stored policy
-  // decides the traffic of one workspace and belongs on that workspace's page.
-  // Left unscoped, the deployment-wide list showed an operator every tenant's
-  // rows and an admin every workspace of theirs, neither of which is what the
-  // page claims to be. Config-file entries have no workspace and are listed
-  // whatever the selection, being in force in all of them.
-  //
-  // Which of the two surfaces answers depends on who is signed in
-  // (otari-ai#1942, otari-ai#1969), and `useRoutingScope` makes that choice once
-  // for both lists: an operator reads the deployment-wide pair, anyone else the
-  // tenant-scoped `/organizations/me/*` one. Both wait for the context to settle
-  // rather than taking "not yet an operator" as "member".
-  const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
-  const isContextSettled =
-    organization.data !== undefined || organization.isError
-  // The switcher is seeded from the caller's own memberships, not the
-  // organization's whole list (otari-ai#1969), so this is null only for somebody
-  // who belongs to no workspace: they have nothing of their own to see and
-  // nowhere to write, and are shown the config entries on a read-only page.
-  const { selected: selectedWorkspace } = useSelectedWorkspace()
-  const workspaceId = selectedWorkspace?.workspace_id
-  const policies = useRoutingPolicies(workspaceId)
-  const aliases = useAliases(workspaceId)
+  const navigate = useNavigate()
+  const {
+    rows,
+    isLoading: isListLoading,
+    error,
+    isOperator,
+    canEdit,
+    writeWorkspaceId,
+  } = useRoutingRows()
+  // Only a gateway that serves requests itself compiles a policy. A hybrid one
+  // takes its attempt plan from its control plane, and a hosted control plane
+  // serves no requests, so a policy stored there is not consulted.
+  const { deployment_type } = useDeployment()
+  const isStandalone = deployment_type === "standalone"
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   const deleteOrgPolicy = useDeleteOrganizationRoutingPolicy()
   const deleteOrgAlias = useDeleteOrganizationAlias()
-  // Where a create lands, on either surface. An operator's used to omit it and
-  // land in the deployment's default workspace, which is a row saved from one
-  // workspace's page and listed on another's. A write to an existing row uses
-  // that row's own workspace instead (`deleteWorkspaceFor` below, and the Edit
-  // form's `workspaceId`), so a list still being refetched through a switch
-  // cannot move a row between workspaces.
-  const writeWorkspaceId = workspaceId ?? null
-  const canEdit =
-    isOperator || (canManage(organization.data) && writeWorkspaceId !== null)
-  // A deep link may pre-fill the add form with ?target=provider:model.
+  // A deep link may pre-fill a new fallback with ?target=provider:model.
   const initialTarget = useUrlValue("target")
   const [adding, setAdding] = useState(initialTarget !== "")
-  // Where focus goes when nothing else claims it. React Aria restores focus to
-  // whatever had it when the dialog opened, which is right for the heading's own
-  // button and wrong for the empty state's: creating the first policy fills the
-  // table, so the empty state unmounts and the node react-aria stored is gone,
-  // leaving focus on `document.body` where the next Tab starts at the top of the
-  // document. `FormDialog` checks for that when the frame is actually gone.
+  // Where the create dialog opens: a form, or the choice of one.
+  const [startAt, setStartAt] = useState<Intent | undefined>(
+    initialTarget === "" ? undefined : "fallback",
+  )
+  // Where focus goes when nothing else claims it: creating the first policy
+  // unmounts the empty state whose button opened the dialog.
   const createButtonRef = useRef<HTMLButtonElement | null>(null)
   const [createCount, setCreateCount] = useState(0)
-  const openCreate = () => {
-    setEditing(undefined)
+  const openCreate = (intent?: Intent) => {
+    setStartAt(intent)
     setCreateCount((n) => n + 1)
     setAdding(true)
   }
   const closeCreate = () => setAdding(false)
-  const [editing, setEditing] = useState<RoutingRow>()
   const [pendingDelete, setPendingDelete] = useState<RoutingRow>()
-  // Readiness opens inline under its own row (DataTable's accordion), because it
-  // describes one policy and the operator clicked that policy. A card above the
-  // table would put the panel nowhere near the control that opened it.
+  // Readiness opens inline under its own row, next to the control that opened it.
   const [expanded, setExpanded] = useState<string>()
   // `adding` is seeded from ?target= before the membership context settles, so
-  // the role is applied here rather than in the initializer: gating the
-  // initializer would drop an operator's deep link, since `isOperator` is still
-  // false at the moment it runs. A member arriving on that link gets the
-  // read-only empty state instead of a form whose only outcome is a refusal.
+  // the role is applied here: a member on that link gets the read-only page.
   const isAdding = adding && canEdit
 
-  // Aliases and policies are listed together: an alias is the one-target case,
-  // and this page is the only place either is managed.
-  const rows: RoutingRow[] = [
-    ...(policies.data ?? []).map((policy) => ({
-      ...policy,
-      kind: "policy" as const,
-    })),
-    ...(aliases.data ?? []).map(aliasAsRow),
-  ].sort(
-    (a, b) =>
-      a.name.localeCompare(b.name) ||
-      (a.user_id ?? "").localeCompare(b.user_id ?? ""),
+  // Stable, because the columns below are memoized on it for DataTable.
+  const openPolicy = useCallback(
+    (row: RoutingRow) =>
+      void navigate({
+        to: "/routing/$name",
+        params: { name: row.name },
+        search: row.user_id ? { user: row.user_id } : {},
+      }),
+    [navigate],
   )
-  // The context counts as loading too: until it settles, neither list has been
-  // asked, and an empty table would read as "no policies" rather than "not yet".
-  const isListLoading =
-    !isContextSettled || policies.isLoading || aliases.isLoading
 
   // Stable so DataTable's row cache holds; see its docstring.
   const renderDetail = useCallback(
@@ -291,40 +120,14 @@ export function RoutingPage() {
         ),
       },
       {
-        id: "serves",
-        header: "Serves",
-        cell: (policy) => (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-foreground">
-              {servesSummary(policy)}
-            </span>
-            {/* The kind of routing, as an affirmative mark: a fallback chain or
-                a learned router is a decision somebody made about this policy,
-                where a plain single-target policy is just the default shape. */}
-            {findCandidates(policy.spec).length > 0 ? (
-              <KindMark label={routerLabelOf(policy.spec)} />
-            ) : policy.is_dynamic ? (
-              <KindMark label="Dynamic" />
-            ) : null}
-          </div>
-        ),
+        id: "main",
+        header: "Main model",
+        cell: (row) => <MainModelCell row={row} />,
       },
       {
-        id: "guards",
-        header: "Guards",
-        cell: (policy) => {
-          const guardrails = policy.spec.guardrails ?? []
-          // An em dash: no guardrails is an absence, not a zero.
-          if (guardrails.length === 0)
-            return <span className="text-muted">—</span>
-          return (
-            <span className="text-body">
-              {guardrails
-                .map((guardrail) => `${guardrail.profile} (${guardrail.mode})`)
-                .join(", ")}
-            </span>
-          )
-        },
+        id: "backups",
+        header: "Backups",
+        cell: (row) => <BackupsCell row={row} />,
       },
       {
         id: "scope",
@@ -335,25 +138,6 @@ export function RoutingPage() {
           ) : (
             <CopyableValue value={policy.user_id ?? ""} label="user id" />
           ),
-      },
-      {
-        id: "source",
-        header: "Source",
-        cell: (row) => (
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-2 text-mono-caption text-muted">
-              <Dot
-                className={
-                  row.source === "config" ? "bg-text-subtle" : "bg-accent"
-                }
-              />
-              {row.source.toUpperCase()}
-            </span>
-            {row.kind === "alias" ? (
-              <span className="text-mono-overline text-subtle">alias</span>
-            ) : null}
-          </div>
-        ),
       },
     ]
     // No actions column for a caller who cannot act: every affordance in it is
@@ -392,45 +176,33 @@ export function RoutingPage() {
             }
           />
         )
-        return policy.source === "config" ? (
+        const isConfig = policy.source === "config"
+        // A policy this dashboard cannot edit without loss opens read-only.
+        const canOpenToEdit = !isConfig && isEditableInForm(policy.spec)
+        return (
           <RowActionRow>
             {readiness}
-            <span className="text-xs text-subtle">set in config.yml</span>
-          </RowActionRow>
-        ) : (
-          <RowActionRow>
-            {readiness}
-            {isEditableInForm(policy.spec) ? (
-              <RowAction
-                icon={FiEdit2}
-                label="Edit"
-                onPress={() => {
-                  // `setAdding(false)` cannot fire while the create dialog is
-                  // open (its backdrop covers the table and `ariaHideOutside`
-                  // takes the rows out of the accessibility tree), so this is
-                  // belt and braces for a future surface that reaches a row
-                  // without going through the modal.
-                  setAdding(false)
-                  setEditing(policy)
-                }}
-              />
-            ) : (
-              <span className="max-w-xs text-xs text-muted">
-                Uses options this form cannot show yet. Edit it through the API
-                so nothing is lost.
-              </span>
-            )}
+            {isConfig ? (
+              <span className="text-xs text-subtle">set in config.yml</span>
+            ) : null}
             <RowAction
-              icon={FiTrash2}
-              label="Delete"
-              onPress={() => setPendingDelete(policy)}
+              icon={canOpenToEdit ? FiEdit2 : FiEye}
+              label={canOpenToEdit ? "Edit" : "View"}
+              onPress={() => openPolicy(policy)}
             />
+            {isConfig ? null : (
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(policy)}
+              />
+            )}
           </RowActionRow>
         )
       },
     })
     return base
-  }, [canEdit, expanded, isOperator])
+  }, [canEdit, expanded, isOperator, openPolicy])
 
   // Which of the four delete surfaces a row goes to. Both name the workspace the
   // row lives in; only the deployment-wide pair carries the user scope, which
@@ -463,7 +235,7 @@ export function RoutingPage() {
               // Visible while the dialog is open: the dialog is over the page,
               // so there is nothing for hiding this to prevent.
               variant="primary"
-              onPress={openCreate}
+              onPress={() => openCreate()}
             >
               Create policy
             </Button>
@@ -475,73 +247,73 @@ export function RoutingPage() {
             admin sees what their own workspace writes reach, and a member is
             told who manages these rather than offered a control they would
             be refused. */}
+        Model names your callers send as{" "}
+        <code className="font-mono text-caption">model</code>. Each policy picks
+        the model that serves a request and the backups tried, in order, when it
+        fails.{" "}
         {isOperator
-          ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
+          ? null
           : canEdit
-            ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
-            : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the ones in force in your workspaces; your organization's admins manage them."}
+            ? "What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
+            : "These are the ones in force in your workspaces; your organization's admins manage them."}
       </PageIntro>
 
       {/* The reads only. Every delete on this page reports inside its own
           confirm dialog, which is where the operator is looking. */}
-      <ErrorBanner error={policies.error ?? aliases.error} />
+      <ErrorBanner error={error} />
+
+      {isStandalone ? null : (
+        <InfoBanner>
+          Policies are a standalone feature: they apply only on a gateway that
+          serves requests itself. A hybrid gateway receives its attempt plan
+          from the connected control plane.
+        </InfoBanner>
+      )}
 
       {/* Mounted while closed so the frame plays its exit with the content
           intact, and keyed on the open counter so the draft is fresh on the way
           in rather than cleared on the way out. See feedback.md. */}
-      <PolicyForm
+      <CreatePolicyDialog
         key={createCount}
-        existing={null}
-        initialTarget={initialTarget}
         isOpen={isAdding}
-        // The empty state's "Create your first policy" is gone by the time
-        // this closes, since creating one is what makes the page non-empty, so
-        // the frame's own restore has nothing to land on. The heading's action
+        startAt={startAt}
+        initialTarget={initialTarget}
+        // The empty state's buttons are gone by the time this closes, since
+        // creating one is what makes the page non-empty. The heading's action
         // survives.
         returnFocusRef={createButtonRef}
         isDeploymentWide={isOperator}
         workspaceId={writeWorkspaceId}
         onClose={closeCreate}
       />
-      {editing !== undefined ? (
-        <PolicyForm
-          // Keyed on the row: the fields seed from `existing` once, through
-          // mount-only state, so without this a second row's Edit would open
-          // with the first row's draft and save it under the second one's name.
-          key={rowKeyOf(editing)}
-          existing={editing}
-          isDeploymentWide={isOperator}
-          workspaceId={editing.workspace_id ?? writeWorkspaceId}
-          onClose={() => setEditing(undefined)}
-        />
-      ) : null}
 
       {rows.length === 0 && !isListLoading ? (
         canEdit ? (
           <EmptyState
             title="No routing policies yet"
-            actionLabel="Create your first policy"
-            onAction={openCreate}
+            description="A policy gives callers one model name with backups behind it, so a provider outage does not become a failed request."
+            actionLabel="Create fallback"
+            onAction={() => openCreate("fallback")}
+            secondaryActionLabel="Other policy types"
+            onSecondaryAction={() => openCreate()}
           >
-            <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
-              <li>
-                Create a policy and point it at the model that should normally
-                serve.
-              </li>
-              <li>
-                Add a fallback chain so a provider outage does not become a
-                failed request.
-              </li>
-              <li>
-                Or split the traffic across two providers by weight, and move
-                the shares as you learn.
-              </li>
-              <li>
-                Or let a router choose per request between a cheap and a strong
-                model, then teach it with a few scored examples.
-              </li>
-              <li>Have your callers send the policy name as their `model`.</li>
-            </ol>
+            {/* Catalog-ID fallback is compiled by a standalone gateway only. */}
+            {isStandalone ? (
+              <p className="max-w-prose text-caption">
+                Tip: the same model on several providers already falls back
+                automatically when callers send its catalog ID.{" "}
+                <Link to="/models" className="text-link hover:underline">
+                  Browse models
+                </Link>{" "}
+                or{" "}
+                <DocsLink
+                  href={docsSourceHref("models.md", "catalog-spellings")}
+                >
+                  read how
+                </DocsLink>
+                .
+              </p>
+            ) : null}
           </EmptyState>
         ) : (
           <EmptyState title="No routing policies yet">
@@ -565,6 +337,8 @@ export function RoutingPage() {
           />
         </TableScrollFrame>
       )}
+
+      {isStandalone ? <AutomaticFallbacksSection /> : null}
 
       <ConfirmDialog
         isOpen={pendingDelete !== undefined}
@@ -617,5 +391,21 @@ export function RoutingPage() {
         }}
       />
     </div>
+  )
+}
+
+/**
+ * The models callers used in the last 30 days, with the offerings their catalog
+ * ID tries and who runs the built-in tools on each, as the gateway reports them.
+ */
+function AutomaticFallbacksSection() {
+  const fallbacks = useAutomaticFallbacks()
+  return (
+    <AutomaticFallbacks
+      fallbacks={fallbacks.data?.models ?? []}
+      toolsNote="Tools shown for callers that declare them in the provider's own words and leave the choice to Otari: a provider's own where it runs them, Otari's where it does not."
+      isLoading={fallbacks.isLoading}
+      error={fallbacks.error}
+    />
   )
 }

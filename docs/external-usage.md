@@ -80,7 +80,11 @@ Only metadata and numeric usage are accepted. Use the generated OpenAPI document
 for the exact schema and validation limits.
 
 Rows are unique on `(source, source_event_id)`. Replaying a batch reports
-duplicates without creating new usage rows.
+duplicates without creating new usage rows. When the database cannot take a
+batch right away (another import of the same events is still writing, or the
+database is unreachable), this endpoint and the OTLP endpoints below answer
+`503` with `Retry-After`. Send the batch again: the events it already stored
+come back as duplicates.
 
 ## OpenTelemetry
 
@@ -108,8 +112,62 @@ The endpoint is the Otari origin plus `/otlp`; the exporter appends the signal
 path itself.
 
 Otari reads the OpenTelemetry GenAI provider, model, response ID, input-token,
-output-token, and cache-token attributes. It ignores non-LLM spans and never
-stores prompt or response content.
+output-token, and cache-token attributes, and records usage from the spans that
+carry tokens. While `trace_capture_enabled` is on, the spans, including an
+agent's own (`invoke_agent`, `execute_tool`), are also kept on the exporting
+key's agent trace, grouped into a session by `anthropic.session.id`, else
+`gen_ai.conversation.id`, else `otari.session_label`, else the OTel trace. Span names and attribute values are
+kept only when they are identifier-shaped; prompt, response, and tool content is
+never stored.
+
+Keeping them is best-effort, and its limits are counted rather than refused: one
+export keeps at most 1,000 spans and 100 sessions, and spans past either limit,
+or that arrive while the trace writer's queue is full, are dropped and counted
+on `gateway_trace_spans_dropped`. The export itself, and the usage it carries,
+is never refused for its traces.
+
+### Claude Platform and the Claude SDKs
+
+The Claude API exports a span for each Messages API request, model request and
+tool use, and each Managed Agents turn, to an OTLP destination added in the
+Claude Console ([Use OpenTelemetry with the Claude API](https://platform.claude.com/docs/en/manage-claude/opentelemetry/api)).
+Otari can be that destination:
+
+| Console field | Value |
+| --- | --- |
+| Provider | Custom |
+| OTLP endpoint URL | `https://otari.example.com/otlp` |
+| Request headers | `Authorization`: `Bearer <budget-exempt Otari API key>` |
+| Content mode | Metadata only |
+
+The Claude API delivers only to a public hostname over HTTPS on port 443 and
+treats a redirect as fatal, so the URL must reach Otari directly. Full content
+gains nothing here, since Otari keeps no prompt or response, and its larger
+spans can push an export past the 8 MiB request limit. Every span of the
+destination binds to the one key's user, so to keep Claude workspaces apart,
+add one destination per workspace, each with its own key, and set its
+**Workspaces** to **Selected** with only that workspace. The Claude API sends a
+workspace's spans to every destination that covers it, so two destinations left
+on **All** would each book the same usage under a different key.
+
+Spans from the Claude Platform and from the Claude SDKs (instrumentation scope
+`com.anthropic.*`) are recorded under the source `claude_platform`, and each
+token is booked once even though a request repeats its usage on several spans:
+
+- A Messages API request is booked from its `anthropic.messages.create` span,
+  keyed by the response id, at the model that served it, with its cache reads
+  and cache writes, and a second row for its compactions' tokens. Cache writes
+  bill at the one cache-write rate; the 1-hour share is kept as its own count,
+  except from a streamed request's SDK span, which splits out only the writes
+  made before the first output token. When the SDK and the API both export the
+  request, the second span is a duplicate.
+- A Managed Agents session is booked from its `anthropic.model_request` spans,
+  labeled with the session id, which also groups the session's threads into one
+  agent trace.
+- Outcome evaluation spans name no model, so their tokens are not booked.
+
+The Claude API's delivery is best effort, so these rows estimate spend rather
+than reconcile it; the Claude Usage API is the complete record.
 
 Claude Code and Codex emit recognizable usage events on the logs signal. Their
 tool behavior and outcome counters can also populate content-free agent

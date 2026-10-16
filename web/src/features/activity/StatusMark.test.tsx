@@ -27,4 +27,10 @@ describe("StatusMark", () => {
     render(<StatusMark status="quarantined" />)
     expect(screen.getByText("quarantined")).toBeInTheDocument()
   })
+
+  it("shows a skipped candidate as neither a failure nor a success", () => {
+    render(<StatusMark status="skipped" />)
+    const word = screen.getByText("Skipped")
+    expect(word).toHaveClass("text-subtle")
+  })
 })

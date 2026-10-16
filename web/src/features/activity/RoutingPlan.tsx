@@ -51,7 +51,7 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
       <div className="overflow-x-auto border border-control-border">
         <table
           className="w-full text-xs"
-          aria-label={`Routing plan for policy ${entry.policy_name}`}
+          aria-label={`Routing plan for ${entry.policy_name}`}
         >
           {/* No `text-muted` here: `text-overline` on each `<th>` sets the color
               itself, so a second declaration on the parent is one more place to

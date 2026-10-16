@@ -23,7 +23,7 @@ updates:
   # This block adds *version* updates. Security updates are a separate feature
   # that needs no config and already runs here, which is why advisory-driven
   # bumps arrived for years while a stale-but-unvulnerable package like
-  # genai-prices sat six releases behind.
+  # a floored dependency sat six releases behind.
   #
   # What version updates do for a lockfile entry whose declared floor already
   # permits the newer version is not documented for uv, so
@@ -39,5 +39,7 @@ updates:
           - "patch"
 
   # No entry for the dashboard: Dependabot documents pnpm support only through
-  # v10 and web/ requires pnpm 11, so one would target a lockfile format it
-  # cannot resolve. Tracked in #1001.
+  # v10 and web/ requires a newer pnpm, so one would target a lockfile format it
+  # cannot resolve. Its security alerts do not reach web/ either, because the
+  # dependency graph no longer reads that lockfile. otari-dashboard-audit.yml
+  # covers advisories in the meantime; version updates are tracked in #1001.

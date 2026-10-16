@@ -2,11 +2,70 @@ import { describe, expect, it } from "vitest"
 
 import { OAUTH_PROVIDER_LABELS } from "@/features/auth/oauthProviders"
 import {
+  isAcceptInvitationPath,
   isPublicAuthPageAvailable,
   oauthCallbackProvider,
   PUBLIC_AUTH_PAGES,
   publicAuthPath,
+  rendersAheadOfRouter,
+  resolveSignInReturnHash,
 } from "@/features/auth/publicAuthPaths"
+
+describe("isAcceptInvitationPath", () => {
+  it("names the page by hash or by pathname, whatever its query string", () => {
+    expect(isAcceptInvitationPath("#/accept-invitation?token=abc")).toBe(true)
+    expect(isAcceptInvitationPath("/accept-invitation")).toBe(true)
+    expect(isAcceptInvitationPath("#/accept-invitations")).toBe(false)
+    expect(isAcceptInvitationPath("#/invitations")).toBe(false)
+  })
+
+  it("is one of the paths the router leaves to the page above it", () => {
+    expect(rendersAheadOfRouter("/accept-invitation")).toBe(true)
+    expect(rendersAheadOfRouter("/signup")).toBe(true)
+    expect(rendersAheadOfRouter("/usage")).toBe(false)
+  })
+})
+
+describe("resolveSignInReturnHash", () => {
+  it("keeps a page the router serves, query string and all", () => {
+    expect(resolveSignInReturnHash("#/organization/billing")).toBe(
+      "#/organization/billing",
+    )
+    expect(resolveSignInReturnHash("#/usage?range=7d")).toBe("#/usage?range=7d")
+    expect(resolveSignInReturnHash("#/models/z-ai/glm-5.3")).toBe(
+      "#/models/z-ai/glm-5.3",
+    )
+  })
+
+  it("sends a page rendered ahead of the router home instead", () => {
+    // Nothing on these is left to do for a session, and three of them carry a
+    // single-use token.
+    for (const hash of [
+      "#/signup",
+      "#/auth/google/callback?code=c&state=s",
+      "#/verify-email?token=t",
+      "#/reset-password?token=t",
+      "#/accept-invitation?token=t",
+    ]) {
+      expect(resolveSignInReturnHash(hash)).toBe("#/")
+    }
+  })
+
+  it("sends anything that is not a hash path in this app home", () => {
+    for (const value of [
+      "",
+      "#",
+      "#keys",
+      "/organization/billing",
+      "https://evil.example/#/keys",
+      "javascript:alert(1)",
+      "#//evil.example",
+      "#/\\evil.example",
+    ]) {
+      expect(resolveSignInReturnHash(value)).toBe("#/")
+    }
+  })
+})
 
 /** A deployment with mail off and no OAuth provider, which each test narrows. */
 const NOTHING_CONFIGURED = { mailReady: false, oauthProviders: [] } as const

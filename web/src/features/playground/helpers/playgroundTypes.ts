@@ -19,9 +19,34 @@ export interface TurnUsage {
   tokensPerSecond: number | undefined
 }
 
+/** A file a question sends, uploaded before the question was. */
+export interface ChatAttachment {
+  fileId: string
+  filename: string
+  bytes: number
+}
+
+/** A tool the gateway ran while answering, with its result once it has one. */
+export interface ToolCall {
+  /** Joins a call to its result. Empty when the model sent none. */
+  id: string
+  name: string
+  /** The arguments the model sent, as the JSON text it streamed. */
+  arguments: string
+  /** Undefined while the call is still running. */
+  result?: string
+  isError: boolean
+  /** The gateway sent a preview of a result longer than it forwards. */
+  isTruncated: boolean
+}
+
 export interface ChatTurn {
   role: "user" | "assistant"
   content: string
+  /** Tools the gateway ran for this reply, in the order they were called. */
+  toolCalls?: ToolCall[]
+  /** The files a question sends with its text. */
+  attachments?: ChatAttachment[]
   /** Chain-of-thought, from a model that streams it in a field of its own. */
   reasoning?: string
   /** Present once an assistant turn has finished and reported its usage. */

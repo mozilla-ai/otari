@@ -162,6 +162,8 @@ describe("makerMark", () => {
       ["minimax", "minimax"],
       ["perplexity", "perplexity"],
       ["github", "github"],
+      ["fireworks", "fireworks"],
+      ["ibm", "watsonx"],
       ["google", "gemini"],
     ] as const
     const shared = PAIRS.filter(

@@ -10,6 +10,8 @@ venv/
 dist/
 build/
 *.egg-info/
+# Written at build time by setuptools-scm.
+cli/src/otari_agent/_version.py
 
 .env
 config.yml
@@ -50,10 +52,16 @@ node_modules
 .pnpm-store/
 
 # otari hook setup's own generated settings: both embed a live Otari API key
-# or master key directly in the hook command (see docs/agent-gates.md), so
+# or master key directly in the hook command (see docs/agent-guardrails.md), so
 # neither is safe to commit. Only these two files, not the whole .claude/ or
 # .codex/ directory: .claude/settings.json (team-shared, committed on
 # purpose) and any .claude/skills/ live under the same directory and must
 # stay tracked.
 .claude/settings.local.json
 .codex/hooks.json
+
+# GitBook site built by scripts/prepare_gitbook_site.py
+/site/
+
+# What Claude Code lays into a plugin folder it loads in place (editor typings).
+plugins/*/.claude-plugin/types/

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   CallerIdentity,
+  MailedLinkStatusResponse,
   OrganizationContext,
   Passkey,
   PasskeysResponse,
@@ -14,14 +15,17 @@ import type {
   SignupRequest,
   SignupResponse,
   UpdateProfileRequest,
+  VerifyEmailRequest,
   VerifyEmailResponse,
 } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
 import {
+  MAILED_LINK_STATUS,
   NO_RETRY,
   ORGANIZATION_MEMBERS,
   ORGANIZATIONS,
   PASSKEYS,
+  PROFILE,
 } from "@/shared/api/queryKeys"
 import { createPasskey } from "@/shared/helpers/webauthn"
 
@@ -88,8 +92,28 @@ export function useSetPassword() {
       void queryClient.invalidateQueries({
         queryKey: [ORGANIZATIONS, "context"],
       })
+      void queryClient.invalidateQueries({ queryKey: [PROFILE] })
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
     },
+  })
+}
+
+/**
+ * Who the signed-in identity is (`GET /v1/auth/profile`), whether or not it
+ * belongs to an organization.
+ *
+ * The organization context carries the same `caller` and is read on every page
+ * anyway, so this is for what that context cannot answer: a caller with no
+ * organization, whom it refuses with a 404. A 404 here is a gateway older than
+ * the route, so it is not retried, and a caller reads it as "unknown".
+ */
+export function useProfile(enabled = true) {
+  return useQuery({
+    queryKey: [PROFILE],
+    queryFn: () => apiFetch<CallerIdentity>("/auth/profile"),
+    staleTime: 60_000,
+    retry: retryUnlessNotFound(useQueryClient()),
+    enabled,
   })
 }
 
@@ -100,10 +124,12 @@ export function useSetPassword() {
  * name, which is the state a roster entry added by address starts in, and every
  * surface that draws a person falls back to the address from there.
  *
- * Two caches carry that name. The membership context is where the sidebar reads
- * it, and the response is exactly the `caller` it holds, so that one is seeded
- * from the answer before being invalidated: the account control renames itself
- * on the same tick rather than a round trip later. The roster is the other, where
+ * Three caches carry that name. The membership context is where the sidebar
+ * reads it, and the response is exactly the `caller` it holds, so that one is
+ * seeded from the answer before being invalidated: the account control renames
+ * itself on the same tick rather than a round trip later. The profile read is
+ * the same shape for a caller with no organization, and is seeded the same way.
+ * The roster is the third, where
  * `userDisplay` resolves a user id for Usage, Activity and Budgets. The context
  * is touched at its own key rather than at `[ORGANIZATIONS]`, which would re-read
  * the memberships list as well and nothing here moves it.
@@ -121,6 +147,7 @@ export function useUpdateProfile() {
         [ORGANIZATIONS, "context"],
         (previous) => (previous ? { ...previous, caller } : previous),
       )
+      queryClient.setQueryData<CallerIdentity>([PROFILE], caller)
       void queryClient.invalidateQueries({
         queryKey: [ORGANIZATIONS, "context"],
       })
@@ -237,46 +264,16 @@ export function useSignup() {
   })
 }
 
-// A query rather than a mutation, the same shape `useValidateInvitation` takes
-// and for a reason that outranks the fact that this one does write: the page
-// verifies on arrival rather than behind a button, so *whatever* fires it has
-// to fire exactly once per token, and a query keyed on the token is the only
-// one of the two that the cache makes idempotent for free. A mutation fired
-// from an effect is not: `main.tsx` runs under StrictMode, whose
-// mount/unmount/mount would spend a single-use token twice and land the second
-// call's `400` over the first call's success.
-//
-// The knobs are what keep it a one-shot, and they are spelled out here rather
-// than leaning on the provider's defaults, because "fires once" is this hook's
-// contract and not a coincidence of how the app is configured. Never stale and
-// never collected, so a remount reads the answer back instead of asking again.
-// No retry, because a spent token's `400` is the final answer and not a blip.
-// And the three automatic refetches are off by name: staleness alone does not
-// hold them back once a query has failed, since a failure leaves no data for
-// `staleTime` to keep fresh, so without these a reconnect or a remount would
-// re-POST a token that is already gone.
-//
-// POST with the token in the body rather than a GET with it in the URL, the
-// same reasoning `useValidateInvitation` gives: the token is a bearer
-// credential and a URL is what an access log or an intermediate proxy
-// routinely retains.
-export function useVerifyEmail(token: string) {
-  return useQuery({
-    queryKey: ["verify-email", token],
-    queryFn: () =>
+// The link verifies only together with the password chosen at signup, so this
+// runs behind a button rather than on arrival. The token travels in the body,
+// not in a URL an access log or a proxy routinely retains.
+export function useVerifyEmail() {
+  return useMutation({
+    mutationFn: (body: VerifyEmailRequest) =>
       apiFetch<VerifyEmailResponse>("/auth/verify-email", {
         method: "POST",
-        body: JSON.stringify({ token }),
+        body: JSON.stringify(body),
       }),
-    // A malformed link is never worth a round trip; the page says so itself.
-    enabled: token.length > 0,
-    retry: false,
-    retryOnMount: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
-    staleTime: Number.POSITIVE_INFINITY,
-    gcTime: Number.POSITIVE_INFINITY,
   })
 }
 
@@ -297,6 +294,35 @@ export function useRequestPasswordReset() {
         method: "POST",
         body: JSON.stringify({ email }),
       }),
+  })
+}
+
+/**
+ * Whether a mailed reset or verification link can still be used, asked on
+ * arrival so a spent or expired link says so before anyone types a password.
+ *
+ * Checking does not use the link. POST with the token in the body for the
+ * reason `useValidateInvitation` gives. Not retried and not refetched: the
+ * answer only moves when the page itself uses the link, and a gateway that
+ * cannot answer (one older than the route, or a throttle) leaves the page on
+ * its form, which still works.
+ */
+export function useMailedLinkStatus(kind: "reset" | "verify", token: string) {
+  return useQuery({
+    queryKey: [MAILED_LINK_STATUS, kind, token],
+    queryFn: async () => {
+      const result = await apiFetch<MailedLinkStatusResponse>(
+        kind === "reset"
+          ? "/auth/password/reset/validate"
+          : "/auth/verify-email/validate",
+        { method: "POST", body: JSON.stringify({ token }) },
+      )
+      return result.status
+    },
+    enabled: token.length > 0,
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false,
+    ...NO_RETRY,
   })
 }
 

@@ -1090,9 +1090,7 @@ def test_the_guardrail_definitions_revision_round_trips(sqlite_at_head: tuple[Co
     inspector = inspect(engine)
     assert _DEFINITIONS_TABLE not in set(inspector.get_table_names())
     assert "definition_id" not in {column["name"] for column in inspector.get_columns(_MANDATES_TABLE)}
-    assert _MANDATES_BACKEND_CHECK not in {
-        check["name"] for check in inspector.get_check_constraints(_MANDATES_TABLE)
-    }
+    assert _MANDATES_BACKEND_CHECK not in {check["name"] for check in inspector.get_check_constraints(_MANDATES_TABLE)}
     assert _MANDATES_DEFINITION_FK not in {fk["name"] for fk in inspector.get_foreign_keys(_MANDATES_TABLE)}
     # The rebuild that takes the new constraints off must not take these with them.
     assert "uq_organization_guardrails_org_profile" in {

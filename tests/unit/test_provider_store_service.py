@@ -108,3 +108,38 @@ def test_row_to_entry_raises_when_key_cannot_be_decrypted(monkeypatch: pytest.Mo
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     with pytest.raises(SecretDecryptionError):
         store._row_to_entry(row)
+
+
+def test_config_entry_without_a_credential_is_dropped_from_the_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ``api_key: ${VAR}`` that resolved empty must not shadow another credential source."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config = GatewayConfig(providers={"openai": {"api_key": ""}, "anthropic": {"api_key": "sk-config"}})
+    assert apply_to_config(config) == set()
+    assert config.providers == {"anthropic": {"api_key": "sk-config"}}
+
+
+def test_stored_row_fills_a_config_entry_without_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config = GatewayConfig(providers={"openai": {"api_key": ""}})
+    _prime({"openai": {"api_key": "sk-stored"}})
+    assert apply_to_config(config) == {"openai"}
+    assert config.providers["openai"] == {"api_key": "sk-stored"}
+    # The row goes away again: the hollow entry returns from the baseline and is dropped again.
+    store._cache.clear()
+    apply_to_config(config)
+    assert "openai" not in config.providers
+
+
+@pytest.mark.asyncio
+async def test_failed_startup_load_still_drops_a_config_entry_without_a_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    async def _fail(*_args: object, **_kwargs: object) -> set[str]:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(store, "refresh_provider_cache", _fail)
+    config = GatewayConfig(providers={"openai": {"api_key": ""}, "anthropic": {"api_key": "sk-config"}})
+    await store.load_providers_at_startup(object(), config)  # type: ignore[arg-type]
+    assert config.providers == {"anthropic": {"api_key": "sk-config"}}

@@ -7,8 +7,8 @@ from and anything else is left to the files API.
 
 from __future__ import annotations
 
-from gateway.services.mcp_loop_responses import _code_interpreter_call_item
 from gateway.services.sandbox_backend import CodeExecution
+from gateway.services.tools._code_execution_responses import _code_interpreter_call_item
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
 
 BASE = "https://otari.example.com/api/v1/files"

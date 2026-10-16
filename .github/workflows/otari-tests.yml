@@ -5,6 +5,9 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
@@ -19,6 +22,8 @@ on:
       # that carries it, so a drift between the two has to fail here.
       - '.github/skills/frontend-standards/**'
       - '.github/instructions/frontend-standards.instructions.md'
+      # A unit test checks that the repository's own guardrail gates still fire.
+      - '.otari/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-tests.yml'
@@ -26,6 +31,9 @@ on:
     branches: [ main ]
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
@@ -40,6 +48,8 @@ on:
       # that carries it, so a drift between the two has to fail here.
       - '.github/skills/frontend-standards/**'
       - '.github/instructions/frontend-standards.instructions.md'
+      # A unit test checks that the repository's own guardrail gates still fire.
+      - '.otari/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-tests.yml'
@@ -50,6 +60,9 @@ on:
 concurrency:
   group: otari-tests-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   test-unit:
@@ -67,7 +80,7 @@ jobs:
       with:
         persist-credentials: false
 
-    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         python-version: 3.14
         activate-environment: true
@@ -81,7 +94,7 @@ jobs:
         uv run pytest tests/unit -v --cov --cov-report=xml -n auto --shard ${{ matrix.shard }}
 
     - name: Upload coverage
-      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         files: ./coverage.xml
         flags: unit
@@ -103,7 +116,7 @@ jobs:
       with:
         persist-credentials: false
 
-    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         python-version: 3.14
         activate-environment: true
@@ -119,11 +132,34 @@ jobs:
         uv run pytest tests/integration -v --cov --cov-report=xml -n auto --shard ${{ matrix.shard }}
 
     - name: Upload coverage
-      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         files: ./coverage.xml
         flags: integration
         fail_ci_if_error: false
+
+  # The any-search and any-fetch libraries test apart from the gateway's suite,
+  # one run per library (Makefile, test-libs).
+  test-libs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        python-version: 3.14
+        activate-environment: true
+
+    - name: Install dependencies
+      run: |
+         uv sync --dev --frozen
+
+    - name: Run the any-search and any-fetch tests
+      run: make test-libs
 
   openapi-spec:
     runs-on: ubuntu-latest
@@ -133,7 +169,7 @@ jobs:
       with:
         persist-credentials: false
 
-    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         python-version: 3.14
         activate-environment: true

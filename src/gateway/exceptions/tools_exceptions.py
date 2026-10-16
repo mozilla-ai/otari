@@ -1,0 +1,472 @@
+"""Errors that the tools domain may raise, each carrying the status it renders as."""
+
+from enum import StrEnum
+
+from fastapi import status
+
+from gateway.exceptions import (
+    TenancyConflictError,
+    TenancyError,
+    TenancyForbiddenError,
+    TenancyNotFoundError,
+    TenancyValidationError,
+)
+
+
+class WorkspaceMcpServerNotFoundError(TenancyNotFoundError):
+    def __init__(self, mcp_server_id: object):
+        super().__init__(f"MCP server {mcp_server_id} not found")
+
+
+class WorkspaceMcpServerAlreadyExistsError(TenancyConflictError):
+    """A workspace already has an MCP server under this name.
+
+    Refused rather than collapsed onto the existing row: the name is what the
+    tool loop labels a server's tools with, so silently reusing it would point
+    a caller's request at a different endpoint than the one they just
+    configured.
+    """
+
+    def __init__(self, workspace_id: object, name: object):
+        super().__init__(f"Workspace {workspace_id} already has an MCP server named '{name}'")
+
+
+class WorkspaceMcpServerUnsafeUrlError(TenancyValidationError):
+    """The URL failed the same SSRF and TLS checks a request-body MCP server faces.
+
+    Carries the reason from `services.url_safety.UnsafeURLError` verbatim: it
+    names the host and the range it resolved into, which is what an operator
+    needs to fix the entry, and it is the operator's own URL either way (this
+    surface is management-gated, not a caller-supplied endpoint).
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+
+
+class WorkspaceMcpServerLimitReachedError(TenancyValidationError):
+    """The workspace already holds as many MCP servers as it may.
+
+    A resolved request opens a session to every server it names, so the cap
+    bounds the fan-out one workspace can ask a gateway process for.
+    """
+
+    def __init__(self, workspace_id: object, limit: int):
+        super().__init__(f"Workspace {workspace_id} already has the maximum of {limit} MCP servers")
+
+
+class ContainerOnManagedCredentialError(TenancyValidationError):
+    """A request named a container on a provider account this gateway shares across workspaces."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "container cannot be used on this route: it resolves to a provider account this gateway "
+            "manages on behalf of many workspaces, and a container id addresses state on that account "
+            "rather than on your workspace. Use a model served by your own provider key."
+        )
+
+
+class McpServerDeclarationError(TenancyValidationError):
+    """A request's MCP servers cannot be reached as it declared them."""
+
+
+class McpServerConfigurationError(TenancyError):
+    """A workspace's stored MCP servers cannot be used, which is the operator's to fix and not the caller's."""
+
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+class CodeExecutionDeclarationError(TenancyValidationError):
+    """A request's code execution declaration or container cannot be served as written."""
+
+
+class CodeExecutionRefusedError(TenancyForbiddenError):
+    """A workspace's code execution policy refuses the code execution a request declared."""
+
+
+class CodeExecutionContainerBusyError(TenancyConflictError):
+    """The container a request resumes is serving another request, so a retry can succeed."""
+
+
+class WebToolDeclarationError(TenancyValidationError):
+    """A request's managed web tool declaration cannot be served as written."""
+
+
+class WebSearchInterceptedError(TenancyForbiddenError):
+    """A request asked the provider to run a web search this deployment runs on its own backend."""
+
+
+class WebAccessRefusedError(Exception):
+    """A workspace's web search policy refuses the web access a request declared."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class WebAccessNotEnabledError(WebAccessRefusedError):
+    """A workspace with web access turned off refuses a request that declares Fetch."""
+
+    def __init__(self) -> None:
+        super().__init__("web access is not enabled for this workspace")
+
+
+class WebAccessToolNotAuthorizedError(WebAccessRefusedError):
+    """A request declared a web tool its workspace's policy does not authorize."""
+
+    def __init__(self) -> None:
+        super().__init__("A requested managed web tool is not authorized for this workspace")
+
+
+class WebSearchNotEnabledError(WebAccessRefusedError):
+    """A workspace with web access turned off refuses a request that declares Search alone."""
+
+    def __init__(self) -> None:
+        super().__init__("web search is not enabled for this workspace")
+
+
+class WebSearchPolicyResolutionFailure(StrEnum):
+    """Why a workspace's web search policy could not be resolved.
+
+    A member carries the message a caller sees.
+    Its value names the cause, which a caller never sees.
+    """
+
+    def __new__(cls, cause: str, message: str) -> "WebSearchPolicyResolutionFailure":
+        member = str.__new__(cls, cause)
+        member._value_ = cause
+        member.message = message
+        return member
+
+    message: str
+
+    ANSWER_UNREADABLE = (
+        "the answer could not be read",
+        "Authorization service returned a malformed web-access policy",
+    )
+    NO_CALLER_CREDENTIAL = (
+        "the request carried no caller credential",
+        "Web search configuration could not be resolved for this request",
+    )
+    NO_WORKSPACE = (
+        "the request named no workspace",
+        "Web search configuration could not be resolved for this request",
+    )
+    STORED_POLICY_INVALID = (
+        "a stored domain rule is invalid",
+        "Web search configuration contains an invalid domain rule",
+    )
+
+
+class WebSearchPolicyResolutionFailedError(Exception):
+    """A workspace's web search policy could not be resolved."""
+
+    def __init__(self, reason: WebSearchPolicyResolutionFailure) -> None:
+        super().__init__(reason.message)
+        self.message = reason.message
+        self.reason = reason
+
+
+class WorkspaceWebSearchDomainsExcludedError(TenancyForbiddenError):
+    """A request's search allow-list shares no domain with its workspace's.
+
+    The two lists are intersected rather than overridden, so this is the empty
+    intersection: every domain the request asked for is one the workspace does
+    not permit. Refused rather than run, because an empty effective allow-list
+    is read by ``_build_web_retrieval_backend`` as *no* allow-list (an empty list
+    is falsy), which would turn the narrowest possible policy into no policy at
+    all.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("The requested search domains are not permitted for this workspace")
+
+
+class SandboxToolsUnrunnableError(TenancyValidationError):
+    """A code-execution policy's tool list names nothing this deployment serves.
+
+    The list intersects what the sandbox backend offers, so this one resolves to
+    an empty set and every request would answer 403. Refused at the write rather
+    than stored, because a policy that reads as a refinement and behaves as a
+    refusal is the failure the surface exists to prevent, and the operator's only
+    signal would be users reporting 403s days later.
+    """
+
+    def __init__(self, served: tuple[str, ...]):
+        super().__init__(
+            "A code-execution tool list must name at least one tool this deployment serves "
+            f"({', '.join(served)}). Use enabled=false to refuse the workspace instead."
+        )
+
+
+class SandboxImageNotAllowedError(TenancyValidationError):
+    """A workspace code-execution policy named a sandbox image the operator has not curated.
+
+    A 400 rather than a 403: the caller has the role to set the policy, and the
+    value they sent is the thing being refused. The message names the allowed
+    set, which is not a disclosure worth withholding, because that set is
+    already reported on the policy itself so the dashboard can offer it.
+    """
+
+
+class CodeExecutionPolicyResolutionFailure(StrEnum):
+    """Why a workspace's code execution policy could not be resolved.
+
+    A member carries the message a caller sees.
+    Its value names the cause, which a caller never sees.
+    """
+
+    def __new__(cls, cause: str, message: str) -> "CodeExecutionPolicyResolutionFailure":
+        member = str.__new__(cls, cause)
+        member._value_ = cause
+        member.message = message
+        return member
+
+    message: str
+
+    ANSWER_UNREADABLE = (
+        "the answer could not be read",
+        "Authorization service returned a malformed code-execution policy",
+    )
+    NO_CALLER_CREDENTIAL = (
+        "the request carried no caller credential",
+        "Code execution policy could not be resolved for this request",
+    )
+    NO_WORKSPACE = (
+        "the request named no workspace",
+        "Code execution policy could not be resolved for this request",
+    )
+
+
+class CodeExecutionPolicyResolutionFailedError(Exception):
+    """A workspace's code execution policy could not be resolved."""
+
+    def __init__(self, reason: CodeExecutionPolicyResolutionFailure) -> None:
+        super().__init__(reason.message)
+        self.message = reason.message
+        self.reason = reason
+
+
+class McpResolutionFailure(StrEnum):
+    """Why an MCP server could not be resolved.
+
+    The message a caller sees is fixed, so a member is the only thing that tells one cause from another.
+    No member names any part of the peer's answer.
+    """
+
+    ANSWER_NOT_AN_OBJECT = "the answer is not an object"
+    ENTRY_UNREADABLE = "an entry could not be read"
+    ID_MISMATCH = "an entry names a different server"
+    NO_CALLER_CREDENTIAL = "the request carried no caller credential"
+    NO_SERVER_LIST = "the answer carries no list of servers"
+    NO_WORKSPACE = "the request named no workspace"
+    SEVERAL_ENTRIES = "several entries answered a request for one"
+
+
+class McpServerResolutionFailedError(TenancyError):
+    """An MCP server could not be resolved.
+
+    The message is fixed because an error boundary may return it.
+    The underlying detail quotes the stored server URL or its credential.
+    The cause travels as ``reason``, which a boundary logs and never returns.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self, reason: McpResolutionFailure) -> None:
+        super().__init__("MCP server resolution failed")
+        self.reason = reason
+
+
+class McpSessionsInterruptedError(Exception):
+    """A request's MCP sessions were canceled while they opened, by something other than the request."""
+
+    def __init__(self) -> None:
+        super().__init__("MCP sessions were canceled before they opened")
+
+
+class WebSearchKeyNotFoundError(TenancyNotFoundError):
+    """No web search key with this id in the caller's organization."""
+
+    def __init__(self, key_id: object):
+        super().__init__(f"Web search key {key_id} not found")
+
+
+class WebSearchKeyUnknownProviderError(TenancyValidationError):
+    """A key named a search provider the managed search tool cannot call."""
+
+    def __init__(self, provider: str, known: tuple[str, ...]):
+        super().__init__(f"Unknown web search provider '{provider}'. Use one of: {', '.join(known)}")
+
+
+class WebSearchKeyNameRequiredError(TenancyValidationError):
+    def __init__(self) -> None:
+        super().__init__("A web search key needs a name")
+
+
+class WebSearchKeyMalformedError(TenancyValidationError):
+    def __init__(self) -> None:
+        super().__init__("A web search key cannot contain whitespace or control characters")
+
+
+class WebSearchKeyAlreadyExistsError(TenancyConflictError):
+    def __init__(self, provider: str, name: str):
+        super().__init__(f"The organization already has a {provider} web search key named '{name}'")
+
+
+class WebSearchKeyArchivedError(TenancyValidationError):
+    """An archived key cannot be changed, made a default or pinned until it is restored."""
+
+    def __init__(self, key_id: object):
+        super().__init__(f"Web search key {key_id} is archived; restore it first")
+
+
+class WebSearchKeyNotArchivedError(TenancyValidationError):
+    """A key in use is archived before it is deleted, so a deletion is never a surprise."""
+
+    def __init__(self, key_id: object):
+        super().__init__(f"Web search key {key_id} is not archived; archive it before deleting it")
+
+
+class WebSearchKeyDefaultConflictError(TenancyConflictError):
+    """Another key became the provider's default at the same time."""
+
+    def __init__(self, provider: str):
+        super().__init__(f"Another {provider} web search key became the default at the same time; retry")
+
+
+class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
+    def __init__(self) -> None:
+        super().__init__("A web search key cannot be both pinned and turned off for a workspace")
+
+
+class SearchToolRefusedError(TenancyValidationError):
+    """A search or fetch instance the instance rules refuse to write or test.
+
+    A 422, the status the same route's request validation answers with.
+    """
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+class SearchToolNotFoundError(TenancyNotFoundError):
+    """No configured or stored search or fetch instance has this name."""
+
+    def __init__(self, name: str):
+        super().__init__(f"No search or fetch instance '{name}'.")
+
+
+class SearchToolUntestableError(TenancyValidationError):
+    """``builtin_fetch`` has no connection test until web fetch runs on the fetch instances."""
+
+    def __init__(self, name: str):
+        super().__init__(
+            f"{name}, the built-in fetcher, has no connection test yet: it arrives when web fetch runs on the "
+            "fetch instances."
+        )
+
+
+class SearchToolMisconfiguredError(TenancyValidationError):
+    """A search instance nothing can run as it stands, such as a ``searxng`` one with no address to search."""
+
+    def __init__(self, name: str, problem: str | None = None):
+        super().__init__(problem or f"Search tool '{name}' is not configured correctly.")
+
+
+class SearchToolSelectionError(TenancyValidationError):
+    """A direct search that names no search instance it can run on (contract C6).
+
+    No instance exists, a name matches none, or no name is given while several
+    exist and no default names one.
+    """
+
+
+class DirectSearchFieldRefusedError(TenancyValidationError):
+    """A direct search asking ``include_raw`` or ``provider_options`` of a call that does not run on any-search.
+
+    A ``searxng`` instance until its adapter, and a Tavily or Brave organization
+    key until theirs.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"include_raw and provider_options are not available yet for a {provider} search: leave them unset."
+        )
+
+
+class DirectSearchFailedError(TenancyError):
+    """The provider failed a direct search, or could not be reached.
+
+    ``message`` is the provider's own account, for the usage row and the log
+    only: an old client's can quote the upstream body. ``headers`` carry the
+    failure's safe fields for the caller (decision 67), and ``upstream_status``
+    is the provider's HTTP status when it gave one.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self, message: str, *, headers: dict[str, str], upstream_status: int | None) -> None:
+        super().__init__(message)
+        self.headers = headers
+        self.upstream_status = upstream_status
+
+
+class WebSearchOptionRefusedError(TenancyValidationError):
+    """A request's ``provider_options`` key the provider serving it does not take from a request.
+
+    The provider's schema does not know the key or refuses its value, or marks
+    the key operator-only. A 400 on either door (design G).
+    """
+
+    def __init__(self, key: str, problem: str):
+        super().__init__(f"provider_options: {problem}.")
+        self.key = key
+
+
+class WebSearchCredentialRefusedError(TenancyError):
+    """A workspace's search or fetch credential its provider cannot be called with as it is.
+
+    One without a key or base URL its provider needs, which the library or the
+    old code would fill from the server's own settings, so the deployment's key
+    or endpoint would serve the tenant; or one naming a base URL the code that
+    serves its provider cannot use, which would send the tenant's key to the
+    provider's public endpoint instead. A 502, the status a malformed
+    credential from the control plane gets (design K).
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self, provider: str, problem: str) -> None:
+        super().__init__(f"The workspace's {provider} credential {problem}.")
+        self.provider = provider
+
+
+__all__ = [
+    "CodeExecutionPolicyResolutionFailedError",
+    "CodeExecutionPolicyResolutionFailure",
+    "DirectSearchFailedError",
+    "DirectSearchFieldRefusedError",
+    "McpResolutionFailure",
+    "McpServerResolutionFailedError",
+    "McpSessionsInterruptedError",
+    "SandboxImageNotAllowedError",
+    "SandboxToolsUnrunnableError",
+    "SearchToolMisconfiguredError",
+    "SearchToolNotFoundError",
+    "SearchToolRefusedError",
+    "SearchToolSelectionError",
+    "SearchToolUntestableError",
+    "WebAccessNotEnabledError",
+    "WebAccessRefusedError",
+    "WebAccessToolNotAuthorizedError",
+    "WebSearchCredentialRefusedError",
+    "WebSearchNotEnabledError",
+    "WebSearchOptionRefusedError",
+    "WebSearchPolicyResolutionFailedError",
+    "WebSearchPolicyResolutionFailure",
+    "WorkspaceMcpServerAlreadyExistsError",
+    "WorkspaceMcpServerLimitReachedError",
+    "WorkspaceMcpServerNotFoundError",
+    "WorkspaceMcpServerUnsafeUrlError",
+    "WorkspaceWebSearchDomainsExcludedError",
+]

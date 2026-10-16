@@ -12,39 +12,44 @@ lock-in semantics, and the terminal all-failed status mapping uniformly.
 from __future__ import annotations
 
 import asyncio
-import math
-import uuid
-from collections.abc import Awaitable, Callable, Iterator
-from typing import Any, Literal, NamedTuple, TypeVar
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Literal, TypeVar
 
 import httpx
-from anthropic import APIConnectionError as _AnthropicAPIConnectionError
-from anthropic import APITimeoutError as _AnthropicAPITimeoutError
 from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, status
-from openai import APIConnectionError as _OpenAIAPIConnectionError
-from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
+from gateway.core.error_codes import (
+    ALL_CANDIDATES_REJECTED,
+    CONTEXT_LENGTH_EXCEEDED,
+    PROVIDER_CREDENTIAL_REJECTED,
+    UNSUPPORTED_CONTENT,
+    error_code_of,
+    error_headers,
+)
 from gateway.core.usage import (
     cache_read_tokens_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
 )
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
-from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
-from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.mcp_stateless import (
-    CODE_RESOLUTION_FAILED,
-    CODE_SERVER_NOT_FOUND,
-    ExecutionState,
-    McpExecutionError,
+from gateway.services.control_plane import ResolveEndpoint, resolve, transport
+from gateway.services.inference import (
+    is_empty_completion,
+    is_provider_billing_error,
+    is_retry_futile,
+    is_upstream_request_fault,
+    upstream_exception_shape,
 )
-from gateway.services.provider_kwargs import split_selector
+from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.provider_kwargs import missing_credential, no_candidate_configured_detail, split_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 
@@ -78,34 +83,6 @@ def record_abandoned_attempt(provider: str, model: str, reason: str, position: i
 # predicate below; listing them keeps the intent explicit and robust to changes
 # in that predicate.
 _USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 410, 422}
-
-# Statuses on which the billing-message probe runs. A 402 is payment required by
-# definition, so it is handled directly in ``is_provider_billing_error`` without
-# depending on a provider's error text. Anthropic reports "credit balance is too
-# low" as a 400 ``invalid_request_error`` and OpenAI's "billing hard limit
-# reached" is a 400. 429 is deliberately excluded: OpenAI's
-# ``insufficient_quota`` arrives as a 429, which is already both failover-eligible
-# and surfaced to the caller as a rate limit, so backing off remains a sane client
-# action and reclassifying it would only change the wording.
-_BILLING_MESSAGE_CANDIDATE_STATUS_CODES = {400, 422}
-
-# Lowercase substrings that identify account-level billing exhaustion in an
-# upstream provider message. Deliberately narrow: a false positive turns a
-# genuinely malformed request into wasted failover attempts against every
-# provider in the route, so a phrase only earns a place here if it cannot plausibly
-# describe a malformed request. Best-effort against current provider phrasing; a
-# reworded message degrades safely to the generic bad-request handling rather
-# than misclassifying.
-_BILLING_MESSAGE_PROBES: tuple[str, ...] = (
-    "credit balance is too low",  # anthropic
-    "purchase credits",  # anthropic
-    "plans & billing",  # anthropic
-    "billing hard limit",  # openai
-    "insufficient balance",  # deepseek, moonshot
-    "insufficient_quota",  # openai (error code, echoed in some messages)
-    "exceeded your current quota",  # openai
-    "insufficient credits",  # openrouter, together
-)
 
 # Streaming first-chunk timeouts (hybrid-mode fallback). Plain LLM streams
 # rarely take long to produce a first token, so a tight cap keeps failed-
@@ -149,22 +126,28 @@ class ResolvedAttempt(BaseModel):
     ``default_attempt_kwargs``, which merges these in non-overridably."""
 
 
+# What the gateway attaches from a peer's settlement, checked at this edge: a
+# negative amount or a source name of any shape reaches a client otherwise.
+_SETTLED_COST_PATTERN = r"^\d+\.\d{6}$"
+_PRICING_SOURCE_PATTERN = r"^[a-z_]{1,32}$"
+
+
 class SettledCost(BaseModel):
     """An attachable platform settlement: a priced cost and the basis for it."""
 
-    cost_usd: str = Field(pattern=r"^-?\d+\.\d{6}$")
-    pricing_source: str
+    cost_usd: str = Field(pattern=_SETTLED_COST_PATTERN)
+    pricing_source: str = Field(pattern=_PRICING_SOURCE_PATTERN)
 
 
 class _UsagePricing(BaseModel):
-    source: str | None
+    source: str | None = Field(pattern=_PRICING_SOURCE_PATTERN)
 
 
 class _CompletedUsageSettlement(BaseModel):
     correlation_id: str
     status: Literal["completed"]
     outcome: Literal["success"]
-    cost_usd: str = Field(pattern=r"^-?\d+\.\d{6}$")
+    cost_usd: str = Field(pattern=_SETTLED_COST_PATTERN)
     currency: Literal["USD"]
     usage_status: Literal["reported", "unavailable"]
     pricing: _UsagePricing
@@ -196,11 +179,38 @@ class ResolvedRoute(BaseModel):
     organization_id: str | None = None
 
 
-class _AttemptFailure(NamedTuple):
+@dataclass(frozen=True)
+class _AttemptFailure:
     position: int
     provider: str
     model: str
     error_class: str
+    error: BaseException = field(repr=False)
+
+
+class UnsupportedAttemptProviderError(Exception):
+    """The control plane named a provider this gateway's any-llm does not know.
+
+    A newer control plane can offer a provider an older gateway predates. The
+    attempt is a gateway capability gap, not a provider failure, and is reported
+    as one so the platform does not blame the provider.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"This gateway cannot reach provider {provider!r}")
+        self.provider = provider
+
+
+def attempt_provider(attempt: ResolvedAttempt) -> LLMProvider:
+    """The any-llm provider ``attempt`` names.
+
+    Raises:
+        UnsupportedAttemptProviderError: This gateway does not know the provider.
+    """
+    try:
+        return LLMProvider(attempt.provider)
+    except ValueError:
+        raise UnsupportedAttemptProviderError(attempt.provider) from None
 
 
 def build_attempt_client_args(attempt: ResolvedAttempt) -> dict[str, Any] | None:
@@ -226,7 +236,7 @@ def build_attempt_client_args(attempt: ResolvedAttempt) -> dict[str, Any] | None
     """
     if not attempt.extra_params:
         return None
-    if LLMProvider(attempt.provider) == LLMProvider.BEDROCK:
+    if attempt_provider(attempt) == LLMProvider.BEDROCK:
         return build_bedrock_client_args(attempt.api_key, attempt.extra_params)
     return dict(attempt.extra_params)
 
@@ -244,14 +254,14 @@ def default_attempt_kwargs(
     shadowed by a same-named field in the caller's own request body,
     matching how ``api_key``/``model`` are already non-overridable.
     """
-    attempt_provider = LLMProvider(attempt.provider)
+    provider = attempt_provider(attempt)
     kwargs: dict[str, Any] = {"api_key": attempt.api_key}
     if attempt.api_base:
         kwargs["api_base"] = attempt.api_base
     merged = {
         **kwargs,
         **base_request_fields,
-        "model": f"{attempt_provider.value}:{attempt.model}",
+        "model": f"{provider.value}:{attempt.model}",
     }
     client_args = build_attempt_client_args(attempt)
     if client_args is not None:
@@ -259,29 +269,134 @@ def default_attempt_kwargs(
     return merged
 
 
-def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> HTTPException:
+def with_attempt_id(exc: HTTPException, attempt_id: str | None) -> HTTPException:
+    """Name the provider attempt a terminal hybrid response is about.
+
+    The hybrid protocol promises the attempt id of the entry that succeeded, or
+    of the last one tried when every attempt failed, so a caller can correlate a
+    failure with the attempt its usage report names. ``None`` is for a failure
+    that reached no attempt and leaves the response unchanged. Stamps ``exc`` in
+    place and returns it, so it can wrap a raise.
+    """
+    if attempt_id is None:
+        return exc
+    exc.headers = {**(exc.headers or {}), ATTEMPT_ID_HEADER: attempt_id}
+    return exc
+
+
+def _provider_failure_http_exc(
+    exc: BaseException,
+    *,
+    fallback_detail: str,
+    attempt_id: str | None = None,
+) -> HTTPException:
     """Build the terminal HTTPException for a failed platform attempt.
 
     Reuses the shared provider-error classifier so platform-mode failures get
     the same specific-but-safe statuses (400/404/429/504) the standalone
-    adapters return, instead of a blanket 502. Falls back to a 502 carrying
-    ``fallback_detail`` when the failure has no signal we can safely surface.
+    adapters return, instead of a blanket 502. Falls back to a 502 whose detail
+    says what happened upstream, or is ``fallback_detail`` when the failure has
+    no signal we can safely surface.
     The classifier applies its caller-fault versus gateway-fault detail split,
     so caller-fault details are sanitized provider diagnostics and gateway-fault
-    details remain fixed strings.
+    details remain fixed strings. ``attempt_id``, when given, names the attempt
+    the failure is about.
     """
     # Deferred import: _pipeline imports this module, so importing it at module
     # scope would be circular.
-    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers
+    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers, provider_failure_detail
 
     mapping = classify_provider_error(exc)
     if mapping is not None:
-        return HTTPException(
-            status_code=mapping.status_code,
-            detail=mapping.detail,
-            headers=provider_error_headers(exc, mapping.status_code),
+        return with_attempt_id(
+            HTTPException(
+                status_code=mapping.status_code,
+                detail=mapping.detail,
+                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+            ),
+            attempt_id,
         )
-    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback_detail)
+    return with_attempt_id(
+        HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=provider_failure_detail(exc, fallback_detail),
+            headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
+        ),
+        attempt_id,
+    )
+
+
+def all_attempts_rejected_detail(tried: int) -> str:
+    """400 detail for a request every attempt rejected as invalid."""
+    return f"No model accepted the request ({tried} attempts). Check the request parameters."
+
+
+def prompt_too_long_for_every_attempt_detail(tried: int) -> str:
+    """400 detail for a prompt every attempt rejected as too long."""
+    return f"The prompt is too long for every model tried ({tried} attempts)."
+
+
+def no_attempt_accepts_images_detail(tried: int) -> str:
+    """400 detail for a request carrying an image that no attempt's model accepts."""
+    return f"None of the models tried accepts image content ({tried} attempts)."
+
+
+def no_attempt_served_detail(tried: int) -> str:
+    """502 detail for a request no attempt could serve, because none of them knew the model."""
+    return f"No model could serve the request ({tried} attempts)."
+
+
+def no_credential_accepted_detail(tried: int) -> str:
+    """424 detail for a request whose every attempt lacked a credential or had it rejected by the provider."""
+    return f"No provider accepted the gateway's credentials for this request ({tried} attempts)."
+
+
+def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | None:
+    """The answer for attempts that all rejected the request alike, or ``None`` when they failed differently.
+
+    The detail is the gateway's own, because one provider's message does not explain why the whole plan failed.
+    """
+    if len(errors) < 2:
+        return None
+    missing = [entry for entry in map(missing_credential, errors) if entry is not None]
+    if len(missing) == len(errors):
+        return HTTPException(
+            status_code=missing[0].status_code,
+            detail=no_candidate_configured_detail(missing),
+            headers=error_headers(missing[0].code),
+        )
+    rejected = sum(1 for error in errors if is_provider_credential_rejection(error))
+    if rejected and rejected + len(missing) == len(errors):
+        return HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail=no_credential_accepted_detail(len(errors)),
+            headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
+        )
+    answers = [_provider_failure_http_exc(error, fallback_detail="") for error in errors]
+    statuses = {answer.status_code for answer in answers}
+    if statuses == {status.HTTP_404_NOT_FOUND}:
+        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=no_attempt_served_detail(len(errors)))
+    if statuses != {status.HTTP_400_BAD_REQUEST}:
+        return None
+    if {error_code_of(answer.headers) for answer in answers} == {CONTEXT_LENGTH_EXCEEDED}:
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=prompt_too_long_for_every_attempt_detail(len(errors)),
+            headers=error_headers(CONTEXT_LENGTH_EXCEEDED),
+        )
+    if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_CONTENT}:
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=no_attempt_accepts_images_detail(len(errors)),
+            headers=error_headers(UNSUPPORTED_CONTENT),
+        )
+    # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
+    # The status cannot tell them apart, so such a plan blames the request.
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=all_attempts_rejected_detail(len(errors)),
+        headers=error_headers(ALL_CANDIDATES_REJECTED),
+    )
 
 
 async def run_platform_attempts(
@@ -295,6 +410,7 @@ async def run_platform_attempts(
     report_attempt_outcome: Callable[[ResolvedAttempt, str, Any, str | None, bool], None],
     on_success: Callable[[ResolvedAttempt], None],
     max_tool_iterations: int,
+    prepare_attempt: Callable[[ResolvedAttempt], dict[str, Any]] | None = None,
 ) -> T:
     """Iterate ``attempts``, returning the first one that succeeds.
 
@@ -306,7 +422,9 @@ async def run_platform_attempts(
     upstream response — locking the request in to the current attempt. The
     runner is agnostic to the response shape; ``extract_usage`` pulls the
     usage object out for reporting and ``on_success`` lets the caller mutate
-    the FastAPI response object on success.
+    the FastAPI response object on success. ``prepare_attempt`` is called just
+    before each attempt runs, with the request fields that attempt is sent in
+    place of ``base_request_fields``.
 
     Lock-in semantics: once ``on_first_response`` has fired on an attempt,
     any subsequent error from that attempt terminates the request instead of
@@ -323,9 +441,10 @@ async def run_platform_attempts(
     If every attempt fails the runner raises 504 on timeout. Otherwise a
     single-attempt failure is classified into a specific safe status
     (400/404/429/...) when the upstream error carries one (via
-    ``_provider_failure_http_exc``), falling back to a generic 502; a
-    multi-attempt fallthrough keeps the generic 502 "All upstream providers
-    failed" rather than attributing one provider's status to the whole set.
+    ``_provider_failure_http_exc``), falling back to a generic 502.
+    When every attempt rejected the request alike,
+    a multi-attempt fallthrough answers as :func:`get_shared_rejection` says.
+    Any other multi-attempt fallthrough keeps the generic 502 "All upstream providers failed".
 
     Callers are expected to hand a non-empty ``attempts`` list — the platform
     resolve endpoint guarantees one. Passing an empty list is a caller
@@ -346,7 +465,6 @@ async def run_platform_attempts(
     last_exc: BaseException | None = None
 
     for index, attempt in enumerate(attempts):
-        completion_kwargs = default_attempt_kwargs(attempt, base_request_fields)
         is_last_planned_attempt = index == len(attempts) - 1
 
         # Per-attempt lock-in flag. Flipped the moment the upstream returns
@@ -367,7 +485,10 @@ async def run_platform_attempts(
             )
 
         try:
-            result = await run_attempt(completion_kwargs, _mark_locked_in)
+            # Built inside the ``try``: an attempt naming a provider this gateway
+            # cannot reach falls through to the next one like any failed attempt.
+            fields = prepare_attempt(attempt) if prepare_attempt is not None else base_request_fields
+            result = await run_attempt(default_attempt_kwargs(attempt, fields), _mark_locked_in)
         except HTTPException:
             raise
         except MaxToolIterationsExceeded as exc:
@@ -428,10 +549,14 @@ async def run_platform_attempts(
             # message on this attempt. Subsequent failures cannot be
             # transparently retried on another provider.
             if locked_in:
-                raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
+                raise _provider_failure_http_exc(
+                    exc, fallback_detail="LLM provider error", attempt_id=attempt.attempt_id
+                ) from exc
             if not retryable:
-                raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
-            failures.append(_AttemptFailure(attempt.position, attempt.provider, attempt.model, error_class))
+                raise _provider_failure_http_exc(
+                    exc, fallback_detail="LLM provider error", attempt_id=attempt.attempt_id
+                ) from exc
+            failures.append(_AttemptFailure(attempt.position, attempt.provider, attempt.model, error_class, exc))
             continue
 
         # Success on this attempt.
@@ -448,18 +573,19 @@ async def run_platform_attempts(
     is_single_attempt = len(attempts) <= 1
     if last_exc is not None and upstream_exception_shape(last_exc)[0] == "timeout":
         detail = "LLM provider timeout" if is_single_attempt else "All upstream providers timed out"
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=detail,
+        raise with_attempt_id(
+            HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail),
+            attempts[-1].attempt_id,
         ) from last_exc
-    # A single attempt has one identifiable upstream failure we can classify;
-    # a multi-attempt fallthrough aggregates heterogeneous failures, so it keeps
-    # the generic 502 rather than attributing one provider's status to the set.
     if is_single_attempt and last_exc is not None:
-        raise _provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="All upstream providers failed",
+        raise _provider_failure_http_exc(
+            last_exc, fallback_detail="LLM provider error", attempt_id=attempts[-1].attempt_id
+        ) from last_exc
+    if (rejection := get_shared_rejection([failure.error for failure in failures])) is not None:
+        raise with_attempt_id(rejection, attempts[-1].attempt_id) from last_exc
+    raise with_attempt_id(
+        HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="All upstream providers failed"),
+        attempts[-1].attempt_id,
     ) from last_exc
 
 
@@ -481,101 +607,34 @@ def _split_model_selector(model_selector: str) -> tuple[str | None, str]:
     return split
 
 
-def _platform_url(base_url: str, path: str) -> str:
-    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
-
-
-def _safe_detail_from_platform(response: httpx.Response, fallback: str) -> str:
-    try:
-        payload = response.json()
-    except ValueError:
-        return fallback
-
-    detail = payload.get("detail") if isinstance(payload, dict) else None
-    return detail if isinstance(detail, str) else fallback
-
-
-async def _post_platform(
-    url: str,
-    headers: dict[str, str],
-    body: dict[str, Any],
-    timeout_seconds: float,
-) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        return await client.post(url, headers=headers, json=body)
-
-
 async def _post_resolve(
     config: GatewayConfig,
     *,
     user_token: str,
-    path: str,
+    endpoint: ResolveEndpoint,
     body: dict[str, Any],
-    client_error_detail: str,
 ) -> Any:
-    """POST ``body`` to a platform resolve endpoint and return the parsed JSON.
+    """Ask the control plane, and render its refusal as this endpoint's own.
 
-    Owns the pieces every resolve helper shares: the base_url guard, the
-    gateway/user token headers, the bounded POST, and the status-code ladder.
-    A 200 returns the parsed payload; client errors (400/401/402/403/404/421/429)
-    are forwarded with the platform's detail when it is a safe string (falling
-    back to ``client_error_detail``), keeping Retry-After on a 429; timeouts,
-    network errors, the platform's server-side failures, and any unexpected
-    status collapse to a 502. 400 is included here (unlike 422, which stays
-    collapsed) because this backend's own 400s are deliberately hand-written,
-    caller-safe rejections (e.g. a Bedrock BYO key using an auth shape that
-    cannot be forwarded through a gateway), not raw framework validation
-    errors that might otherwise leak internal request-shape detail.
+    The service raises domain errors so that nothing below the API layer has to
+    know about HTTP. The caller here answers a request, so it needs the status
+    back, and a 429 needs the peer's ``Retry-After`` with it.
+
+    A caller that answers in a route's own error format has a ``FormatAdapter``
+    to render through, so it reads the domain error and leaves this alone.
     """
-    platform_base_url = config.platform.get("base_url")
-    if not platform_base_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Hybrid mode is misconfigured",
-        )
-
-    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
-    resolve_url = _platform_url(platform_base_url, path)
-    headers = {
-        "X-Gateway-Token": config.platform_token or "",
-        "X-User-Token": user_token,
-    }
-
     try:
-        response = await _post_platform(
-            url=resolve_url,
-            headers=headers,
+        return await resolve(
+            config,
+            user_token=user_token,
+            endpoint=endpoint,
             body=body,
-            timeout_seconds=timeout_ms / 1000,
         )
-    except (httpx.TimeoutException, httpx.NetworkError):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        ) from None
-
-    if response.status_code == 200:
-        try:
-            return response.json()
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Authorization service unavailable",
-            ) from None
-
-    # 421 is the platform saying the user token belongs to another region; its
-    # detail names the host, and the caller needs both to go there (otari-ai#1665).
-    if response.status_code in {400, 401, 402, 403, 404, 421, 429}:
-        detail = _safe_detail_from_platform(response, client_error_detail)
-        response_headers: dict[str, str] | None = None
-        if response.status_code == 429 and response.headers.get("Retry-After"):
-            response_headers = {"Retry-After": response.headers["Retry-After"]}
-        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
-
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="Authorization service unavailable",
-    )
+    except ControlPlaneRefusedError as exc:
+        headers = {"Retry-After": exc.retry_after} if exc.retry_after else None
+        raise HTTPException(status_code=exc.status_code, detail=exc.message, headers=headers) from None
+    except ControlPlaneError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
 
 
 async def _resolve_platform_credentials(
@@ -594,9 +653,8 @@ async def _resolve_platform_credentials(
     payload = await _post_resolve(
         config,
         user_token=user_token,
-        path="/gateway/provider-keys/resolve",
+        endpoint=ResolveEndpoint.PROVIDER_KEYS,
         body=resolve_body,
-        client_error_detail="Authorization request rejected",
     )
     return _parse_resolve_payload(payload)
 
@@ -679,225 +737,36 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
     )
 
 
-UpstreamErrorKind = Literal["timeout", "conn_err"]
+def is_provider_credential_rejection(exc: BaseException) -> bool:
+    """Whether the provider refused the credential the gateway sent.
 
-
-def _error_status_code(exc: BaseException) -> int | None:
-    """The HTTP error status an upstream exception carries, or ``None``.
-
-    Reads ``status_code``, then an integer ``code``, then
-    ``response.status_code``, and accepts only a 4xx/5xx from any of them.
-
-    ``code`` is needed because google-genai's ``APIError`` puts the status there
-    and never sets ``status_code``; where another SDK uses ``code`` for an error
-    slug (OpenAI's ``"invalid_api_key"``) the value is not an ``int`` and is
-    skipped. ``response.status_code`` comes last because the attached object is
-    not always the response that failed: google-genai raises a mid-stream error
-    against its own stream wrapper, whose ``status_code`` is a hardcoded 200
-    because the SSE response opened fine and the error arrived in a later chunk.
-    That is how Gemini reports a quota 429 on a streaming call, so reading the
-    200 would classify a rate limit as unclassifiable (a generic 502) and record
-    200 as the request's outcome through :func:`failure_status_code`.
-
-    The 4xx/5xx bound is what rejects that 200, and also the non-HTTP integers
-    that reach ``code``: google-genai's live API raises through the same
-    ``APIError`` with a websocket close code (1006, 1008).
+    An upstream 401, or a 403 that is not the provider refusing the request itself
+    (see :func:`is_upstream_request_fault`).
     """
-    for value in (
-        getattr(exc, "status_code", None),
-        getattr(exc, "code", None),
-        getattr(getattr(exc, "response", None), "status_code", None),
-    ):
-        if isinstance(value, int) and 400 <= value <= 599:
-            return value
-    return None
-
-
-def upstream_exception_chain(exc: BaseException) -> Iterator[BaseException]:
-    """Yield an exception and its ``original_exception`` chain once each."""
-    current: BaseException | None = exc
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        yield current
-        current = getattr(current, "original_exception", None)
-
-
-def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | None, int | None]:
-    """Classify the *shape* of an upstream exception, independent of retry policy.
-
-    Returns ``(kind, status_code)`` where ``kind`` is ``"timeout"``,
-    ``"conn_err"``, or ``None``, and ``status_code`` is the HTTP status the
-    exception carries, or ``None``. At most one of the two is set. ``kind`` is
-    a ``Literal``, not a bare ``str``, so a typo at a ``kind == "..."``
-    comparison site (e.g. in :func:`_classify_upstream_error`) is a mypy error
-    instead of a silent no-op. Shared by :func:`_classify_upstream_error`
-    (drives the hybrid-mode fallback decision) and
-    :func:`gateway.api.routes._pipeline.classify_provider_error` (drives the
-    final client-facing status/detail), so the two stay in sync.
-
-    Recognizes, in order, walking ``.original_exception`` when the current
-    exception carries no signal of its own:
-
-    1. Stdlib/httpx timeout and network exceptions directly.
-    2. The OpenAI and Anthropic SDKs' own ``APITimeoutError`` /
-       ``APIConnectionError``. any-llm calls these SDKs directly (it does not
-       wrap httpx itself unless ``ANY_LLM_UNIFIED_EXCEPTIONS=1``), and both
-       SDKs catch ``httpx.TimeoutException`` / network errors internally and
-       re-raise as their own types. Those wrapped types are not instances of
-       any httpx exception and carry no ``status_code``/``response``, so a
-       real provider timeout or "provider unreachable" would otherwise be
-       unclassifiable. ``APITimeoutError`` subclasses ``APIConnectionError``
-       in both SDKs, so the timeout check must run first. This covers the
-       majority of any-llm providers, which reuse ``BaseOpenAIProvider`` or
-       ``BaseAnthropicProvider``.
-    3. An HTTP error status carried by the exception, on ``status_code``,
-       ``code``, or its attached ``.response`` (see
-       :func:`_error_status_code`).
-    4. A conservative duck-typed fallback, by exception class name, for the
-       remaining any-llm provider SDKs that don't reuse the OpenAI/Anthropic
-       base classes (e.g. cohere, mistral, groq, bedrock) and whose own
-       timeout/connection exception types aren't imported here. Mirrors the
-       heuristic ``any_llm.utils.exception_handler.convert_exception`` already
-       uses internally. Only applies when the exception carries no status code
-       at all, so it never shadows a real HTTP-status classification.
-    5. If none of the above match, ``.original_exception`` (set by any-llm's
-       ``AnyLLMError`` family, e.g. via ``convert_exception``) is unwrapped and
-       reclassified from step 1. This keeps detection working once
-       ``ANY_LLM_UNIFIED_EXCEPTIONS=1`` becomes the default: any-llm's
-       ``convert_exception`` re-wraps a raw SDK timeout/connection error into
-       a generic ``any_llm.exceptions.ProviderError`` (class name matches
-       neither ``*TimeoutError`` nor ``*ConnectionError``, no ``status_code``),
-       but always preserves the original SDK exception on
-       ``original_exception``. Bounded by an ``id()``-based seen-set so a
-       (pathological, self-referential) cycle terminates instead of looping.
-    """
-    for current in upstream_exception_chain(exc):
-        if isinstance(
-            current,
-            (
-                asyncio.TimeoutError,
-                TimeoutError,
-                httpx.TimeoutException,
-                _OpenAIAPITimeoutError,
-                _AnthropicAPITimeoutError,
-            ),
-        ):
-            return "timeout", None
-        if isinstance(current, (httpx.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)):
-            return "conn_err", None
-
-        status_code = _error_status_code(current)
-        if status_code is not None:
-            return None, status_code
-
-        class_name = type(current).__name__
-        if class_name.endswith("TimeoutError"):
-            return "timeout", None
-        if class_name.endswith("ConnectionError"):
-            return "conn_err", None
-
-    return None, None
-
-
-def upstream_error_message(exc: BaseException) -> str:
-    """Best-effort human-readable text from an upstream exception (and its wrapper).
-
-    Concatenates the exception's ``message`` attribute and ``str()`` across its
-    ``original_exception`` chain, so a substring probe still matches whether
-    otari receives the raw SDK error today or a wrapped ``AnyLLMError`` after
-    any-llm flips to unified exceptions.
-
-    Used both for classification and, on a caller-fault rejection, as the text
-    the caller sees. Run it through :func:`redact_upstream_message` before it
-    reaches a response body.
-    """
-    parts: list[str] = []
-    seen: set[str] = set()
-    for candidate in upstream_exception_chain(exc):
-        message = getattr(candidate, "message", None)
-        candidates = (message, str(candidate)) if isinstance(message, str) else (str(candidate),)
-        for part in candidates:
-            # ``message`` and ``str()`` are usually the same text on a raw SDK
-            # error, and a wrapper usually restringifies what it wraps. Keeping
-            # both would read as a stutter now that this text can reach the
-            # caller, so each distinct part is kept once, in order.
-            stripped = part.strip()
-            if stripped and stripped not in seen:
-                seen.add(stripped)
-                parts.append(stripped)
-    return " ".join(parts)
-
-
-# A day. A provider (or a confused proxy in front of one) does not get to tell
-# this gateway's callers to sleep for a year.
-_MAX_RETRY_AFTER_SECONDS = 86400
-
-
-def upstream_retry_after(exc: BaseException) -> str | None:
-    """The upstream ``Retry-After`` as whole seconds, or ``None``.
-
-    Read from the exception's own headers or its attached response's, whichever
-    carries them, walking the ``original_exception`` chain like the other
-    upstream readers here.
-
-    The value is re-serialized from a parsed number rather than relayed as
-    received, so nothing a provider chooses reaches a response header the
-    gateway emits: a header value is not a body, and CRLF in one is not a
-    formatting problem. Fractional seconds round up, since a client honoring
-    the header must not retry before the window the provider named. The
-    HTTP-date form is dropped rather than parsed, because no provider sends one
-    here and a value that cannot be bounded is not one to relay.
-    """
-    for current in upstream_exception_chain(exc):
-        for holder in (current, getattr(current, "response", None)):
-            # Mapping-like but not necessarily a Mapping: httpx.Headers here, a
-            # plain dict where an SDK copies them out.
-            get_header = getattr(getattr(holder, "headers", None), "get", None)
-            if not callable(get_header):
-                continue
-            raw = get_header("retry-after") or get_header("Retry-After")
-            if not isinstance(raw, str):
-                continue
-            try:
-                parsed = float(raw.strip())
-            except ValueError:
-                continue
-            # ``float`` accepts "inf" and "1e400", and ``math.ceil`` raises
-            # OverflowError on both. This runs inside error handling, so an
-            # exception here would turn a rate limit into a 500.
-            if not math.isfinite(parsed) or parsed < 0:
-                continue
-            seconds = math.ceil(parsed)
-            return str(min(seconds, _MAX_RETRY_AFTER_SECONDS))
-    return None
-
-
-def is_provider_billing_error(exc: BaseException) -> bool:
-    """True when a 4xx is the provider saying "this account is out of money".
-
-    Providers disagree on the status for account billing exhaustion. Anthropic
-    returns a 400 ``invalid_request_error`` carrying "Your credit balance is too
-    low to access the Anthropic API"; OpenAI has a 400 "billing hard limit
-    reached"; DeepSeek uses 402 "Insufficient Balance". A 400 normally means the
-    request itself is malformed, so these would otherwise be reported to the
-    caller as "check the model name and parameters" and, worse, skip failover on
-    the assumption that every provider would reject the same request. The
-    account balance is per-provider, so the next attempt in the route can very
-    plausibly succeed.
-
-    A 402 is always a billing error: HTTP defines it as payment required, even
-    when a provider SDK discards the response reason and body. The 400/422 probe
-    stays deliberately narrow so error reports do not falsely label malformed
-    requests as account billing exhaustion.
-    """
-    _kind, status_code = upstream_exception_shape(exc)
-    if status_code == 402:
-        return True
-    if status_code not in _BILLING_MESSAGE_CANDIDATE_STATUS_CODES:
+    if missing_credential(exc) is not None:
         return False
-    message = upstream_error_message(exc).lower()
-    return any(probe in message for probe in _BILLING_MESSAGE_PROBES)
+    kind, status_code = upstream_exception_shape(exc)
+    if kind == "timeout":
+        return False
+    if status_code == status.HTTP_401_UNAUTHORIZED:
+        return True
+    return status_code == status.HTTP_403_FORBIDDEN and not is_upstream_request_fault(exc)
+
+
+# The OpenAI and Anthropic SDKs read this header before their own retry rule
+# (``_should_retry`` in each SDK's ``_base_client.py``), so ``false`` stops them
+# retrying a 5xx they would otherwise retry. The name is theirs, not Otari's.
+SHOULD_RETRY_HEADER = "x-should-retry"
+
+
+def with_retry_hint(exc: BaseException, status_code: int, headers: dict[str, str] | None) -> dict[str, str] | None:
+    """``headers`` for a provider failure answered with ``status_code``, telling the client not to retry a futile 5xx.
+
+    Only a 5xx carries it: an SDK does not retry the 4xx answers anyway.
+    """
+    if status_code < status.HTTP_500_INTERNAL_SERVER_ERROR or not is_retry_futile(exc):
+        return headers
+    return {**(headers or {}), SHOULD_RETRY_HEADER: "false"}
 
 
 def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
@@ -909,6 +778,13 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     cancellations, and tool loops that already produced an assistant response are
     handled by the walker before this classifier runs.
     """
+    if missing_credential(exc) is not None:
+        return True, "missing_credential"
+    if isinstance(exc, UnsupportedAttemptProviderError):
+        return True, "unsupported_provider"
+    if is_empty_completion(exc):
+        return True, "empty_completion"
+
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:
         return True, kind
@@ -923,136 +799,6 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     return True, "unknown"
 
 
-async def _resolve_platform_mcp_servers(
-    config: GatewayConfig,
-    user_token: str,
-    mcp_server_ids: list[uuid.UUID],
-) -> list[McpServerConfig]:
-    """Swap workspace-scoped MCP server ids for inline configs by calling the platform.
-
-    Ids are de-duplicated with their order preserved, which is the contract
-    `resolve_workspace_mcp_servers` states the two modes share. It matters more
-    than a saved round trip now that two resolved servers sharing a name are a
-    500 (`prepare_gateway_tools`): the protocol does not say what the platform
-    answers for a repeated id, so sending one twice must not be able to make a
-    request fail on a duplicate the caller never really asked for.
-    """
-    payload = await _post_resolve(
-        config,
-        user_token=user_token,
-        path="/gateway/mcp-servers/resolve",
-        body={"mcp_server_ids": [str(uid) for uid in dict.fromkeys(mcp_server_ids)]},
-        client_error_detail="MCP server resolution failed",
-    )
-    return [
-        McpServerConfig(
-            name=s["name"],
-            url=s["url"],
-            authorization_token=s.get("authorization_token"),
-            purpose_hint=s.get("purpose_hint"),
-            allowed_tools=s.get("allowed_tools"),
-        )
-        for s in payload.get("servers", [])
-    ]
-
-
-async def _resolve_platform_mcp_server(
-    config: GatewayConfig,
-    user_token: str,
-    mcp_server_id: uuid.UUID,
-) -> ResolvedMcpServer:
-    """Resolve one stored MCP server for the stored-server endpoints.
-
-    The same platform resolver `_resolve_platform_mcp_servers` calls, with a
-    one-id request. A current peer may echo ``id`` and ``enabled``; an older peer
-    returns only the connection config and omits a disabled server. Exactly one
-    legacy entry is therefore bound to the only id requested and treated as
-    enabled. An explicit id must still match, and an explicit enabled value must
-    still be a strict boolean (R-RES-1).
-
-    An empty list is the legacy disabled-server answer and is indistinguishable
-    here from an inaccessible server, which is also the public 404 contract.
-    Several entries, a mismatched id, a missing ``servers`` list, or a field
-    Otari cannot read remain resolution failures.
-
-    Raises:
-        McpExecutionError: the server was inaccessible, or the answer was not a
-            matching, well-formed entry.
-        HTTPException: the platform itself refused, for the route to classify.
-    """
-    payload = await _post_resolve(
-        config,
-        user_token=user_token,
-        path="/gateway/mcp-servers/resolve",
-        body={"mcp_server_ids": [str(mcp_server_id)]},
-        client_error_detail="MCP server resolution failed",
-    )
-    servers = payload.get("servers") if isinstance(payload, dict) else None
-    if not isinstance(servers, list):
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
-    if not servers:
-        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
-    if len(servers) != 1:
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
-
-    entry = servers[0]
-    if isinstance(entry, dict):
-        entry = dict(entry)
-        entry.setdefault("id", mcp_server_id)
-        entry.setdefault("enabled", True)
-    try:
-        resolved = ResolvedMcpServer.model_validate(entry)
-    except ValidationError:
-        # No detail from the validator travels: it would quote the resolver's
-        # own payload, which carries the stored URL and credential.
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
-    if resolved.id != mcp_server_id:
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
-    return resolved
-
-
-async def _resolve_platform_web_search(
-    config: GatewayConfig,
-    user_token: str,
-    requested_tools: list[str] | None = None,
-) -> dict[str, Any]:
-    """Resolve the workspace's web-search policy via the platform.
-
-    New gateways send the exact managed web capabilities the request declared.
-    ``None`` retains the legacy Search-only body for compatibility callers.
-    """
-    payload = await _post_resolve(
-        config,
-        user_token=user_token,
-        path="/gateway/web-search/resolve",
-        body={} if requested_tools is None else {"requested_tools": requested_tools},
-        client_error_detail="Web search resolution failed",
-    )
-    return payload if isinstance(payload, dict) else {}
-
-
-async def _resolve_platform_code_execution(
-    config: GatewayConfig,
-    user_token: str,
-) -> dict[str, Any]:
-    """Resolve the workspace's code-execution policy via the platform.
-
-    POSTs an empty body to `/gateway/code-execution/resolve` (via
-    `_post_resolve`, which owns the shared guard/headers/status-code ladder)
-    and returns the parsed JSON dict on 200 (``{enabled, tools,
-    default_purpose_hint, max_iterations, exec_timeout_s}``, soft limits
-    already clamped to operator ceilings platform-side).
-    """
-    payload = await _post_resolve(
-        config,
-        user_token=user_token,
-        path="/gateway/code-execution/resolve",
-        body={},
-        client_error_detail="Code execution resolution failed",
-    )
-    return payload if isinstance(payload, dict) else {}
-
-
 async def _report_platform_usage(
     config: GatewayConfig,
     correlation_id: str,
@@ -1062,12 +808,14 @@ async def _report_platform_usage(
     session_label: str | None = None,
     *,
     ttft_ms: int | None = None,
+    units: Mapping[str, int] | None = None,
     is_final_attempt: bool,
 ) -> SettledCost | None:
     """POST a usage record back to the platform with bounded retries.
 
     ``is_final_attempt`` tells the platform that no later planned fallback will
-    run. Failures are swallowed after ``max_retries`` so they don't impact the
+    run. ``units`` carries the counts a rate that is not per token bills a
+    successful attempt on, keyed by pricing unit. Failures are swallowed after ``max_retries`` so they don't impact the
     user's response path. Non-retryable status codes (auth /
     payment-required / not-found / conflict / unprocessable) short-circuit the
     retry loop.
@@ -1078,7 +826,7 @@ async def _report_platform_usage(
 
     timeout_ms = int(config.platform.get("usage_timeout_ms", 5000))
     max_retries = int(config.platform.get("usage_max_retries", 3))
-    usage_url = _platform_url(platform_base_url, "/gateway/usage")
+    usage_url = transport.control_plane_url(platform_base_url, "/gateway/usage")
     headers = {"X-Gateway-Token": config.platform_token or ""}
 
     payload: dict[str, Any] = {
@@ -1109,6 +857,11 @@ async def _report_platform_usage(
             if cache_write_tokens:
                 usage_payload["cache_write_1h_tokens"] = cache_write_1h_tokens_of(usage)
             payload["usage"] = usage_payload
+        # Beside ``usage`` rather than in it: a report with no token counts omits
+        # ``usage`` so the platform records it as unavailable, and a peer that
+        # does not read ``units`` must keep seeing that.
+        if units:
+            payload["units"] = dict(units)
     elif error_class is not None:
         payload["error_class"] = error_class
 
@@ -1116,7 +869,7 @@ async def _report_platform_usage(
     for attempt in range(1, max_retries + 1):
         should_retry = False
         try:
-            response = await _post_platform(
+            response = await transport.post(
                 url=usage_url,
                 headers=headers,
                 body=payload,

@@ -14,10 +14,10 @@ from typing import Any
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.ports.growth_signal_port import GrowthActivationEvent
+from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
 
 
-class NullGrowthSignalAdapter:
+class NullGrowthSignalAdapter(GrowthSignalPort):
     """``GrowthSignalPort`` adapter for a build with no CRM or messenger vendor.
 
     Holds no state, so the request's database session is unused.

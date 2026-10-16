@@ -289,9 +289,7 @@ class SelectEntry(BaseModel):
             )
         for selector, weight in self.weights.items():
             if not math.isfinite(weight) or weight < 0:
-                raise ValueError(
-                    f"weight for '{selector}' must be a finite, non-negative number; got {weight}"
-                )
+                raise ValueError(f"weight for '{selector}' must be a finite, non-negative number; got {weight}")
         if not any(weight > 0 for weight in self.weights.values()):
             raise ValueError(
                 "every weight is 0, so this entry could never select anything and the policy would "
@@ -382,9 +380,7 @@ class PolicySpec(BaseModel):
         total = selected + len(self.on_failure)
         if total > MAX_CANDIDATES:
             detail = f"{selected} routed candidate(s) + on_failure" if pool else "1 selected + on_failure"
-            raise ValueError(
-                f"a policy may have at most {MAX_CANDIDATES} candidates ({detail}); this one has {total}"
-            )
+            raise ValueError(f"a policy may have at most {MAX_CANDIDATES} candidates ({detail}); this one has {total}")
         return self
 
     @model_validator(mode="after")
@@ -613,9 +609,7 @@ class RoutingMemory(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     # The workspace this row belongs to; see `APIKey.workspace_id` for why.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -625,9 +619,7 @@ class RoutingMemory(Base):
     qualities: Mapped[dict[str, float]] = mapped_column(JSON)
     task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     label_source: Mapped[str] = mapped_column(default="human")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert model to dictionary.
@@ -662,14 +654,10 @@ class RouterPreference(Base):
     """
 
     __tablename__ = "router_preferences"
-    __table_args__ = (
-        Index("ix_router_preferences_workspace_user_created", "workspace_id", "user_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_router_preferences_workspace_user_created", "workspace_id", "user_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     # The workspace this row belongs to; see `APIKey.workspace_id` for why.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -678,9 +666,7 @@ class RouterPreference(Base):
     task_id: Mapped[str | None] = mapped_column(default=None)
     scores: Mapped[dict[str, float]] = mapped_column(JSON)
     label_source: Mapped[str] = mapped_column(default="human")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert model to dictionary."""

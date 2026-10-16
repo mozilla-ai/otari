@@ -13,7 +13,7 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.database import DATABASE_ERRORS, create_log_session, create_session
+from gateway.core.database import DATABASE_ERRORS, create_log_session, create_session, describe_database_error
 from gateway.log_config import logger
 
 
@@ -79,8 +79,8 @@ class UnitOfWork:
         """Roll back, leaving the error that ended the step as the one the caller sees."""
         try:
             await self._session.rollback()
-        except DATABASE_ERRORS:
-            logger.warning("Could not roll back a unit of work", exc_info=True)
+        except DATABASE_ERRORS as exc:
+            logger.warning("Could not roll back a unit of work: %s", describe_database_error(exc))
 
 
 def session_for(uow: UnitOfWork) -> AsyncSession:

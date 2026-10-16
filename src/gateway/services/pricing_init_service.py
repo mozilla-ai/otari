@@ -15,7 +15,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
-from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 
 
 async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
@@ -28,7 +28,7 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
 
     When community-maintained default pricing is enabled (opt-in), the dire "all
     requests rejected" warning no longer applies; a softer note is logged instead,
-    since models outside genai-prices coverage are still rejected.
+    since models outside models.dev coverage are still rejected.
     """
     if not config.require_pricing:
         return
@@ -52,7 +52,7 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     else:
         logger.warning(
             "require_pricing is enabled with no configured pricing; relying on default_pricing "
-            "(genai-prices) for billing. Models outside its coverage are still rejected with HTTP 402."
+            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402."
         )
 
 
@@ -146,8 +146,7 @@ async def warn_if_router_candidates_lack_pricing(config: GatewayConfig, db: Asyn
     gateway down over an optimization that has a safe fallback; refusing a write
     costs an operator one corrected request, with the policy in front of them.
     """
-    from gateway.services.routing.backends import backend_requires_pricing
-    from gateway.services.routing.knn import unpriced_router_candidates
+    from gateway.services.routing import backend_requires_pricing, unpriced_router_candidates
 
     for name, spec in config.routing.policies.items():
         if not backend_requires_pricing(spec.router_backend):
@@ -174,11 +173,20 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
 
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
 
+    # A search tool's flat rate is keyed ``<provider>:<tool>``, and its provider is
+    # never under ``providers``.
+    search_providers = config.search_tool_providers()
+
     for raw_model_key, pricing_config in config.pricing.items():
         model_key = normalize_pricing_key(config, raw_model_key)
         instance = model_key.split(":", 1)[0] if ":" in model_key else model_key
 
-        if instance not in config.providers and instance != GATEWAY_TOOL_PRICING_PROVIDER:
+        if (
+            instance not in config.providers
+            and instance not in config.decision_providers
+            and instance not in search_providers
+            and instance != GATEWAY_TOOL_PRICING_PROVIDER
+        ):
             logger.warning(
                 "Skipping pricing for '%s': provider '%s' is not listed in the providers section. "
                 "The provider may still work if its credentials come from the environment, but its "
@@ -193,7 +201,6 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         output_price = pricing_config.output_price_per_million
         cache_read_price = pricing_config.cache_read_price_per_million
         cache_write_price = pricing_config.cache_write_price_per_million
-        cache_write_1h_price = pricing_config.cache_write_1h_price_per_million
         pricing_tiers = [tier.model_dump(exclude_none=True) for tier in pricing_config.pricing_tiers]
         effective_at = normalize_effective_at(pricing_config.effective_at)
 
@@ -222,7 +229,6 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             output_price_per_million=output_price,
             cache_read_price_per_million=cache_read_price,
             cache_write_price_per_million=cache_write_price,
-            cache_write_1h_price_per_million=cache_write_1h_price,
             pricing_tiers=pricing_tiers,
             unit=pricing_config.unit,
             origin="config",

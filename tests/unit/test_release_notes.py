@@ -26,6 +26,8 @@ _UNRELEASED_COMMITS = [
     "fix: correct a plain bug",
     "refactor: tidy a plain module",
     "Update a readme without a type",
+    # The shape GitHub gives a security advisory's merge: one commit, the fork's commits as bullets.
+    "Merge commit from fork\n\n* fix(auth): close a fixed advisory\n\nWhat was wrong.\n\n* docs(auth): describe it",
 ]
 
 
@@ -112,6 +114,12 @@ def test_a_plain_commit_of_a_hidden_type_stays_hidden(notes: str) -> None:
 
 def test_a_commit_without_a_type_still_renders(entries_by_group: dict[str, list[str]]) -> None:
     assert any(line.startswith("- Update a readme without a type") for line in entries_by_group["Other"]), (
+        entries_by_group
+    )
+
+
+def test_a_security_advisory_merge_renders_its_first_commit(entries_by_group: dict[str, list[str]]) -> None:
+    assert any(line.startswith("- **auth:** Close a fixed advisory") for line in entries_by_group["Bug Fixes"]), (
         entries_by_group
     )
 

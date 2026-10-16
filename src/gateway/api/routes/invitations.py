@@ -13,66 +13,31 @@ the identity stays password-less until ``POST /api/v1/auth/signup`` or a
 provider sign-in claims it.
 """
 
-from typing import Annotated
+from fastapi import APIRouter, BackgroundTasks, Request
 
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from gateway.api.deps import get_db
+from gateway.api.deps import (
+    GrowthSignalPortDep,
+    InvitationClaimSettingsDep,
+    MembershipOrganizationServiceDep,
+    OrganizationServiceDep,
+)
+from gateway.api.routes._public_auth import throttle_public_auth
 from gateway.models.tenancy import (
     AcceptInvitationRequest,
     AcceptInvitationResultPublic,
     InvitationPreviewPublic,
     ValidateInvitationRequest,
 )
-from gateway.services.budgets import WorkspaceBudgetDefaultService
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import report_new_account
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
-
-
-def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationService:
-    """Build the organization service on the request's session.
-
-    A separate copy of the same tiny factory `organizations.py` declares: the
-    two route modules deliberately don't import from each other (one is
-    public, one is master-key gated), and importing the dependency alone
-    across that boundary is not worth it for one function.
-    """
-    return OrganizationService(db, membership_listener=WorkspaceBudgetDefaultService(db))
-
-
-OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
-
-
-def _throttle(request: Request) -> None:
-    """Throttle calls to these routes per client IP.
-
-    ``POST /api/v1/auth/session`` is the only other unauthenticated route that
-    takes a credential, and it is IP-limited (``auth_session._check_login_rate_limit``,
-    via ``app.state.login_rate_limiter``); these two were not, and ``accept``
-    writes. The token's entropy (``secrets.token_urlsafe(32)``) already rules
-    out guessing, so this isn't about brute-forcing a token: it's that these
-    are the app's only unauthenticated write surface, reachable at whatever
-    rate a client can manage, each call costing a handful of reads (``accept``
-    several writes). Reuses the sign-in route's limiter/budget rather than a
-    separate one, unconditionally (not just on failure, unlike sign-in): there
-    is no legitimate caller here to avoid locking out, only a client with an
-    address it can retry from.
-    """
-    limiter = getattr(request.app.state, "login_rate_limiter", None)
-    if limiter is None:
-        return
-    client_ip = request.client.host if request.client else None
-    if client_ip is None:
-        return
-    limiter.check(client_ip)
 
 
 @router.post("/validate")
 async def validate_invitation(
     request: Request,
     service: OrganizationServiceDep,
+    claims: InvitationClaimSettingsDep,
     body: ValidateInvitationRequest,
 ) -> InvitationPreviewPublic:
     """Look up a pending invitation by its token, for the accept page to render before committing.
@@ -81,21 +46,31 @@ async def validate_invitation(
     the token is a bearer credential, and a URL path is what an access log or
     an intermediate proxy routinely retains.
     """
-    _throttle(request)
-    return await service.get_invitation_preview(body.token)
+    throttle_public_auth(request)
+    return await service.get_invitation_preview(body.token, claims=claims)
 
 
 @router.post("/accept")
 async def accept_invitation(
     request: Request,
-    service: OrganizationServiceDep,
+    background_tasks: BackgroundTasks,
+    service: MembershipOrganizationServiceDep,
+    claims: InvitationClaimSettingsDep,
+    growth: GrowthSignalPortDep,
     body: AcceptInvitationRequest,
 ) -> AcceptInvitationResultPublic:
-    """Accept a pending invitation, resolving it to an active membership and optionally setting a first password."""
-    _throttle(request)
-    return await service.accept_invitation(
+    """Accept a pending invitation, resolving it to an active membership and optionally setting a first password.
+
+    Setting a first password makes the account usable for the first time, so it
+    is reported to ``GrowthSignalPort`` as a signup.
+    """
+    throttle_public_auth(request)
+    acceptance = await service.accept_invitation(
         body.token,
+        claims=claims,
         password=body.password,
         full_name=body.full_name,
         terms_accepted=body.terms_accepted,
     )
+    await report_new_account(growth, acceptance.claimed, background_tasks=background_tasks)
+    return acceptance.result

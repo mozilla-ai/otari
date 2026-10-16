@@ -1,14 +1,21 @@
 import uuid
+from collections.abc import Collection, Sequence
+from decimal import Decimal
 from typing import Never
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
-from gateway.models.budgets import Budget, WorkspaceBudgetDefault
+from gateway.models.budgets import BUDGET_ORIGIN_CONFIG, Budget, BudgetResetLog
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
+
+
+def _in_reach_of(organization_id: uuid.UUID) -> ColumnElement[bool]:
+    """Match a budget the deployment owns, or one this organization owns."""
+    return or_(Budget.organization_id.is_(None), Budget.organization_id == organization_id)
 
 
 class BudgetRepository(BaseRepository[Budget, Never, Never]):
@@ -24,19 +31,36 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         await self.db.refresh(budget)
         return budget
 
+    async def add_if_absent(self, budget_id: str) -> bool:
+        """Stage an empty budget under ``budget_id``, returning False when a concurrent request created it first.
+
+        The insert runs in a SAVEPOINT, so losing that race rolls back this row alone.
+        """
+        try:
+            async with self.db.begin_nested():
+                self.db.add(Budget(budget_id=budget_id))
+        except IntegrityError:
+            return False
+        return True
+
+    async def usage(self, budget_id: str) -> tuple[int, float, float]:
+        """Count the active users on a budget and sum their spend and reservations."""
+        row = (
+            await self.db.execute(
+                select(
+                    func.count(),
+                    # Decimal defaults: ``coalesce(numeric, double precision)`` would sum exact counters as floats.
+                    func.coalesce(func.sum(User.spend), Decimal(0)),
+                    func.coalesce(func.sum(User.reserved), Decimal(0)),
+                ).where(User.budget_id == budget_id, User.deleted_at.is_(None))
+            )
+        ).one()
+        return int(row[0]), float(row[1]), float(row[2])
+
     async def count_by_organization(self, organization_id: uuid.UUID) -> int:
         """Count the organization's budgets."""
         result = await self.db.execute(
             select(func.count()).select_from(Budget).where(Budget.organization_id == organization_id)
-        )
-        return result.scalar_one()
-
-    async def count_member_policies_for_budget(self, budget_id: str) -> int:
-        """Count the workspace member budget policies that name this budget."""
-        result = await self.db.execute(
-            select(func.count())
-            .select_from(WorkspaceBudgetDefault)
-            .where(WorkspaceBudgetDefault.budget_id == budget_id)
         )
         return result.scalar_one()
 
@@ -45,12 +69,48 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         result = await self.db.execute(select(func.count()).select_from(User).where(User.budget_id == budget_id))
         return result.scalar_one()
 
+    async def minute_limits_for_user(self, user_id: str) -> tuple[str, int | None, int | None] | None:
+        """``(budget_id, rpm_limit, tpm_limit)`` of the user's own budget, or None when it limits neither."""
+        row = (
+            await self.db.execute(
+                select(Budget.budget_id, Budget.rpm_limit, Budget.tpm_limit)
+                .join(User, User.budget_id == Budget.budget_id)
+                .where(User.user_id == user_id, User.deleted_at.is_(None))
+            )
+        ).first()
+        if row is None or (row.rpm_limit is None and row.tpm_limit is None):
+            return None
+        return row.budget_id, row.rpm_limit, row.tpm_limit
+
     async def get_by_id_and_organization(self, budget_id: str, organization_id: uuid.UUID) -> Budget | None:
         """Return the budget with this ID when this organization owns it, otherwise None."""
         result = await self.db.execute(
             select(Budget).where(Budget.budget_id == budget_id, Budget.organization_id == organization_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_in_reach_of(self, budget_id: str, organization_id: uuid.UUID) -> Budget | None:
+        """Return the budget with this ID when the deployment or this organization owns it, otherwise None."""
+        result = await self.db.execute(
+            select(Budget).where(Budget.budget_id == budget_id, _in_reach_of(organization_id))
+        )
+        return result.scalar_one_or_none()
+
+    async def list_in_reach_of(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
+        """Return a page of the budgets the deployment owns and this organization owns, oldest first."""
+        result = await self.db.execute(
+            select(Budget)
+            .where(_in_reach_of(organization_id))
+            .order_by(Budget.created_at, Budget.budget_id)
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_many(self, budget_ids: Sequence[str]) -> dict[str, Budget]:
+        """Return the budgets with these IDs, keyed on ID, omitting an ID that names none."""
+        result = await self.db.execute(select(Budget).where(Budget.budget_id.in_(budget_ids)))
+        return {budget.budget_id: budget for budget in result.scalars().all()}
 
     async def list_by_organization(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
         """Return a page of the organization's budgets, oldest first."""
@@ -62,6 +122,14 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def remove_reset_logs(self, budget_id: str) -> None:
+        """Stage the deletion of the budget's reset history.
+
+        ``budget_reset_logs.budget_id`` is NOT NULL with no ``ondelete``, so a budget that has ever reset
+        cannot be removed until its history is.
+        """
+        await self.db.execute(delete(BudgetResetLog).where(BudgetResetLog.budget_id == budget_id))
 
     async def remove(self, budget: Budget) -> None:
         """Stage the deletion of a budget.
@@ -76,3 +144,26 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
             await self.db.flush()
         except IntegrityError:
             raise BudgetStillReferencedError(budget_id) from None
+
+    async def mark_declared(self, budget_ids: Collection[str]) -> None:
+        """Mark these budgets as declared in config.yml, and clear the mark from every other budget.
+
+        Only rows whose mark changes are written, so a restart with nothing changed locks none.
+        """
+        declared = list(budget_ids)
+        if declared:
+            await self.db.execute(
+                update(Budget)
+                .where(
+                    Budget.budget_id.in_(declared),
+                    or_(Budget.origin.is_(None), Budget.origin != BUDGET_ORIGIN_CONFIG),
+                )
+                .values(origin=BUDGET_ORIGIN_CONFIG)
+                .execution_options(synchronize_session=False)
+            )
+        await self.db.execute(
+            update(Budget)
+            .where(Budget.origin == BUDGET_ORIGIN_CONFIG, Budget.budget_id.not_in(declared))
+            .values(origin=None)
+            .execution_options(synchronize_session=False)
+        )

@@ -13,6 +13,8 @@ export function EmptyState({
   actionLabel,
   onAction,
   isActionDisabled,
+  secondaryActionLabel,
+  onSecondaryAction,
   children,
 }: {
   title: string
@@ -23,6 +25,9 @@ export function EmptyState({
   actionLabel?: string
   onAction?: () => void
   isActionDisabled?: boolean
+  // A quieter alternative beside the primary, as a ghost button.
+  secondaryActionLabel?: string
+  onSecondaryAction?: () => void
   children?: ReactNode
 }) {
   return (
@@ -36,7 +41,7 @@ export function EmptyState({
         </div>
         {children}
         {actionLabel && onAction ? (
-          <div>
+          <div className="flex flex-wrap items-center gap-3">
             <Button
               variant="primary"
               isDisabled={isActionDisabled}
@@ -44,6 +49,11 @@ export function EmptyState({
             >
               {actionLabel}
             </Button>
+            {secondaryActionLabel && onSecondaryAction ? (
+              <Button variant="ghost" onPress={onSecondaryAction}>
+                {secondaryActionLabel}
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </Card.Content>

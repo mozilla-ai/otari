@@ -9,11 +9,13 @@ from gateway.services.mail import MailMessage, render_email
 from gateway.services.tenancy.tokens import format_expiry
 
 
-def render_verification_email(*, verify_link: str, expiry_hours: int) -> MailMessage:
+def render_verification_email(*, verify_link: str, expiry_hours: int, asset_root: str | None) -> MailMessage:
     """Render the email-verification message for one recipient."""
     return render_email(
         "verify_email",
         subject="Verify your email for Otari",
+        preheader="Confirm this address to finish signing in. The link expires in {{VALID_PERIOD}}.",
+        asset_root=asset_root,
         values={
             "VERIFY_LINK": verify_link,
             "VALID_PERIOD": format_expiry(expiry_hours),

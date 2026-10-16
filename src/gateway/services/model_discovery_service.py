@@ -501,7 +501,8 @@ async def test_provider_credentials(
 ) -> ProviderDiscovery:
     """List models for ad-hoc credentials without storing them.
 
-    Backs the dashboard's "test connection" before a provider is saved. Reports
+    Backs the dashboard's "test connection" before a provider is saved, and the
+    model listing of an organization's stored provider keys. Reports
     failure rather than raising, and never echoes the api key (only sanitized,
     capped provider errors, which may include the api_base but never the key).
     ``timeout`` defaults to the module bound; the route passes

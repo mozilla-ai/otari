@@ -9,12 +9,13 @@ edition, so it stays a plain service (``gateway.services.oauth_service``, on
 apron-auth). What varies is the *policy* applied to the proven identity, and
 that is the whole of this port.
 
-The core adapter enforces the base build's policy, which is the roster:
-an OAuth identity signs in as an account an operator already put here, and never
-creates one. An overlay binds a different policy behind the same interface, a
-hosted edition that provisions on first sight, or an enterprise OIDC connection
-that maps a directory group onto an organization, without editing any file in
-this tree.
+Every edition keys a sign-in on the provider's ``(provider, subject)`` pair,
+and that rule is not behind the port either.
+An identity already linked to an account signs in as that account without asking the port.
+The port decides only which account an identity with no link signs in as, and that account gains the link.
+
+An overlay can bind its own policy to this port without editing any file in this tree.
+For example, an enterprise edition can map an OIDC directory group to an organization.
 
 Scope is OAuth and OpenID Connect. Other federation shapes are separate
 surfaces rather than this method widened: a SAML assertion is keyed on a subject
@@ -22,57 +23,59 @@ with an optional email and no email-verified signal, and SCIM is out-of-band
 provisioning rather than interactive sign-in. Each arrives as its own port or
 method when its adapter does.
 
-**Stability: this interface is not frozen while Otari is pre-1.0.** The
-anticipated change is named and already scheduled elsewhere:
-mozilla-ai/otari-ai#1551 moves identity resolution onto apron-auth's own model,
-keying on ``(provider, subject)`` rather than on an address and reading
-``email_verified`` as the tri-state it really is. That work lands once, on the
-platform, and arrives here with the shape it settles on; this port deliberately
-does not anticipate it. Overlay authors should pin a released tag and expect
-``resolve`` to gain a subject and lose the boolean.
+**Stability: this interface is not frozen while Otari is pre-1.0.**
+Overlay authors should pin a released tag.
 """
 
+from dataclasses import dataclass
 from typing import Protocol
 
+from gateway.models.identity import ProviderIdentity
 from gateway.models.tenancy import User
 
 
+@dataclass(frozen=True, slots=True)
+class IdentityResolution:
+    """The identity an OAuth sign-in resolved to.
+
+    ``new_account`` is true when this sign-in created the account, or is the
+    first way in to one nobody had claimed. The caller reports it as a signup,
+    and holds it to the terms the deployment publishes, so an adapter need not.
+    ``password_removed`` is true when this sign-in removed a password the account
+    held, so the caller can tell the person.
+    """
+
+    identity: User
+    new_account: bool
+    password_removed: bool = False
+
+
 class IdentityProviderPort(Protocol):
-    """Which identity here, if any, an external OAuth identity signs in as."""
+    """Which account here, if any, an external OAuth identity with no link signs in as."""
 
-    async def resolve(
-        self,
-        *,
-        provider: str,
-        email: str | None,
-        full_name: str | None,
-        email_verified: bool,
-    ) -> User:
-        """Return the identity this external OAuth identity signs in as.
+    async def resolve(self, external: ProviderIdentity) -> IdentityResolution:
+        """Return the account that an identity with no link here signs in as.
 
-        ``provider`` names the provider or connection and is an open string
-        rather than a closed enum, because a customer's own OIDC connections are
-        not enumerable by this tree.
+        ``IdentityResolution.new_account`` says whether this sign-in created the
+        account or is the first way in to one nobody had claimed, which the
+        caller reports as a signup.
 
-        ``email_verified`` is the provider's assertion about ``email``, already
-        collapsed to a boolean by the caller. apron-auth reports it as
-        tri-state (true, false, or unasserted), and an unasserted value arrives
-        here as ``False``: an adapter must be able to read this argument as "the
-        provider affirmatively vouched for this address", so silence has to
-        collapse to the unverified side rather than be laundered into a verified
-        identity. See the module docstring for where the tri-state model lands.
+        NOTE: No account is linked to the identity's ``(provider, subject)`` when this is called.
+        The account this returns gains that link.
+        An adapter must return an account only when this identity may sign in as it from then on.
+        A deactivated account is refused whatever an adapter returns.
+        An adapter must not pick an existing account by an email claim that a tenant can set.
 
-        An adapter decides for itself what to do with an identity it does not
-        recognize, and both answers are legitimate: refuse (the core), or
-        provision (a hosted edition). Nothing here is required to write.
+        Each adapter decides whether to refuse an unknown identity or create an account for it.
+        An adapter does not have to write anything.
 
         Raises:
             TenancyError: If this identity may not sign in to this deployment.
                 The concrete subclass carries the status and the message the
-                caller sees, so the sign-in route stays thin.
+                caller sees.
 
         """
         ...
 
 
-__all__ = ["IdentityProviderPort"]
+__all__ = ["IdentityProviderPort", "IdentityResolution"]

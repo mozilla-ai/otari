@@ -6,6 +6,7 @@ import {
   buildConversationTitle,
   findRatedExchange,
   togglePinnedModel,
+  turnsFromSavedMessages,
 } from "./playgroundSave"
 import type { ChatTurn } from "./playgroundTypes"
 
@@ -60,6 +61,24 @@ describe("buildConversationRequest", () => {
 
   it("omits the field for a turn that had none, rather than sending null", () => {
     expect(request.messages[0]).not.toHaveProperty("reasoning")
+  })
+
+  it("stores a question's attachments in the wire's spelling", () => {
+    const withFile = buildConversationRequest({
+      workspaceId: "ws-1",
+      model: "openai:gpt-4o",
+      turns: [
+        {
+          role: "user",
+          content: "Read this",
+          attachments: [{ fileId: "file-1", filename: "a.pdf", bytes: 3 }],
+        },
+      ],
+    })
+    expect(withFile.messages[0]?.attachments).toEqual([
+      { file_id: "file-1", filename: "a.pdf", bytes: 3 },
+    ])
+    expect(request.messages[0]).not.toHaveProperty("attachments")
   })
 
   it("stores no usage figures", () => {
@@ -144,5 +163,38 @@ describe("togglePinnedModel", () => {
     const pinned = ["a"]
     togglePinnedModel(pinned, "b")
     expect(pinned).toEqual(["a"])
+  })
+})
+
+describe("turnsFromSavedMessages", () => {
+  it("restores each turn with its attachments, and none where it had none", () => {
+    expect(
+      turnsFromSavedMessages([
+        {
+          role: "user",
+          content: "Read this",
+          attachments: [{ file_id: "file-1", filename: "a.pdf", bytes: 3 }],
+        },
+        {
+          role: "assistant",
+          content: "Done",
+          reasoning: null,
+          attachments: [],
+        },
+      ]),
+    ).toEqual([
+      {
+        role: "user",
+        content: "Read this",
+        reasoning: undefined,
+        attachments: [{ fileId: "file-1", filename: "a.pdf", bytes: 3 }],
+      },
+      {
+        role: "assistant",
+        content: "Done",
+        reasoning: undefined,
+        attachments: undefined,
+      },
+    ])
   })
 })

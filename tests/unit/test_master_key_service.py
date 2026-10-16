@@ -24,7 +24,7 @@ from gateway.services.master_key_service import (
     hash_master_key,
     stage_generated_master_key_rotation,
 )
-from gateway.services.pricing_service import no_pricing_error_detail
+from gateway.services.pricing_service import configure_default_pricing, no_pricing_error_detail
 
 
 @pytest.fixture(autouse=True)
@@ -139,9 +139,31 @@ async def test_is_valid_master_key_accepts_hash_and_plaintext() -> None:
     assert await deps.is_valid_master_key("nope", plain, session) is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "   "])
+async def test_blank_master_key_is_unset_and_accepts_no_empty_token(blank: str) -> None:
+    config = GatewayConfig(master_key=blank)
+    assert config.master_key is None
+    session = AsyncMock()
+    session.get.return_value = None
+    assert await deps.is_valid_master_key("", config, session) is False
+
+
 def test_402_message_states_cause_and_both_fixes() -> None:
     msg = no_pricing_error_detail("openai:gpt-5")
     assert "openai:gpt-5" in msg
     assert f"{API_ROOT}/pricing" in msg
     assert "default_pricing" in msg
     assert f"{API_ROOT}/settings" in msg
+
+
+def test_402_message_with_default_pricing_on_names_a_typo_and_not_the_fallback() -> None:
+    configure_default_pricing(True)
+    msg = no_pricing_error_detail("openai:gpt5-mini")
+    assert "openai:gpt5-mini" in msg
+    assert "Default pricing is on" in msg
+    assert "typo" in msg
+    assert f"GET {API_ROOT}/models" in msg
+    assert f"POST {API_ROOT}/pricing" in msg
+    assert f"{API_ROOT}/settings" not in msg
+    assert "enable the default-pricing fallback" not in msg

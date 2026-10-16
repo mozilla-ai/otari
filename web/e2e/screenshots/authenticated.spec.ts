@@ -91,6 +91,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   },
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
+  { route: "/sessions", name: "sessions", heading: /sessions/i },
   { route: "/tools", name: "tools", heading: /tools/i },
   // A narrowed Tools child is no longer the page above with two services
   // hidden: it heads with the tool's own status row, and its group titles drop
@@ -201,8 +202,8 @@ test.describe("organization rail", () => {
   })
 
   test("organization provider models panel", async ({ page }) => {
-    // The panel is the point of the merge and sits inside a row, so the page
-    // capture above does not reach it. Expanded by pressing the row's own
+    // The panel is the point of the merge and opens below the table, so the
+    // page capture above does not reach it. Expanded by pressing the row's own
     // control rather than by a seeded id, which is created at run time.
     await login(page)
     await ensureOrgProviderKey(page)
@@ -450,10 +451,10 @@ test.describe("the keys page's one-time secret", () => {
 })
 
 test.describe("the routing policy dialog", () => {
-  // The form at rest. The matrix at the top of this file opens routes and
-  // captures them; this is a state the page has to be put into, and on the
-  // mobile project it is also the only place the full-screen sheet appears.
-  test("the create dialog, on the form step", async ({ page }) => {
+  // The first step: what the policy is for, one line per kind. The matrix at
+  // the top of this file opens routes; this is a state the page has to be put
+  // into, and on the mobile project it is also where the sheet appears.
+  test("the create dialog, choosing a kind", async ({ page }) => {
     await login(page)
     await gotoRoute(page, "/routing")
     await expect(
@@ -461,16 +462,29 @@ test.describe("the routing policy dialog", () => {
     ).toBeVisible()
     await page.getByRole("button", { name: "Create policy" }).first().click()
     const dialog = page.getByRole("dialog")
+    await expect(dialog.getByRole("radio", { name: "Fallback" })).toBeVisible()
+    await captureScreenshot(page, "routing-create-dialog-choice")
+  })
+
+  // The fallback form, with a backup row, which is the common case at its
+  // tallest.
+  test("the create dialog, on the fallback form", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/routing")
     await expect(
-      dialog.getByRole("textbox", { name: /Policy name/ }),
+      page.getByRole("heading", { name: /routing/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create policy" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("button", { name: "Continue" }).click()
+    await expect(
+      dialog.getByRole("combobox", { name: "Backup 1" }),
     ).toBeVisible()
     await captureScreenshot(page, "routing-create-dialog")
   })
 
-  // The same dialog once a fallback chain has been summoned, which is the
-  // shortest way to a body taller than the frame: the header and the footer stay
-  // put and the fields scroll between them.
-  test("the create dialog, with a fallback chain", async ({ page }) => {
+  // A pool form: rows with a share, a mark and a remove each.
+  test("the create dialog, on the split traffic form", async ({ page }) => {
     await login(page)
     await gotoRoute(page, "/routing")
     await expect(
@@ -478,9 +492,58 @@ test.describe("the routing policy dialog", () => {
     ).toBeVisible()
     await page.getByRole("button", { name: "Create policy" }).first().click()
     const dialog = page.getByRole("dialog")
-    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
-    await expect(dialog.getByText("If that fails, try")).toBeVisible()
-    await captureScreenshot(page, "routing-create-dialog-fallback")
+    // The input is visually hidden under its label, which takes the press.
+    await dialog.getByText("Split traffic", { exact: true }).click()
+    await expect(
+      dialog.getByRole("radio", { name: "Split traffic" }),
+    ).toBeChecked()
+    await dialog.getByRole("button", { name: "Continue" }).click()
+    await expect(
+      dialog.getByRole("textbox", { name: /share/i }).first(),
+    ).toBeVisible()
+    await captureScreenshot(page, "routing-create-dialog-split")
+  })
+})
+
+test.describe("a routing policy's page", () => {
+  // A policy combining a split, a tier-down and a backup, so every editable
+  // section has something in it. Written through the API and idempotent: the
+  // write is an upsert by name.
+  test("every section, filled in", async ({ page }) => {
+    const written = await page.request.post(`${API_ROOT}/routing/policies`, {
+      headers: authHeaders,
+      data: {
+        name: "screenshot-mixed",
+        spec: {
+          select: [
+            {
+              when: { budget_used_pct: { gte: 80 } },
+              target: "openai:gpt-4o-mini",
+            },
+            {
+              router: "weighted",
+              candidates: [
+                "openai:gpt-4o",
+                "anthropic:claude-3-5-haiku-latest",
+              ],
+              weights: {
+                "openai:gpt-4o": 70,
+                "anthropic:claude-3-5-haiku-latest": 30,
+              },
+            },
+            { default: "openai:gpt-4o" },
+          ],
+          on_failure: ["groq:llama-3.3-70b-versatile"],
+        },
+      },
+    })
+    await expectOk(written, "create routing policy")
+    await login(page)
+    await gotoRoute(page, "/routing/screenshot-mixed")
+    await expect(
+      page.getByRole("heading", { name: "screenshot-mixed" }),
+    ).toBeVisible()
+    await captureScreenshot(page, "routing-policy-page")
   })
 })
 

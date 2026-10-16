@@ -24,7 +24,7 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
-from gateway.types.code_execution import ExecResponse, SessionHandle
+from gateway.types.code_execution import ExecResponse, ResultBlock, SessionHandle
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOC_PATH = _REPO_ROOT / "docs" / "code-execution-protocol.md"
@@ -287,3 +287,24 @@ def test_no_orphan_schemas(spec: dict[str, Any]) -> None:
     assert reachable, "no schema is reachable from paths; the traversal, not the spec, is broken"
     orphans = set(spec["components"]["schemas"]) - reachable
     assert not orphans, f"schema(s) no operation reaches: {orphans}"
+
+
+def test_a_content_entry_naming_no_file_is_not_a_file_reference() -> None:
+    """A text-editor view rides in the same field; it names no file, so it is discarded, not read as a blank one."""
+    block = ResultBlock.model_validate(
+        {
+            "type": "code_execution_tool_result",
+            "content": {
+                "type": "code_execution_result",
+                "stdout": "",
+                "return_code": 0,
+                "content": [
+                    {"type": "text_editor_code_execution_view_result", "content": "print('hi')\n"},
+                    {"type": "code_execution_output", "file_id": "f1", "filename": "chart.png"},
+                    {"type": "code_execution_output", "file_id": "f2"},
+                ],
+            },
+        }
+    )
+
+    assert [(ref.file_id, ref.filename) for ref in block.content.content] == [("f1", "chart.png"), ("f2", "")]

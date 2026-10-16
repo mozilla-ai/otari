@@ -1,14 +1,22 @@
 """Unit tests for the per-key model access-control matcher and validation."""
 
+import uuid
+from collections.abc import Iterator
+
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.services.model_access import (
     effective_allowlist,
     is_allowlist_subset,
     is_model_allowed,
+    key_model_refusal,
+    org_model_refusal,
     validate_allowed_models,
 )
+from gateway.services.tenancy import org_provider_key_service as org_store
+from gateway.services.tenancy.org_provider_key_service import KeyOffer
 
 
 class _Key:
@@ -119,3 +127,152 @@ def test_validate_passthrough_and_dedup() -> None:
 def test_validate_rejects_bad_entries(bad: str) -> None:
     with pytest.raises(ValueError):
         validate_allowed_models(GatewayConfig(), [bad])
+
+
+# --- organization-key refusals ---------------------------------------------
+
+
+@pytest.fixture
+def workspace_id() -> Iterator[uuid.UUID]:
+    """A workspace whose overlay entries are cleared after the test."""
+    workspace_id = uuid.uuid4()
+    org_store._org_model_restrictions.clear()
+    org_store._org_key_offers.clear()
+    yield workspace_id
+    org_store._org_model_restrictions.clear()
+    org_store._org_key_offers.clear()
+
+
+def _narrow(workspace_id: uuid.UUID, *, served: list[str], offered: dict[str, bool] | None) -> None:
+    org_store._org_model_restrictions[(workspace_id, "openai")] = served
+    org_store._org_key_offers[(workspace_id, "openai")] = KeyOffer(key_name="primary", offered=offered)
+
+
+def test_an_unnarrowed_provider_refuses_nothing(workspace_id: uuid.UUID) -> None:
+    assert org_model_refusal(workspace_id, "openai", "gpt-4o", selector="openai:gpt-4o", through_alias=False) is None
+
+
+def test_a_served_model_is_not_refused(workspace_id: uuid.UUID) -> None:
+    _narrow(workspace_id, served=["gpt-4o"], offered={"gpt-4o": True, "gpt-4o-mini": False})
+    assert org_model_refusal(workspace_id, "openai", "gpt-4o", selector="openai:gpt-4o", through_alias=False) is None
+
+
+def test_a_model_switched_off_is_refused_as_not_serving(workspace_id: uuid.UUID) -> None:
+    _narrow(workspace_id, served=["gpt-4o"], offered={"gpt-4o": True, "gpt-4o-mini": False})
+    refusal = org_model_refusal(
+        workspace_id, "openai", "gpt-4o-mini", selector="openai:gpt-4o-mini", through_alias=False
+    )
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_SERVING, 403)
+    assert "offered on provider key 'primary' but not serving" in refusal.detail
+    assert "openai:gpt-4o-mini" in refusal.detail
+
+
+def test_a_model_no_key_offers_is_not_found(workspace_id: uuid.UUID) -> None:
+    _narrow(workspace_id, served=["gpt-4o"], offered={"gpt-4o": True})
+    refusal = org_model_refusal(
+        workspace_id, "openai", "gpt-does-not-exist", selector="openai:gpt-does-not-exist", through_alias=False
+    )
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
+    assert "Provider key 'primary' does not offer 'openai:gpt-does-not-exist'" in refusal.detail
+
+
+def test_a_workspace_restriction_on_a_served_model_stays_not_allowed(workspace_id: uuid.UUID) -> None:
+    """The key serves it; this workspace chose not to reach it, which is a permission, not a switch."""
+    _narrow(workspace_id, served=["gpt-4o"], offered={"gpt-4o": True, "gpt-4o-mini": True})
+    refusal = org_model_refusal(workspace_id, "openai", "gpt-4o-mini", selector="fast", through_alias=True)
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_ALLOWED, 403)
+    assert refusal.detail == "Model 'fast' is not permitted for this API key."
+
+
+def test_a_restriction_on_a_key_offering_no_rows_stays_not_allowed(workspace_id: uuid.UUID) -> None:
+    _narrow(workspace_id, served=["gpt-4o"], offered=None)
+    refusal = org_model_refusal(
+        workspace_id, "openai", "gpt-4o-mini", selector="openai:gpt-4o-mini", through_alias=False
+    )
+    assert refusal is not None
+    assert refusal.code == MODEL_NOT_ALLOWED
+
+
+def test_the_detail_names_the_selector_not_the_resolved_model(workspace_id: uuid.UUID) -> None:
+    """An alias exists partly to keep its target off the wire."""
+    _narrow(workspace_id, served=[], offered={"gpt-4o": False})
+    refusal = org_model_refusal(workspace_id, "openai", "gpt-4o", selector="fast", through_alias=True)
+    assert refusal is not None
+    assert "fast" in refusal.detail
+    assert "gpt-4o" not in refusal.detail
+
+
+def test_an_unrestricted_key_is_never_refused_by_its_allow_list() -> None:
+    assert key_model_refusal(None, None, selector="no-such-model") is None
+    assert key_model_refusal(None, "openai:gpt-4o", selector="openai:gpt-4o") is None
+
+
+def test_a_restricted_key_is_told_an_unresolvable_selector_is_invalid_not_forbidden() -> None:
+    refusal = key_model_refusal(["openai:gpt-4o"], None, selector="no-such-model")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (INVALID_MODEL, 400)
+    assert "no-such-model" in refusal.detail
+    assert "'provider:model' selector, an alias, or a model id from the catalog" in refusal.detail
+
+
+def test_a_restricted_key_is_refused_a_model_its_list_excludes() -> None:
+    refusal = key_model_refusal(["openai:gpt-4o"], "gemini:gemini-2.5-flash", selector="gemini:gemini-2.5-flash")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_ALLOWED, 403)
+    assert key_model_refusal(["openai:*"], "openai:gpt-4o", selector="fast") is None
+
+
+def _narrow_anthropic(workspace_id: uuid.UUID, *, offered: dict[str, bool]) -> None:
+    org_store._org_model_restrictions[(workspace_id, "anthropic")] = [m for m, on in offered.items() if on]
+    org_store._org_key_offers[(workspace_id, "anthropic")] = KeyOffer(key_name="primary", offered=offered)
+
+
+def test_an_undated_name_whose_dated_builds_are_all_off_is_not_serving(workspace_id: uuid.UUID) -> None:
+    _narrow_anthropic(workspace_id, offered={"claude-haiku-4-5-20251001": False, "claude-sonnet-4-6": True})
+    refusal = org_model_refusal(
+        workspace_id, "anthropic", "claude-haiku-4-5", selector="anthropic:claude-haiku-4-5", through_alias=False
+    )
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_SERVING, 403)
+    assert refusal.detail == (
+        "Model 'anthropic:claude-haiku-4-5' is offered on provider key 'primary' "
+        "as 'anthropic:claude-haiku-4-5-20251001' but not serving. Turn it on under Organization > Providers."
+    )
+
+
+def test_an_undated_name_with_two_dated_builds_is_not_found_and_names_them(workspace_id: uuid.UUID) -> None:
+    _narrow_anthropic(workspace_id, offered={"claude-x-20250101": True, "claude-x-20250601": True})
+    refusal = org_model_refusal(
+        workspace_id, "anthropic", "claude-x", selector="anthropic:claude-x", through_alias=False
+    )
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
+    assert refusal.detail == (
+        "Provider key 'primary' does not offer 'anthropic:claude-x'. "
+        "It offers 'anthropic:claude-x-20250101', 'anthropic:claude-x-20250601'; send one of those."
+    )
+
+
+def test_an_undated_name_with_every_dated_build_off_is_not_serving_and_names_them(workspace_id: uuid.UUID) -> None:
+    """Two builds is ambiguous only while one serves; with both off, the switch is what refuses."""
+    _narrow_anthropic(workspace_id, offered={"claude-x-20250101": False, "claude-x-20250601": False})
+    refusal = org_model_refusal(
+        workspace_id, "anthropic", "claude-x", selector="anthropic:claude-x", through_alias=False
+    )
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_SERVING, 403)
+    assert "as 'anthropic:claude-x-20250101', 'anthropic:claude-x-20250601' but not serving" in refusal.detail
+
+
+@pytest.mark.parametrize("alias", ["fast", "claude-x"])
+def test_an_undated_name_behind_an_alias_does_not_name_the_dated_builds(workspace_id: uuid.UUID, alias: str) -> None:
+    """A bare alias may share its target's model name, so provenance decides, not the spelling."""
+    _narrow_anthropic(workspace_id, offered={"claude-x-20250101": True, "claude-x-20250601": True})
+    refusal = org_model_refusal(workspace_id, "anthropic", "claude-x", selector=alias, through_alias=True)
+    assert refusal is not None
+    assert refusal.code == MODEL_NOT_FOUND
+    assert "20250101" not in refusal.detail
+    assert "20250601" not in refusal.detail

@@ -608,6 +608,49 @@ describe("ProvidersPage", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
   })
 
+  it("lists the whole catalog, including the providers that sort last", async () => {
+    // any-llm's registry passed 50 entries, and a cap at 50 dropped `xai` and
+    // `zai` from the browsed list without a word. The catalog names both by
+    // their bare id, so the picker also spells them as the rest of the UI does.
+    const filler = Array.from({ length: 55 }, (_, i) => ({
+      id: `provider${String(i).padStart(2, "0")}`,
+      name: `Provider ${String(i).padStart(2, "0")}`,
+      env_key: null,
+      default_api_base: null,
+      requires_api_key: true,
+      env_key_present: false,
+    }))
+    mockApi({
+      meta: [],
+      stored: [],
+      catalog: [
+        ...filler,
+        {
+          id: "xai",
+          name: "xai",
+          env_key: "XAI_API_KEY",
+          default_api_base: null,
+          requires_api_key: true,
+          env_key_present: false,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider" }),
+    )
+    await user.click(screen.getByRole("button", { name: /show suggestions/i }))
+
+    const listbox = await screen.findByRole("listbox")
+    const xai = await within(listbox).findByRole("option", { name: "xAI" })
+    expect(within(listbox).getAllByRole("option")).toHaveLength(56)
+
+    await user.click(xai)
+    expect(screen.getByPlaceholderText("Search providers…")).toHaveValue("xAI")
+  })
+
   it("offers a fresh draft from each of the two openers", async () => {
     // Nothing unmounts the form, so the remount on the way in is the only thing
     // that clears it, and what it clears here includes a pasted provider key: a

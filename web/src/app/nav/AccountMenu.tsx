@@ -10,23 +10,29 @@ import {
   FiFileText,
   FiHardDrive,
   FiLogOut,
+  FiMessageCircle,
   FiMoon,
   FiSettings,
   FiShield,
+  FiSun,
 } from "react-icons/fi"
 
-import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
-import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
-import type { OrganizationContext } from "@/client"
-import { Avatar } from "@/design-system/indicators/Avatar"
-import { useAuth } from "@/features/auth/AuthContext"
-import { useOrganizationContext } from "@/shared/api/organizations"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 import {
-  THEME_PREFERENCES,
-  type ThemePreference,
-  useTheme,
-} from "@/shared/hooks/useTheme"
+  AccountBadge,
+  useAccountBadgeLabel,
+} from "@/app/nav/overlayAccountBadge"
+import { AccountMenuRows } from "@/app/nav/overlayAccountMenuRows"
+import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
+import { useNavVisibility } from "@/app/nav/useNavVisibility"
+import type { OrganizationContext } from "@/client"
+import { useAuth } from "@/features/auth/AuthContext"
+import { useProfile } from "@/shared/api/auth"
+import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
+import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useTheme } from "@/shared/hooks/useTheme"
 import {
   NAV_ICON_CLASS,
   NAV_TRANSITION,
@@ -50,12 +56,6 @@ import {
 // Data & Privacy stays a disabled row when unset rather than vanishing: the
 // settings surface it will become is coming, and a menu that silently lacks it
 // reads as a menu that never will.
-
-const THEME_LABELS: Record<ThemePreference, string> = {
-  system: "System",
-  light: "Light",
-  dark: "Dark",
-}
 
 // 36px rows at 13.5px, which is the menu's own scale: a step down from the
 // rail's 44px/14px, because a menu row is read once on the way to a decision
@@ -92,7 +92,8 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // address stands in and is a better answer than a role. An identity with
 // neither, and a context that has not landed or could not be read, get
 // "Signed in": naming nobody is the honest answer, and it is what the trigger
-// showed before the first paint anyway.
+// showed before the first paint anyway. A caller with no organization, whom
+// the context answers with a 404, is named from the profile read instead.
 function sessionIdentity(caller: OrganizationContext["caller"]): {
   name: string
   initials: string
@@ -151,7 +152,9 @@ function MenuItem({
   title,
   trailing,
   trailingIcon,
+  hasTrailingGutter = false,
   ariaLabel,
+  className = "",
 }: {
   label: string
   /** A Feather mark, named at the call site and dressed here. */
@@ -162,7 +165,15 @@ function MenuItem({
   trailing?: string
   /** Fills the same lane as `trailing`, for a mark rather than a value. */
   trailingIcon?: ReactNode
+  /**
+   * Leaves an empty chevron-width slot after the value, so a value ends where
+   * the value of a row that does end in a chevron does. A row an edition adds
+   * to this menu (the data region) ends in one, and without the slot the
+   * appearance row's value would stop 26px to the right of it.
+   */
+  hasTrailingGutter?: boolean
   ariaLabel?: string
+  className?: string
 }) {
   return (
     <button
@@ -176,7 +187,7 @@ function MenuItem({
         isDisabled && title ? `${label} (${title})` : (ariaLabel ?? undefined)
       }
       onClick={onPress}
-      className={`${MENU_ROW} ${isDisabled ? MENU_ROW_DISABLED : MENU_ROW_RESTING}`}
+      className={`${MENU_ROW} ${isDisabled ? MENU_ROW_DISABLED : MENU_ROW_RESTING} ${className}`}
     >
       <Icon aria-hidden="true" className={MENU_ICON_CLASS} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -192,6 +203,11 @@ function MenuItem({
       ) : (
         <span aria-hidden="true" className="h-0 w-11 shrink-0" />
       )}
+      {hasTrailingGutter ? (
+        // 8px from the value, not the row's 10: the chevron it stands in for sits
+        // 8px from its own row's value.
+        <span aria-hidden="true" className="-ml-0.5 size-4 shrink-0" />
+      ) : null}
     </button>
   )
 }
@@ -263,38 +279,30 @@ function MenuExternalLink({
 }
 
 /**
- * Appearance: one row that names the current preference and cycles through the
- * three, system → light → dark → system.
+ * Appearance: one row that names the current theme and flips to the other.
  *
- * The design draws only the closed state, a row with "System" on the right,
- * which is what a menu wants: the setting is one line, not three. It was
- * previously a radio group, which spent three rows of the menu on a setting
- * nobody opened the menu for, and then a segmented control, which spent one row
- * on three targets 40px wide. A cycling row is the same one line the design
- * draws and needs no second surface to open into.
- *
- * `System` stays in the cycle rather than being the off state of a light/dark
- * pair: it is a preference in its own right, and the only value that keeps
- * following the OS after the fact.
+ * The design draws only the closed state, a row with the theme on the right,
+ * which is what a menu wants: the setting is one line, not two. Light and dark
+ * are the whole choice. Until one is chosen the dashboard follows the operating
+ * system, and the row names what that resolved to.
  *
  * The trailing value is the visible state, and `aria-label` is the same fact
  * for a screen reader plus what activating will do, because a button whose
  * meaning changes on every press cannot say it in a static name.
  */
 function AppearanceControl() {
-  const { preference, setPreference } = useTheme()
-  const next =
-    THEME_PREFERENCES[
-      (THEME_PREFERENCES.indexOf(preference) + 1) % THEME_PREFERENCES.length
-    ]
+  const { resolved, toggle } = useTheme()
+  const current = resolved === "dark" ? "Dark" : "Light"
+  const next = resolved === "dark" ? "Light" : "Dark"
 
   return (
     <MenuItem
       label="Appearance"
-      icon={FiMoon}
-      trailing={THEME_LABELS[preference]}
-      ariaLabel={`Appearance: ${THEME_LABELS[preference]}. Switch to ${THEME_LABELS[next]}.`}
-      onPress={() => setPreference(next)}
+      icon={resolved === "dark" ? FiMoon : FiSun}
+      trailing={current}
+      hasTrailingGutter
+      ariaLabel={`Appearance: ${current}. Switch to ${next}.`}
+      onPress={toggle}
     />
   )
 }
@@ -304,6 +312,7 @@ export function AccountMenu({
   deploymentLanding,
   triggerRef,
   onOpenDeploymentLevel,
+  onOpenFeedback,
 }: {
   isCollapsed: boolean
   /**
@@ -319,13 +328,25 @@ export function AccountMenu({
    * opens it as a level inside the drawer, and this popover has closed by then.
    */
   onOpenDeploymentLevel?: () => void
+  /**
+   * Below `md`, opens the feedback dialog, which the shell mounts outside this
+   * popover. From `md` up the top bar carries it beside Documentation.
+   */
+  onOpenFeedback?: () => void
 }) {
   const { logout } = useAuth()
-  const { docs_url, terms_url, privacy_url } = useDeployment()
-  const hostsSurface = useSurfaceVisibility()
+  const { docs_url, terms_url, privacy_url, feedback_enabled } = useDeployment()
+  const isNavVisible = useNavVisibility()
   const organization = useOrganizationContext()
+  // A caller with no organization has no context to read a name from, so the
+  // profile names them instead; everyone else needs no second request.
+  const profile = useProfile(isNoOrganizationError(organization.error))
   const [open, setOpen] = useState(false)
-  const identity = sessionIdentity(organization.data?.caller)
+  const identity = sessionIdentity(organization.data?.caller ?? profile.data)
+  const badgeLabel = useAccountBadgeLabel()
+  const triggerLabel = badgeLabel
+    ? `Account: ${identity.name}, ${badgeLabel}`
+    : `Account: ${identity.name}`
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
@@ -341,8 +362,9 @@ export function AccountMenu({
         // otherwise hears "Account" and never who is signed in. On the
         // collapsed rail the name is not rendered at all, so this is the only
         // place it could reach anybody there. `AppearanceControl` folds its own
-        // visible state in for the same reason.
-        aria-label={`Account: ${identity.name}`}
+        // visible state in for the same reason. What the badge shows follows
+        // the name when a build gives it words of its own.
+        aria-label={triggerLabel}
         // `expandedJustify` rather than a `justify-start` appended here: this is
         // a HeroUI `Button`, which arrives centered, and the collapsed rail
         // wants the monogram in the icon column instead.
@@ -352,7 +374,7 @@ export function AccountMenu({
           expandedJustify: "start",
         })}
       >
-        <Avatar initials={identity.initials} />
+        <AccountBadge initials={identity.initials} />
         {isCollapsed ? null : (
           <>
             <span className="min-w-0 flex-1 truncate text-left text-foreground">
@@ -380,6 +402,10 @@ export function AccountMenu({
             to="/account"
             onNavigate={() => setOpen(false)}
           />
+          {/* Whatever an edition adds under the account itself, before the
+              appearance row: it belongs with who is signed in, not with how
+              the page looks. */}
+          <AccountMenuRows closeMenu={() => setOpen(false)} />
           <AppearanceControl />
           {/* The deployment's own pages, which used to sit in the organization
               rail's General section. They are the deployment talking about
@@ -451,7 +477,7 @@ export function AccountMenu({
           ) : null}
           <div className={MENU_DIVIDER} />
           {/* The top bar's destinations remain reachable in the mobile drawer. */}
-          {hostsSurface(PLAYGROUND_NAV_ITEM) && (
+          {isNavVisible(PLAYGROUND_NAV_ITEM) && (
             <MenuLink
               label={PLAYGROUND_NAV_ITEM.label}
               icon={PLAYGROUND_NAV_ITEM.icon}
@@ -476,6 +502,17 @@ export function AccountMenu({
               className="md:hidden"
             />
           )}
+          {feedback_enabled && onOpenFeedback ? (
+            <MenuItem
+              label="Feedback"
+              icon={FiMessageCircle}
+              className="md:hidden"
+              onPress={() => {
+                setOpen(false)
+                onOpenFeedback()
+              }}
+            />
+          ) : null}
           {terms_url ? (
             <MenuExternalLink
               label="Terms of service"
@@ -501,7 +538,11 @@ export function AccountMenu({
           {/* Neutral, not danger-colored. Ending a session is reversible by
               signing in again, so red here spends the color that marks the
               deletes on the pages behind this menu. */}
-          <MenuItem label="Log out" icon={FiLogOut} onPress={logout} />
+          <MenuItem
+            label="Log out"
+            icon={FiLogOut}
+            onPress={() => void logout()}
+          />
         </Popover.Dialog>
       </Popover.Content>
     </Popover>

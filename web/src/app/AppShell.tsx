@@ -1,5 +1,5 @@
 import { Button, Disclosure, Popover } from "@heroui/react"
-import { Link, Outlet, useLocation } from "@tanstack/react-router"
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { clsx } from "clsx"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -30,6 +30,7 @@ import {
   navItemForPath,
   navLabelForPath,
   ORG_NAV_SECTIONS,
+  pageLabelForPath,
   visibleNavSections,
 } from "@/app/nav/registry"
 import {
@@ -52,19 +53,21 @@ import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { Chip } from "@/design-system/indicators/Chip"
+import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
+import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
-const CHROME_TITLES: Record<string, string | undefined> = {
-  "/docs": "Documentation",
-  "/account": "Account",
-}
 
 // One width, not a range. The rail used to be draggable between 200 and 480px
 // and to remember where it was left; it is now the design's 264px, or 72px
@@ -211,6 +214,7 @@ function useRecordNavigation(): (to: NavPath, isActive: boolean) => void {
 function NavRowLink({
   to,
   label,
+  badge,
   icon: Icon,
   isActive,
   isCollapsed,
@@ -219,6 +223,7 @@ function NavRowLink({
 }: {
   to: NavPath
   label: string
+  badge?: string
   icon?: IconType
   isActive: boolean
   isCollapsed?: boolean
@@ -238,7 +243,11 @@ function NavRowLink({
         onNavigate()
       }}
       className={navRowClass({ isActive, isCollapsed, isNested })}
-      aria-label={isCollapsed ? label : undefined}
+      // Spelled out with a badge, which would otherwise run into the label
+      // ("Code executionBeta") in the accessible name.
+      aria-label={
+        isCollapsed ? label : badge ? `${label}, ${badge}` : undefined
+      }
       title={isCollapsed ? label : undefined}
     >
       {/* A nested row draws no glyph: the indent is what marks it as one, and
@@ -251,6 +260,7 @@ function NavRowLink({
       {isCollapsed ? null : (
         <span className="min-w-0 flex-1 truncate">{label}</span>
       )}
+      {badge && !isCollapsed ? <Chip tone="accent">{badge}</Chip> : null}
     </Link>
   )
 }
@@ -349,6 +359,7 @@ function NavGroup({
                 key={child.to}
                 to={child.to}
                 label={child.label}
+                badge={child.badge}
                 icon={child.icon}
                 isActive={currentPath === child.to}
                 onNavigate={() => {
@@ -427,6 +438,7 @@ function NavGroup({
             key={child.to}
             to={child.to}
             label={child.label}
+            badge={child.badge}
             icon={child.icon}
             isActive={currentPath === child.to}
             isNested
@@ -476,13 +488,18 @@ export function AppShell() {
 }
 
 function AppShellChrome() {
+  const { feedback_enabled } = useDeployment()
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const feedbackTriggerRef = useRef<HTMLButtonElement>(null)
+
   // Navigation is data: the shell renders whatever the registry declares and
   // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.
   const isVisible = useNavVisibility()
   const recordNavigation = useRecordNavigation()
   const { pathname } = useLocation()
-  useDocumentTitle(navLabelForPath(pathname) ?? CHROME_TITLES[pathname])
+  const navigate = useNavigate()
+  useDocumentTitle(pageLabelForPath(pathname))
   // A gated-off destination is still reachable by bookmark or shared URL, so the
   // shell answers those with a panel instead of a page whose every request the
   // server would refuse. An unregistered path (the guide, the 404 splat) has no
@@ -540,8 +557,11 @@ function AppShellChrome() {
   // budgets and settings are reachable only through this entry, the routes still
   // work by URL, and the server authorizes every request behind it regardless.
   // Hiding the way there because one query failed strands three destinations.
+  // A 404 is not a failure but the answer that there is no organization to
+  // manage.
   const managesOrganization =
-    canManage(organization.data) || organization.isError
+    canManage(organization.data) ||
+    (organization.isError && !isNoOrganizationError(organization.error))
 
   // Both rails remember where you were, so the controls that cross between them
   // return you rather than resetting you. Recorded here rather than on those
@@ -796,6 +816,7 @@ function AppShellChrome() {
       <UpdatePrompt />
       <ConnectionStatus />
       <PricingWarning />
+      <UnpricedUsageWarning />
       {/* `relative` so the mobile drawer can be offset from *this row* rather
           than from the viewport. The row's top edge is the header's top edge,
           and the pricing alarm above it is a band in flow, so a
@@ -934,10 +955,15 @@ function AppShellChrome() {
                 )}
               </div>
             ) : (
-              <WorkspaceSwitcher isCollapsed={effectiveCollapsed} />
+              <WorkspaceSwitcher
+                isCollapsed={effectiveCollapsed}
+                onNavigate={closeMobileNav}
+              />
             )}
           </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-4 p-3">
+          {/* No bottom padding: the account band closes the rail, so it sits on
+              the viewport's edge the way the scope band sits on the top. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-4 px-3 pt-3">
             <nav
               // Named because the header's breadcrumb is a navigation landmark
               // too, and two unnamed ones give a screen-reader user no way to tell
@@ -1104,6 +1130,10 @@ function AppShellChrome() {
               <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border">
                 <AccountMenu
                   isCollapsed={effectiveCollapsed}
+                  onOpenFeedback={() => {
+                    closeMobileNav()
+                    setFeedbackOpen(true)
+                  }}
                   triggerRef={accountTriggerRef}
                   // Below `md` the Deployment row opens a level inside the
                   // drawer instead of navigating: the popover it lives in is
@@ -1172,7 +1202,10 @@ function AppShellChrome() {
               </button>
               <Breadcrumbs pathname={pathname} />
             </div>
-            <TopBarActions />
+            <TopBarActions
+              onOpenFeedback={() => setFeedbackOpen(true)}
+              feedbackTriggerRef={feedbackTriggerRef}
+            />
           </header>
           <main
             ref={mainRef}
@@ -1194,7 +1227,9 @@ function AppShellChrome() {
                   // a registered path can be gated off, so the fallback is there
                   // for the type rather than for a case that happens.
                   title={`${navLabelForPath(pathname) ?? currentItem?.label ?? "That page"} is not available here`}
-                  description="This deployment does not serve that page. Pick a destination from the sidebar."
+                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Overview."
+                  actionLabel={pathname === "/" ? undefined : "Go to Overview"}
+                  onAction={() => void navigate({ to: "/" })}
                 />
               ) : (
                 <Outlet />
@@ -1203,6 +1238,15 @@ function AppShellChrome() {
           </main>
         </div>
       </div>
+      {feedback_enabled ? (
+        <FeedbackDialog
+          isOpen={feedbackOpen}
+          onOpenChange={setFeedbackOpen}
+          // Below `md` the drawer has closed by then, and the menu row inside it
+          // with it, so the control that reopens the drawer takes focus.
+          returnFocusRef={isMobile ? toggleRef : feedbackTriggerRef}
+        />
+      ) : null}
     </div>
   )
 }

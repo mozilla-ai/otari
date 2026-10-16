@@ -156,6 +156,19 @@ def test_user_key_mismatch_rejection_is_recorded_against_the_keys_user(
     assert row["provider"] is None
 
 
+def test_user_key_mismatch_rejection_row_carries_the_request_tags(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The mismatch is refused before the request context exists, and its row is still tagged."""
+    _make_user(client, master_key_header, "owner")
+    _make_user(client, master_key_header, "someone-else")
+    key = _make_key(client, master_key_header, "owned", user_id="owner")
+
+    assert _chat(client, key, model="openai:gpt-4o", user="someone-else", metadata={"purpose": "chat"}) == 403
+
+    assert _one_error(client, master_key_header)["tags"] == {"purpose": "chat"}
+
+
 def test_unresolvable_selector_rejection_is_recorded(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A selector that no longer resolves (400) leaves a row.
 
@@ -183,14 +196,14 @@ def test_unresolvable_selector_releases_the_reservation(
     then builds its key as the model alone, and that raw selector is exactly the
     ``provider:model`` form stored pricing rows use, so an instance removed from
     config while its pricing row survives still prices, still reserves a nonzero
-    estimate, and only fails later at dispatch. Before the refund, that hold
+    estimate, and is refused as invalid_model only after it reserved. Before the refund, that hold
     stayed on ``users.reserved`` until the next budget reset (forever for a
     budget with no reset period).
 
     Structured as an A/B, because ``reserved == 0.0`` alone would also hold if
     the estimate were 0, which would make this test pass while guarding nothing.
     The control puts the same request under a budget smaller than the estimate:
-    it is refused at the budget gate rather than reaching dispatch, which is only
+    it is refused at the budget gate rather than as invalid_model, which is only
     possible if the raw selector really did match pricing and really did produce
     a nonzero estimate. That is the precondition that makes the refund matter.
     """

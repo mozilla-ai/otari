@@ -1,0 +1,107 @@
+name: Label Released PRs
+
+# Labels every pull request a published Otari Release shipped with the release
+# tag (for example `v0.4.0`), so a PR page says which release carried it. The
+# PRs are the ones whose merge commits lie between the previous release tag and
+# this one, as GitHub associates them, which holds for squash merges and for
+# the release PR itself. any-llm does the same in its release workflow.
+#
+# A final release is diffed against the previous final release, so a PR that
+# first shipped in a pre-release is also labeled with the final version it
+# ended up in. A pre-release is diffed against the previous tag of either kind.
+#
+# Runs on the Release otari-tag-release.yml publishes, which it creates with the
+# otari-bot App token so that this workflow starts. The labels are written with
+# GITHUB_TOKEN, whose events start no workflow, so labeling a PR re-runs none of
+# its checks. Dispatch it with a tag to label an earlier release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose PRs to label (e.g. v0.9.0)"
+        required: true
+
+permissions: {}
+
+jobs:
+  label:
+    name: Label the release's PRs
+    # Integration packages tag `<package>-vX.Y.Z` and publish no Release, but a
+    # Release made by hand for one must not label Otari PRs.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Creating the label goes through the Issues API; adding it to a PR
+      # needs pull-requests.
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Resolve the release tag
+        id: ver
+        env:
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[-a-zA-Z0-9.]+)?$'; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
+          # The range starts at the previous tag, so the history and tags are needed.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Label merged PRs with the release tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$TAG" == *-* ]]; then
+            PREV_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$TAG^" 2>/dev/null || true)"
+          else
+            PREV_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude 'v*-*' "$TAG^" 2>/dev/null || true)"
+          fi
+          RANGE="${PREV_TAG:+$PREV_TAG..}$TAG"
+          echo "Labeling the PRs merged in $RANGE"
+
+          # For a commit on the default branch, this endpoint returns the PR
+          # that merged it. A failed call (rate limit, network) fails the job
+          # rather than leaving a PR silently unlabeled.
+          PRS="$(
+            git log --format=%H "$RANGE" | while read -r sha; do
+              gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
+                --jq '.[] | select(.merged_at != null) | .number'
+            done | sort -un
+          )"
+
+          if [ -z "$PRS" ]; then
+            echo "No merged PRs in $RANGE"
+            exit 0
+          fi
+
+          gh label create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --color "0e8a16" \
+            --description "Shipped in release $TAG" \
+            --force
+
+          FAILED=0
+          for pr in $PRS; do
+            echo "Labeling #$pr"
+            if ! gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$pr/labels" \
+              -f "labels[]=$TAG" --silent; then
+              echo "::warning::Could not label #$pr"
+              FAILED=1
+            fi
+          done
+          exit "$FAILED"

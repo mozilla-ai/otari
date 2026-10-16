@@ -13,10 +13,12 @@
  * Not in a sidebar rail. It is a chrome destination like `/account` and
  * `/docs`: a permanent row for something that is empty almost always would
  * read as a section of the product. The organization switcher surfaces it
- * instead, and only while something is actually waiting.
+ * instead, and only while something is actually waiting or the caller belongs
+ * to no organization.
  */
 
 import { Button } from "@heroui/react"
+import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiMail } from "react-icons/fi"
 
@@ -32,6 +34,7 @@ import {
   useAcceptPendingMembership,
   useDeclinePendingMembership,
   usePendingOrganizationInvitations,
+  useSwitchOrganization,
 } from "@/shared/api/organizations"
 import { formatDateTime } from "@/shared/helpers/format"
 
@@ -45,6 +48,11 @@ export function PendingInvitationsPage() {
   // Which row's accept is in flight. `accept.isPending` alone would put every
   // row's button in a pending state, because one mutation backs the whole list.
   const [accepting, setAccepting] = useState<string | undefined>(undefined)
+  // The organization the last accept joined, so the page can offer the way
+  // into it: accepting adds the membership without moving the caller there.
+  const [joined, setJoined] = useState<PendingOrganizationInvitation>()
+  const switchOrganization = useSwitchOrganization()
+  const navigate = useNavigate()
 
   const waiting = invitations.data ?? []
   // Whether the server has actually answered, as against the query having
@@ -70,7 +78,28 @@ export function PendingInvitationsPage() {
         <PageLoading label="Loading invitations…" />
       ) : null}
 
-      {hasAnswered && waiting.length === 0 ? (
+      {joined ? (
+        <div className="flex flex-col gap-3 border-b border-border py-5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-foreground">
+            You joined <strong>{joined.organization_name}</strong>.
+          </p>
+          <Button
+            variant={waiting.length === 0 ? "primary" : "ghost"}
+            className="shrink-0"
+            isPending={switchOrganization.isPending}
+            onPress={() =>
+              switchOrganization.mutate(joined.organization_id, {
+                onSuccess: () => void navigate({ to: "/" }),
+              })
+            }
+          >
+            Go to {joined.organization_name}
+          </Button>
+        </div>
+      ) : null}
+      <ErrorBanner error={switchOrganization.error} />
+
+      {hasAnswered && waiting.length === 0 && !joined ? (
         <EmptyState
           title="No invitations waiting"
           description="When an organization invites you, it appears here as well as in the email it sends, so a link you never received is not the only way in."
@@ -125,6 +154,7 @@ export function PendingInvitationsPage() {
                     onPress={() => {
                       setAccepting(invitation.organization_member_id)
                       accept.mutate(invitation.organization_member_id, {
+                        onSuccess: () => setJoined(invitation),
                         onSettled: () => setAccepting(undefined),
                       })
                     }}

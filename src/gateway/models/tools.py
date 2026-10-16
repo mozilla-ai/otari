@@ -1,8 +1,11 @@
-"""ORM tables for gateway-run tools, and the vocabulary the executor column is closed to."""
+"""ORM tables for gateway-run tools, the executor column's vocabulary, and the web search policy a request reads."""
 
 import uuid
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
 from sqlalchemy import (
@@ -10,12 +13,15 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    false,
     func,
+    text,
     true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,45 +30,26 @@ from gateway.models.base import Base, UtcDateTime
 from gateway.models.secret_fields import redact_secret_like_values
 
 
-def _epoch_seconds(value: datetime | None) -> int | None:
-    """Return a UTC epoch from a stored datetime.
-
-    SQLite hands datetimes back naive; ``datetime.timestamp()`` would then read
-    them as local time and skew the epoch by the server's UTC offset. Treat a
-    naive value as the UTC it was stored as before converting.
-    """
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return int(value.timestamp())
-
-
-def _rfc3339(value: datetime | None) -> str | None:
-    """Return an RFC 3339 timestamp from a stored datetime, reading a naive value as UTC."""
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.isoformat().replace("+00:00", "Z")
-
-
 class SearchToolCredential(Base):
-    """A ``POST /v1/search`` tool configured at runtime through the dashboard.
+    """A search or fetch instance configured at runtime through the dashboard.
 
-    The database counterpart of a ``search_tools:`` entry in config.yml: it is
-    merged over the config-file tools at runtime (see
-    ``search_tool_store_service``), with the stored row winning on a name
-    collision, exactly as ``ProviderCredential`` does for providers. The API key
-    is held encrypted (``secret_box``) and is optional, because a ``searxng``
-    backend is normally keyless; ``last4`` is kept in clear only so the UI can
-    show which key is set without ever decrypting. Standalone mode only.
+    The database counterpart of a ``search_tools:`` or ``fetch_tools:`` entry in
+    config.yml, as ``kind`` says: it is merged over the config-file entries of
+    its kind at runtime (see ``search_tool_store_service``), with the stored row
+    winning on a name collision, exactly as ``ProviderCredential`` does for
+    providers. ``kind`` is fixed when the row is created, and ``fetch_tool`` is a
+    search row's enrichment instance. The API key is held encrypted
+    (``secret_box``) and is optional, because a ``searxng`` backend is normally
+    keyless; ``last4`` is kept in clear only so the UI can show which key is set
+    without ever decrypting. Standalone mode only.
     """
 
     __tablename__ = "search_tool_credentials"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(default="search", server_default="search")
     provider: Mapped[str] = mapped_column()
+    fetch_tool: Mapped[str | None] = mapped_column()
     api_base: Mapped[str | None] = mapped_column()
     encrypted_api_key: Mapped[str | None] = mapped_column()
     last4: Mapped[str | None] = mapped_column()
@@ -85,98 +72,15 @@ class SearchToolCredential(Base):
         """
         return {
             "name": self.name,
+            "kind": self.kind,
             "provider": self.provider,
+            "fetch_tool": self.fetch_tool,
             "api_base": self.api_base,
             "last4": self.last4,
             "timeout": self.timeout_seconds,
             "options": redact_secret_like_values(self.options) or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-
-class FileObject(Base):
-    """Uploaded file metadata for the OpenAI-compatible files API.
-
-    The raw bytes live in a pluggable blob store; this row holds metadata plus
-    the ``storage_ref`` that store minted for them. Files are scoped to
-    ``user_id`` for tenant isolation and soft-deleted via ``deleted_at``.
-    ``workspace_id`` is a second, independent axis: it says which workspace the
-    upload was made in, so a key confined to one workspace never reaches
-    another's files even when the same user holds keys in both.
-    """
-
-    __tablename__ = "file_objects"
-    __table_args__ = (
-        # The listing's shape: the tenant predicates, then the keyset sort the
-        # cursor pages on. Without them every page sorts the user's whole set;
-        # the second serves a master-key listing that names no workspace.
-        Index(
-            "ix_file_objects_user_workspace_created",
-            "user_id",
-            "workspace_id",
-            "created_at",
-            "id",
-        ),
-        Index("ix_file_objects_user_created", "user_id", "created_at", "id"),
-    )
-
-    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: f"file-{uuid.uuid4().hex}")
-    # Always set to the authenticated user; non-null enforces the user-scoping
-    # contract at the schema level. CASCADE removes a user's files on delete.
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
-    # The workspace this row belongs to; see `APIKey.workspace_id` for why it is
-    # NOT NULL and RESTRICT rather than nullable and cascading. Existing rows were
-    # backfilled onto the deployment's default workspace, which is also where a
-    # master-key upload lands.
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    filename: Mapped[str] = mapped_column()
-    mime_type: Mapped[str] = mapped_column()
-    bytes: Mapped[int] = mapped_column()
-    purpose: Mapped[str] = mapped_column(default="user_data")
-    storage_ref: Mapped[str | None] = mapped_column(nullable=True)
-    # Set when a provider's own sandbox produced the file. The three provider
-    # columns record where it came from; nothing on the read path uses them.
-    provider: Mapped[str | None] = mapped_column(nullable=True)
-    provider_instance: Mapped[str | None] = mapped_column(nullable=True)
-    provider_container_id: Mapped[str | None] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
-    )
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
-
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to the OpenAI file object shape."""
-        return {
-            "id": self.id,
-            "object": "file",
-            "bytes": self.bytes,
-            "created_at": _epoch_seconds(self.created_at),
-            "expires_at": _epoch_seconds(self.expires_at),
-            "filename": self.filename,
-            "purpose": self.purpose,
-        }
-
-    def to_anthropic_dict(self) -> dict[str, Any]:
-        """Convert to the ``FileMetadata`` shape of Anthropic's GA Files API.
-
-        ``expires_at`` is always present and ``None`` for a file kept indefinitely.
-        ``downloadable`` is always true, because the gateway serves every stored file's bytes back.
-        """
-        return {
-            "id": self.id,
-            "type": "file",
-            "filename": self.filename,
-            "mime_type": self.mime_type,
-            "size_bytes": self.bytes,
-            "created_at": _rfc3339(self.created_at),
-            "expires_at": _rfc3339(self.expires_at),
-            "downloadable": True,
         }
 
 
@@ -245,7 +149,7 @@ class CodeExecutor(StrEnum):
     """
 
     AUTO = "auto"
-    """The provider when it runs this tool natively for this model, else Otari."""
+    """Per attempt: the provider when that attempt's model runs this tool natively, else Otari."""
     OTARI = "otari"
     """Always the configured code-execution backend, whatever the provider offers."""
     PROVIDER = "provider"
@@ -260,6 +164,35 @@ class CodeExecutor(StrEnum):
             return None
         try:
             return cls(value.strip().lower())
+        except ValueError:
+            return None
+
+
+class SandboxProvider(StrEnum):
+    """What runs the code a code-execution tool call asks for, chosen per deployment.
+
+    Values are read without regard to case or surrounding whitespace.
+    """
+
+    PROTOCOL = "protocol"
+    """A backend at ``sandbox_url`` that speaks the published code-execution protocol."""
+    E2B = "e2b"
+    """E2B's hosted sandboxes, driven from this process."""
+
+    @classmethod
+    def parse(cls, value: object) -> "SandboxProvider | None":
+        """The member for a configured value, ``PROTOCOL`` for a blank one, or ``None`` for anything else."""
+        if isinstance(value, cls):
+            return value
+        if value is None:
+            return cls.PROTOCOL
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return cls.PROTOCOL
+        try:
+            return cls(normalized)
         except ValueError:
             return None
 
@@ -430,6 +363,186 @@ class WorkspaceWebSearchConfig(Base):
     )
 
 
+class OrgWebSearchKey(Base):
+    """One web search provider key an organization brings, for its workspaces' searches.
+
+    The search counterpart of ``OrgProviderKey`` (``models/provider_keys.py``), decided
+    at otari-ai#1748 and mozilla-ai/otari#1724: archival, one default per organization
+    and provider, and per-workspace pin or turn-off overrides
+    (:class:`WorkspaceWebSearchKeyOverride`). A workspace with a usable key searches
+    with it; any other workspace uses the deployment's own search, which this table
+    never changes. The two never merge.
+
+    ``provider`` is one of ``WEB_SEARCH_PROVIDERS``, the services the managed search
+    tool can call with a key. ``encrypted_api_key`` is Fernet-encrypted with
+    ``OTARI_SECRET_KEY`` (``services/secret_box.py``) and never serialized; ``last4``
+    is what an operator tells two keys apart by.
+
+    CASCADE: an organization-owned credential means nothing once its organization is gone.
+    """
+
+    __tablename__ = "org_web_search_keys"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "provider", "name", name="uq_org_web_search_keys_org_provider_name"),
+        # One live default per (organization, provider), arbitrated by the database
+        # so two concurrent "set default" calls cannot both win.
+        Index(
+            "uq_org_web_search_keys_org_default",
+            "organization_id",
+            "provider",
+            unique=True,
+            postgresql_where=text("is_org_default AND archived_at IS NULL"),
+            sqlite_where=text("is_org_default AND archived_at IS NULL"),
+        ),
+        # The target of the override table's composite FK, which pins an override
+        # to a key of its own organization.
+        UniqueConstraint("organization_id", "id", name="uq_org_web_search_keys_org_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    encrypted_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    last4: Mapped[str | None] = mapped_column(String(8), default=None)
+    archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    is_org_default: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
+class WorkspaceWebSearchKeyOverride(Base):
+    """A workspace's departure from its organization's web search keys for one key.
+
+    No row means the workspace inherits. A row pins the key as the workspace's own
+    (``is_default``) or turns it off for the workspace (``disabled``); a row with
+    neither is deleted rather than stored.
+    """
+
+    __tablename__ = "workspace_web_search_key_overrides"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "org_web_search_key_id", name="uq_workspace_web_search_key_overrides_ws_key"),
+        # Composite, so an override can only name a key of the workspace's own organization.
+        ForeignKeyConstraint(
+            ["organization_id", "org_web_search_key_id"],
+            ["org_web_search_keys.organization_id", "org_web_search_keys.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    org_web_search_key_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    is_default: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    disabled: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
+class WebToolCredentialSource(StrEnum):
+    """Where a workspace's web search or fetch credential came from."""
+
+    # The organization's own key, read from this deployment's rows.
+    ORG = "org"
+    # The control plane's answer to a hybrid data plane's resolve.
+    HYBRID = "hybrid"
+
+
+@dataclass(frozen=True)
+class WebToolCredential:
+    """A provider and key a workspace's web tool uses in place of the deployment's instance.
+
+    The base of :class:`WebSearchCredential` and :class:`WebFetchCredential`,
+    which are distinct types so a search key never serves a fetch, nor a fetch
+    key a search: each one's ``options`` are its own tool's.
+
+    ``api_key`` is ``None`` for a provider that takes none, such as ``searxng``.
+    The key, ``api_base`` and ``options`` are left out of the ``repr``, so a log
+    line or an error that prints the record never prints the key, nor a tenant's
+    endpoint, which can name a private host or carry userinfo.
+    """
+
+    provider: str
+    source: WebToolCredentialSource
+    api_key: str | None = field(default=None, repr=False)
+    api_base: str | None = field(default=None, repr=False)
+    options: Mapping[str, Any] = field(default=MappingProxyType({}), repr=False, hash=False)
+
+
+@dataclass(frozen=True)
+class WebSearchCredential(WebToolCredential):
+    """The search provider and key a workspace's searches use in place of the deployment's."""
+
+
+@dataclass(frozen=True)
+class WebFetchCredential(WebToolCredential):
+    """The fetch provider and key a workspace's fetches, and the enrichment of its searches, use."""
+
+
+@dataclass(frozen=True)
+class ResolvedCodeExecutionPolicy:
+    """A workspace's code execution policy, as the request path reads it.
+
+    A value type rather than the ORM row, so a streaming response that outlives the request carries no ORM identity.
+    """
+
+    enabled: bool
+    default_purpose_hint: str | None
+    max_iterations: int | None
+    exec_timeout_s: int | None
+    image: str | None
+    tools: frozenset[str] | None
+    # ``None`` leaves the choice to the deployment and the request.
+    executor: CodeExecutor | None = None
+
+
+class WebTool(StrEnum):
+    """A managed web tool a request can declare, named as the model and the control plane see it."""
+
+    SEARCH = "web_search"
+    FETCH = "web_fetch"
+
+
+@dataclass(frozen=True)
+class ResolvedWebSearchConfig:
+    """A workspace's web search policy, as the request path reads it.
+
+    A value type rather than the ORM row, so it holds no ORM identity.
+    ``authorized_tools`` is ``None`` where the policy authorizes no tool by name, so no per-tool check applies.
+    """
+
+    enabled: bool
+    max_results: int | None
+    purpose_hint: str | None
+    allowed_domains: tuple[str, ...] | None
+    blocked_domains: tuple[str, ...] | None
+    provider_options: dict[str, Any] | None
+    authorized_tools: frozenset[str] | None
+    # The workspace's own search key, which its searches use in place of the deployment's.
+    credential: WebSearchCredential | None = None
+    # The workspace's own fetch key, which its fetches and the enrichment of its searches use.
+    fetch_credential: WebFetchCredential | None = None
+
+
 class SandboxContainer(Base):
     """A code-execution sandbox held past the request that leased it, for the next one to resume.
 
@@ -460,4 +573,3 @@ class SandboxContainer(Base):
     # same workspace at the same time. Cleared when the request records its
     # lease; the timestamp releases one a crashed gateway never gave back.
     in_use_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
-

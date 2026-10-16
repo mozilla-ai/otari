@@ -82,7 +82,10 @@ const CONTEXTS: { place: string; keys: string[] }[] = [
       "status",
     ],
   },
-  { place: "otari-mcp-table", keys: ["actions", "enabled", "token"] },
+  {
+    place: "otari-mcp-table",
+    keys: ["actions", "enabled", "server_id", "token"],
+  },
   {
     place: "otari-members-table",
     keys: ["actions", "member", "role", "spend", "status", "workspaces"],

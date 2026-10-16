@@ -1,19 +1,19 @@
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
-from gateway.api.deps import get_db, require_deployment_operator
+from gateway.api.deps import BudgetServiceDep, CallerOrganization, get_db, require_deployment_operator
+from gateway.api.routes._helpers import database_error
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
-from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import Budget, BudgetResetLog
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.schemas.budgets import (
+    BUDGET_ID_PATTERN,
     BudgetResetLogResponse,
     BudgetResponse,
     CreateBudgetRequest,
@@ -78,6 +78,8 @@ async def create_budget(
         max_budget=to_usd_or_none(request.max_budget),
         token_limit=request.token_limit,
         request_limit=request.request_limit,
+        rpm_limit=request.rpm_limit,
+        tpm_limit=request.tpm_limit,
         budget_duration_sec=request.budget_duration_sec,
         reset_alignment=request.reset_alignment,
     )
@@ -85,12 +87,9 @@ async def create_budget(
     db.add(budget)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("create budget", exc) from None
     await db.refresh(budget)
 
     # A newly created budget has no users assigned yet, so the rollup is zero.
@@ -100,12 +99,13 @@ async def create_budget(
 @router.get("")
 async def list_budgets(
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[BudgetResponse]:
-    """List all budgets with pagination."""
-    result = await db.execute(select(Budget).offset(skip).limit(limit))
-    budgets = result.scalars().all()
+    """List the deployment's budgets and the caller's organization's, with pagination."""
+    budgets = await service.list_deployment_budgets(organization_id, skip=skip, limit=limit)
 
     # One grouped query for the whole page instead of a per-budget aggregate, so
     # listing N budgets stays a fixed two queries rather than N+1. Scoped to the
@@ -141,10 +141,11 @@ async def list_budgets(
 async def get_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
 ) -> BudgetResponse:
     """Get details of a specific budget."""
-    result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
-    budget = result.scalar_one_or_none()
+    budget = await service.get_deployment_budget(budget_id, organization_id)
 
     if not budget:
         raise HTTPException(
@@ -163,10 +164,11 @@ async def update_budget(
     budget_id: str,
     request: UpdateBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
 ) -> BudgetResponse:
     """Update a budget."""
-    result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
-    budget = result.scalar_one_or_none()
+    budget = await service.get_deployment_budget(budget_id, organization_id)
 
     if not budget:
         raise HTTPException(
@@ -192,6 +194,10 @@ async def update_budget(
         budget.token_limit = request.token_limit
     if "request_limit" in request.model_fields_set:
         budget.request_limit = request.request_limit
+    if "rpm_limit" in request.model_fields_set:
+        budget.rpm_limit = request.rpm_limit
+    if "tpm_limit" in request.model_fields_set:
+        budget.tpm_limit = request.tpm_limit
     # The two cadence fields settle together, because each is only legal in terms
     # of the other: the pair that has to hold is the one the row ends up with, so
     # an omitted field contributes what is stored. Switching a rolling budget to a
@@ -202,9 +208,7 @@ async def update_budget(
             if "budget_duration_sec" in request.model_fields_set
             else budget.budget_duration_sec
         )
-        alignment = (
-            request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
-        )
+        alignment = request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
         _require_single_period_source(duration, alignment)
         budget.budget_duration_sec = duration
         budget.reset_alignment = alignment
@@ -215,10 +219,9 @@ async def update_budget(
     # cosmetic one: `_roll_expired_periods` only updates a row whose `period_end`
     # is not null, so a budget moved from "no reset" to a periodic cadence would
     # leave its ceilings with NULL windows that never roll, accumulating spend
-    # forever. Since `b7e1c4a9d2f5` a budget can also belong to an organization
-    # while this route still sees every one of them, so the ceilings stranded that
-    # way may be a tenant's. Shared with the tenant-scoped surface rather than
-    # written twice.
+    # forever. Since `b7e1c4a9d2f5` a budget can also belong to an organization,
+    # so the ceilings stranded that way may be a tenant's. Shared with the
+    # tenant-scoped surface rather than written twice.
     if cadence_of(budget.budget_duration_sec, budget.reset_alignment) != cadence_before:
         await retime_ceilings_for_budget(
             db,
@@ -229,12 +232,9 @@ async def update_budget(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("update budget", exc) from None
     await db.refresh(budget)
 
     user_count, total_spend, total_reserved = await _budget_usage(db, budget_id)
@@ -243,89 +243,68 @@ async def update_budget(
     )
 
 
-@router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_budget(
-    budget_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
-    """Delete a budget.
+@router.put(
+    "/{budget_id}",
+    responses={status.HTTP_201_CREATED: {"model": BudgetResponse, "description": "The budget was created"}},
+)
+async def put_budget(
+    budget_id: Annotated[
+        str,
+        Path(
+            pattern=BUDGET_ID_PATTERN,
+            description=(
+                "An id you choose: up to 128 letters, digits, '.', '_' and '-', starting with a letter or digit"
+            ),
+        ),
+    ],
+    request: CreateBudgetRequest,
+    response: Response,
+    service: BudgetServiceDep,
+) -> BudgetResponse:
+    """Create a budget under an id you choose, or replace the one with that id.
 
-    Refused with 409 while anything still names this budget: a workspace handing
-    it to its members, or a scoped ceiling enforcing it. Both foreign keys are
-    ``RESTRICT``, so the database would refuse either anyway, but as an
-    ``IntegrityError`` reported as "Database error" with nothing naming what to
-    go and change. Checked here so the refusal can say which, and where.
+    Every field takes the value in the body, and a field left out is cleared, so
+    the same request always leaves the same budget. Answers 201 when it created
+    the budget. Users on a budget it replaces stay on it, and its ceilings follow
+    a change of reset period. A budget an organization owns is not replaced.
     """
-    result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
-    budget = result.scalar_one_or_none()
+    budget, created = await service.put_deployment_budget(budget_id, request)
+    if created:
+        response.status_code = status.HTTP_201_CREATED
+    return budget
 
-    if not budget:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Budget with id '{budget_id}' not found",
-        )
 
-    holders = (
-        (
-            await db.execute(
-                select(col(Workspace.name))
-                .join(WorkspaceBudgetDefault, WorkspaceBudgetDefault.workspace_id == col(Workspace.id))
-                .where(WorkspaceBudgetDefault.budget_id == budget_id)
-                .order_by(Workspace.name)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if holders:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This budget is the member default for "
-                f"{', '.join(holders)}. Change or remove that default on the workspace "
-                "(Organization > Workspaces > Edit) before deleting it."
-            ),
-        )
+@router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_budget(budget_id: str, service: BudgetServiceDep) -> None:
+    """Delete a budget the deployment owns.
 
-    # The same refusal for the ceilings themselves, which name a budget directly
-    # and whose foreign key is RESTRICT too. Counted rather than named: a scope id
-    # is a bare uuid, so listing them would say less than the number does.
-    enforcing = (
-        await db.execute(select(func.count()).select_from(ScopedBudget).where(ScopedBudget.budget_id == budget_id))
-    ).scalar_one()
-    if enforcing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"This budget is enforced by {enforcing} spend "
-                f"{'ceiling' if enforcing == 1 else 'ceilings'}. A member's ceiling is "
-                "changed on Members & roles (Edit > Workspace access); others are managed "
-                "through /api/v1/scoped-budgets."
-            ),
-        )
+    Refused with 409 for an organization's budget: the operator may edit one
+    (``PATCH`` retimes its ceilings) but deleting it would take a budget the
+    tenant defined out from under them.
 
-    await db.delete(budget)
-    try:
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+    Refused with 409, too, while anything still names this budget: a workspace
+    handing it to its members, or a scoped ceiling enforcing it. The refusal says
+    which, and where.
+
+    Gateway users assigned to the budget are left uncapped, as the dashboard's
+    confirmation says, its reset history is deleted with it, and it is taken off
+    every service key's ``end_user_budget_ids``. A budget that is a key's
+    ``end_user_budget_id`` is refused (409) until that key's default changes.
+    """
+    await service.delete_deployment_budget(budget_id)
 
 
 @router.get("/{budget_id}/reset-logs")
 async def list_budget_reset_logs(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    service: BudgetServiceDep,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[BudgetResetLogResponse]:
     """List per-user reset events for a budget, newest first."""
-    budget = (
-        await db.execute(select(Budget.budget_id).where(Budget.budget_id == budget_id))
-    ).scalar_one_or_none()
+    budget = await service.get_deployment_budget(budget_id, organization_id)
     if not budget:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

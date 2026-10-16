@@ -61,7 +61,7 @@ class Attempt:
 
     selection_reason: SelectionReason = "static"
     """Why this candidate is here: ``static``, ``default``, ``condition:<key>``,
-    ``router:<name>``, or ``on_failure``."""
+    ``router:<name>``, ``catalog``, or ``on_failure``."""
 
     attempt_id: str | None = None
     """Correlation id when an external control plane supplied the attempt.

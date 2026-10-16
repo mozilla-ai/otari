@@ -21,7 +21,7 @@ from gateway.models.usage import UsageLog
 class _BoomWriter:
     """A log writer whose put fails the way a broken session or queue would."""
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         raise RuntimeError("log writer is down")
 
     async def start(self) -> None:
@@ -35,8 +35,9 @@ class _RecordingWriter:
     def __init__(self) -> None:
         self.rows: list[UsageLog] = []
 
-    async def put(self, log: UsageLog) -> None:
+    async def put(self, log: UsageLog) -> bool:
         self.rows.append(log)
+        return True
 
     async def start(self) -> None:
         pass

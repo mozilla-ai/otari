@@ -52,6 +52,43 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
         )
         return list(result.scalars().all())
 
+    async def get_current_by_organization_members(
+        self,
+        organization_member_ids: Iterable[uuid.UUID],
+    ) -> dict[uuid.UUID, Invitation]:
+        """Return each membership's newest invitation that is pending or expired, keyed by membership.
+
+        The roster's view of an ``invited`` row: an invitation that expired is
+        still the one to revoke or reissue, so it is not filtered out the way
+        ``get_pending_by_organization_members`` filters it.
+
+        Ranked in SQL, so a membership's older expired rows are never loaded:
+        the work stays bounded by the page, not by its invitation history.
+        """
+        ids = list(organization_member_ids)
+        if not ids:
+            return {}
+        ranked = (
+            select(
+                col(Invitation.id).label("id"),
+                func.row_number()
+                .over(
+                    partition_by=col(Invitation.organization_member_id),
+                    order_by=(col(Invitation.created_at).desc(), col(Invitation.id).desc()),
+                )
+                .label("rank"),
+            )
+            .where(
+                col(Invitation.organization_member_id).in_(ids),
+                col(Invitation.status).in_(("pending", "expired")),
+            )
+            .subquery()
+        )
+        result = await self.db.execute(
+            select(Invitation).join(ranked, col(Invitation.id) == ranked.c.id).where(ranked.c.rank == 1)
+        )
+        return {invitation.organization_member_id: invitation for invitation in result.scalars().all()}
+
     async def get_live_pending_for_user_with_context(
         self,
         user_id: uuid.UUID,
@@ -91,6 +128,7 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
             col(Invitation.status) == "pending",
             col(Invitation.expires_at) >= now,
         ]
+
         # One join set, applied to both statements. Counting over a narrower
         # one lets a row be counted and not returned, which would end
         # ``fetchAllPaged``'s walk early on a page it read as short; today
@@ -103,9 +141,7 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
                 col(Invitation.organization_member_id) == col(OrganizationMember.id),
             ).join(Organization, col(Invitation.organization_id) == col(Organization.id))
 
-        count_result = await self.db.execute(
-            joined(select(func.count()).select_from(Invitation)).where(*conditions)
-        )
+        count_result = await self.db.execute(joined(select(func.count()).select_from(Invitation)).where(*conditions))
         count = count_result.scalar_one()
 
         result = await self.db.execute(
@@ -116,6 +152,30 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
             .limit(limit)
         )
         return [(invitation, membership, organization) for invitation, membership, organization in result.all()], count
+
+    async def lock_live_pending_for_user(self, user_id: uuid.UUID, *, now: datetime) -> bool:
+        """Lock one membership this identity holds a live invitation to, and return whether there is one.
+
+        The same conditions as ``get_live_pending_for_user_with_context``. Every
+        revocation, decline and removal suspends the membership row, so holding
+        it until the caller's transaction ends makes that write wait, and one
+        that committed first fails the re-checked ``invited`` condition.
+
+        NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
+        """
+        result = await self.db.execute(
+            select(col(OrganizationMember.id))
+            .join(Invitation, col(Invitation.organization_member_id) == col(OrganizationMember.id))
+            .where(
+                col(OrganizationMember.user_id) == user_id,
+                col(OrganizationMember.status) == "invited",
+                col(Invitation.status) == "pending",
+                col(Invitation.expires_at) >= now,
+            )
+            .limit(1)
+            .with_for_update(of=OrganizationMember)
+        )
+        return result.first() is not None
 
     async def create_invitation(
         self,

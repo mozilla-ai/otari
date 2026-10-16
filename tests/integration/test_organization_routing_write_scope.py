@@ -28,12 +28,14 @@ from typing import Any
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
 from gateway.models.provider_keys import (
     OrgProviderKey,
 )
+from gateway.models.routing import RoutingPolicy
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -363,7 +365,7 @@ def test_both_lists_are_bounded(client: TestClient, world: _World) -> None:
 
 
 def test_a_user_scoped_row_is_neither_listed_nor_destroyed_by_a_tenant_delete(
-    client: TestClient, master_key_header: dict[str, str], world: _World
+    client: TestClient, master_key_header: dict[str, str], world: _World, db_session_factory: Callable[[], Session]
 ) -> None:
     """A tenant may not address a user-scoped row, so it may not be shown one either.
 
@@ -400,12 +402,15 @@ def test_a_user_scoped_row_is_neither_listed_nor_destroyed_by_a_tenant_delete(
     assert deleted.status_code == status.HTTP_204_NO_CONTENT, deleted.text
 
     # The workspace-wide row is the one the tenant addressed and the one that
-    # went; the user-scoped row it never saw is still there.
-    survivors = {
-        (row["name"], row["user_id"])
-        for row in client.get(f"{API_ROOT}/routing/policies", headers=master_key_header).json()
-        if row["source"] == "stored"
-    }
+    # went; the user-scoped row it never saw is still there. Read from the table,
+    # because the master key's own list is the default organization's.
+    with db_session_factory() as session:
+        survivors = {
+            (row.name, row.user_id)
+            for row in session.scalars(
+                select(RoutingPolicy).where(RoutingPolicy.workspace_id == world.workspaces["alpha_one"])
+            )
+        }
     assert ("shared", "scoped-user") in survivors
     assert ("shared", None) not in survivors
 

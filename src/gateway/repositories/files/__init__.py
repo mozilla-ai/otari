@@ -1,17 +1,17 @@
-"""Data access for the file rows the ``/v1/files`` API serves."""
+"""Data access for the file rows the Files API serves."""
 
+from gateway.repositories.files.file_provider_copy_repository import FileProviderCopyRepository
 from gateway.repositories.files.file_repository import (
-    OutputFileRow,
-    delete_file_rows,
-    existing_file_ids,
-    reclaimable_files,
-    record_output_file,
+    FilePageQuery,
+    FileRepository,
+    could_name_a_file,
 )
+from gateway.repositories.files.files_repositories import FileRepositories
 
 __all__ = [
-    "OutputFileRow",
-    "delete_file_rows",
-    "existing_file_ids",
-    "reclaimable_files",
-    "record_output_file",
+    "FilePageQuery",
+    "FileProviderCopyRepository",
+    "FileRepositories",
+    "FileRepository",
+    "could_name_a_file",
 ]

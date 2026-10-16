@@ -24,6 +24,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.guardrails_exceptions import (
+    OrganizationGuardrailDefinitionAlreadyExistsError,
+    OrganizationGuardrailDefinitionArgumentsError,
+    OrganizationGuardrailDefinitionInUseError,
+    OrganizationGuardrailDefinitionLimitReachedError,
+    OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailDefinitionUnsafeUrlError,
+    OrganizationGuardrailNotBuildableError,
+    OrganizationGuardrailNotDefinableError,
+)
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailDefinition
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.tenancy import (
@@ -34,17 +45,6 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
 from gateway.services.tenancy import organization_guardrail_runner as runner
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrganizationGuardrailDefinitionAlreadyExistsError,
-    OrganizationGuardrailDefinitionArgumentsError,
-    OrganizationGuardrailDefinitionInUseError,
-    OrganizationGuardrailDefinitionLimitReachedError,
-    OrganizationGuardrailDefinitionNotFoundError,
-    OrganizationGuardrailDefinitionUnsafeUrlError,
-    OrganizationGuardrailNotBuildableError,
-    OrganizationGuardrailNotDefinableError,
-)
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     MAX_DEFINITIONS_PER_ORGANIZATION,
     OrganizationGuardrailDefinitionCreate,
@@ -53,6 +53,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionUpdate,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 pytestmark = pytest.mark.asyncio
 
@@ -85,7 +86,7 @@ def _service(db: AsyncSession) -> OrganizationGuardrailDefinitionService:
     uow = UnitOfWork(db)
     return OrganizationGuardrailDefinitionService(
         definitions=OrganizationGuardrailDefinitionRepository(uow),
-        organizations=OrganizationService(db, membership_listener=None),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         uow=uow,
         build_state=runner.build_state,
         rebuild=runner.rebuild_definition,
@@ -144,7 +145,7 @@ def _stub_vendor(monkeypatch: pytest.MonkeyPatch) -> None:
         def create(_guardrail_name: Any, **_kwargs: Any) -> Any:
             return object()
 
-    monkeypatch.setattr(runner, 'AnyGuardrail', _Stub)
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
 
 
 def _hold(organization_id: uuid.UUID, definition: OrganizationGuardrailDefinitionPublic, *, guardrail: object) -> None:
@@ -878,9 +879,7 @@ async def test_disabling_a_definition_stops_it_on_the_worker_that_served_the_wri
     assert runner.handle(organization.id, created.id) is None
 
 
-async def test_deleting_a_definition_drops_what_the_worker_held(
-    async_db: AsyncSession, vendor: list[str]
-) -> None:
+async def test_deleting_a_definition_drops_what_the_worker_held(async_db: AsyncSession, vendor: list[str]) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     service = _service(async_db)

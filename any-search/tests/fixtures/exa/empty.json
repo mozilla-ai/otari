@@ -1,0 +1,12 @@
+{
+  "status": 200,
+  "body": {
+    "requestId": "bb9141bc09183d9b00499f650bc4c405",
+    "resolvedSearchType": "",
+    "results": [],
+    "searchTime": 1026.7,
+    "costDollars": {
+      "total": 0
+    }
+  }
+}

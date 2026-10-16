@@ -51,10 +51,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.exceptions.identity_exceptions import CurrentPasswordRequiredError, EmailChangeNotSupportedError
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.password_service import MIN_PASSWORD_LENGTH
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH, validated_email
-from gateway.services.tenancy.errors import CurrentPasswordRequiredError, EmailChangeNotSupportedError
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 from gateway.services.tenancy.user_service import set_password, update_password
 
@@ -129,7 +129,9 @@ class SetPasswordRequest(BaseModel):
             "The address to sign in with. Required when the identity has none, which is the state "
             "first boot leaves the operator in, including when the master key is what authenticates "
             "the call. Resubmitting the address the identity already holds is accepted and ignored; "
-            "only a *different* address is refused, because changing one is not supported yet."
+            "only a *different* address is refused, because changing one is not supported yet. It is always the "
+            "caller's own address, the operator's when the master key authenticates the call, and never names "
+            "another account."
         ),
     )
 
@@ -166,6 +168,13 @@ async def set_dashboard_password(
     recovered; it does not excuse ``email``, because an identity with no address
     has nothing to sign in with whoever is asking. The operator setting a password
     for the first time retires master-key sign-in on this deployment.
+
+    With the master key the caller is the deployment's operator, so an ``email``
+    sent then is the operator's own sign-in address: on an unclaimed deployment it
+    claims the deployment with that address. This never sets another account's
+    password; an address another account holds is refused with 409. To help a
+    member who forgot their password, send them a link with
+    ``POST /api/v1/admin/users/{user_id}/password-link``.
 
     Every other session this identity holds ends, the caller's own excepted, so
     a cookie stolen before the change does not outlive it.

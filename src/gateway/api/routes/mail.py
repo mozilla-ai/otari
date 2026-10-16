@@ -146,6 +146,7 @@ async def send_test_mail(
         "mail_test",
         to=recipient,
         subject="Otari test message",
+        preheader="Delivered over {{TRANSPORT}}. Nothing else is needed.",
         values={
             "UI_BASE_URL": config.effective_ui_base_url,
             "TRANSPORT": mailer.transport_name,

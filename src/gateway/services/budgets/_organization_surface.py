@@ -14,6 +14,7 @@ and a ceiling that names one is still listed, with ``manageable`` false, because
 from datetime import UTC, datetime
 from typing import Any
 
+from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.budget_exceptions import (
     BudgetStillReferencedError,
     OrganizationBudgetHeldElsewhereError,
@@ -41,7 +42,6 @@ from gateway.schemas.budgets import (
 from gateway.services.budgets._periods import period_window
 from gateway.services.budgets._retiming import cadence_of
 from gateway.services.budgets._scopes import ScopeOwnership, lock_workspace_for_scope
-from gateway.services.tenancy.errors import TenancyValidationError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 _MAX_LIST_LIMIT = 1000
@@ -184,16 +184,17 @@ class _OrganizationSurface:
         Ceilings and member policies are counted so the refusal can say which.
         A gateway user's assignment is counted but not named, because the admin cannot act on gateway users,
         and without the count the ORM would null the assignment out silently.
-        A reset record refuses at flush time instead, and is reported the same way.
+        The budget's reset history goes with it, as it does on the deployment's delete.
         """
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
         ceilings = await self._repositories.ceilings.count_for_budget(budget.budget_id)
-        defaults = await self._repositories.budgets.count_member_policies_for_budget(budget.budget_id)
+        defaults = await self._repositories.member_policies.count_for_budget(budget.budget_id)
         if ceilings or defaults:
             raise OrganizationBudgetInUseError(budget.budget_id, ceilings=ceilings, defaults=defaults)
         if await self._repositories.budgets.count_users_for_budget(budget.budget_id):
             raise OrganizationBudgetHeldElsewhereError(budget.budget_id)
+        await self._repositories.budgets.remove_reset_logs(budget.budget_id)
         try:
             await self._repositories.budgets.remove(budget)
         except BudgetStillReferencedError:
@@ -300,4 +301,3 @@ class _OrganizationSurface:
             changes["period_start"], changes["period_end"] = _current_window(budget)
         ceiling = await self._repositories.ceilings.update(ceiling, changes)
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
-

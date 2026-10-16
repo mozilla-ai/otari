@@ -33,7 +33,6 @@ from pydantic import BaseModel, Field, create_model
 
 from gateway.api.routes._schema_derive import (
     PARAM_FIELD_RENAMES,
-    SENSITIVE_PARAM_FIELDS,
     derive_request_base,
 )
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -42,6 +41,7 @@ from gateway.api.routes.chat import ChatCompletionRequest
 from gateway.api.routes.images import ImageGenerationRequest
 from gateway.api.routes.messages import MessagesRequest
 from gateway.api.routes.responses import ResponsesRequest
+from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 
 # Inference endpoints whose request schema mirrors an any-llm typed ``*Params``
 # model: (gateway request model, any-llm Params model). The request model derives
@@ -114,13 +114,28 @@ def test_messages_request_preserves_container_for_upstream() -> None:
     assert request.model_dump(exclude_unset=True)["container"] == "container_01ABC"
 
 
+def test_messages_request_preserves_a_container_object_for_upstream() -> None:
+    """Anthropic's object form, an id and the skills to load, survives validation unchanged."""
+    container = {"id": "container_01ABC", "skills": [{"type": "anthropic", "skill_id": "pptx"}]}
+    request = MessagesRequest.model_validate(
+        {
+            "model": "anthropic:claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Continue"}],
+            "max_tokens": 100,
+            "container": container,
+        }
+    )
+
+    assert request.model_dump(exclude_unset=True)["container"] == container
+
+
 def test_messages_openapi_request_schema_includes_container() -> None:
-    """The published Messages request contract advertises container continuity."""
+    """The published Messages request contract advertises container continuity, as an id or an object."""
     spec_path = Path(__file__).resolve().parents[2] / "docs/public/openapi.json"
     spec = json.loads(spec_path.read_text())
 
     container = spec["components"]["schemas"]["MessagesRequest"]["properties"]["container"]
-    assert {variant.get("type") for variant in container["anyOf"]} == {"string", "null"}
+    assert {variant.get("type") for variant in container["anyOf"]} == {"string", "object", "null"}
 
 
 def test_derived_and_hand_written_endpoints_are_disjoint() -> None:
@@ -154,9 +169,16 @@ def test_sensitive_params_are_dropped_when_deriving() -> None:
 def test_sensitive_params_are_stripped_before_forwarding() -> None:
     """A client-smuggled sensitive field (e.g. via the Responses ``extra="allow"`` path) is stripped."""
     stripped = _strip_gateway_fields(
-        {"model": "x", "temperature": 0.5, "api_key": "sk-leak", "provider": "evil", "extra_body": {}}
+        {
+            "model": "x",
+            "temperature": 0.5,
+            "api_key": "sk-leak",
+            "provider": "evil",
+            "extra_body": {},
+            "extra_headers": {"OpenAI-Project": "proj_other"},
+            "extra_query": {"api-version": "preview"},
+        }
     )
-    assert "api_key" not in stripped and "provider" not in stripped and "extra_body" not in stripped
     assert stripped == {"model": "x", "temperature": 0.5}
 
 

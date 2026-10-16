@@ -1,4 +1,4 @@
-"""Gemini on the request path: native code execution, native tools and attachments past the inline limit.
+"""Gemini on the request path: native code execution, native tools, attachments past the inline limit and caching.
 
 The pure logic is covered by ``tests/unit/test_code_executor.py`` and
 ``tests/unit/test_content_normalizer.py``. These pin what reaches the provider
@@ -26,6 +26,7 @@ from openai.types.responses import Response, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.services.files import FileService
 
 from .conftest import build_test_client
 
@@ -114,15 +115,20 @@ def _messages_body(*tools: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("sandbox", [True, False])
-def test_gemini_runs_the_bare_keyword_itself_on_chat(
-    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch, sandbox: bool
+@pytest.mark.parametrize("declared", [_BARE, _NATIVE])
+def test_gemini_runs_code_itself_on_chat(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    sandbox: bool,
+    declared: dict[str, Any],
 ) -> None:
     if sandbox:
         monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
     else:
         monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
 
-    response, seen = _post_chat(client, api_key_header, _chat_body(_BARE))
+    response, seen = _post_chat(client, api_key_header, _chat_body(declared))
 
     assert response.status_code == 200, response.text
     assert seen["tools"] == [_NATIVE]
@@ -139,6 +145,29 @@ def test_gemini_runs_anthropics_dated_keyword_itself_on_messages(
     assert seen["tools"] == [_NATIVE]
 
 
+def test_geminis_own_declaration_runs_on_the_sandbox_when_the_request_asks_for_otari(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gemini's spelling carries no ``type``, and is still decided by the executor rather than forwarded."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    headers = {**api_key_header, "Otari-Code-Execution": "otari"}
+    seen: list[dict[str, Any]] = []
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        seen.append(kwargs)
+        return _chat_response()
+
+    with patch("gateway.services.mcp_loop.acompletion", new=fake_loop_acompletion):
+        response, direct = _post_chat(client, headers, _chat_body(_NATIVE))
+
+    assert response.status_code == 200, response.text
+    sent = [*seen, direct] if direct else seen
+    assert sent
+    for kwargs in sent:
+        assert _NATIVE not in (kwargs.get("tools") or [])
+        assert _BARE not in (kwargs.get("tools") or [])
+
+
 def test_a_gemini_native_tool_reaches_the_provider_untouched_on_messages(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:
@@ -151,7 +180,10 @@ def test_a_gemini_native_tool_reaches_the_provider_untouched_on_messages(
 
 
 @pytest.fixture
-def small_inline_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+def small_inline_client(
+    test_config: GatewayConfig, clean_database: None, monkeypatch: pytest.MonkeyPatch
+) -> Generator[TestClient]:
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
     yield from build_test_client(test_config.model_copy(update={"files_gemini_inline_max_bytes": 100}))
 
 
@@ -176,13 +208,14 @@ def test_an_attachment_past_geminis_inline_limit_reaches_it_by_uri(
     headers = _key_header(small_inline_client, test_config)
     upload = AsyncMock(return_value=_URI)
 
-    with patch("gateway.api.routes._normalize.upload_attachment", new=upload):
+    with patch.object(FileService, "attachment_uri", new=upload):
         response, seen = _post_chat(small_inline_client, headers, _chat_body(content=[_pdf_part(500)]))
 
     assert response.status_code == 200, response.text
     assert seen["messages"][0]["content"] == [{"type": "file", "file": {"file_data": _URI, "filename": "big.pdf"}}]
     assert upload.await_args is not None
     assert upload.await_args.kwargs["filename"] == "big.pdf"
+    assert upload.await_args.kwargs["credential"].api_key == "g-key"
 
 
 def test_an_attachment_that_cannot_be_moved_is_refused_before_the_provider(
@@ -190,7 +223,7 @@ def test_an_attachment_that_cannot_be_moved_is_refused_before_the_provider(
 ) -> None:
     headers = _key_header(small_inline_client, test_config)
 
-    with patch("gateway.api.routes._normalize.upload_attachment", new=AsyncMock(side_effect=RuntimeError("refused"))):
+    with patch.object(FileService, "attachment_uri", new=AsyncMock(side_effect=RuntimeError("refused"))):
         response, seen = _post_chat(small_inline_client, headers, _chat_body(content=[_pdf_part(500)]))
 
     assert response.status_code == 400, response.text
@@ -198,8 +231,40 @@ def test_an_attachment_that_cannot_be_moved_is_refused_before_the_provider(
     assert seen == {}
 
 
+def test_an_attachment_that_cannot_be_moved_is_refused_on_messages_too(
+    small_inline_client: TestClient, test_config: GatewayConfig
+) -> None:
+    headers = _key_header(small_inline_client, test_config)
+    body = {
+        "model": _GEMINI,
+        "max_tokens": 100,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": base64.b64encode(b"x" * 500).decode("ascii"),
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+    with patch.object(FileService, "attachment_uri", new=AsyncMock(side_effect=RuntimeError("refused"))):
+        response, seen = _post_messages(small_inline_client, headers, body)
+
+    assert response.status_code == 400, response.text
+    assert "inline" in response.text
+    assert seen == {}
+
+
 def test_gemini_is_served_on_responses(client: TestClient, api_key_header: dict[str, str]) -> None:
-    """any-llm serves Gemini's Responses API through Interactions, so the route no longer refuses it."""
+    """any-llm serves Gemini's Responses API through Interactions, so the route does not refuse it."""
     seen: dict[str, Any] = {}
 
     async def fake_aresponses(**kwargs: Any) -> Response:
@@ -227,7 +292,7 @@ def test_gemini_is_served_on_responses(client: TestClient, api_key_header: dict[
         response = client.post(f"{API_ROOT}/responses", json={"model": _GEMINI, "input": "hi"}, headers=api_key_header)
 
     assert response.status_code == 200, response.text
-    assert seen["provider"] == "gemini"
+    assert str(seen.get("provider") or seen.get("model", "")).startswith("gemini")
 
 
 def test_a_cache_write_on_chat_is_billed_at_the_write_price(

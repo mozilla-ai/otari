@@ -1,4 +1,4 @@
-"""Compile a routing policy into an ordered plan of attempts.
+"""Compile a routing policy, or a catalog ID's offerings, into an ordered plan of attempts.
 
 Pure and synchronous. Everything it needs about the request arrives as arguments
 (:class:`BudgetState` and the allow-list), so it takes no database session, is
@@ -24,18 +24,23 @@ silently compiled down to one attempt is the failure mode this exists to prevent
 
 from __future__ import annotations
 
+import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from any_llm.exceptions import AnyLLMError
 
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
-from gateway.services.model_access import is_model_allowed
-from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
+from gateway.services.model_access import is_model_allowed, org_model_refusal
+from gateway.services.provider_kwargs import (
+    credential_ladder_exhausted,
+    resolve_catalog_fallback,
+    resolve_provider_selector,
+)
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
 
@@ -45,6 +50,7 @@ __all__ = [
     "DroppedCandidate",
     "NoEligibleCandidatesError",
     "RouterOrdering",
+    "compile_catalog_plan",
     "compile_policy",
     "needs_budget_state",
     "selection_consults_router",
@@ -118,6 +124,16 @@ class DroppedCandidate:
     """Human-readable, for an operator."""
 
 
+# A dropped candidate's detail reads after its selector ("'openai:x' is ..."),
+# so the organization-key refusals are phrased as fragments here rather than
+# reusing the full sentence the request routes answer with.
+_ORG_REFUSAL_FRAGMENTS: dict[str, str] = {
+    MODEL_NOT_ALLOWED: "is not in this workspace's organization-key model allow-list",
+    MODEL_NOT_SERVING: "is offered by the organization's provider key but not serving",
+    MODEL_NOT_FOUND: "is not offered by the organization's provider key",
+}
+
+
 @dataclass(frozen=True)
 class CompiledPlan:
     """An ordered plan, plus everything that was left out and why."""
@@ -144,6 +160,10 @@ class CompiledPlan:
     def selection_reason(self) -> str:
         """Why the head candidate was selected."""
         return self.attempts[0].selection_reason
+
+    def is_fallback(self, served: Attempt) -> bool:
+        """Whether ``served`` is a candidate other than the head, failed or skipped past."""
+        return served.position != self.head.position
 
 
 def needs_budget_state(spec: PolicySpec) -> bool:
@@ -299,67 +319,9 @@ def compile_policy(
 
     ordered: list[tuple[str, str]] = list(selected)
     ordered.extend((selector, "on_failure") for selector in spec.on_failure)
-
-    attempts: list[Attempt] = []
-    dropped: list[DroppedCandidate] = []
-    seen: set[str] = set()
-
-    for selector, selection_reason in ordered:
-        try:
-            resolved = resolve_provider_selector(config, selector, workspace_id=workspace_id)
-        except (ValueError, AnyLLMError) as exc:
-            # Startup validation rejects an unresolvable selector, so reaching
-            # this means the provider set changed under a running gateway.
-            dropped.append(
-                DroppedCandidate(selector, "unresolvable", f"could not be resolved to a provider ({exc})")
-            )
-            continue
-
-        canonical = f"{resolved.instance}:{resolved.model}"
-        if canonical in seen:
-            dropped.append(DroppedCandidate(selector, "duplicate", "already in the plan at an earlier position"))
-            continue
-        if not is_model_allowed(allowlist, canonical):
-            dropped.append(
-                DroppedCandidate(selector, "not_allowed", "is not in allowed_models for this caller")
-            )
-            continue
-        # Organization-scoped model restriction (otari#643), same disjointness
-        # condition `provider_kwargs.get_provider_kwargs` uses: only a selector
-        # that named no configured instance can have resolved through an
-        # organization key, so only that case is subject to its restriction.
-        # Every candidate is checked here, not only the plan's head, so a
-        # `router`/`on_failure` fallover cannot serve a model the workspace's
-        # organization key excludes just because the head candidate passed.
-        if workspace_id is not None and resolved.instance not in config.providers:
-            org_allowlist = cached_org_model_restriction(workspace_id, resolved.provider.value)
-            if org_allowlist is not None and resolved.model not in org_allowlist:
-                dropped.append(
-                    DroppedCandidate(
-                        selector,
-                        "not_allowed",
-                        "is not in this workspace's organization-key model allow-list",
-                    )
-                )
-                continue
-        if len(attempts) >= MAX_CANDIDATES:
-            dropped.append(
-                DroppedCandidate(selector, "over_cap", f"exceeds the {MAX_CANDIDATES}-candidate cap")
-            )
-            continue
-
-        seen.add(canonical)
-        attempts.append(
-            Attempt(
-                position=len(attempts) + 1,
-                instance=resolved.instance,
-                provider=resolved.provider,
-                model=resolved.model,
-                kwargs=resolved.kwargs,
-                display_model=policy_name,
-                selection_reason=selection_reason,
-            )
-        )
+    attempts, dropped = _resolve_candidates(
+        config, ordered, display_model=policy_name, allowlist=allowlist, workspace_id=workspace_id
+    )
 
     if not attempts:
         raise NoEligibleCandidatesError(policy_name, dropped)
@@ -389,3 +351,109 @@ def compile_policy(
         ],
         dropped=dropped,
     )
+
+
+def compile_catalog_plan(
+    config: GatewayConfig,
+    model_selector: str,
+    *,
+    user_id: str | None = None,
+    allowlist: list[str] | None = None,
+    workspace_id: uuid.UUID | None = None,
+) -> CompiledPlan | None:
+    """Turn a catalog ID into a failover plan over its offerings, best first, or ``None``.
+
+    Each offering is filtered as a policy candidate is.
+    ``None`` leaves the request to resolve as a plain model does: for a name an alias or a static policy claims,
+    for a name with fewer than two offerings, when the filters leave no offering,
+    and when an offering has no stored credential.
+    """
+    offerings = resolve_catalog_fallback(config, model_selector, user_id, workspace_id=workspace_id)
+    if len(offerings) < 2:
+        return None
+    ordered = [(selector, "catalog") for selector in offerings]
+    attempts, dropped = _resolve_candidates(
+        config, ordered, display_model=model_selector, allowlist=allowlist, workspace_id=workspace_id
+    )
+    if dropped and logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Catalog ID '%s' compiled to %d of %d offerings; dropped %s",
+            model_selector,
+            len(attempts),
+            len(offerings),
+            "; ".join(f"{item.selector} ({item.reason})" for item in dropped),
+        )
+    if not attempts:
+        return None
+    # NOTE: Only the plain path asks the hosted-credential port, so an offering that needs it leaves the plan.
+    if any(credential_ladder_exhausted(attempt.provider, attempt.kwargs) for attempt in attempts):
+        return None
+    # The first offering that survives the filters is the catalog's choice, and the rest follow it.
+    attempts = [attempts[0], *(replace(attempt, selection_reason="on_failure") for attempt in attempts[1:])]
+    return CompiledPlan(policy_name=model_selector, attempts=attempts, dropped=dropped)
+
+
+def _resolve_candidates(
+    config: GatewayConfig,
+    ordered: list[tuple[str, str]],
+    *,
+    display_model: str,
+    allowlist: list[str] | None,
+    workspace_id: uuid.UUID | None,
+) -> tuple[list[Attempt], list[DroppedCandidate]]:
+    """The attempts ``ordered`` resolves to for this caller, and every candidate dropped on the way."""
+    attempts: list[Attempt] = []
+    dropped: list[DroppedCandidate] = []
+    seen: set[str] = set()
+
+    for selector, selection_reason in ordered:
+        if len(attempts) >= MAX_CANDIDATES:
+            dropped.append(DroppedCandidate(selector, "over_cap", f"exceeds the {MAX_CANDIDATES}-candidate cap"))
+            continue
+        try:
+            resolved = resolve_provider_selector(config, selector, workspace_id=workspace_id)
+        except (ValueError, AnyLLMError) as exc:
+            # Startup validation rejects an unresolvable selector, so reaching
+            # this means the provider set changed under a running gateway.
+            dropped.append(DroppedCandidate(selector, "unresolvable", f"could not be resolved to a provider ({exc})"))
+            continue
+
+        canonical = f"{resolved.instance}:{resolved.model}"
+        if canonical in seen:
+            dropped.append(DroppedCandidate(selector, "duplicate", "already in the plan at an earlier position"))
+            continue
+        if not is_model_allowed(allowlist, canonical):
+            dropped.append(DroppedCandidate(selector, "not_allowed", "is not in allowed_models for this caller"))
+            continue
+        # Organization-scoped model restriction (otari#643), same disjointness
+        # condition `provider_kwargs.get_provider_kwargs` uses: only a selector
+        # that named no configured instance can have resolved through an
+        # organization key, so only that case is subject to its restriction.
+        # Every candidate is checked here, not only the plan's head, so a
+        # `router`/`on_failure` fallover cannot serve a model the workspace's
+        # organization key excludes just because the head candidate passed.
+        if workspace_id is not None and resolved.instance not in config.providers:
+            refusal = org_model_refusal(
+                workspace_id,
+                resolved.provider.value,
+                resolved.model,
+                selector=selector,
+                through_alias=resolved.alias is not None,
+            )
+            if refusal is not None:
+                dropped.append(DroppedCandidate(selector, "not_allowed", _ORG_REFUSAL_FRAGMENTS[refusal.code]))
+                continue
+        seen.add(canonical)
+        attempts.append(
+            Attempt(
+                position=len(attempts) + 1,
+                instance=resolved.instance,
+                provider=resolved.provider,
+                model=resolved.model,
+                kwargs=resolved.kwargs,
+                display_model=display_model,
+                selection_reason=selection_reason,
+            )
+        )
+
+    return attempts, dropped

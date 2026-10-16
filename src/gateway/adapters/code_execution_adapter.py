@@ -25,6 +25,7 @@ import httpx
 from pydantic import ValidationError
 
 from gateway.core.env import otari_env
+from gateway.models.tools import SandboxProvider
 from gateway.ports.code_execution_port import (
     CodeExecutionPort,
     CodeExecutionSession,
@@ -61,7 +62,7 @@ def _contract_violation(exc: ValidationError) -> str:
     return f"response does not match the code-execution contract ({fields})"
 
 
-class ProtocolCodeExecutionAdapter:
+class ProtocolCodeExecutionAdapter(CodeExecutionPort):
     """A backend of the operator's own, reached over the published contract."""
 
     def __init__(self, sandbox_url: str) -> None:
@@ -177,7 +178,7 @@ class ProtocolCodeExecutionAdapter:
             raise SandboxNotReachableError(f"sandbox session {session_id} could not be resumed: {exc}") from exc
 
 
-class _ProtocolSession:
+class _ProtocolSession(CodeExecutionSession):
     """The six operations, against one session of a contract-speaking backend."""
 
     def __init__(
@@ -287,11 +288,6 @@ class _ProtocolSession:
                 yield chunk
 
 
-def _selected_provider(config: GatewayConfig) -> str:
-    """The deployment's ``sandbox_provider``, normalized. One spelling, two readers."""
-    return (config.sandbox_provider or "protocol").strip().lower() or "protocol"
-
-
 def build_code_execution_port(config: GatewayConfig) -> CodeExecutionPort:
     """The adapter this deployment's ``sandbox_provider`` names.
 
@@ -299,7 +295,7 @@ def build_code_execution_port(config: GatewayConfig) -> CodeExecutionPort:
     every deployment that existed before the port. Anything else is a hosted
     provider driven in this process and needs no URL.
     """
-    if _selected_provider(config) == "e2b":
+    if config.effective_sandbox_provider() is SandboxProvider.E2B:
         from gateway.adapters.e2b_code_execution_adapter import E2BCodeExecutionAdapter
 
         return E2BCodeExecutionAdapter()
@@ -325,7 +321,7 @@ def verify_code_execution_ready(config: GatewayConfig) -> None:
         return
     try:
         build_code_execution_port(config)
-        if _selected_provider(config) == "e2b":
+        if config.effective_sandbox_provider() is SandboxProvider.E2B:
             from gateway.adapters.e2b_code_execution_adapter import verify_ready
 
             verify_ready()

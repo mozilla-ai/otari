@@ -305,48 +305,49 @@ test.describe("fallback routing", () => {
     await page.getByRole("button", { name: "Create policy" }).first().click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
-    await dialog.getByRole("textbox", { name: /Policy name/ }).fill(POLICY)
-    await fillModelBox(page, /Serves/, "openai:gpt-4o")
+    await expect(dialog.getByRole("radio", { name: "Fallback" })).toBeChecked()
+    await dialog.getByRole("button", { name: "Continue" }).click()
+    await dialog.getByRole("textbox", { name: /^Name/ }).fill(POLICY)
+    await fillModelBox(page, /^Main model/, "openai:gpt-4o")
 
-    // The chain is summoned rather than presented, so naming one model stays a
-    // short task; a second candidate is then added to the chain that exists.
-    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
-    await fillModelBox(page, /Fallback 1/, "anthropic:claude-3-5-haiku-latest")
-    await page.getByRole("button", { name: "+ Another fallback" }).click()
-    await fillModelBox(page, /Fallback 2/, "groq:llama-3.3-70b-versatile")
+    // The first backup row is there from the start; more are added one at a
+    // time, in the order they are tried.
+    await fillModelBox(page, /^Backup 1/, "anthropic:claude-3-5-haiku-latest")
+    await dialog.getByRole("button", { name: "Add a backup" }).click()
+    await fillModelBox(page, /^Backup 2/, "groq:llama-3.3-70b-versatile")
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
-    // The table summarises the chain by its length, so the count is the assertion
-    // that both fallbacks were saved and not just the first.
+    // The table lists the backups in order, so both chips are the assertion
+    // that both were saved and not just the first.
     const policy = row(page, "Routing policies", POLICY)
-    await expect(policy).toContainText(/\+2 on failure/)
+    const backups = policy
+      .getByRole("list", { name: "Backups" })
+      .getByRole("listitem")
+    await expect(backups).toHaveText([
+      "claude-3-5-haiku-latest · Anthropic",
+      "llama-3.3-70b-versatile · Groq",
+    ])
 
     // Shrinking has to be possible too: a chain that could only grow would strand
-    // an operator who added a candidate by mistake.
+    // an operator who added a candidate by mistake. Edit opens the policy's own
+    // page, where the chain is a section with its own Save.
     await policy.getByRole("button", { name: "Edit" }).click()
-    const fallbackTwo = page.getByRole("combobox", { name: /Fallback 2/ })
+    await expect(pageHeading(page, POLICY)).toBeVisible()
+    const fallbackTwo = page.getByRole("combobox", { name: /^Backup 2/ })
     await expect(fallbackTwo).toBeVisible()
-    // Scoped to the row holding Fallback 2 rather than taken by index off the
-    // page: the form grows a Remove control per condition, per candidate in a
-    // pool and per guardrail, so an index would start removing the wrong thing
-    // the moment this policy grew one of those.
-    // Innermost element holding both the box and its Remove: the combobox sits in
-    // a wrapper of its own, so filtering on the box alone lands inside that
-    // wrapper, which has no button in it.
-    await page
-      .locator("div")
-      .filter({ has: fallbackTwo })
-      .filter({ has: page.getByRole("button", { name: "Remove" }) })
-      .last()
-      .getByRole("button", { name: "Remove" })
-      .click()
-    await expect(
-      page.getByRole("combobox", { name: /Fallback 2/ }),
-    ).toHaveCount(0)
-    await page.getByRole("button", { name: "Save" }).click()
-    await expect(row(page, "Routing policies", POLICY)).toContainText(
-      /\+1 on failure/,
+    // Each backup's Remove names its row, so the press cannot land on another.
+    await page.getByRole("button", { name: "Remove backup 2" }).click()
+    await expect(page.getByRole("combobox", { name: /^Backup 2/ })).toHaveCount(
+      0,
     )
+    await page.getByRole("button", { name: "Save fallback chain" }).click()
+    await expect(page.getByText("Unsaved changes")).toHaveCount(0)
+    await page.getByRole("link", { name: "← Routing" }).click()
+    await expect(
+      row(page, "Routing policies", POLICY)
+        .getByRole("list", { name: "Backups" })
+        .getByRole("listitem"),
+    ).toHaveText(["claude-3-5-haiku-latest · Anthropic"])
 
     await row(page, "Routing policies", POLICY)
       .getByRole("button", { name: "Delete" })

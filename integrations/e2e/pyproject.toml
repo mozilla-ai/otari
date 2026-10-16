@@ -1,0 +1,23 @@
+[project]
+name = "otari-framework-e2e"
+version = "0"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic-ai-otari",
+    "langchain-otari",
+    "langgraph",
+    "langchain",
+    "pytest",
+]
+
+[tool.uv]
+package = false
+
+# The packages under test, from this checkout, so a change to one runs here before it is released.
+[tool.uv.sources]
+pydantic-ai-otari = { path = "../pydantic-ai-otari", editable = true }
+langchain-otari = { path = "../langchain-otari", editable = true }
+
+[tool.pytest.ini_options]
+# Its own config, so the repository's pytest.ini (and its plugins) do not apply here.
+addopts = "-p no:cacheprovider"

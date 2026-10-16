@@ -30,6 +30,7 @@ from sqlmodel import col
 
 from gateway.core.config import API_ROOT
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.budget_exceptions import (
     OrganizationBudgetHeldElsewhereError,
     OrganizationBudgetInUseError,
@@ -38,6 +39,7 @@ from gateway.exceptions.budget_exceptions import (
     OrganizationScopedBudgetNotFoundError,
     OrganizationScopeNotFoundError,
 )
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
@@ -59,8 +61,9 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
-from gateway.services.tenancy.errors import NotAuthorizedError, TenancyValidationError
+from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
 _CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"
@@ -370,7 +373,7 @@ def test_a_blank_provider_narrowing_is_refused(
 ) -> None:
     """A ceiling narrowed to nothing would be created, listed, and never enforced.
 
-    ``applicable_budgets`` matches ``provider_key_id == provider_instance OR IS
+    ``get_provider_ceilings`` matches ``provider_key_id == provider_instance OR IS
     NULL``, and a blank string is neither: it stores as a narrowed row under
     ``uq_scoped_budgets_scope_with_key`` and binds to no request ever. That is the
     same permissive-direction failure a scope naming nothing has, so it is refused
@@ -548,8 +551,12 @@ def _service(async_db: AsyncSession) -> BudgetService:
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
-        OrganizationService(async_db, membership_listener=None),
+        OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         ApiKeyService(ApiKeyRepository(uow)),
+        WorkspaceAccess(
+            async_db,
+            OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        ),
     )
 
 
@@ -1090,11 +1097,12 @@ async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_d
 
 
 @pytest.mark.asyncio
-async def test_a_delete_is_refused_while_a_reset_record_names_the_budget(async_db: AsyncSession) -> None:
-    """The reference that outlives the assignment which produced it.
+async def test_a_delete_clears_the_budget_reset_history(async_db: AsyncSession) -> None:
+    """A reset record outlives the assignment that produced it, and goes with the budget.
 
     A user can detach after a reset, leaving no live `users.budget_id` while the
-    `budget_reset_logs` row remains and goes on refusing the delete.
+    `budget_reset_logs` row remains. Refusing on it would strand the budget: the
+    deployment route will not delete a tenant's budget, so no one could.
     """
     organization = await _organization(async_db, slug="acme-reset-hold")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
@@ -1112,11 +1120,10 @@ async def test_a_delete_is_refused_while_a_reset_record_names_the_budget(async_d
     )
     await async_db.flush()
 
-    # `OrganizationBudgetHeldElsewhereError`, not the in-use error: a reset log is
-    # not a tenant's row to be told about, and its NOT NULL column makes the
-    # ORM's null-out fail at the commit rather than being caught by a count.
-    with pytest.raises(OrganizationBudgetHeldElsewhereError):
-        await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
+    await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
+
+    remaining = await async_db.execute(select(BudgetResetLog).where(BudgetResetLog.budget_id == budget.budget_id))
+    assert remaining.all() == []
 
 
 @pytest.mark.asyncio

@@ -15,8 +15,13 @@ untyped dicts, several inference responses use `response_model=None`), so
 `enrich_spec` first injects the real typed completion schemas from `any-llm`
 (which the gateway already depends on) before generation. The result: a chat
 method that accepts typed messages and returns a typed `ChatCompletion`,
-typed `messages` / `rerank` / `embeddings` responses, and the fully typed
-control-plane endpoints (keys, users, budgets, pricing, usage).
+typed `messages` / `rerank` / `embeddings` responses, typed batch lifecycle
+and result responses (including `ChatCompletion` results), and the fully typed
+control-plane endpoints (keys, users, budgets, pricing, usage). The one
+exception is the parts of a multi-part message `content` array (text, image,
+audio, file): the generated Python wrapper for that nested union serializes
+every part as `null`, so `enrich_spec` types the parts as free-form objects and
+the gateway validates them.
 
 Each SDK then **hand-writes a thin shell** over this generated core for the
 things OpenAPI Generator cannot emit:
@@ -138,9 +143,10 @@ warning and the regeneration still succeeds. Where branch protection requires an
 approving review, the merge stays queued until someone approves rather than
 merging unattended.
 
-**Required secret:** `SDK_CODEGEN_TOKEN`, a fine-grained PAT or GitHub App token
-with `Contents:write` and `Pull-requests:write` on the four SDK repos. The default
-`GITHUB_TOKEN` cannot push to other repositories.
+**Required secrets:** `CODEGEN_APP_ID` (the Client ID) and `CODEGEN_APP_KEY` (the
+private key) of the codegen GitHub App. The app is installed on the four SDK repos
+with `Contents:write` and `Pull-requests:write`, and each matrix leg mints a token
+for its own SDK repo. The default `GITHUB_TOKEN` cannot push to other repositories.
 
 ## Post-processing
 

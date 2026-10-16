@@ -411,13 +411,23 @@ describe("the boundary check is wired up", () => {
       "workflows",
       "otari-dashboard.yml",
     )
+    const makefile = join(WEB, "..", "Makefile")
     // Skipped rather than failed in a checkout without the workflows (a sparse
     // clone, a vendored copy of web/): the assertion has nothing to say there.
-    if (!existsSync(workflow)) return
-    const runsLint = readFileSync(workflow, "utf8").includes("pnpm run lint")
-    expect(runsLint, "otari-dashboard.yml does not run pnpm run lint").toBe(
-      true,
-    )
+    if (!existsSync(workflow) || !existsSync(makefile)) return
+    const pkg = JSON.parse(readFileSync(join(WEB, "package.json"), "utf8")) as {
+      scripts: Record<string, string>
+    }
+    // `biome check --write` still fails on a rule it cannot fix, such as a boundary import.
+    expect(
+      readFileSync(workflow, "utf8"),
+      "otari-dashboard.yml does not run make lint-web",
+    ).toContain("make lint-web")
+    expect(
+      readFileSync(makefile, "utf8"),
+      "make lint-web does not run lint:fix",
+    ).toMatch(/^lint-web:.*\n\tpnpm --dir web run lint:fix$/m)
+    expect(pkg.scripts["lint:fix"]).toContain("biome check")
   })
 })
 

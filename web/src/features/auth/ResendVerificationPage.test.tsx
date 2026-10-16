@@ -4,9 +4,15 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ResendVerificationPage } from "@/features/auth/ResendVerificationPage"
+import {
+  readSignInAddress,
+  rememberSignInAddress,
+} from "@/features/auth/signInAddress"
 import { apiFetch } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { bootstrap } from "@/tests/fixtures"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 // The network boundary, not the hooks: the real hooks, their query keys, and
@@ -30,15 +36,18 @@ function renderPage() {
   })
   return render(
     <QueryClientProvider client={client}>
-      <ThemeProvider>
-        <ResendVerificationPage />
-      </ThemeProvider>
+      <DeploymentProvider value={bootstrap()}>
+        <ThemeProvider>
+          <ResendVerificationPage />
+        </ThemeProvider>
+      </DeploymentProvider>
     </QueryClientProvider>,
   )
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  window.sessionStorage.clear()
   resetTelemetrySpy()
   window.location.hash = ""
 })
@@ -48,7 +57,21 @@ afterEach(() => {
   window.location.hash = ""
 })
 
+vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
+  PublicAuthFields: ({ page, isBusy }: { page: string; isBusy: boolean }) => (
+    <p>{`fields for ${page}, ${isBusy ? "busy" : "idle"}`}</p>
+  ),
+}))
+
 describe("ResendVerificationPage", () => {
+  it("renders the edition's own fields ahead of the address", () => {
+    renderPage()
+
+    expect(
+      screen.getByText("fields for resend-verification, idle"),
+    ).toBeInTheDocument()
+  })
+
   it("sends a fresh link and lands on the check-email page", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
     const user = userEvent.setup()
@@ -63,6 +86,23 @@ describe("ResendVerificationPage", () => {
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(
       "/auth/resend-verification",
     )
+  })
+
+  it("starts from the address the page before handed over, and passes it on", async () => {
+    rememberSignInAddress("ada@example.com")
+    vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com")
+    await user.clear(screen.getByLabelText("Email"))
+    await user.type(screen.getByLabelText("Email"), "grace@example.com")
+    await user.click(screen.getByRole("button", { name: "Send link" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/check-email?type=resend")
+    })
+    expect(readSignInAddress()).toBe("grace@example.com")
   })
 })
 

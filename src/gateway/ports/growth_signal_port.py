@@ -106,6 +106,8 @@ class GrowthSignalPort(Protocol):
           from the first successful usage row every time the guide is read,
           rather than recording it, so there is no instant at which a workspace
           becomes activated, only a polled read that would notify on every load.
+          An overlay that wants it derives it from ``UsageSignalPort``, which is
+          told about each usage row as it is written.
         """
         ...
 

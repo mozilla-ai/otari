@@ -17,6 +17,7 @@ import pytest
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException
 
+from conftest import InstallControlPlane
 from gateway.api.routes import _platform
 from gateway.api.routes._platform import (
     ResolvedAttempt,
@@ -25,8 +26,10 @@ from gateway.api.routes._platform import (
     record_abandoned_attempt,
     run_platform_attempts,
 )
-from gateway.core.config import GatewayConfig
+from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
+from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, error_code_of
 from gateway.metrics import REGISTRY
+from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -251,7 +254,9 @@ def test_default_attempt_kwargs_forwards_bedrock_extra_params_via_client_args() 
 
     kwargs = default_attempt_kwargs(attempt, {})
 
-    assert kwargs["client_args"] == {
+    client_args = dict(kwargs["client_args"])
+    assert client_args.pop("config").read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+    assert client_args == {
         "region_name": "us-east-1",
         "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
         "aws_secret_access_key": "secret-access-key",
@@ -454,9 +459,11 @@ def _completed_usage_body(
 
 
 @pytest.mark.asyncio
-async def test_report_platform_usage_returns_completed_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_platform_usage_returns_completed_cost(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     post_mock = AsyncMock(return_value=httpx.Response(200, json=_completed_usage_body()))
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     result = await _platform._report_platform_usage(
         _usage_config(),
@@ -470,10 +477,12 @@ async def test_report_platform_usage_returns_completed_cost(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
-async def test_report_platform_usage_accepts_opaque_correlation_id(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_platform_usage_accepts_opaque_correlation_id(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     correlation_id = "01HX1ABCDEFGHJKMNPQRSTVWXYZ"
     post_mock = AsyncMock(return_value=httpx.Response(200, json=_completed_usage_body(correlation_id=correlation_id)))
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     result = await _platform._report_platform_usage(
         _usage_config(),
@@ -489,11 +498,11 @@ async def test_report_platform_usage_accepts_opaque_correlation_id(monkeypatch: 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [202, 204])
 async def test_report_platform_usage_returns_none_without_completed_cost(
-    monkeypatch: pytest.MonkeyPatch,
     status_code: int,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     post_mock = AsyncMock(return_value=httpx.Response(status_code))
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     result = await _platform._report_platform_usage(
         _usage_config(),
@@ -523,15 +532,13 @@ async def test_report_platform_usage_returns_none_without_completed_cost(
     ids=["unpriced", "unavailable", "priced-zero"],
 )
 async def test_report_platform_usage_applies_pricing_source_gate(
-    monkeypatch: pytest.MonkeyPatch,
     cost_usd: str,
     usage_status: str,
     pricing_source: str | None,
     expected: _platform.SettledCost | None,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
-    monkeypatch.setattr(
-        _platform,
-        "_post_platform",
+    control_plane_transport(
         AsyncMock(
             return_value=httpx.Response(
                 200,
@@ -541,7 +548,7 @@ async def test_report_platform_usage_applies_pricing_source_gate(
                     pricing_source=pricing_source,
                 ),
             )
-        ),
+        )
     )
 
     result = await _platform._report_platform_usage(
@@ -569,11 +576,11 @@ async def test_report_platform_usage_applies_pricing_source_gate(
     ids=["malformed", "gone", "correlation-mismatch"],
 )
 async def test_report_platform_usage_ignores_non_attachable_responses(
-    monkeypatch: pytest.MonkeyPatch,
     response: httpx.Response,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     post_mock = AsyncMock(return_value=response)
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     result = await _platform._report_platform_usage(
         _usage_config(),
@@ -588,7 +595,9 @@ async def test_report_platform_usage_ignores_non_attachable_responses(
 
 
 @pytest.mark.asyncio
-async def test_report_platform_usage_ignores_failed_outcome_body(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_platform_usage_ignores_failed_outcome_body(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     post_mock = AsyncMock(
         return_value=httpx.Response(
             200,
@@ -601,7 +610,7 @@ async def test_report_platform_usage_ignores_failed_outcome_body(monkeypatch: py
             },
         )
     )
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     result = await _platform._report_platform_usage(
         _usage_config(),
@@ -617,6 +626,7 @@ async def test_report_platform_usage_ignores_failed_outcome_body(monkeypatch: py
 @pytest.mark.asyncio
 async def test_report_platform_usage_retries_then_returns_completed_cost(
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     post_mock = AsyncMock(
         side_effect=[
@@ -625,7 +635,7 @@ async def test_report_platform_usage_retries_then_returns_completed_cost(
         ]
     )
     sleep_mock = AsyncMock()
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
     monkeypatch.setattr(asyncio, "sleep", sleep_mock)
 
     result = await _platform._report_platform_usage(
@@ -642,7 +652,10 @@ async def test_report_platform_usage_retries_then_returns_completed_cost(
 
 
 @pytest.mark.asyncio
-async def test_report_platform_usage_does_not_retry_on_402(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_platform_usage_does_not_retry_on_402(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """A 402 from the usage-report endpoint is a permanent rejection (the org
     wallet is overdrawn or missing and won't recover within the retry window).
     The gateway must POST once and give up, never retry."""
@@ -655,7 +668,7 @@ async def test_report_platform_usage_does_not_retry_on_402(monkeypatch: pytest.M
     )
 
     post_mock = AsyncMock(return_value=httpx.Response(402))
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
     sleep_mock = AsyncMock()
     monkeypatch.setattr(asyncio, "sleep", sleep_mock)
 
@@ -686,9 +699,9 @@ async def test_report_platform_usage_does_not_retry_on_402(monkeypatch: pytest.M
     ],
 )
 async def test_report_platform_usage_forwards_session_label(
-    monkeypatch: pytest.MonkeyPatch,
     session_label: str | None,
     expected: str | None,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """The caller's session label rides the usage report so the platform can
     attribute spend; blank/absent labels are omitted from the payload."""
@@ -701,7 +714,7 @@ async def test_report_platform_usage_forwards_session_label(
     )
 
     post_mock = AsyncMock(return_value=httpx.Response(204))
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     await _platform._report_platform_usage(
         config,
@@ -729,9 +742,9 @@ async def test_report_platform_usage_forwards_session_label(
     ],
 )
 async def test_report_platform_usage_forwards_ttft_ms(
-    monkeypatch: pytest.MonkeyPatch,
     ttft_ms: int | None,
     expected: int | None,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     config = cast(
         GatewayConfig,
@@ -741,7 +754,7 @@ async def test_report_platform_usage_forwards_ttft_ms(
         ),
     )
     post_mock = AsyncMock(return_value=httpx.Response(204))
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     await _platform._report_platform_usage(
         config,
@@ -760,7 +773,9 @@ async def test_report_platform_usage_forwards_ttft_ms(
 
 
 @pytest.mark.asyncio
-async def test_report_platform_usage_omits_unavailable_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_platform_usage_omits_unavailable_usage(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     config = cast(
         GatewayConfig,
         SimpleNamespace(
@@ -769,7 +784,7 @@ async def test_report_platform_usage_omits_unavailable_usage(monkeypatch: pytest
         ),
     )
     post_mock = AsyncMock(return_value=httpx.Response(204))
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     await _platform._report_platform_usage(
         config,
@@ -783,7 +798,9 @@ async def test_report_platform_usage_omits_unavailable_usage(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
-async def test_report_platform_usage_forwards_final_attempt_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_platform_usage_forwards_final_attempt_marker(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     config = cast(
         GatewayConfig,
         SimpleNamespace(
@@ -792,7 +809,7 @@ async def test_report_platform_usage_forwards_final_attempt_marker(monkeypatch: 
         ),
     )
     post_mock = AsyncMock(return_value=httpx.Response(204))
-    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    control_plane_transport(post_mock)
 
     await _platform._report_platform_usage(
         config,
@@ -804,3 +821,100 @@ async def test_report_platform_usage_forwards_final_attempt_marker(monkeypatch: 
     )
 
     assert post_mock.call_args.kwargs["body"]["is_final_attempt"] is True
+
+
+class _Rejection(Exception):
+    """A provider rejection that carries its status and its own message."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+async def _exhaust(failures: list[Exception]) -> HTTPException:
+    attempts = [
+        ResolvedAttempt(
+            attempt_id=f"a{index}", position=index, provider="openai", model="m", api_key="k", managed=False
+        )
+        for index in range(len(failures))
+    ]
+    route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
+    remaining = iter(failures)
+
+    async def _run_attempt(_kwargs: dict[str, Any], _on_first_response: Any) -> str:
+        raise next(remaining)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await run_platform_attempts(
+            route=route,
+            attempts=attempts,
+            base_request_fields={},
+            run_attempt=_run_attempt,
+            extract_usage=lambda _result: None,
+            classify_error=lambda _exc: (True, "http_400"),
+            report_attempt_outcome=lambda *args: None,
+            on_success=lambda _attempt: None,
+            max_tool_iterations=1,
+        )
+    return exc_info.value
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_every_attempt_rejected_alike_returns_that_rejection() -> None:
+    exc = await _exhaust([_Rejection(400, "first rejection"), _Rejection(400, "max_tokens is too large")])
+
+    assert exc.status_code == 400
+    assert exc.detail == _platform.all_attempts_rejected_detail(2)
+    assert (exc.headers or {})[ATTEMPT_ID_HEADER] == "a1"
+    assert error_code_of(exc.headers) == ALL_CANDIDATES_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_no_attempt_knew_the_model_is_a_502() -> None:
+    exc = await _exhaust([_Rejection(404, "no such model"), _Rejection(404, "no such model")])
+
+    assert exc.status_code == 502
+    assert exc.detail == _platform.no_attempt_served_detail(2)
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_attempts_failed_differently_is_a_generic_502() -> None:
+    exc = await _exhaust([_Rejection(400, "bad request"), _Rejection(404, "no such model")])
+
+    assert exc.status_code == 502
+    assert exc.detail == "All upstream providers failed"
+
+
+@pytest.mark.asyncio
+async def test_each_attempt_is_sent_the_fields_prepared_for_it() -> None:
+    attempts = [_single_attempt("anthropic", "claude-primary"), _single_attempt("vertexai", "claude-fallback")]
+    prepared: list[str] = []
+    sent: list[dict[str, Any]] = []
+
+    def _prepare(attempt: ResolvedAttempt) -> dict[str, Any]:
+        prepared.append(attempt.provider)
+        return {"tools": [{"type": f"for-{attempt.provider}"}]}
+
+    async def _run_attempt(kwargs: dict[str, Any], _on_first_response: Any) -> Any:
+        sent.append(kwargs)
+        if len(sent) == 1:
+            raise RuntimeError("primary down")
+        return "ok"
+
+    result = await run_platform_attempts(
+        route=ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts),
+        attempts=attempts,
+        base_request_fields={"tools": [{"type": "shared"}]},
+        run_attempt=_run_attempt,
+        extract_usage=lambda _r: None,
+        classify_error=lambda _exc: (True, "unknown"),
+        report_attempt_outcome=lambda *_args: None,
+        on_success=lambda _attempt: None,
+        max_tool_iterations=1,
+        prepare_attempt=_prepare,
+    )
+
+    assert result == "ok"
+    assert prepared == ["anthropic", "vertexai"]
+    assert [kwargs["tools"] for kwargs in sent] == [[{"type": "for-anthropic"}], [{"type": "for-vertexai"}]]

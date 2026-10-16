@@ -14,13 +14,44 @@ describe("RoutingCell", () => {
           attempt_position: 1,
           attempt_count: 2,
         })}
-        outcome={{ servedBy: "openai:gpt-4o", servedPosition: 2 }}
+        outcome={{
+          servedBy: "openai:gpt-4o",
+          servedPosition: 2,
+          spilledFrom: [],
+        }}
       />,
     )
 
     expect(screen.getByText("cheap-first")).toBeInTheDocument()
     expect(
       screen.getByText("attempt 1 of 2 failed, served by openai:gpt-4o"),
+    ).toBeInTheDocument()
+  })
+
+  it("says a candidate was skipped for a full rate limit, not that it failed", () => {
+    render(
+      <RoutingCell
+        entry={entry({
+          policy_name: "spill",
+          status: "absorbed",
+          status_code: 429,
+          error_message:
+            "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+          attempt_position: 1,
+          attempt_count: 2,
+        })}
+        outcome={{
+          servedBy: "anthropic:claude-haiku-4-5",
+          servedPosition: 2,
+          spilledFrom: [],
+        }}
+      />,
+    )
+
+    expect(
+      screen.getByText(
+        "attempt 1 of 2 skipped, rate limit 'flash-cap' full, served by anthropic:claude-haiku-4-5",
+      ),
     ).toBeInTheDocument()
   })
 
