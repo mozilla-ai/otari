@@ -23,12 +23,19 @@ SESSION_TAG = "session_id"
 
 # Headers in which an agent harness sends its own session id, and the harness each
 # one belongs to. Claude Code sends ``x-claude-code-session-id`` on every request of
-# a session. Other harnesses are added as their requests are confirmed.
+# a session.
 HARNESS_SESSION_HEADERS: Mapping[str, str] = {"x-claude-code-session-id": "claude-code"}
 
 # Headers a harness sends only on a subagent's requests. A subagent shares its parent's
 # session id and works inside the parent's turn, so the task it was handed is no new prompt.
 HARNESS_SUBAGENT_HEADERS = frozenset({"x-claude-code-agent-id"})
+
+# Codex sends its thread id as ``thread-id`` and its root thread's id as ``session-id``.
+# The thread is the session, so a subagent gets one of its own; ``session-id`` is read
+# only without a ``thread-id``. Both names are generic, so they count only on a request
+# whose ``originator`` or ``User-Agent`` starts with ``codex``.
+_CODEX_SESSION_HEADERS = ("thread-id", "session-id")
+_CODEX_MARKER_HEADERS = ("originator", "user-agent")
 
 # ``User-Agent`` product names a harness is known by, where it differs from the name shown.
 _HARNESS_PRODUCTS: Mapping[str, str] = {"claude-cli": "claude-code"}
@@ -57,6 +64,10 @@ def _clean(value: str | None) -> str | None:
     return value[:_MAX_KEY_LENGTH] if value else None
 
 
+def _is_codex(headers: Mapping[str, str]) -> bool:
+    return any((headers.get(header) or "").strip().lower().startswith("codex") for header in _CODEX_MARKER_HEADERS)
+
+
 def resolve_session(
     headers: Mapping[str, str], *, session_label: str | None, tags: Mapping[str, str] | None
 ) -> SessionRef | None:
@@ -71,6 +82,10 @@ def resolve_session(
     for header in HARNESS_SESSION_HEADERS:
         if (key := _clean(headers.get(header))) is not None:
             return SessionRef(source="harness", key=key)
+    if _is_codex(headers):
+        for header in _CODEX_SESSION_HEADERS:
+            if (key := _clean(headers.get(header))) is not None:
+                return SessionRef(source="harness", key=key)
     return None
 
 
@@ -89,6 +104,8 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
     for header, harness in HARNESS_SESSION_HEADERS.items():
         if headers.get(header):
             return harness
+    if _is_codex(headers):
+        return "codex"
     agent = (headers.get("user-agent") or "").strip()
     if not agent:
         return None
