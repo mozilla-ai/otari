@@ -4,13 +4,23 @@ import {
   healthDetail,
   healthLabel,
   healthNeedsAttention,
+  toolCountLabel,
 } from "@/features/tools/mcpServerHealth"
 import { workspaceMcpServerHealth as health } from "@/tests/fixtures"
 
 describe("mcpServerHealth", () => {
-  it("counts the tools a passing check found", () => {
-    expect(healthLabel(health({ tool_count: 1 }))).toBe("1 TOOL")
-    expect(healthLabel(health({ tool_count: 12 }))).toBe("12 TOOLS")
+  it("calls a passing check connected and leaves the count to the Tools column", () => {
+    expect(healthLabel(health())).toBe("CONNECTED")
+    expect(toolCountLabel(health({ tool_count: 1, tools: ["a"] }), false)).toBe(
+      "1 tool",
+    )
+    expect(
+      toolCountLabel(health({ tool_count: 1, tools: ["a", "b", "c"] }), true),
+    ).toBe("1 of 3 tools")
+    expect(
+      toolCountLabel(health({ status: "failing", error: "timeout" }), false),
+    ).toBeUndefined()
+    expect(toolCountLabel(null, false)).toBeUndefined()
     expect(healthDetail(health({ tool_count: 2, tools: ["a", "b"] }))).toBe(
       "Connected. The server offers 2 tools.",
     )
@@ -28,7 +38,7 @@ describe("mcpServerHealth", () => {
       missing_allowed_tools: ["close_issue", "merge"],
     })
 
-    expect(healthLabel(missing)).toBe("1 TOOL · 2 MISSING")
+    expect(healthLabel(missing)).toBe("CONNECTED")
     expect(healthDetail(missing)).toMatch(/does not offer close_issue, merge/)
     expect(healthNeedsAttention(missing)).toBe(true)
   })

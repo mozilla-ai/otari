@@ -2685,11 +2685,11 @@ main {
   width: 8.75rem;
   min-width: 8.75rem;
 }
-/* Wide enough for the longest label, "12 TOOLS · 2 MISSING", on one line inside
-   the button that opens its detail. */
+/* Wide enough for the longest label, "TOKEN UNREADABLE", on one line inside the
+   button that opens its detail. */
 .otari-mcp-table .table__column[data-key="health"] {
-  width: 13.5rem;
-  min-width: 13.5rem;
+  width: 12rem;
+  min-width: 12rem;
 }
 /* Three 24px actions 16px apart, plus the cell's padding. */
 .otari-mcp-table .table__column[data-key="actions"] {

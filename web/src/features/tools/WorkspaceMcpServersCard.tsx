@@ -22,6 +22,7 @@ import {
   healthDetail,
   healthLabel,
   healthNeedsAttention,
+  toolCountLabel,
 } from "@/features/tools/mcpServerHealth"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
@@ -107,7 +108,7 @@ function healthCell(server: WorkspaceMcpServer) {
 
 /** The page's own opening line, which the `/tools` card does not carry. */
 const PAGE_DESCRIPTION =
-  "MCP endpoints a workspace's requests can reach by naming their ids, without carrying a URL or a bearer token of their own. Each is checked for SSRF safety when it is stored and again when a request uses it, and its token is encrypted at rest. Saving one also connects to it, and Health shows what that found."
+  "MCP servers this workspace's requests can use by id. Each is checked for SSRF safety and tested when saved."
 
 export function WorkspaceMcpServersCard({
   variant = "card",
@@ -263,14 +264,20 @@ export function WorkspaceMcpServersCard({
       // no allow-list at all, so `[]` exposes every tool exactly as null does.
       // This form never sends `[]`, but a row created over the API can hold one,
       // and a cell claiming no tools were exposed would be the opposite of true.
-      cell: (row) =>
-        row.allowed_tools === null || row.allowed_tools.length === 0 ? (
-          <span className="text-muted">All</span>
+      // A passing check gives the real count; without one, the allow-list is
+      // all there is to say. The names would be an unbounded column (the list
+      // runs to hundreds), so they live in the Health popover and the dialog.
+      cell: (row) => {
+        const hasAllowList =
+          row.allowed_tools !== null && row.allowed_tools.length > 0
+        const counted = toolCountLabel(row.health, hasAllowList)
+        if (counted) return <span>{counted}</span>
+        return hasAllowList ? (
+          <span>{row.allowed_tools?.length} allowed</span>
         ) : (
-          // The names themselves would be an unbounded column (the list runs to
-          // hundreds), so the count is the cell and the list is in the dialog.
-          <span>{row.allowed_tools.length} allowed</span>
-        ),
+          <span className="text-muted">All</span>
+        )
+      },
     },
     { id: "token", header: "Token", cell: tokenChip },
     {
@@ -341,14 +348,12 @@ export function WorkspaceMcpServersCard({
       )}
 
       <p className="max-w-prose text-sm text-muted">
-        Endpoints that requests billed to {selected.name} can use by naming
-        their ids in <code className="font-mono">mcp_server_ids</code>. A
-        request may still pass its own servers inline; these are the ones it
-        does not have to carry a URL or a token for. Tokens are stored encrypted
-        and are never shown again.
+        Requests billed to {selected.name} use these by listing their ids in{" "}
+        <code className="font-mono">mcp_server_ids</code>, with no URL or token
+        of their own. Tokens are encrypted and never shown again.
         {manages
           ? null
-          : " Registering or changing one is for an owner or admin of the workspace, or of the organization."}
+          : " Only an owner or admin of the workspace or organization can change them."}
       </p>
 
       <ErrorBanner error={query.error} />

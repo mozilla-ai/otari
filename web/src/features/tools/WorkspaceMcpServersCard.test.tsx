@@ -125,7 +125,7 @@ describe("WorkspaceMcpServersCard", () => {
       await screen.findByRole("heading", { level: 1, name: "MCP servers" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/checked for SSRF safety when it is stored/),
+      screen.getByText(/checked for SSRF safety and tested when saved/),
     ).toBeInTheDocument()
     expect(
       await screen.findByRole("button", { name: "Add MCP server" }),
@@ -439,7 +439,7 @@ describe("WorkspaceMcpServersCard", () => {
     // asserted here and in the operator case above.
     expect(screen.getByText("STORED")).toBeVisible()
     expect(
-      screen.getByText(/for an owner or admin of the workspace/),
+      screen.getByText(/Only an owner or admin of the workspace/),
     ).toBeVisible()
     expect(
       screen.queryByRole("button", { name: "Add MCP server" }),
@@ -462,7 +462,10 @@ describe("WorkspaceMcpServersCard", () => {
     const servers = [
       workspaceMcpServer({
         name: "github",
-        health: health({ tool_count: 3 }),
+        health: health({
+          tool_count: 3,
+          tools: ["list_issues", "get_issue", "close_issue"],
+        }),
       }),
       workspaceMcpServer({
         id: "66666666-6666-6666-6666-666666666666",
@@ -482,7 +485,8 @@ describe("WorkspaceMcpServersCard", () => {
     mockApi({ servers })
     await renderLoaded(servers)
 
-    expect(screen.getByText("3 TOOLS")).toBeVisible()
+    expect(screen.getByText("CONNECTED")).toBeVisible()
+    expect(screen.getByText("3 tools")).toBeVisible()
     expect(screen.getByText("TOKEN REJECTED")).toBeVisible()
     expect(screen.getByText("Not checked")).toBeVisible()
   })

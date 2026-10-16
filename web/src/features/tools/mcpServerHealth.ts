@@ -76,17 +76,32 @@ const FAILURES: Record<
   },
 }
 
-/** The table's few words for a check, uppercase like the cells beside it. */
+/**
+ * The table's few words for a check, uppercase like the cells beside it. A
+ * passing check says only that: the Tools column carries the count.
+ */
 export function healthLabel(health: WorkspaceMcpServerHealth): string {
-  if (health.error) {
-    const failure = FAILURES[health.error]
-    return health.error === "http_error" && health.http_status
-      ? `HTTP ${health.http_status}`
-      : failure.label
-  }
-  const tools = `${health.tool_count ?? 0} ${health.tool_count === 1 ? "TOOL" : "TOOLS"}`
-  const missing = health.missing_allowed_tools ?? []
-  return missing.length > 0 ? `${tools} · ${missing.length} MISSING` : tools
+  if (!health.error) return "CONNECTED"
+  return health.error === "http_error" && health.http_status
+    ? `HTTP ${health.http_status}`
+    : FAILURES[health.error].label
+}
+
+/**
+ * The Tools column's count from a passing check: every tool the server offers,
+ * or how many of them the allow-list admits. Undefined when no check passed.
+ */
+export function toolCountLabel(
+  health: WorkspaceMcpServerHealth | null,
+  hasAllowList: boolean,
+): string | undefined {
+  if (health?.status !== "healthy") return undefined
+  const admitted = health.tool_count ?? 0
+  const offered = health.tools?.length || admitted
+  const noun = offered === 1 ? "tool" : "tools"
+  return hasAllowList
+    ? `${admitted} of ${offered} ${noun}`
+    : `${offered} ${noun}`
 }
 
 /** One sentence saying what the check found and, on a failure, what to fix. */
