@@ -283,10 +283,9 @@ describe("HostedProvidersPage", () => {
     )
     const patch = hostedRequests(requests, "PATCH")[0]
     expect(patch.url).toContain("/hosted-providers/openai")
-    expect(patch.body).toEqual({
-      api_base: "https://proxy.example.com/v2",
-      client_args: null,
-    })
+    // The API showed no arguments, so none are sent: null would clear any it
+    // could not read back.
+    expect(patch.body).toEqual({ api_base: "https://proxy.example.com/v2" })
   })
 
   it("asks for the key again before pointing a provider at another host", async () => {

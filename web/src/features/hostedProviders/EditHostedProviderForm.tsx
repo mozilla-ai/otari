@@ -85,8 +85,9 @@ export function EditHostedProviderForm({
 
   const submit = () => {
     if (!canSubmit || !parsedClientArgs.ok) return
-    // Always sent: a stored secret the form was never shown rides back as the
-    // mask, which the server reads as "keep what is stored".
+    // A stored secret the form was never shown rides back as the mask, which
+    // the server reads as "keep what is stored". Omitted when the API showed
+    // none and none was entered: null would clear arguments it could not read.
     const clientArgs = mergeCredentialFields(
       draft.credentials,
       parsedClientArgs.value,
@@ -98,7 +99,9 @@ export function EditHostedProviderForm({
         body: {
           ...(draft.apiKey === "" ? {} : { api_key: draft.apiKey }),
           api_base: draft.apiBase.trim(),
-          client_args: clientArgs,
+          ...(provider.client_args === null && clientArgs === null
+            ? {}
+            : { client_args: clientArgs }),
         },
       },
       { onSuccess: onClose },
