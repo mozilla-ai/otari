@@ -17,9 +17,11 @@ from any_llm.types.responses import Response, ResponseStreamEvent
 from openai.types.responses import (
     ResponseCompactionItem,
     ResponseCompletedEvent,
+    ResponseFailedEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionCallArgumentsDoneEvent,
     ResponseFunctionToolCall,
+    ResponseIncompleteEvent,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
     ResponseOutputMessage,
@@ -783,6 +785,26 @@ def _response_completed(seq: int = 0, output: list[Any] | None = None) -> Respon
     )
 
 
+_TERMINAL_EVENT_TYPES = {
+    "completed": ResponseCompletedEvent,
+    "incomplete": ResponseIncompleteEvent,
+    "failed": ResponseFailedEvent,
+}
+
+
+def _response_terminal(status: str, *, output_tokens: int, seq: int = 0) -> ResponseStreamEvent:
+    """The event a response of ``status`` ends with, reporting ``output_tokens``."""
+    event_class = _TERMINAL_EVENT_TYPES[status]
+    return cast(
+        ResponseStreamEvent,
+        event_class(
+            type=cast(Any, f"response.{status}"),
+            response=_response(status=status, output_tokens=output_tokens),
+            sequence_number=seq,
+        ),
+    )
+
+
 def _message(item_id: str, text: str) -> ResponseOutputMessage:
     return ResponseOutputMessage(
         id=item_id,
@@ -985,6 +1007,127 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
     seqs = [e.sequence_number for e in events if getattr(e, "sequence_number", None) is not None]
     assert seqs == list(range(len(seqs)))
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["incomplete", "failed"])
+async def test_stream_continues_past_a_round_that_ended_unfinished_like_a_completed_one(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """A round that asked only for the gateway's tool and ended unfinished is not shown its terminal event.
+
+    The client sees one terminal event, the last one, and its usage counts the
+    earlier round's output tokens as a completed round's would be.
+    """
+    fc = _function_call("call_1", "fetch_url", '{"u": "x"}')
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, fc),
+                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _response_terminal(status, output_tokens=5),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "done"), _response_terminal("completed", output_tokens=3)),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+            max_iterations=5,
+        )
+    ]
+
+    assert [e.type for e in events if e.type.removeprefix("response.") in _TERMINAL_EVENT_TYPES] == [
+        "response.completed"
+    ]
+    assert events[-1].type == "response.completed"
+    assert cast(Any, events[-1]).response.usage.output_tokens == 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["incomplete", "failed"])
+async def test_stream_counts_earlier_rounds_output_on_a_final_round_that_ended_unfinished(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    fc = _function_call("call_1", "fetch_url", '{"u": "x"}')
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, fc),
+                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _response_terminal("completed", output_tokens=5),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "cut"), _response_terminal(status, output_tokens=3)),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+            max_iterations=5,
+        )
+    ]
+
+    assert events[-1].type == f"response.{status}"
+    assert cast(Any, events[-1]).response.usage.output_tokens == 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["incomplete", "failed"])
+async def test_stream_mixed_batch_that_ended_unfinished_announces_the_gateway_search_before_its_terminal(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """The gateway's search is run and announced on the way out, and the round's terminal event still comes last."""
+    search = _function_call("call_search", "web_search", '{"query": "otari"}')
+    foreign = _function_call("call_foreign", "user_tool", "{}")
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, search),
+                _output_item_added(1, foreign),
+                _response_terminal(status, output_tokens=4),
+            ),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakeSearchPool()
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            native_tools=_SEARCH,
+        )
+    ]
+
+    assert [(e.type, getattr(getattr(e, "item", None), "type", None)) for e in events] == [
+        ("response.output_item.added", "function_call"),
+        ("response.output_item.added", "web_search_call"),
+        ("response.output_item.done", "web_search_call"),
+        (f"response.{status}", None),
+    ]
+    assert pool.calls == [("web_search", {"query": "otari"})]
 
 
 @pytest.mark.asyncio
