@@ -92,7 +92,7 @@ function ToolPicker({
       <p className="text-sm text-muted">
         {tools.length === 0
           ? "Connected. The server offers no tools."
-          : `Connected. The server offers ${tools.length} ${tools.length === 1 ? "tool" : "tools"}; select one to add it to Allowed tools or take it off.`}
+          : `Connected. ${tools.length} ${tools.length === 1 ? "tool" : "tools"} available; click to allow.`}
       </p>
       {tools.length > 0 ? (
         <ul
@@ -136,10 +136,10 @@ function CheckNotice({ server }: { server: WorkspaceMcpServer }) {
     <div role="status">
       <InfoBanner tone="warning">
         {health === null
-          ? "Saved, but the gateway was too busy to check the connection. Use Recheck on the server's row."
+          ? "Saved, but not checked: the gateway was busy. Use Recheck on its row."
           : health.status === "failing"
-            ? `Saved, but the gateway could not use this server. ${healthDetail(health)}`
-            : "Saved. Some allowed tools are not offered by the server; they are named below."}
+            ? `Saved, but the connection failed. ${healthDetail(health)}`
+            : "Saved. Some allowed tools are not offered; see below."}
       </InfoBanner>
     </div>
   )
@@ -295,10 +295,9 @@ export function McpServerDialog({
       title={editing ? "Edit MCP server" : "New MCP server"}
       description={
         <>
-          An MCP endpoint this workspace's requests can reach by naming its id
-          in <code className="font-mono">mcp_server_ids</code>. The gateway
-          connects to it while a request runs, so it has to be reachable from
-          the gateway rather than from this browser. Saving checks that it is.
+          Requests use it by id in{" "}
+          <code className="font-mono">mcp_server_ids</code>. It must be
+          reachable from the gateway.
         </>
       }
       submitLabel={editing ? "Save server" : "Add MCP server"}
@@ -325,7 +324,7 @@ export function McpServerDialog({
         placeholder="github"
         isRequired
         autoFocus
-        description="Unique within this workspace, and what the model sees this server's tools labeled with."
+        description="Unique in this workspace."
       />
       <Field
         label="URL"
@@ -333,7 +332,6 @@ export function McpServerDialog({
         onChange={setUrl}
         placeholder="https://mcp.example.com/github"
         isRequired
-        description="The streamable HTTP MCP endpoint."
         // On the field rather than at the foot of the dialog, which is five
         // controls further down: the refusal is about this input, so it is
         // announced with this input.
@@ -359,12 +357,12 @@ export function McpServerDialog({
           placeholder={
             editing?.has_token
               ? "Leave blank to keep the stored token"
-              : "Optional bearer token"
+              : "Optional"
           }
           description={
             editing?.has_token
-              ? "A token is stored for this server. It is never shown; type a new one only to replace it."
-              : "Sent as a bearer token. Stored encrypted and never shown again."
+              ? "Stored and never shown. Type a new one to replace it."
+              : "Sent as a bearer token. Encrypted, never shown again."
           }
         />
         {editing?.has_token ? (
@@ -379,14 +377,14 @@ export function McpServerDialog({
         value={hint}
         onChange={setHint}
         placeholder="Use for repository and issue lookups"
-        description="Prepended to the system message to help the model choose this server's tools."
+        description="Helps the model choose this server's tools."
       />
       <Field
         label="Allowed tools"
         value={allowedTools}
         onChange={setAllowedTools}
-        placeholder="Comma separated, blank for every tool"
-        description="Only these tool names are exposed to the model. Blank exposes every tool the server offers."
+        placeholder="All tools"
+        description="Comma separated. Blank allows every tool."
       />
       <div role="status" className="flex flex-col gap-2">
         {testIsCurrent ? <ErrorBanner error={test.error} /> : null}
@@ -408,10 +406,7 @@ export function McpServerDialog({
         <Checkbox isSelected={enabled} onChange={setEnabled}>
           Enabled
         </Checkbox>
-        <span className="text-caption">
-          A disabled server keeps its row and its token. A request that names it
-          skips it rather than failing.
-        </span>
+        <span className="text-caption">Requests skip a disabled server.</span>
       </div>
     </FormDialog>
   )

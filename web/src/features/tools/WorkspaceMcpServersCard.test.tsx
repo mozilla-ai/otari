@@ -532,7 +532,7 @@ describe("WorkspaceMcpServersCard", () => {
     )
     await user.click(screen.getByRole("button", { name: "Test connection" }))
 
-    expect(await screen.findByText(/The server offers 3 tools/)).toBeVisible()
+    expect(await screen.findByText(/3 tools available/)).toBeVisible()
     const post = writes(calls).find((call) => call.url.endsWith("/check"))
     expect(post?.body).toEqual({
       url: "https://mcp.example.com/github",
@@ -594,11 +594,11 @@ describe("WorkspaceMcpServersCard", () => {
     await renderLoaded(servers)
 
     await user.click(screen.getByRole("button", { name: "Edit" }))
-    expect(screen.getByText(/The server offers 2 tools/)).toBeVisible()
+    expect(screen.getByText(/2 tools available/)).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Test connection" }))
 
     expect(await screen.findByText(/The test failed\./)).toBeVisible()
-    expect(screen.queryByText(/The server offers/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/tools available/)).not.toBeInTheDocument()
   })
 
   it("tests an edit with the stored token unless a new one is typed", async () => {
@@ -652,9 +652,7 @@ describe("WorkspaceMcpServersCard", () => {
       name: "Edit MCP server",
     })
     expect(
-      within(dialog).getByText(
-        /Saved, but the gateway could not use this server/,
-      ),
+      within(dialog).getByText(/Saved, but the connection failed/),
     ).toBeVisible()
     expect(within(dialog).getByText(/HTTP 404/)).toBeVisible()
     expect(
@@ -696,7 +694,7 @@ describe("WorkspaceMcpServersCard", () => {
     await user.type(screen.getByLabelText("URL"), "https://mcp.example.com/v2")
     await user.click(screen.getByRole("button", { name: "Save server" }))
 
-    expect(await screen.findByText(/too busy to check/)).toBeVisible()
+    expect(await screen.findByText(/the gateway was busy/)).toBeVisible()
     expect(screen.getByRole("dialog")).toBeVisible()
   })
 
