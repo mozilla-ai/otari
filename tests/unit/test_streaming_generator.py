@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 
+import anyio
 import pytest
 from any_llm.types.completion import CompletionUsage
 
@@ -810,7 +811,10 @@ async def test_a_stream_that_reaches_its_completing_chunk_is_unaffected_by_the_c
 
 
 class _ClosableStream:
-    """An endless stream recording whether it was closed."""
+    """An endless stream recording whether it was closed.
+
+    Reading a chunk and closing both suspend, as a provider's network calls do, so a cancellation can land in either.
+    """
 
     def __init__(self) -> None:
         self.closed = False
@@ -819,9 +823,11 @@ class _ClosableStream:
         return self
 
     async def __anext__(self) -> str:
+        await asyncio.sleep(0)
         return "chunk"
 
     async def aclose(self) -> None:
+        await asyncio.sleep(0)
         self.closed = True
 
 
@@ -843,3 +849,52 @@ async def test_a_stream_the_client_abandons_closes_its_source() -> None:
     await gen.aclose()
 
     assert source.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("keepalive_interval", [0.0, _KEEPALIVE_INTERVAL], ids=["direct", "keepalive"])
+async def test_a_stream_cancelled_by_a_client_disconnect_settles_once_and_closes_its_source(
+    keepalive_interval: float,
+) -> None:
+    """Starlette answers a disconnect by cancelling the response's task group, which cancels every await after it.
+
+    ``aclose()`` throws one ``GeneratorExit`` instead, so it cannot show whether settling and closing survive that.
+    """
+    source = _ClosableStream()
+    settlement: list[str] = []
+    observed: list[type[BaseException]] = []
+
+    async def on_incomplete() -> None:
+        settlement.append("started")
+        await asyncio.sleep(0)
+        settlement.append("finished")
+
+    gen = streaming_generator(
+        stream=source,
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        on_incomplete=on_incomplete,
+        keepalive_interval_seconds=keepalive_interval,
+    )
+
+    async def stream_response(scope: anyio.CancelScope) -> None:
+        received = 0
+        try:
+            async for _event in gen:
+                received += 1
+                if received == 5:
+                    scope.cancel()
+        except BaseException as exc:
+            observed.append(type(exc))
+            raise
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(stream_response, task_group.cancel_scope)
+
+    assert settlement == ["started", "finished"]
+    assert source.closed
+    assert observed == [asyncio.CancelledError]
