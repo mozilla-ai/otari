@@ -1535,7 +1535,7 @@ async def _prepare_for_dispatch(
 
 
 def hosted_model_not_offered_detail(selector: str) -> str:
-    """Why a model a hosted provider serves the organization, with the model switched off, is refused."""
+    """Why a model a hosted provider serves the organization, with the model not switched on, is refused."""
     return f"Model '{selector}' is not offered on this deployment."
 
 
@@ -1544,9 +1544,10 @@ async def _refuse_if_hosted_model_switched_off(
 ) -> None:
     """Refuse a model the port declined although it serves the organization the provider.
 
-    That is a model the operator switched off, and what dispatch would say
-    instead names the provider's environment variable, which no caller can set
-    and which would not serve the model either. A provider the port does not
+    That is a model the operator switched off or never put on the provider's
+    roster, and what dispatch would say instead names the provider's
+    environment variable, which no caller can set and which would not serve
+    the model either. A provider the port does not
     serve the organization at all, restricted to another one included, keeps
     the ordinary missing-credential answer, so nothing here says whether such a
     provider exists.

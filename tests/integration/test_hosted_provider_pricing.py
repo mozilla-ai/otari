@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
+from any_llm.types.model import Model
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
 from gateway.models.usage import UsageLog
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
 from .conftest import build_test_client
@@ -48,11 +50,13 @@ def _keys(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _no_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _stub(impl_name: str, **_: object) -> Any:
-        from gateway.services.model_discovery_service import ProviderDiscovery
+def _discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hosted key lists the one model these tests ask for, so the roster offers it."""
 
-        return ProviderDiscovery(provider=impl_name, models=[])
+    async def _stub(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=impl_name, models=[Model(id="gpt-4o", object="model", created=0, owned_by=impl_name)]
+        )
 
     monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _stub)
 
@@ -346,6 +350,12 @@ def test_a_zero_override_cannot_carry_an_unpriced_hosted_model_past_require_pric
     unpriced = "openai:gpt-4o"
     assert _override(strict_client, tenant.owner, 0, unpriced).status_code == status.HTTP_201_CREATED
     _hosted_openai(strict_client, master)
+    # Nothing prices it, so it arrives switched off; the operator serves it anyway.
+    [offered] = strict_client.get(f"{API_ROOT}/hosted-providers/openai/models", headers=master).json()["data"]
+    switched_on = strict_client.patch(
+        f"{API_ROOT}/hosted-providers/openai/models/{offered['id']}", json={"enabled": True}, headers=master
+    )
+    assert switched_on.status_code == status.HTTP_200_OK, switched_on.text
 
     response, captured = _complete(strict_client, _api_key(strict_client, tenant), unpriced)
 

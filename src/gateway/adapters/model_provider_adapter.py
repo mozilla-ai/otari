@@ -40,8 +40,8 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         """Resolve the deployment's own credential for ``provider``.
 
         ``model`` selects nothing (a hosted provider is one credential) but it
-        can refuse: a model the operator switched off on this provider is not
-        served, which is what makes that switch more than a stored boolean.
+        can refuse: only a model the operator switched on in this provider's
+        roster is served, so one switched off or never offered is refused.
 
         ``organization_id`` decides one thing: a provider restricted to another
         organization answers ``None``, as if it were not configured, so a tenant

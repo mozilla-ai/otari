@@ -5,7 +5,7 @@ operator API in `test_hosted_providers_api.py`. This file pins the half that
 makes them worth having: a request that brings no key of its own, for a
 provider nobody configured in ``config.yml``, is dispatched on the credential
 the operator stored, with the extras it stored, and a model the operator
-switched off is not. Model discovery is stubbed; the provider call is captured
+switched off or never offered is not. Model discovery is stubbed; the provider call is captured
 at the any-llm boundary and never made.
 """
 
@@ -162,7 +162,7 @@ def test_with_no_hosted_provider_the_candidate_goes_out_uncredentialed(
     assert captured["model"] == "openai:gpt-4o"
 
 
-def test_a_model_switched_off_is_not_served_and_an_unlisted_one_is(
+def test_neither_a_model_switched_off_nor_one_the_roster_never_listed_is_served(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     _create_user(client, master_key_header)
@@ -182,7 +182,7 @@ def test_a_model_switched_off_is_not_served_and_an_unlisted_one_is(
     unlisted, _ = _post_chat_capture(client, master_key_header, "openai:o3")
 
     assert "api_key" not in refused
-    assert unlisted["api_key"] == KEY
+    assert "api_key" not in unlisted
 
 
 def test_a_provider_switched_off_stops_serving(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -221,7 +221,7 @@ def test_the_catalog_lists_what_the_hosted_provider_advertises(
     assert "openai:gpt-4o-mini" not in ids
 
 
-def test_a_model_switched_off_is_refused_as_not_offered_rather_than_unconfigured(
+def test_a_model_not_switched_on_is_refused_as_not_offered_rather_than_unconfigured(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     """The refusal neither points at an environment variable nor names anything of the deployment's."""
@@ -233,19 +233,21 @@ def test_a_model_switched_off_is_refused_as_not_offered_rather_than_unconfigured
         f"{API_ROOT}/hosted-providers/openai/models/{mini['id']}", json={"enabled": False}, headers=master_key_header
     )
 
-    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_MockCompletionError)) as called:
-        response = client.post(
-            f"{API_ROOT}/chat/completions",
-            json={"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
-            headers=master_key_header,
-        )
+    # Switched off, and never on the roster at all.
+    for model in ("openai:gpt-4o-mini", "openai:o3"):
+        with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_MockCompletionError)) as called:
+            response = client.post(
+                f"{API_ROOT}/chat/completions",
+                json={"model": model, "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+                headers=master_key_header,
+            )
 
-    assert response.status_code == 424, response.text
-    assert response.headers["Otari-Error-Code"] == "provider_not_configured"
-    assert response.json()["detail"] == "Model 'openai:gpt-4o-mini' is not offered on this deployment."
-    assert "OPENAI_API_KEY" not in response.text
-    assert KEY not in response.text
-    called.assert_not_called()
+        assert response.status_code == 424, response.text
+        assert response.headers["Otari-Error-Code"] == "provider_not_configured"
+        assert response.json()["detail"] == f"Model '{model}' is not offered on this deployment."
+        assert "OPENAI_API_KEY" not in response.text
+        assert KEY not in response.text
+        called.assert_not_called()
 
 
 @pytest.fixture

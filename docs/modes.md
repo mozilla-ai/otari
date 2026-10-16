@@ -104,7 +104,9 @@ the organization's own provider key serves the request. Where that is missing
 too, one of the deployment's **hosted providers** does. A hosted provider is a credential the
 deployment's operator configures for the deployment to serve requests on, one
 per provider, with a roster of the models offered on it and the rate each is
-charged at on the deployment price list. A standalone deployment configures them
+charged at on the deployment price list. Only a model switched on in that roster
+is served on the hosted credential: a model switched off, or one the roster does
+not list, is refused with `424`. A standalone deployment configures them
 on the Hosted providers page; a hosted control plane holds them for its data
 plane. The deployment settles the upstream bill for a hosted model, which is why
 its rate belongs to the deployment and not to any one organization.
