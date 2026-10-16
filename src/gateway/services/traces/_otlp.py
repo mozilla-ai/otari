@@ -175,6 +175,8 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
         projected["error.type"] = error_type
     if (finish_reasons := _joined(attributes, "gen_ai.response.finish_reasons")) is not None:
         projected["gen_ai.response.finish_reasons"] = finish_reasons
+    if (max_tokens := _int(attributes, "gen_ai.request.max_tokens")) is not None:
+        projected["gen_ai.request.max_tokens"] = max_tokens
     return SpanRecord(
         span_id=_span_id(span.trace_id, span.span_id),
         parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
