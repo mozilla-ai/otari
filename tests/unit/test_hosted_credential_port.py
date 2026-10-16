@@ -124,9 +124,10 @@ def _ctx(
     organization_id: uuid.UUID | None = ORGANIZATION_ID,
     workspace_id: uuid.UUID | None = WORKSPACE_ID,
     plan: Any = None,
+    config: GatewayConfig | None = None,
 ) -> pipeline.RequestContext:
     return pipeline.RequestContext(
-        config=GatewayConfig(),
+        config=config or GatewayConfig(),
         db=None,
         uow=None,
         log_writer=cast(Any, object()),
@@ -157,10 +158,11 @@ async def _dispatch(
     port: ModelProviderPort,
     *,
     selector: str = "openai:gpt-4o",
+    config: GatewayConfig | None = None,
 ) -> ResolvedProvider:
     return await pipeline.resolve_dispatch_provider(
         ctx,
-        GatewayConfig(),
+        config or GatewayConfig(),
         selector,
         adapter=chat._ADAPTER,
         model_provider=port,
@@ -295,6 +297,21 @@ async def test_a_keyless_provider_is_served_on_the_deployments_own_hosted_provid
 
     assert result.deployment_paid is True
     assert result.kwargs == {"api_key": "otari-no-key-required", "api_base": "http://vllm.internal:8000/v1"}
+
+
+@pytest.mark.asyncio
+async def test_a_configured_keyless_provider_keeps_its_own_connection_over_a_hosted_one() -> None:
+    """A region is not a credential, but it is the deployment's own configuration of the provider."""
+    config = GatewayConfig(providers={"bedrock": {"client_args": {"region_name": "eu-west-1"}}})
+    port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="bedrock"))
+    selector = "bedrock:anthropic.claude-3"
+    resolved = resolve_provider_selector(config, selector)
+
+    result = await _dispatch(_ctx(resolved_provider=resolved, config=config), port, selector=selector, config=config)
+
+    assert port.calls == []
+    assert result.deployment_paid is False
+    assert result.kwargs["client_args"]["region_name"] == "eu-west-1"
 
 
 @pytest.mark.parametrize("error", [HostedAccessDeniedError("no"), RuntimeError("down at password=hunter2"), None])

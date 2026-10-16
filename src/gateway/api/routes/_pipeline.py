@@ -1818,9 +1818,13 @@ async def _serve_from_hosted_credential(
     # A provider any-llm calls with no key (a local vLLM, Bedrock on an instance
     # profile) works with nothing configured, so it is asked about only to let the
     # deployment's own hosted provider of that name serve it: an answer re-keyed
-    # elsewhere, a refusal or a failure leaves the request as it was.
+    # elsewhere, a refusal or a failure leaves the request as it was. One the
+    # deployment configures keeps its own connection, even when all it sets is
+    # an SDK option such as Bedrock's region, which carries no credential.
     own_name_only = not credential_ladder_exhausted(resolved.provider, resolved.kwargs)
-    if own_name_only and not credential_ladder_empty(resolved.provider, resolved.kwargs):
+    if own_name_only and (
+        resolved.instance in ctx.config.providers or not credential_ladder_empty(resolved.provider, resolved.kwargs)
+    ):
         return resolved
 
     try:
