@@ -37,16 +37,16 @@ from gateway.exceptions.files_exceptions import (
 from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
 from gateway.services.content_normalizer import (
-    InlineLimit,
     NormalizationStats,
     WireFormat,
     has_container_blocks,
+    inline_limit_for,
     name_container_copies,
     normalize_messages,
 )
-from gateway.services.files import FileService, StagedFile, provider_holds_copies, uploads_attachments
+from gateway.services.files import FileService, StagedFile, provider_holds_copies
 from gateway.services.model_capabilities import resolve_capabilities
-from gateway.services.provider_kwargs import ProviderAccounts, effective_credential, get_provider_kwargs
+from gateway.services.provider_kwargs import ProviderAccounts, effective_credential
 from gateway.services.tools import (
     CODE_EXECUTION_TOOL,
     CandidateTools,
@@ -58,46 +58,6 @@ from gateway.services.tools import (
     parse_code_execution_header,
     resolve_code_executor_preference,
 )
-
-# The providers that cap the attachment bytes one request may carry inline. Vertex
-# AI is left out: its provider serves Claude and Mistral models as well as Gemini,
-# under limits of their own.
-_INLINE_LIMITED_PROVIDERS = frozenset({LLMProvider.GEMINI})
-
-
-def inline_limit_for(
-    config: GatewayConfig,
-    provider: LLMProvider,
-    fmt: WireFormat,
-    *,
-    files: FileService | None,
-    candidates: Sequence[LLMProvider | None],
-    instance: str | None,
-    workspace_id: uuid.UUID | None,
-) -> InlineLimit | None:
-    """The inline attachment limit for ``provider``, with an upload where Otari can move a file there.
-
-    Only where every candidate shares the limit: a request that may fall back to
-    a provider without it is sent as it is, so the fallback can still serve it.
-    """
-    if fmt == "responses" or not candidates or any(c not in _INLINE_LIMITED_PROVIDERS for c in candidates):
-        return None
-    upload = None
-    if files is not None and uploads_attachments(provider):
-        attachments = files
-
-        async def upload(data: bytes, mime: str, filename: str) -> str:
-            kwargs = get_provider_kwargs(config, provider, instance, workspace_id=workspace_id)
-            return await attachments.attachment_uri(
-                data,
-                provider=provider,
-                credential=effective_credential(provider, kwargs),
-                workspace_id=workspace_id,
-                mime_type=mime,
-                filename=filename,
-            )
-
-    return InlineLimit(max_bytes=config.files_gemini_inline_max_bytes, upload=upload)
 
 
 def _executor_preference(

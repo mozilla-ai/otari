@@ -29,14 +29,16 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
+from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
 from gateway.log_config import logger
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
-from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for
+from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for, uploads_attachments
 from gateway.services.model_capabilities import Capabilities
+from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
 from gateway.services.vision import describe_image
 
 WireFormat = Literal["openai", "anthropic", "responses"]
@@ -132,6 +134,47 @@ class InlineLimit:
 
     max_bytes: int
     upload: ProviderUpload | None = None
+
+
+# The providers that cap the attachment bytes one request may carry inline. Vertex
+# AI is left out: its provider serves Claude and Mistral models as well as Gemini,
+# under limits of their own.
+_INLINE_LIMITED_PROVIDERS = frozenset({LLMProvider.GEMINI})
+
+
+def inline_limit_for(
+    config: GatewayConfig,
+    provider: LLMProvider,
+    fmt: WireFormat,
+    *,
+    files: FileService | None,
+    candidates: Sequence[LLMProvider | None],
+    instance: str | None,
+    workspace_id: uuid.UUID | None,
+) -> InlineLimit | None:
+    """The inline attachment limit for ``provider``, with an upload where Otari can move a file there.
+
+    Only where every candidate shares the limit: a request that may fall back to
+    a provider without it is sent as it is, so the fallback can still serve it.
+    """
+    if fmt == "responses" or not candidates or any(c not in _INLINE_LIMITED_PROVIDERS for c in candidates):
+        return None
+    upload = None
+    if files is not None and uploads_attachments(provider):
+        attachments = files
+
+        async def upload(data: bytes, mime: str, filename: str) -> str:
+            kwargs = get_provider_kwargs(config, provider, instance, workspace_id=workspace_id)
+            return await attachments.attachment_uri(
+                data,
+                provider=provider,
+                credential=effective_credential(provider, kwargs),
+                workspace_id=workspace_id,
+                mime_type=mime,
+                filename=filename,
+            )
+
+    return InlineLimit(max_bytes=config.files_gemini_inline_max_bytes, upload=upload)
 
 
 @dataclass

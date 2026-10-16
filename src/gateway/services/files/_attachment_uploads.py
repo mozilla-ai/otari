@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import hmac
 import json
 import os
 import time
@@ -61,7 +60,9 @@ def _account(provider: LLMProvider, credential: ResolvedCredential) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
-    return hmac.new(_ACCOUNT_KEY, canonical.encode(), hashlib.sha256).hexdigest()
+    # scrypt rather than a fast hash because the input holds an API key. It is only a lookup key, so the
+    # cost is kept low; the per-process salt is what keeps it from being matched against known keys.
+    return hashlib.scrypt(canonical.encode(), salt=_ACCOUNT_KEY, n=2**12, r=8, p=1, dklen=32).hex()
 
 
 def _recall(key: tuple[str, str, str]) -> str | None:
@@ -105,7 +106,8 @@ async def upload_attachment(
     """
     if provider not in _UPLOAD_PROVIDERS:
         raise ProviderUploadFailedError
-    key = (_account(provider, credential), str(workspace_id or ""), hashlib.sha256(data).hexdigest())
+    account = await asyncio.to_thread(_account, provider, credential)
+    key = (account, str(workspace_id or ""), hashlib.sha256(data).hexdigest())
     if (uri := _recall(key)) is not None:
         return uri
     try:

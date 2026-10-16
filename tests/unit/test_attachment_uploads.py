@@ -12,10 +12,10 @@ from any_llm.types.files import FileMetadata
 
 from gateway.adapters import provider_file_adapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
-from gateway.api.routes._normalize import inline_limit_for
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.ports.provider_file_port import ProviderFilePort
+from gateway.services.content_normalizer import inline_limit_for
 from gateway.services.files import FileService, _attachment_uploads, uploads_attachments
 from gateway.services.files._attachment_uploads import upload_attachment
 from gateway.types.provider_account import ResolvedCredential
