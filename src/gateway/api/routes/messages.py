@@ -115,6 +115,8 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
+    provider_attempt_kwargs,
+    with_typed_code_execution_tool,
 )
 from gateway.services.traces import read_turn
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, StreamFormat
@@ -800,17 +802,17 @@ class _MessagesAdapter:
         attempt: ResolvedAttempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return default_attempt_kwargs(attempt, base_request_fields)
+        return provider_attempt_kwargs(default_attempt_kwargs(attempt, base_request_fields))
 
     def local_attempt_kwargs(
         self,
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return attempt.call_kwargs(base_request_fields)
+        return provider_attempt_kwargs(attempt.call_kwargs(base_request_fields))
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        return kwargs
+        return provider_attempt_kwargs(kwargs)
 
 
 _ADAPTER = _MessagesAdapter()
@@ -851,6 +853,8 @@ async def create_message(
     # overcharge the request. Provenance comes from each block, so this is
     # independent of whether the current request enables the same tool again.
     request.messages = _strip_gateway_minted_blocks(request.messages)
+    if (typed_tools := with_typed_code_execution_tool(request.tools)) is not request.tools:
+        request.tools = typed_tools
 
     # Uploads the normalizer found for the code-execution sandbox, handed to the
     # sandbox session once the billed user and workspace are resolved.
@@ -1080,8 +1084,8 @@ async def create_message(
         resolved = await resolve_dispatch_provider(
             ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
         )
-        call_kwargs = apply_endpoint_defaults(
-            {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+        call_kwargs = provider_attempt_kwargs(
+            apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved)
         )
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -1129,8 +1133,8 @@ async def create_message(
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
     )
-    call_kwargs = apply_endpoint_defaults(
-        {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+    call_kwargs = provider_attempt_kwargs(
+        apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved)
     )
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
