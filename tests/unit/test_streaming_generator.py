@@ -13,6 +13,8 @@ from gateway.streaming import (
     OPENAI_STREAM_FORMAT,
     RESPONSES_STREAM_FORMAT,
     IncompleteStreamError,
+    StreamingAttemptFailure,
+    iterate_streaming_attempts,
     streaming_generator,
 )
 
@@ -892,15 +894,34 @@ async def _read_until_the_client_leaves(
     return observed
 
 
+async def _as_the_chosen_attempt(source: AsyncIterator[str]) -> AsyncIterator[str]:
+    """``source`` as ``iterate_streaming_attempts`` hands on the attempt it chose, its first chunk already read."""
+
+    async def build_stream(_attempt: str) -> AsyncIterator[str]:
+        return source
+
+    async def on_attempt_failed(_attempt: str, failure: StreamingAttemptFailure) -> None:
+        pytest.fail(f"the only attempt failed: {failure.error_class}")
+
+    _, stream = await iterate_streaming_attempts(
+        attempts=["only"],
+        build_stream=build_stream,
+        classify_error=lambda exc: (False, type(exc).__name__),
+        on_attempt_failed=on_attempt_failed,
+    )
+    return stream
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("keepalive_interval", [0.0, _KEEPALIVE_INTERVAL], ids=["direct", "keepalive"])
+@pytest.mark.parametrize("through_attempts", [False, True], ids=["bare", "chosen-attempt"])
 async def test_a_stream_canceled_by_a_client_disconnect_settles_once_and_closes_its_source(
-    keepalive_interval: float,
+    keepalive_interval: float, through_attempts: bool
 ) -> None:
     source = _ClosableStream()
     settlement: list[str] = []
     gen = streaming_generator(
-        stream=source,
+        stream=await _as_the_chosen_attempt(source) if through_attempts else source,
         format_chunk=_format_chunk,
         extract_usage=lambda _: None,
         fmt=OPENAI_STREAM_FORMAT,
