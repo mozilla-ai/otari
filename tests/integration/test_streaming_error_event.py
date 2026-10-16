@@ -3,14 +3,16 @@
 import json
 import time
 from collections.abc import AsyncIterator, Callable
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 from any_llm.exceptions import ContextLengthExceededError
 from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, CompletionUsage
+from any_llm.types.responses import Response, ResponseStreamEvent
 from fastapi.testclient import TestClient
+from openai.types.responses import ResponseCreatedEvent, ResponseTextDeltaEvent
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -508,3 +510,68 @@ def test_a_chat_stream_with_several_choices_is_complete_only_when_each_finishes(
         assert _error_event(response.text)["error"]["code"] == "provider_stream_interrupted"
     else:
         assert '"error"' not in response.text
+
+
+def _response_snapshot(status: str) -> Response:
+    return Response(
+        id="resp_cut",
+        created_at=0.0,
+        model="gpt-4o-mini",
+        object="response",
+        status=cast(Any, status),
+        output=[],
+        parallel_tool_calls=False,
+        tool_choice="auto",
+        tools=[],
+    )
+
+
+_RESPONSES_OPENING_EVENTS: list[ResponseStreamEvent] = [
+    ResponseCreatedEvent(type="response.created", response=_response_snapshot("in_progress"), sequence_number=0),
+    ResponseTextDeltaEvent(
+        type="response.output_text.delta",
+        item_id="msg_cut",
+        output_index=0,
+        content_index=0,
+        delta="Hel",
+        logprobs=[],
+        sequence_number=1,
+    ),
+]
+
+
+def _stream_responses(client: TestClient, headers: dict[str, str], events: list[ResponseStreamEvent]) -> Any:
+    """Stream a Responses request whose provider sends ``events`` and then closes the stream."""
+    created = client.post(f"{API_ROOT}/users", json={"user_id": _STREAM_USER}, headers=headers)
+    assert created.status_code == 200, created.text
+
+    async def _aresponses(**_kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        async def _stream() -> AsyncIterator[ResponseStreamEvent]:
+            for event in events:
+                yield event
+
+        return _stream()
+
+    with patch("gateway.api.routes.responses.aresponses", new=_aresponses):
+        return client.post(
+            f"{API_ROOT}/responses",
+            json={"model": "openai:gpt-4o-mini", "input": "hi", "user": _STREAM_USER, "stream": True},
+            headers=headers,
+        )
+
+
+def test_a_responses_stream_the_provider_ends_before_its_terminal_event_is_an_interrupted_stream_error(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """``response.created`` and one text delta, then the stream closes: the client is told the text is truncated."""
+    response = _stream_responses(client, master_key_header, _RESPONSES_OPENING_EVENTS)
+
+    assert response.status_code == 200, response.text
+    assert _error_event(response.text)["error"] == {
+        "message": "The provider's stream ended before it finished",
+        "type": "server_error",
+        "code": "provider_stream_interrupted",
+    }
+    assert _usage_row(db_session_factory).status == "error"
