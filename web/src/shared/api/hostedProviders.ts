@@ -37,8 +37,11 @@ import {
 // upstream (every provider, for the sweep), so they carry `longRequestSignal`
 // rather than the default request deadline.
 
-/** The hosted-provider list is small: one row per provider implementation. */
-const PROVIDER_PAGE_LIMIT = 100
+/**
+ * The API's maximum: one row per provider implementation, a closed set well
+ * inside it, so one page is the whole list.
+ */
+const PROVIDER_PAGE_LIMIT = 1000
 
 const providerPath = (provider: string) =>
   `/hosted-providers/${encodeURIComponent(provider)}`
