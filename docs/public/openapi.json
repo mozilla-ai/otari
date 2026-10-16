@@ -18915,6 +18915,30 @@
             "title": "Origin",
             "type": "string"
           },
+          "otel_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OpenTelemetry span id an OTLP span was exported with, in lowercase hex. Null on a span the gateway recorded itself.",
+            "title": "Otel Span Id"
+          },
+          "otel_trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OpenTelemetry trace id an OTLP span was exported with, in lowercase hex. Null on a span the gateway recorded itself.",
+            "title": "Otel Trace Id"
+          },
           "outcome": {
             "enum": [
               "ok",
@@ -19046,6 +19070,8 @@
           "tool_type",
           "tool_call_id",
           "request_id",
+          "otel_trace_id",
+          "otel_span_id",
           "attributes"
         ],
         "title": "SpanPublic",

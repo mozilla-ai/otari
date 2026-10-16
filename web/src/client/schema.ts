@@ -16059,6 +16059,16 @@ export interface components {
              */
             origin: "gateway" | "otlp";
             /**
+             * Otel Span Id
+             * @description The OpenTelemetry span id an OTLP span was exported with, in lowercase hex. Null on a span the gateway recorded itself.
+             */
+            otel_span_id: string | null;
+            /**
+             * Otel Trace Id
+             * @description The OpenTelemetry trace id an OTLP span was exported with, in lowercase hex. Null on a span the gateway recorded itself.
+             */
+            otel_trace_id: string | null;
+            /**
              * Outcome
              * @enum {string}
              */
