@@ -4059,6 +4059,27 @@
         "title": "ChatCompletionRequest",
         "type": "object"
       },
+      "CheckFailure": {
+        "description": "Why a stored server failed its connection check.\n\nStored on the server's row and shown to whoever manages it, so each value\nnames a cause an operator can act on, and none carries anything the remote\nserver said. The first two are decided before any connection is opened.",
+        "enum": [
+          "unsafe_url",
+          "credentials_unavailable",
+          "unreachable",
+          "tls_failed",
+          "timeout",
+          "redirected",
+          "unauthorized",
+          "forbidden",
+          "not_found",
+          "server_error",
+          "http_error",
+          "not_mcp",
+          "limits_exceeded",
+          "connection_failed"
+        ],
+        "title": "CheckFailure",
+        "type": "string"
+      },
       "CheckVerdictRequest": {
         "additionalProperties": false,
         "description": "One verifier gate's verdict, as the caller's own verifier run produced it.\n\nMirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back\nthe gate the policy itself named (same bound, same reason), ``outcome``\nis the caller's own report of the verifier's exit code (0/1/anything\nelse, mapped by the caller to pass/fail/error), and ``detail`` is the\nverifier's captured stdout, capped the same way ``reasoning`` is.",
@@ -22080,6 +22101,72 @@
         "title": "WorkspaceMcpServerCreate",
         "type": "object"
       },
+      "WorkspaceMcpServerHealth": {
+        "description": "The last connection check: whether the gateway reached the server, and what it found.\n\nDescribes the server as the gateway saw it at ``checked_at``, not now: a\nserver that answered then can be down since, and the request path checks\nnothing in advance on the strength of this.",
+        "properties": {
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CheckFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the check failed; null when healthy"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The HTTP status the server refused with, if any",
+            "title": "Http Status"
+          },
+          "missing_allowed_tools": {
+            "description": "Allow-listed names the server did not offer",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Allowed Tools",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "healthy",
+              "failing"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Live tools the allow-list admits; null when the check failed",
+            "title": "Tool Count"
+          }
+        },
+        "required": [
+          "status",
+          "checked_at"
+        ],
+        "title": "WorkspaceMcpServerHealth",
+        "type": "object"
+      },
       "WorkspaceMcpServerPublic": {
         "description": "The API-facing shape. Never carries the token, only whether one is set.\n\nNo ``last4``-style prefix either, unlike `OrgProviderKeyPublic`: a provider\nkey's last four digits let an operator match a stored key against the one\nin their provider's console, and there is no equivalent workflow for an MCP\nbearer token.",
         "properties": {
@@ -22108,6 +22195,17 @@
           "has_token": {
             "title": "Has Token",
             "type": "boolean"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceMcpServerHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last connection check; null until one has run"
           },
           "id": {
             "format": "uuid",
@@ -22152,6 +22250,7 @@
           "allowed_tools",
           "enabled",
           "has_token",
+          "health",
           "created_at",
           "updated_at"
         ],
@@ -44424,7 +44523,7 @@
         ]
       },
       "post": {
-        "description": "Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.\n\nThe authorization token is encrypted at rest and never returned. The URL\nis checked for SSRF safety here as well as on the request path, and must\nuse https when a token is set. A name already used in this workspace is\nrefused with a 409.",
+        "description": "Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.\n\nThe authorization token is encrypted at rest and never returned. The URL\nis checked for SSRF safety here as well as on the request path, and must\nuse https when a token is set. A name already used in this workspace is\nrefused with a 409.\n\nOnce stored, the server is connected to and its tools listed, and the\noutcome is returned as `health`. A server that fails this check is still\nstored, and `health.error` says why.",
         "operationId": "mcp-servers-create_workspace_mcp_server",
         "parameters": [
           {
@@ -44546,7 +44645,7 @@
         ]
       },
       "patch": {
-        "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it.",
+        "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it. A change to the URL, the token or the allow-list checks the\nserver again, as creating it does.",
         "operationId": "mcp-servers-update_workspace_mcp_server",
         "parameters": [
           {
@@ -44611,6 +44710,68 @@
           }
         ],
         "summary": "Update Workspace Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check": {
+      "post": {
+        "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the tools the allow-list admits, and stores the\noutcome as `health`. A server that fails is still a 200, with\n`health.status` set to `failing`. A 429 means every check slot on this\ngateway was busy and nothing was recorded.",
+        "operationId": "mcp-servers-check_workspace_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Workspace Mcp Server",
         "tags": [
           "mcp-servers"
         ]

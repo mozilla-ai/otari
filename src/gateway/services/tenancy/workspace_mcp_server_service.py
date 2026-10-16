@@ -30,16 +30,17 @@ standalone deployment is not a hosted multi-tenant one:
   between a synchronous ingress validator and a service-layer SSRF pass. This
   repository's `validate_mcp_url` is a single async function that already does
   both, and these routes are async, so the reason for the split does not apply.
-- No analytics events, and no `status` field on the public shape (the
-  platform's is an affordance of its hosted dashboard; the page here,
-  `web/src/features/tools/McpServersPage.tsx`, reports `enabled` and
-  `has_token` and needs no third state).
+- No analytics events, and no `status` field on the public shape. The
+  platform's is derived from configuration alone; this one publishes `health`
+  instead, the outcome of actually connecting, which a server gets when it is
+  stored, when its connection details change, and on request.
 """
 
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -50,16 +51,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerAlreadyExistsError,
+    WorkspaceMcpServerCheckBusyError,
     WorkspaceMcpServerLimitReachedError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
 )
+from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import User
 from gateway.models.tools import WorkspaceMcpServer
 from gateway.repositories.tenancy import WorkspaceRepository
+
+# The module as well as the names, so the check is looked up at call time and a
+# test can stand in for the network.
+from gateway.services import mcp_stateless
+from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
+    SecretDecryptionError,
     decrypt_secret,
     encrypt_secret,
 )
@@ -160,6 +169,26 @@ class WorkspaceMcpServerUpdate(BaseModel):
         return self
 
 
+class WorkspaceMcpServerHealth(BaseModel):
+    """The last connection check: whether the gateway reached the server, and what it found.
+
+    Describes the server as the gateway saw it at ``checked_at``, not now: a
+    server that answered then can be down since, and the request path checks
+    nothing in advance on the strength of this.
+    """
+
+    status: Literal["healthy", "failing"]
+    checked_at: str
+    error: CheckFailure | None = Field(default=None, description="Why the check failed; null when healthy")
+    http_status: int | None = Field(default=None, description="The HTTP status the server refused with, if any")
+    tool_count: int | None = Field(
+        default=None, description="Live tools the allow-list admits; null when the check failed"
+    )
+    missing_allowed_tools: list[str] = Field(
+        default_factory=list, description="Allow-listed names the server did not offer"
+    )
+
+
 class WorkspaceMcpServerPublic(BaseModel):
     """The API-facing shape. Never carries the token, only whether one is set.
 
@@ -177,6 +206,7 @@ class WorkspaceMcpServerPublic(BaseModel):
     allowed_tools: list[str] | None
     enabled: bool
     has_token: bool
+    health: WorkspaceMcpServerHealth | None = Field(description="The last connection check; null until one has run")
     created_at: str
     updated_at: str
 
@@ -201,6 +231,7 @@ class WorkspaceMcpServerPublic(BaseModel):
             allowed_tools=server.allowed_tools,
             enabled=server.enabled,
             has_token=server.encrypted_token is not None,
+            health=WorkspaceMcpServerHealth.model_validate(server.health) if server.health is not None else None,
             created_at=server.created_at.isoformat(),
             updated_at=server.updated_at.isoformat(),
         )
@@ -230,6 +261,53 @@ def _encrypted(token: str) -> str:
         return encrypt_secret(token)
     except SecretBoxUnavailableError:
         raise SecretBoxUnavailableTenancyError("MCP server authorization tokens") from None
+
+
+async def _check(server: WorkspaceMcpServer) -> ServerCheck:
+    """Run the connection check on a stored row, settling its URL and token first.
+
+    The same order the request path takes: a token that will not decrypt and a
+    URL that is no longer safe each stop the check before anything is sent.
+
+    Raises:
+        McpCapacityUnavailable: no check slot was free, so nothing was checked.
+    """
+    try:
+        token = decrypt_secret(server.encrypted_token) if server.encrypted_token else None
+    except (SecretDecryptionError, SecretBoxUnavailableError):
+        return ServerCheck(tool_names=[], failure=CheckFailure.CREDENTIALS_UNAVAILABLE)
+    try:
+        await validate_mcp_url(server.url, has_authorization_token=token is not None)
+    except UnsafeURLError:
+        return ServerCheck(tool_names=[], failure=CheckFailure.UNSAFE_URL)
+    return await mcp_stateless.check_stored_server(
+        ResolvedMcpServer(
+            id=server.id,
+            name=server.name,
+            url=server.url,
+            authorization_token=token,
+            enabled=server.enabled,
+            purpose_hint=server.purpose_hint,
+            allowed_tools=server.allowed_tools,
+        )
+    )
+
+
+def _health(server: WorkspaceMcpServer, check: ServerCheck) -> WorkspaceMcpServerHealth:
+    offered = set(check.tool_names)
+    missing = (
+        []
+        if check.failure is not None or server.allowed_tools is None
+        else [name for name in dict.fromkeys(server.allowed_tools) if name not in offered]
+    )
+    return WorkspaceMcpServerHealth(
+        status="healthy" if check.failure is None else "failing",
+        checked_at=datetime.now(UTC).isoformat(),
+        error=check.failure,
+        http_status=check.http_status,
+        tool_count=len(offered) if check.failure is None else None,
+        missing_allowed_tools=missing,
+    )
 
 
 async def resolve_workspace_mcp_servers(
@@ -373,6 +451,26 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerNotFoundError(server_id)
         return server
 
+    async def _record_check(self, server: WorkspaceMcpServer) -> bool:
+        """Check a stored server's connection and save the outcome as its health.
+
+        The transaction is ended first, so no pooled connection is held while
+        the gateway waits on a remote server for up to the discovery deadline.
+        Returns false when no check slot was free, leaving the row's health as
+        it was.
+        """
+        await self.db.commit()
+        try:
+            check = await _check(server)
+        except McpCapacityUnavailable:
+            logger.info("MCP server check skipped server_id=%s reason=capacity", server.id)
+            return False
+        server.health = _health(server, check).model_dump(mode="json")
+        await self.db.commit()
+        await self.db.refresh(server)
+        logger.info("MCP server checked server_id=%s outcome=%s", server.id, check.failure or "ok")
+        return True
+
     async def list_servers(
         self,
         *,
@@ -466,7 +564,9 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, request.name) from None
 
         await self.db.commit()
-        await self.db.refresh(server)
+        # After the commit, so a server that fails its check is still stored:
+        # it may be registered before it is up, and `health` says what failed.
+        await self._record_check(server)
         return WorkspaceMcpServerPublic.from_model(server)
 
     async def update_server(
@@ -499,6 +599,13 @@ class WorkspaceMcpServerService:
         url_changed = "url" in fields and fields["url"] != server.url
         if url_changed or isinstance(new_token, str):
             await _validate_url(fields.get("url") or server.url, has_token=effective_has_token)
+        # What the stored health described. Rechecked after the commit; cleared
+        # here so a check that cannot run leaves no health rather than a stale one.
+        connection_changed = (
+            url_changed
+            or isinstance(new_token, str)
+            or ("allowed_tools" in fields and fields["allowed_tools"] != server.allowed_tools)
+        )
 
         if new_token == "":
             server.encrypted_token = None
@@ -507,6 +614,8 @@ class WorkspaceMcpServerService:
 
         for field, value in fields.items():
             setattr(server, field, value)
+        if connection_changed:
+            server.health = None
 
         # Read before the flush: the rollback below expires every loaded
         # instance, so reading ``server.name`` inside the handler would emit a
@@ -520,7 +629,24 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, attempted_name) from None
 
         await self.db.commit()
-        await self.db.refresh(server)
+        if connection_changed:
+            await self._record_check(server)
+        else:
+            await self.db.refresh(server)
+        return WorkspaceMcpServerPublic.from_model(server)
+
+    async def check_server(
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID
+    ) -> WorkspaceMcpServerPublic:
+        """Check a server's connection now and store the outcome as its health.
+
+        A failing check is a result, not an error: the request succeeded in
+        finding out that the server did not.
+        """
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        if not await self._record_check(server):
+            raise WorkspaceMcpServerCheckBusyError
         return WorkspaceMcpServerPublic.from_model(server)
 
     async def delete_server(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
@@ -534,6 +660,7 @@ class WorkspaceMcpServerService:
 __all__ = [
     "MAX_MCP_SERVERS_PER_WORKSPACE",
     "WorkspaceMcpServerCreate",
+    "WorkspaceMcpServerHealth",
     "WorkspaceMcpServerPublic",
     "WorkspaceMcpServerService",
     "WorkspaceMcpServerUpdate",

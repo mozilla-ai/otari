@@ -36,6 +36,7 @@ import type {
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
   WorkspaceMember,
   WorkspaceProviderKeyOverride,
   WorkspaceWebSearchConfig,
@@ -871,8 +872,24 @@ export function workspaceMcpServer(
     enabled: true,
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
+    // Never checked, which is how a row stored before checks existed reads.
+    health: null,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function workspaceMcpServerHealth(
+  overrides: Partial<WorkspaceMcpServerHealth> = {},
+): WorkspaceMcpServerHealth {
+  return {
+    status: "healthy",
+    checked_at: "2026-08-01T00:00:00+00:00",
+    error: null,
+    http_status: null,
+    tool_count: 2,
+    missing_allowed_tools: [],
     ...overrides,
   }
 }

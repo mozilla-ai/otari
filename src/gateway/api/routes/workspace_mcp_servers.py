@@ -78,6 +78,10 @@ async def create_workspace_mcp_server(
     is checked for SSRF safety here as well as on the request path, and must
     use https when a token is set. A name already used in this workspace is
     refused with a 409.
+
+    Once stored, the server is connected to and its tools listed, and the
+    outcome is returned as `health`. A server that fails this check is still
+    stored, and `health.error` says why.
     """
     return await service.create_server(user=current_identity, workspace_id=workspace_id, request=body)
 
@@ -94,7 +98,8 @@ async def update_workspace_mcp_server(
 
     Only the fields sent are applied. Omit `authorization_token` to leave the
     stored token alone, send an empty string to clear it, or send a value to
-    rotate it.
+    rotate it. A change to the URL, the token or the allow-list checks the
+    server again, as creating it does.
     """
     return await service.update_server(
         user=current_identity,
@@ -102,6 +107,23 @@ async def update_workspace_mcp_server(
         server_id=server_id,
         request=body,
     )
+
+
+@router.post("/{server_id}/check")
+async def check_workspace_mcp_server(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerPublic:
+    """Check a server's connection now. Organization owners/admins or this workspace's owners/admins.
+
+    Opens one session, lists the tools the allow-list admits, and stores the
+    outcome as `health`. A server that fails is still a 200, with
+    `health.status` set to `failing`. A 429 means every check slot on this
+    gateway was busy and nothing was recorded.
+    """
+    return await service.check_server(user=current_identity, workspace_id=workspace_id, server_id=server_id)
 
 
 @router.delete("/{server_id}")

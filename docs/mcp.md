@@ -409,6 +409,31 @@ an owner/admin of that workspace.
   with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
 
+#### Connection checks
+
+Creating a server connects to it once, lists its tools, and returns the outcome
+as `health`. So does a `PATCH` that changes the URL, the token, or
+`allowed_tools`; other edits leave `health` as it was.
+`POST /{server_id}/check` runs the check again on demand, with the same
+permissions as an update.
+
+A server that fails its check is still stored. `health.status` is `failing` and
+`health.error` names the cause: `unreachable`, `tls_failed`, `timeout`,
+`redirected`, `unauthorized` (401), `forbidden` (403), `not_found` (404 or
+405), `server_error` (5xx), `http_error` (another status), `not_mcp` (the URL
+answered, but not as a streamable HTTP MCP server), `limits_exceeded`,
+`unsafe_url`, `credentials_unavailable` (the stored token will not decrypt), or
+`connection_failed`. `health.http_status` carries the status where the server
+refused with one. A passing check reports `tool_count`, the number of tools the
+allow-list admits, and `missing_allowed_tools`, the allow-listed names the server
+does not offer.
+
+`health` is `null` until a check has run. It is also `null` after a connection
+change when every check slot on the gateway was busy; `POST /{server_id}/check`
+answers `429` in that case and records nothing. The value describes the server
+as of `health.checked_at`; a request still checks the URL again, and nothing is
+skipped because a check once passed.
+
 In hybrid mode these routes are not mounted: the servers live in otari.ai and
 are managed there.
 

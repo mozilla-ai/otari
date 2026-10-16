@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FiEdit2, FiTrash2 } from "react-icons/fi"
+import { FiEdit2, FiRefreshCw, FiTrash2 } from "react-icons/fi"
 
 import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -17,13 +17,20 @@ import {
   McpServerDialog,
   type McpServerDraft,
 } from "@/features/tools/McpServerDialog"
+import {
+  healthDetail,
+  healthLabel,
+  healthNeedsAttention,
+} from "@/features/tools/mcpServerHealth"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
+  useCheckWorkspaceMcpServer,
   useCreateWorkspaceMcpServer,
   useDeleteWorkspaceMcpServer,
   useUpdateWorkspaceMcpServer,
   useWorkspaceMcpServers,
 } from "@/shared/api/tools"
+import { formatDateTime } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The MCP servers this workspace has registered, which a request reaches by
@@ -58,9 +65,33 @@ function tokenChip(server: WorkspaceMcpServer) {
   )
 }
 
+// The last connection check, as of when it ran: the label in the cell, and the
+// sentence and the time on its title for whoever wants the detail.
+function healthCell(server: WorkspaceMcpServer) {
+  const health = server.health
+  if (health === null) {
+    return <span className="text-subtle">Not checked</span>
+  }
+  const dot =
+    health.status === "failing"
+      ? "bg-danger"
+      : healthNeedsAttention(health)
+        ? "bg-warning"
+        : "bg-success"
+  return (
+    <span
+      className="flex items-center gap-2 text-mono-caption text-muted"
+      title={`${healthDetail(health)} Checked ${formatDateTime(health.checked_at)}.`}
+    >
+      <Dot className={dot} />
+      {healthLabel(health)}
+    </span>
+  )
+}
+
 /** The page's own opening line, which the `/tools` card does not carry. */
 const PAGE_DESCRIPTION =
-  "MCP endpoints a workspace's requests can reach by naming their ids, without carrying a URL or a bearer token of their own. Each is checked for SSRF safety when it is stored and again when a request uses it, and its token is encrypted at rest."
+  "MCP endpoints a workspace's requests can reach by naming their ids, without carrying a URL or a bearer token of their own. Each is checked for SSRF safety when it is stored and again when a request uses it, and its token is encrypted at rest. Saving one also connects to it, and Health shows what that found."
 
 export function WorkspaceMcpServersCard({
   variant = "card",
@@ -87,6 +118,7 @@ export function WorkspaceMcpServersCard({
   const create = useCreateWorkspaceMcpServer()
   const update = useUpdateWorkspaceMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
+  const check = useCheckWorkspaceMcpServer()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
   // Bumped on every open and used as the dialog's key, so the draft is cleared
@@ -94,6 +126,7 @@ export function WorkspaceMcpServersCard({
   // is still animating away.
   const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<WorkspaceMcpServer>()
+  const [saved, setSaved] = useState<WorkspaceMcpServer>()
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
 
   const isPage = variant === "page"
@@ -122,6 +155,7 @@ export function WorkspaceMcpServersCard({
   // 409 over a blank one. Same reset `PasskeysCard` does for the same reason.
   const openAdd = () => {
     setEditing(undefined)
+    setSaved(undefined)
     create.reset()
     setOpenCount((count) => count + 1)
     setDialogOpen(true)
@@ -129,6 +163,7 @@ export function WorkspaceMcpServersCard({
 
   const openEdit = (server: WorkspaceMcpServer) => {
     setEditing(server)
+    setSaved(undefined)
     update.reset()
     setOpenCount((count) => count + 1)
     setDialogOpen(true)
@@ -140,7 +175,25 @@ export function WorkspaceMcpServersCard({
   }
 
   const submit = (draft: McpServerDraft) => {
-    const onDone = { onSuccess: () => setDialogOpen(false) }
+    // A save checks the connection when it adds a server or changes how it is
+    // reached, which shows as a check newer than the one the row had. When that
+    // check found a problem, or could not run, the dialog stays open on the
+    // stored row and says so, so the fix is an edit rather than a second add.
+    const settle = (server: WorkspaceMcpServer) => {
+      const checked =
+        editing === undefined ||
+        server.health?.checked_at !== editing.health?.checked_at
+      if (
+        checked &&
+        (server.health === null || healthNeedsAttention(server.health))
+      ) {
+        setEditing(server)
+        setSaved(server)
+        return
+      }
+      setDialogOpen(false)
+    }
+    const onDone = { onSuccess: settle }
     if (editing) {
       update.mutate(
         {
@@ -215,6 +268,7 @@ export function WorkspaceMcpServersCard({
         </span>
       ),
     },
+    { id: "health", header: "Health", cell: healthCell },
   ]
   if (manages) {
     columns.push({
@@ -222,6 +276,17 @@ export function WorkspaceMcpServersCard({
       header: "",
       cell: (row) => (
         <RowActionRow>
+          <RowAction
+            icon={FiRefreshCw}
+            label="Recheck"
+            isDisabled={check.isPending && check.variables?.serverId === row.id}
+            onPress={() =>
+              check.mutate({
+                workspaceId: selected.workspace_id,
+                serverId: row.id,
+              })
+            }
+          />
           <RowAction
             icon={FiEdit2}
             label="Edit"
@@ -268,6 +333,7 @@ export function WorkspaceMcpServersCard({
       </p>
 
       <ErrorBanner error={query.error} />
+      <ErrorBanner error={check.error} />
 
       <TableScrollFrame className="otari-mcp-table">
         <DataTable
@@ -291,6 +357,7 @@ export function WorkspaceMcpServersCard({
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
+        saved={saved}
         isPending={create.isPending || update.isPending}
         error={editing ? update.error : create.error}
         onSubmit={submit}

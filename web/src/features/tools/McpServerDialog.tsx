@@ -2,10 +2,12 @@ import { useState } from "react"
 
 import type { WorkspaceMcpServer } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { healthDetail } from "@/features/tools/mcpServerHealth"
 
 // The form behind both Add and Edit, one component rather than two: the only
 // field that behaves differently between them is the bearer token, and keeping
@@ -67,11 +69,34 @@ function urlProblem(raw: string, willHaveToken: boolean): string | undefined {
   return undefined
 }
 
+// What a save's connection check found, when it found something. The server is
+// stored either way, which is what the first word says.
+function CheckNotice({ server }: { server: WorkspaceMcpServer }) {
+  const health = server.health
+  return (
+    <div role="status">
+      <InfoBanner tone="warning">
+        {health === null
+          ? "Saved, but the gateway was too busy to check the connection. Use Recheck on the server's row."
+          : health.status === "failing"
+            ? `Saved, but the gateway could not use this server. ${healthDetail(health)}`
+            : `Saved. ${healthDetail(health)}`}
+      </InfoBanner>
+    </div>
+  )
+}
+
 export interface McpServerDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
   /** The server being edited; absent means this is an add. */
   editing?: WorkspaceMcpServer
+  /**
+   * The server as this dialog last saved it, when that save's connection check
+   * needs a look. The dialog stays open on it, so a fix is an edit of what was
+   * just stored.
+   */
+  saved?: WorkspaceMcpServer
   isPending: boolean
   error: unknown
   onSubmit: (draft: McpServerDraft) => void
@@ -81,6 +106,7 @@ export function McpServerDialog({
   isOpen,
   onOpenChange,
   editing,
+  saved,
   isPending,
   error,
   onSubmit,
@@ -117,7 +143,7 @@ export function McpServerDialog({
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // One predicate naming every field the operator can change, so "is there
   // anything to lose" cannot drift from what the form actually holds.
-  const { isDirty } = useDirtySnapshot({
+  const { isDirty, reset } = useDirtySnapshot({
     name,
     url,
     token,
@@ -126,6 +152,23 @@ export function McpServerDialog({
     allowedTools,
     enabled,
   })
+  // A save that kept the dialog open is the new baseline: the token it carried
+  // is stored now, so the box empties, and closing asks nothing.
+  const [seenSave, setSeenSave] = useState(saved)
+  if (saved !== seenSave) {
+    setSeenSave(saved)
+    setToken("")
+    setClearToken(false)
+    reset({
+      name,
+      url,
+      token: "",
+      clearToken: false,
+      hint,
+      allowedTools,
+      enabled,
+    })
+  }
 
   const submit = () => {
     if (isInvalid) return
@@ -154,7 +197,7 @@ export function McpServerDialog({
           An MCP endpoint this workspace's requests can reach by naming its id
           in <code className="font-mono">mcp_server_ids</code>. The gateway
           connects to it while a request runs, so it has to be reachable from
-          the gateway rather than from this browser.
+          the gateway rather than from this browser. Saving checks that it is.
         </>
       }
       submitLabel={editing ? "Save server" : "Add MCP server"}
@@ -164,6 +207,7 @@ export function McpServerDialog({
       isDirty={isDirty}
       error={error}
     >
+      {saved ? <CheckNotice server={saved} /> : null}
       <Field
         label="Name"
         value={name}

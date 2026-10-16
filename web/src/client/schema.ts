@@ -6157,6 +6157,10 @@ export interface paths {
          *     is checked for SSRF safety here as well as on the request path, and must
          *     use https when a token is set. A name already used in this workspace is
          *     refused with a 409.
+         *
+         *     Once stored, the server is connected to and its tools listed, and the
+         *     outcome is returned as `health`. A server that fails this check is still
+         *     stored, and `health.error` says why.
          */
         post: operations["mcp-servers-create_workspace_mcp_server"];
         delete?: never;
@@ -6188,9 +6192,35 @@ export interface paths {
          *
          *     Only the fields sent are applied. Omit `authorization_token` to leave the
          *     stored token alone, send an empty string to clear it, or send a value to
-         *     rotate it.
+         *     rotate it. A change to the URL, the token or the allow-list checks the
+         *     server again, as creating it does.
          */
         patch: operations["mcp-servers-update_workspace_mcp_server"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Workspace Mcp Server
+         * @description Check a server's connection now. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     Opens one session, lists the tools the allow-list admits, and stores the
+         *     outcome as `health`. A server that fails is still a 200, with
+         *     `health.status` set to `failing`. A 429 means every check slot on this
+         *     gateway was busy and nothing was recorded.
+         */
+        post: operations["mcp-servers-check_workspace_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/workspaces/{workspace_id}/member-budget-policies": {
@@ -8436,6 +8466,16 @@ export interface components {
             /** User */
             user?: string | null;
         };
+        /**
+         * CheckFailure
+         * @description Why a stored server failed its connection check.
+         *
+         *     Stored on the server's row and shown to whoever manages it, so each value
+         *     names a cause an operator can act on, and none carries anything the remote
+         *     server said. The first two are decided before any connection is opened.
+         * @enum {string}
+         */
+        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed";
         /**
          * CheckVerdictRequest
          * @description One verifier gate's verdict, as the caller's own verifier run produced it.
@@ -16664,6 +16704,40 @@ export interface components {
             url: string;
         };
         /**
+         * WorkspaceMcpServerHealth
+         * @description The last connection check: whether the gateway reached the server, and what it found.
+         *
+         *     Describes the server as the gateway saw it at ``checked_at``, not now: a
+         *     server that answered then can be down since, and the request path checks
+         *     nothing in advance on the strength of this.
+         */
+        WorkspaceMcpServerHealth: {
+            /** Checked At */
+            checked_at: string;
+            /** @description Why the check failed; null when healthy */
+            error?: components["schemas"]["CheckFailure"] | null;
+            /**
+             * Http Status
+             * @description The HTTP status the server refused with, if any
+             */
+            http_status?: number | null;
+            /**
+             * Missing Allowed Tools
+             * @description Allow-listed names the server did not offer
+             */
+            missing_allowed_tools?: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "healthy" | "failing";
+            /**
+             * Tool Count
+             * @description Live tools the allow-list admits; null when the check failed
+             */
+            tool_count?: number | null;
+        };
+        /**
          * WorkspaceMcpServerPublic
          * @description The API-facing shape. Never carries the token, only whether one is set.
          *
@@ -16681,6 +16755,8 @@ export interface components {
             enabled: boolean;
             /** Has Token */
             has_token: boolean;
+            /** @description The last connection check; null until one has run */
+            health: components["schemas"]["WorkspaceMcpServerHealth"] | null;
             /**
              * Id
              * Format: uuid
@@ -27355,6 +27431,38 @@ export interface operations {
                 "application/json": components["schemas"]["WorkspaceMcpServerUpdate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-check_workspace_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

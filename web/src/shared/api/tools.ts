@@ -452,6 +452,31 @@ export function useUpdateWorkspaceMcpServer() {
   })
 }
 
+// Connects to a stored server now and records the outcome as its `health`. A
+// server that fails answers 200 like one that passes; only a busy gateway (429)
+// is an error here.
+export function useCheckWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}/check`,
+        { method: "POST" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+    },
+  })
+}
+
 export function useDeleteWorkspaceMcpServer() {
   const queryClient = useQueryClient()
   return useMutation({
