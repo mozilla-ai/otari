@@ -348,7 +348,7 @@ from gateway.services.tools import (
     validate_web_declarations,
     web_search_intercept_enabled,
 )
-from gateway.services.traces import RequestTrace, TurnFacts, harness_of, resolve_session
+from gateway.services.traces import RequestTrace, TurnFacts, harness_of, is_subagent, resolve_session
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import (
     WEB_FETCH_TOOL_NAME,
@@ -2976,6 +2976,7 @@ async def resolve_request_context(
             session=session,
             harness=harness_of(raw_request.headers),
             turn=turn,
+            subagent=is_subagent(raw_request.headers),
             request_id=request_id,
             workspace_id=workspace_id,
             user_id=user_id,

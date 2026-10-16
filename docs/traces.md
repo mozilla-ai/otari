@@ -58,9 +58,13 @@ session's harness: `my-agent/1.4.0` shows `my-agent`. An SDK's default
 Turns and the tools your agent runs are read from each request's input, so they
 need nothing extra when the request carries the conversation as usual: the
 user's message last when a turn starts, the tool results last when the model's
-tool calls are answered, each with the call id the model gave it. A Responses
-request that continues with `previous_response_id` carries only the new items,
-so its tools are recorded without a name.
+tool calls are answered, each with the call id the model gave it. In a Messages
+request, any `system` messages after them are skipped; Claude Code sends one on
+almost every request. A Claude Code subagent sends its parent's session id and
+an `x-claude-code-agent-id` of its own, and its requests open no turn, since it
+works inside its parent's turn. A Responses request that continues with
+`previous_response_id` carries only the new items, so its tools are recorded
+without a name.
 
 ## Turns, steps and tools
 
