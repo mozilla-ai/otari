@@ -1,5 +1,6 @@
 """The files domain: uploaded files, their lifecycle, and the sweep that gives their storage back."""
 
+from gateway.services.files._attachment_uploads import uploads_attachments
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import produced_files_for
 from gateway.services.files._provider_uploads import provider_holds_copies
@@ -45,4 +46,5 @@ __all__ = [
     "provider_holds_copies",
     "run_file_sweeper",
     "sandbox_path_for",
+    "uploads_attachments",
 ]

@@ -28,6 +28,7 @@ from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import (
     AttachedFilesNotReadError,
+    InlineAttachmentsTooLargeError,
     NoCandidateHoldsCopiesError,
     ProviderAttachmentError,
     ProviderAttachmentRefusedError,
@@ -36,15 +37,16 @@ from gateway.exceptions.files_exceptions import (
 from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
 from gateway.services.content_normalizer import (
+    InlineLimit,
     NormalizationStats,
     WireFormat,
     has_container_blocks,
     name_container_copies,
     normalize_messages,
 )
-from gateway.services.files import FileService, StagedFile, provider_holds_copies
+from gateway.services.files import FileService, StagedFile, provider_holds_copies, uploads_attachments
 from gateway.services.model_capabilities import resolve_capabilities
-from gateway.services.provider_kwargs import ProviderAccounts, effective_credential
+from gateway.services.provider_kwargs import ProviderAccounts, effective_credential, get_provider_kwargs
 from gateway.services.tools import (
     CODE_EXECUTION_TOOL,
     CandidateTools,
@@ -56,6 +58,46 @@ from gateway.services.tools import (
     parse_code_execution_header,
     resolve_code_executor_preference,
 )
+
+# The providers that cap the attachment bytes one request may carry inline. Vertex
+# AI is left out: its provider serves Claude and Mistral models as well as Gemini,
+# under limits of their own.
+_INLINE_LIMITED_PROVIDERS = frozenset({LLMProvider.GEMINI})
+
+
+def inline_limit_for(
+    config: GatewayConfig,
+    provider: LLMProvider,
+    fmt: WireFormat,
+    *,
+    files: FileService | None,
+    candidates: Sequence[LLMProvider | None],
+    instance: str | None,
+    workspace_id: uuid.UUID | None,
+) -> InlineLimit | None:
+    """The inline attachment limit for ``provider``, with an upload where Otari can move a file there.
+
+    Only where every candidate shares the limit: a request that may fall back to
+    a provider without it is sent as it is, so the fallback can still serve it.
+    """
+    if fmt == "responses" or not candidates or any(c not in _INLINE_LIMITED_PROVIDERS for c in candidates):
+        return None
+    upload = None
+    if files is not None and uploads_attachments(provider):
+        attachments = files
+
+        async def upload(data: bytes, mime: str, filename: str) -> str:
+            kwargs = get_provider_kwargs(config, provider, instance, workspace_id=workspace_id)
+            return await attachments.attachment_uri(
+                data,
+                provider=provider,
+                credential=effective_credential(provider, kwargs),
+                workspace_id=workspace_id,
+                mime_type=mime,
+                filename=filename,
+            )
+
+    return InlineLimit(max_bytes=config.files_gemini_inline_max_bytes, upload=upload)
 
 
 def _executor_preference(
@@ -192,6 +234,8 @@ async def normalize_request_messages(
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
+    candidates: Sequence[LLMProvider | None] = (),
+    credential_workspace_id: uuid.UUID | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
 
@@ -204,13 +248,21 @@ async def normalize_request_messages(
     recorded on ``NormalizationStats.container_inputs``, and a block naming none
     refuses the request.
 
+    ``candidates`` is every provider the request may dispatch to, head first, and
+    ``credential_workspace_id`` the workspace it dispatches under. Together they
+    decide whether attachments past the provider's inline limit are moved to its
+    own storage (see ``inline_limit_for``).
+
     An attachment the model reads never fails the request, because this runs
     after the budget reservation and a refusal here would lose it.
     The input is returned untouched instead, which is also the answer where file
     understanding is off or the provider could not be parsed.
+    The exception is an attachment past an inline limit that could not be moved,
+    which the provider would refuse anyway, so the request is refused here first.
 
     Raises:
         ProviderAttachmentError: only where ``provider_container`` is set.
+        InlineAttachmentsTooLargeError: the attachments pass the provider's inline limit and could not be moved.
     """
     if provider_container and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
         # Nothing below would examine the blocks, so a `container_upload` would
@@ -220,7 +272,16 @@ async def normalize_request_messages(
         return messages, NormalizationStats()
     try:
         caps = resolve_capabilities(config, provider, model, instance=instance)
-        return await normalize_messages(
+        inline_limit = inline_limit_for(
+            config,
+            provider,
+            fmt,
+            files=files,
+            candidates=candidates or (provider,),
+            instance=instance,
+            workspace_id=credential_workspace_id,
+        )
+        normalized, stats = await normalize_messages(
             messages,
             config=config,
             caps=caps,
@@ -230,6 +291,7 @@ async def normalize_request_messages(
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
+            inline_limit=inline_limit,
         )
     except ProviderAttachmentError:
         raise
@@ -242,6 +304,9 @@ async def normalize_request_messages(
             raise ProviderUploadFailedError from exc
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)
         return messages, NormalizationStats()
+    if stats.oversized:
+        raise InlineAttachmentsTooLargeError(config.files_gemini_inline_max_bytes)
+    return normalized, stats
 
 
 def container_copies_step(

@@ -878,6 +878,8 @@ async def create_message(
             user_id=target.user_id,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
+            candidates=target.candidate_providers,
+            credential_workspace_id=target.credential_workspace_id,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,

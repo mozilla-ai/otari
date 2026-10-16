@@ -1214,6 +1214,17 @@ class GatewayConfig(
         ge=1,
         description="Maximum size in bytes for a single uploaded file.",
     )
+    files_gemini_inline_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=16 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Most attachment bytes, counted as sent (base64), one request to a Gemini model carries inline. "
+            "Gemini caps a whole request at 20 MB, so the default leaves room for the rest of it. Past it, each "
+            "further attachment is uploaded to Gemini's file storage with the instance's own key and referenced "
+            "by URI, and where Gemini refuses that upload the request is refused up front rather than by Gemini. "
+            "A request that may fall back to another provider is sent as it is."
+        ),
+    )
     files_output_max_files: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=20,
         ge=0,

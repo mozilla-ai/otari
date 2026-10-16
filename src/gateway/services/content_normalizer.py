@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import mimetypes
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
@@ -70,6 +71,12 @@ class NormalizationStats:
     # container, in message order and without repeats. Only filled when the
     # caller said the provider runs the code.
     container_inputs: list[StagedFile] = field(default_factory=list)
+    # Bytes forwarded inline so far, as sent (base64), attachments moved to
+    # provider storage, and attachments left inline past the provider's limit
+    # (see ``InlineLimit``).
+    inline_bytes: int = 0
+    uploaded: int = 0
+    oversized: int = 0
 
     def hold_for_container(self, staged: StagedFile) -> None:
         """Record ``staged`` as a file the provider's own container must be given."""
@@ -104,6 +111,27 @@ class NormalizationStats:
             completion_tokens=self.vision_completion_tokens,
             total_tokens=self.vision_prompt_tokens + self.vision_completion_tokens,
         )
+
+
+# Uploads ``(data, mime, filename)`` to the provider's own file storage and
+# returns the URI a request can reference it by.
+ProviderUpload = Callable[[bytes, str, str], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class InlineLimit:
+    """How many attachment bytes a provider accepts inline in one request, counted as sent (base64).
+
+    Gemini refuses a request past 20 MB. Once the attachments would pass
+    ``max_bytes``, each further one goes through ``upload`` and is referenced by
+    URI instead. With no ``upload`` (a provider without a Files API, or no
+    credential to call it with) the block is left as it was and counted on
+    ``NormalizationStats.oversized``, so the caller can refuse the request before
+    the provider does.
+    """
+
+    max_bytes: int
+    upload: ProviderUpload | None = None
 
 
 @dataclass
@@ -301,6 +329,44 @@ def _inline_passthrough(block: dict[str, Any], fmt: WireFormat, src: _Source) ->
     return {"type": "file", "file": file_obj}
 
 
+def _uploaded_file_block(src: _Source, uri: str) -> dict[str, Any]:
+    """An OpenAI ``file`` part referencing ``uri``, the one shape that carries a MIME hint beside a URI.
+
+    A provider file URI has no extension, so any-llm reads the MIME type from the
+    filename. The Anthropic Messages bridge forwards a block it has no mapping for
+    unchanged, so the same part serves both wire formats.
+    """
+    filename = src.filename or f"attachment{mimetypes.guess_extension(src.mime) or ''}"
+    return {"type": "file", "file": {"file_data": uri, "filename": filename}}
+
+
+def _encoded_size(data: bytes) -> int:
+    """The bytes ``data`` takes on the wire, base64-encoded."""
+    return 4 * ((len(data) + 2) // 3)
+
+
+async def _within_inline_limit(
+    block: dict[str, Any], src: _Source, limit: InlineLimit, stats: NormalizationStats
+) -> dict[str, Any] | None:
+    """``block`` moved to provider storage when it would pass ``limit``, else ``None`` to forward it inline."""
+    if src.data is None:
+        return None
+    size = _encoded_size(src.data)
+    if stats.inline_bytes + size <= limit.max_bytes:
+        stats.inline_bytes += size
+        return None
+    if limit.upload is not None:
+        try:
+            uri = await limit.upload(src.data, src.mime, src.filename or "")
+        except Exception as exc:  # noqa: BLE001 - counted as oversized and refused by the caller
+            logger.warning("content normalizer: provider upload failed for a %d byte %s: %s", size, src.kind, exc)
+        else:
+            stats.uploaded += 1
+            return _uploaded_file_block(src, uri)
+    stats.oversized += 1
+    return block
+
+
 async def _extract_to_text(src: _Source, config: GatewayConfig, stats: NormalizationStats) -> str | None:
     """Produce a text rendering of a non-text block for a text-only model."""
     if src.data is None:
@@ -445,6 +511,7 @@ async def _normalize_block(
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
+    inline_limit: InlineLimit | None = None,
 ) -> Any:
     if not isinstance(block, dict):
         return block
@@ -490,6 +557,8 @@ async def _normalize_block(
 
     native = caps.image if src.kind == _IMAGE else caps.pdf and _is_native_document(src)
     if native:
+        if inline_limit is not None and (moved := await _within_inline_limit(block, src, inline_limit, stats)):
+            return moved
         # Only rewrite when bytes came from a stored file_id (the provider can't
         # resolve our ids); already-inline / remote blocks pass through as-is.
         return _inline_passthrough(block, fmt, src) if src.needs_inline else block
@@ -541,6 +610,7 @@ async def normalize_messages(
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
+    inline_limit: InlineLimit | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Return (possibly-rewritten messages, stats).
 
@@ -559,6 +629,9 @@ async def normalize_messages(
     caller holds refuses the request rather than reaching the provider. With both
     set, for a request whose candidates run the code in different places, the
     block keeps naming the upload and the upload is staged as well.
+
+    ``inline_limit`` caps the attachment bytes the provider is sent inline (see
+    :class:`InlineLimit`).
 
     Messages whose ``content`` is a plain string are returned untouched (the
     common, zero-overhead path). Only list-content messages are walked, plus, on
@@ -584,6 +657,7 @@ async def normalize_messages(
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
+            inline_limit=inline_limit,
         )
 
     out: list[dict[str, Any]] = []
