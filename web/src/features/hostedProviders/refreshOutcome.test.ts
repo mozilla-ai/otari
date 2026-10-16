@@ -160,7 +160,9 @@ describe("catalogRefreshFailures", () => {
   it("does not offer removal for a provider defined in configuration", () => {
     // No delete reaches it, whatever page of the provider list it is on.
     const result = sweep({
-      providers: [provider({ error: "The key was refused.", source: "config" })],
+      providers: [
+        provider({ error: "The key was refused.", source: "config" }),
+      ],
     })
 
     expect(catalogRefreshFailures(result)).toEqual([
