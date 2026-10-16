@@ -25,7 +25,7 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
-from gateway.api.deps import get_web_provider_client
+from gateway.api.deps import get_optional_web_provider_client
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.tools import OTARI_TOOL_CALLS_FIELD
 
@@ -89,7 +89,8 @@ def serve_fetch_on_tabstack(
         async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as answering:
             yield answering
 
-    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+    # The client the tool ports carry, which every completion route takes.
+    client.app.dependency_overrides[get_optional_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
 
 
 def tool_result(sent: list[dict[str, Any]]) -> str:

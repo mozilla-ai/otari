@@ -250,7 +250,6 @@ def _build_web_retrieval_backend(
 
     kwargs["enable_search"] = search_tool_entry is not None
     kwargs["enable_fetch"] = fetch_tool_entry is not None
-    kwargs["fetch_policy"] = fetch_policy
     kwargs["counter"] = counter
     if fetch_tool_entry is not None:
         # The builder is handed no workspace policy, so no fetch credential serves the call.

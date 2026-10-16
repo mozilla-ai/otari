@@ -8,6 +8,7 @@ transport, so no case reaches the network.
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import os
 import subprocess
@@ -62,6 +63,7 @@ from gateway.services.web_retrieval_backend import (
     WebRetrievalLimitExceededError,
 )
 from gateway.services.web_retrieval_network import (
+    ContentDecodingError,
     NetworkDeadlineExceeded,
     PinnedAsyncHTTPTransport,
     RedirectValidationError,
@@ -218,6 +220,8 @@ async def test_the_whole_result_is_bounded(fetcher: AsyncMock) -> None:
         (NetworkDeadlineExceeded("x"), "[tool error] Web Fetch timed out", "timeout", None),
         (httpx.ReadTimeout("x"), "[tool error] Web Fetch timed out", "timeout", None),
         (WebFetchHTTPStatusError(404), "[tool error] destination returned HTTP 404", "http_status", 404),
+        # The text names any status; the failure keeps one only from 400.
+        (WebFetchHTTPStatusError(304), "[tool error] destination returned HTTP 304", "http_status", None),
         (UnsupportedContentTypeError("x"), "[tool error] unsupported content type", "content_type", None),
         (ExtractionError("x"), "[tool error] content extraction failed", "extraction", None),
         (
@@ -240,6 +244,7 @@ async def test_the_whole_result_is_bounded(fetcher: AsyncMock) -> None:
         ),
         (httpx.ConnectError("x"), "[tool error] Web Fetch network failure", "network", None),
         (WebFetchError("x"), "[tool error] Web Fetch network failure", "network", None),
+        (ContentDecodingError("x"), "[tool error] Web Fetch failed", "content_decoding", None),
         (RuntimeError("x"), "[tool error] Web Fetch failed", "internal_error", None),
     ],
 )
@@ -585,6 +590,37 @@ async def test_a_provider_instance_sends_through_the_client_it_was_handed() -> N
         "---\n"
         "# Example\n\nBody"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_provider_is_asked_for_the_canonical_url_that_was_checked() -> None:
+    sent: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content)["url"])
+        return httpx.Response(200, json={"content": "page", "url": sent[-1]})
+
+    resolved, client = _tabstack(answer)
+    async with client:
+        await _call(WebFetchBackend(resolved, web_provider_client=client), "HTTPS://Example.COM/a?b=c#part")
+
+    assert sent == ["https://example.com/a?b=c"]
+
+
+@pytest.mark.asyncio
+async def test_a_url_whose_canonical_form_outgrows_the_request_limit_is_still_shown() -> None:
+    """Percent-encoding lengthens an accepted URL past the limit it was checked against."""
+    url = "https://example.com/" + "é" * 2000
+    old = _old(WebFetchBackend(_fake(text="page")))
+    async with old:
+        text = await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": url})
+        rendering = native_rendering(WEB_FETCH_TOOL_NAME, Dialect.MESSAGES)
+        assert rendering is not None
+        _, result = rendering.ran(_native_call(failed=False), old)
+
+    shown = "https://example.com/" + "%C3%A9" * 2000
+    assert text.startswith(f"Source: {shown}\n")
+    assert result.content.url == shown
 
 
 @pytest.mark.asyncio

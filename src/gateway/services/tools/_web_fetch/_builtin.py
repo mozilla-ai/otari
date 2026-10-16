@@ -26,6 +26,7 @@ from gateway.services.web_fetch_service import (
     WebFetchService,
 )
 from gateway.services.web_retrieval_network import (
+    ContentDecodingError,
     NetworkDeadlineExceeded,
     PinnedAsyncHTTPTransport,
     RedirectValidationError,
@@ -45,6 +46,7 @@ CONTENT_TYPE_TAG = "content_type"
 EXTRACTION_TAG = "extraction"
 URL_INVALID_TAG = "url_invalid"
 NETWORK_TAG = "network"
+CONTENT_DECODING_TAG = "content_decoding"
 
 
 def register_builtin_fetcher() -> None:
@@ -94,6 +96,8 @@ class HardenedFetcher:
             raise _failed(URL_INVALID_TAG) from None
         except (httpx.HTTPError, WebFetchError):
             raise _failed(NETWORK_TAG) from None
+        except ContentDecodingError:
+            raise _failed(CONTENT_DECODING_TAG) from None
         cut = max_chars is not None and len(result.text) > max_chars
         return FetchedPage(
             url=str(result.requested_url.url),

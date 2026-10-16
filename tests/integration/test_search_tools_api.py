@@ -37,7 +37,11 @@ from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.search_tool_store_service import refresh_tool_instances, reset_search_tool_cache
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.web_fetch_service import WebFetchHTTPStatusError, WebFetchResult, WebFetchService
-from gateway.services.web_retrieval_network import PinnedAsyncHTTPTransport, TrustedProxyAsyncHTTPTransport
+from gateway.services.web_retrieval_network import (
+    ContentDecodingError,
+    PinnedAsyncHTTPTransport,
+    TrustedProxyAsyncHTTPTransport,
+)
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_web_url
 
 from .conftest import build_test_client
@@ -832,17 +836,20 @@ def test_builtin_fetch_is_tested_with_one_fetch_as_a_fetch_tool_call_makes(
     assert client.delete(f"{API_ROOT}/search-tools/builtin_fetch", headers=master_key_header).status_code == 404
 
 
+@pytest.mark.parametrize(
+    ("raised", "tag"), [(WebFetchHTTPStatusError(404), "http_status"), (ContentDecodingError("x"), "content_decoding")]
+)
 def test_a_failed_builtin_fetch_test_reports_the_fetchers_tag(
-    client: TestClient, master_key_header: dict[str, str]
+    client: TestClient, master_key_header: dict[str, str], raised: Exception, tag: str
 ) -> None:
-    with patch.object(WebFetchService, "fetch", new=AsyncMock(side_effect=WebFetchHTTPStatusError(404))):
+    with patch.object(WebFetchService, "fetch", new=AsyncMock(side_effect=raised)):
         resp = client.post(
             f"{API_ROOT}/search-tools/builtin_fetch/test",
             json={"url": "https://example.com/a"},
             headers=master_key_header,
         )
 
-    assert resp.json() == {"ok": False, "error": "http_status", "hits": None, "characters": None}
+    assert resp.json() == {"ok": False, "error": tag, "hits": None, "characters": None}
 
 
 def test_testing_an_unknown_instance_is_404(client: TestClient, master_key_header: dict[str, str]) -> None:

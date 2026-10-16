@@ -155,7 +155,6 @@ class WebRetrievalBackend:
             msg = "WebRetrievalBackend needs either a base_url or a provider with its api key"
             raise ValueError(msg)
         self._enable_search = enable_search
-        self._enable_fetch = enable_fetch
         self._base_url = base_url.rstrip("/") if base_url else None
         # A licensed search API this process calls itself, instead of the
         # SearXNG-shaped service at ``base_url``. Set when the deployment
@@ -269,7 +268,7 @@ class WebRetrievalBackend:
 
     def owns_tool(self, name: str) -> bool:
         return (self._enable_search and name == WEB_SEARCH_TOOL_NAME) or (
-            self._enable_fetch and name == WEB_FETCH_TOOL_NAME
+            self._fetch is not None and name == WEB_FETCH_TOOL_NAME
         )
 
     def purpose_hints(self) -> list[tuple[str, str]]:
