@@ -94,9 +94,16 @@ Three things to know:
   own would sign its requests with the bucket's keys, which AWS rejects, so give
   Bedrock its own keys on the Providers page or in `OTARI_CONFIG_YAML`.
 - Railway bills a bucket per stored GB and keeps no backups of it. A deleted
-  bucket stays restorable for 52 hours, after which its objects are gone. The
-  file sweep (`files_retention_hours`, off by default) is how to bound what
-  accumulates.
+  bucket stays restorable for 52 hours, after which its objects are gone.
+  `OTARI_FILES_RETENTION_HOURS` bounds what accumulates: a file in the bucket
+  past that age stops being served, and the sweep (hourly by default,
+  `files_sweep_interval_sec`) then removes its bytes. This covers files a
+  sandbox produced as well as uploads. The image default keeps a file until
+  it is deleted. A file's expiry is fixed when it is uploaded, so changing the
+  value affects later uploads only. Where a provider's own code execution
+  reads attached files, keep the value well above an hour: a copy never
+  outlives the file's expiry, and the provider needs at least an hour; see
+  [A file the provider's own code execution reads](../../docs/files.md#a-file-the-providers-own-code-execution-reads).
 - To run without the bucket, do it in this order. First set
   `OTARI_FILES_ENABLED=false` on the otari service and let it redeploy. Then
   delete the bucket and the six `otari-files` variables. The order matters:
