@@ -110,6 +110,39 @@ def test_messages_tool_results_answer_the_calls_the_history_named() -> None:
     )
 
 
+_OPERATOR_NOTE = {"role": "system", "content": [{"type": "text", "text": "x"}]}
+_EFFORT_CHANGE = {"role": "system", "content": [], "output_config": {"effort": "low"}}
+
+
+@pytest.mark.parametrize(
+    ("prompt", "trailing"),
+    [
+        ([{"type": "text", "text": "x"}] * 3, [_OPERATOR_NOTE]),
+        ("x", [_OPERATOR_NOTE]),
+        ("x", [_OPERATOR_NOTE, _EFFORT_CHANGE]),
+    ],
+)
+def test_messages_a_prompt_under_trailing_system_messages_opens_a_turn(
+    prompt: Any, trailing: list[dict[str, Any]]
+) -> None:
+    """Claude Code follows the user's input with a mid-conversation system message, which is the operator's."""
+    assert read_turn("messages", [{"role": "user", "content": prompt}, *trailing]).opens_turn
+
+
+def test_messages_tool_results_under_a_trailing_system_message_answer_their_calls() -> None:
+    history = [
+        {"role": "user", "content": [{"type": "text", "text": "x"}]},
+        _OPERATOR_NOTE,
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "x"}]},
+        _OPERATOR_NOTE,
+    ]
+
+    assert read_turn("messages", history) == TurnFacts(
+        opens_turn=False, answered=(AnsweredCall(call_id="toolu_1", name="Bash", is_error=False, position=3),)
+    )
+
+
 def test_chat_trailing_tool_messages_answer_the_assistants_calls() -> None:
     history = [
         {"role": "user", "content": "x"},
