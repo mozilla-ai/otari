@@ -9,6 +9,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 
 from gateway.api.deps import FederationTokenExchangeDep, record_auth_failure
+from gateway.core.feature import CoreFeature
 from gateway.schemas.api_keys import FederationTokenRequest, FederationTokenResponse, OAuthErrorResponse
 from gateway.services.api_keys import FederationGrantError
 
@@ -55,3 +56,13 @@ async def exchange_token(grant: FederationTokenRequest, exchange: FederationToke
         return JSONResponse(body.model_dump(), status_code=exc.status_code, headers=_NO_STORE)
     response = FederationTokenResponse(access_token=token, expires_in=expires_in)
     return JSONResponse(response.model_dump(), headers=_NO_STORE)
+
+
+# Switched by ``federation_issuers``, a startup setting: with no issuer trusted, no identity token could be exchanged,
+# so the route is absent rather than refusing.
+FEATURE = CoreFeature(
+    name="workload_identity_exchange",
+    surface=None,
+    enabled=lambda config: bool(config.federation_issuers),
+    routers=lambda config: (router,),
+)

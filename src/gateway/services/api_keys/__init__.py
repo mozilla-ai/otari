@@ -22,6 +22,7 @@ from gateway.services.api_keys._federation import (
 )
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
 from gateway.services.api_keys._service import ApiKeyService
+from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace, key_refusal
 
 __all__ = [
     "JWT_BEARER_GRANT",
@@ -32,11 +33,14 @@ __all__ = [
     "FederationGrantError",
     "FederationMatch",
     "FederationRefusedError",
+    "FederationTokenExchange",
     "FederationUnavailableError",
+    "OrganizationOfWorkspace",
     "access_token_expiry",
     "declared_secret_problem",
     "grant_names_key",
     "is_access_token",
+    "key_refusal",
     "match_federation_rules",
     "mint_access_token",
     "read_access_token",

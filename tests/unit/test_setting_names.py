@@ -55,6 +55,7 @@ _SETTING_NAMES = frozenset(
         "enable_docs",
         "enable_metrics",
         "federation_access_token_ttl_sec",
+        "federation_allow_private_hosts",
         "federation_issuers",
         "feedback_enabled",
         "fetch_tools",

@@ -16,6 +16,7 @@ authentication-failure metric and nothing from the token itself.
 import asyncio
 import base64
 import binascii
+import functools
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterable, Sequence
@@ -108,10 +109,10 @@ def unverified_issuer(token: str) -> str | None:
     return issuer if isinstance(issuer, str) else None
 
 
-async def fetch_json(url: str) -> Any:
+async def fetch_json(url: str, *, allow_private_hosts: bool = False) -> Any:
     """GET a JSON document over https, through the outbound URL checks, refusing redirects and large bodies."""
     try:
-        await validate_federation_url(url)
+        await validate_federation_url(url, allow_private_hosts=allow_private_hosts)
         async with (
             httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=False) as client,
             client.stream("GET", url, headers={"Accept": "application/json"}) as response,
@@ -169,12 +170,14 @@ class FederatedTokenVerifier:
         self,
         issuers: Sequence[FederationIssuer],
         *,
-        fetch: FetchJson = fetch_json,
+        allow_private_hosts: bool = False,
+        fetch: FetchJson | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.issuers = tuple(issuers)
+        self.allow_private_hosts = allow_private_hosts
         self._by_issuer = {entry.issuer: entry for entry in self.issuers}
-        self._fetch = fetch
+        self._fetch = fetch or functools.partial(fetch_json, allow_private_hosts=allow_private_hosts)
         self._clock = clock
         self._cache: dict[str, _IssuerKeys] = {}
         self._failed_at: dict[str, float] = {}

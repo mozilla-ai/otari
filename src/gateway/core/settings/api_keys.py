@@ -175,6 +175,13 @@ class ApiKeySettings(BaseModel):
         ),
     )
 
+    federation_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
+        default=False,
+        description=(
+            "Let a federation issuer's discovery document and signing keys be fetched from a private, loopback or "
+            "link-local address, for an issuer on the deployment's own network. Off by default."
+        ),
+    )
     federation_access_token_ttl_sec: Annotated[int, Shown(SettingsGroup.GENERAL)] = Field(
         default=600,
         ge=60,

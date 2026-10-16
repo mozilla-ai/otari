@@ -10,6 +10,7 @@ to a JSON file. It can be run in two modes:
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -23,6 +24,7 @@ if str(SRC_ROOT) not in sys.path:
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import FederationIssuer
 from gateway.main import create_app
+from gateway.services.secret_box import generate_secret_key
 
 
 def generate_openapi_spec() -> dict[str, object]:
@@ -49,7 +51,14 @@ def generate_openapi_spec() -> dict[str, object]:
             web_search_backend_token="openapi-generation-placeholder",
             federation_issuers=[FederationIssuer(issuer="https://openapi-generation-placeholder.invalid")],
         )
-        app = create_app(config)
+        # The token exchange needs a secret to start; a throwaway one, for this process only.
+        previous = os.environ.get("OTARI_SECRET_KEY")
+        os.environ["OTARI_SECRET_KEY"] = previous or generate_secret_key()
+        try:
+            app = create_app(config)
+        finally:
+            if previous is None:
+                del os.environ["OTARI_SECRET_KEY"]
         return cast(dict[str, object], app.openapi())
 
 

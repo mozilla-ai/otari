@@ -32,7 +32,7 @@ Five call sites with overlapping but not identical threat models:
 * **Workload identity discovery and JWKS** (:func:`validate_federation_url`):
   the issuer is operator-configured and its signing-key location comes from
   its discovery document. https only, and private hosts are blocked unless
-  ``OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS`` is set.
+  the ``federation_allow_private_hosts`` setting is on.
 
 These checks are intentionally conservative: DNS rebinding can defeat host-based
 allowlists. Production deployments should also enforce egress policy at the
@@ -320,17 +320,13 @@ async def validate_provider_api_base(url: str) -> None:
     await _reject_internal_host(host, host_label="provider api_base", override_var="OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS")
 
 
-def _allow_federation_private_hosts() -> bool:
-    return parse_bool_env(otari_env("FEDERATION_ALLOW_PRIVATE_HOSTS", "false"))
-
-
-async def validate_federation_url(url: str) -> None:
+async def validate_federation_url(url: str, *, allow_private_hosts: bool = False) -> None:
     """Reject an OpenID discovery or JWKS URL that is not https or that reaches an internal address.
 
     The issuer is operator-configured, but the JWKS location comes from the
     issuer's discovery document, so it is checked like any URL the gateway did
-    not write itself. Private hosts are refused unless
-    ``OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS`` is set, for an issuer on the
+    not write itself. Private hosts are refused unless ``allow_private_hosts``,
+    the ``federation_allow_private_hosts`` setting, is on for an issuer on the
     deployment's own network. Raises :class:`UnsafeURLError` on rejection.
     """
     parsed = urlparse(url)
@@ -339,6 +335,6 @@ async def validate_federation_url(url: str) -> None:
     host = parsed.hostname
     if not host:
         raise UnsafeURLError("federation URL must include a hostname")
-    if _allow_federation_private_hosts():
+    if allow_private_hosts:
         return
     await _reject_internal_host(host, host_label="federation", override_var="OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS")

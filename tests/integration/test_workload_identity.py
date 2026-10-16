@@ -21,6 +21,7 @@ from gateway.api.deps import AUTH_FAILURES
 from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.settings.api_keys import FederationIssuer
 from gateway.services.api_keys import FederatedTokenVerifier
+from gateway.services.secret_box import generate_secret_key
 
 from .conftest import MODEL_NAME, build_test_client
 
@@ -70,7 +71,11 @@ def federation_config(test_config: GatewayConfig) -> GatewayConfig:
 
 
 @pytest.fixture
-def client(federation_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+def client(
+    federation_config: GatewayConfig, clean_database: None, monkeypatch: pytest.MonkeyPatch
+) -> Generator[TestClient]:
+    # Federation needs a secret to start, for the access tokens the exchange signs.
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     for test_client in build_test_client(federation_config):
         test_client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
             federation_config.federation_issuers, fetch=_fetch

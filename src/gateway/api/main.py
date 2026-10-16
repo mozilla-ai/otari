@@ -38,7 +38,6 @@ from gateway.api.routes import (
     messages,
     models,
     moderations,
-    oauth,
     org_provider_keys,
     organization_budgets,
     organization_guardrail_definitions,
@@ -215,9 +214,6 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # ``keys.router`` holds over every key's.
     RouterMount(end_users.router, Plane.CONTROL),
     RouterMount(end_users.budgets_router, Plane.CONTROL),
-    # Absent rather than refusing where no federation issuer is trusted, since
-    # then no identity token could be exchanged.
-    RouterMount(oauth.router, Plane.CONTROL, when=lambda config: bool(config.federation_issuers)),
     RouterMount(users.router, Plane.CONTROL),
     RouterMount(organizations.router, Plane.CONTROL),
     RouterMount(organization_budgets.budgets_router, Plane.CONTROL),

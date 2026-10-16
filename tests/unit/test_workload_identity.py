@@ -547,15 +547,63 @@ def test_a_rule_email_is_stored_lower_case() -> None:
     "url",
     ["http://issuer.example.com/keys", "https://10.0.0.1/keys", "https://169.254.169.254/keys", "https://127.0.0.1/k"],
 )
-async def test_a_jwks_url_must_be_public_https(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS", raising=False)
-
+async def test_a_jwks_url_must_be_public_https(url: str) -> None:
     with pytest.raises(UnsafeURLError):
         await validate_federation_url(url)
 
 
 @pytest.mark.asyncio
-async def test_a_private_issuer_may_be_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS", "true")
+async def test_a_private_issuer_may_be_allowed_but_never_over_http() -> None:
+    await validate_federation_url("https://10.0.0.1/keys", allow_private_hosts=True)
+    with pytest.raises(UnsafeURLError):
+        await validate_federation_url("http://10.0.0.1/keys", allow_private_hosts=True)
 
-    await validate_federation_url("https://10.0.0.1/keys")
+
+@pytest.mark.asyncio
+async def test_the_verifier_fetches_with_the_configured_private_host_setting() -> None:
+    """The default fetcher refuses a private JWKS address unless the verifier was built allowing it."""
+    issuer = [FederationIssuer(issuer=ISSUER, jwks_uri="https://10.0.0.1/keys")]
+
+    with pytest.raises(FederationUnavailableError):
+        await FederatedTokenVerifier(issuer).verify(_token())
+    assert FederatedTokenVerifier(issuer, allow_private_hosts=True).allow_private_hosts is True
+
+
+def test_the_private_host_setting_is_validated_at_config_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS", "sometimes")
+    with pytest.raises(ValidationError, match="federation_allow_private_hosts"):
+        GatewayConfig()
+
+    monkeypatch.setenv("OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS", "true")
+    assert GatewayConfig().federation_allow_private_hosts is True
+
+
+# Starting without a secret
+
+
+def test_federation_without_a_secret_key_refuses_to_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    from gateway.main import create_app
+
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    config = GatewayConfig.model_validate(
+        {"federation_issuers": [ISSUER], "database_url": f"sqlite:///{tmp_path / 'otari.db'}"}
+    )
+
+    with pytest.raises(ValueError, match="OTARI_SECRET_KEY"):
+        config.validate_declared_access()
+    with pytest.raises(ValueError, match="OTARI_SECRET_KEY"):
+        create_app(config)
+
+
+def test_federation_with_a_secret_key_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gateway.services.secret_box import generate_secret_key
+
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+    GatewayConfig.model_validate({"federation_issuers": [ISSUER]}).validate_declared_access()
+
+
+def test_no_secret_key_is_needed_with_federation_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+
+    GatewayConfig().validate_declared_access()

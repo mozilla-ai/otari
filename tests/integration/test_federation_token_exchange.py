@@ -314,7 +314,7 @@ def test_an_inactive_key_cannot_exchange(
     assert refused.json() == _INVALID_GRANT
 
 
-def test_without_a_secret_key_the_exchange_is_unavailable(
+def test_a_secret_key_removed_after_start_makes_the_exchange_unavailable(
     client: TestClient, federated: _Federated, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("OTARI_SECRET_KEY")
@@ -333,7 +333,7 @@ def test_with_federation_off_the_endpoint_is_absent(test_config: GatewayConfig, 
 # Refusals are cheap
 
 
-def test_a_refused_exchange_writes_nothing(client: TestClient, federated: _Federated) -> None:
+def test_an_exchange_refused_or_not_writes_nothing(client: TestClient, federated: _Federated) -> None:
     with _writes() as writes:
         for body in (
             federated.grant(organization_id="00000000-0000-0000-0000-000000000000"),
@@ -342,11 +342,13 @@ def test_a_refused_exchange_writes_nothing(client: TestClient, federated: _Feder
             federated.grant(grant_type="password"),
         ):
             assert _exchange(client, body).status_code in (400, 401)
-        refused_writes = list(writes)
-        # The listener does see writes: a successful exchange records the key's first use.
-        assert _exchange(client, federated.grant()).status_code == 200
+        exchanged = _exchange(client, federated.grant())
+        assert exchanged.status_code == 200
+        exchange_writes = list(writes)
+        # The listener does see writes: the access token's first use records the key's first use.
+        assert _chat(client, _bearer(exchanged.json()["access_token"])).status_code == 200
 
-    assert refused_writes == []
+    assert exchange_writes == []
     assert any(statement.lstrip().upper().startswith("UPDATE API_KEYS") for statement in writes)
 
 
