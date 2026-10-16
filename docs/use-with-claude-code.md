@@ -50,6 +50,13 @@ it, but hybrid authentication does not.
 
 The same values can go in the `env` block of Claude Code's settings file.
 
+A workload on Google Cloud, or behind another OpenID Connect issuer, can skip
+the key altogether: Claude Code's own workload identity
+(`ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and
+`ANTHROPIC_IDENTITY_TOKEN_FILE`) works against a standalone Otari that trusts
+the issuer. See
+[Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks).
+
 ## Tag Claude Code traffic
 
 Claude Code cannot set a request body's `metadata`, but it can add headers, so

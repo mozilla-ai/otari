@@ -180,6 +180,64 @@ reply = otari().chat.completions.create(
 )
 ```
 
+## Claude Code and the Anthropic SDKs
+
+Claude Code and the Anthropic SDKs speak workload identity themselves: given an
+identity token and a federation rule, they exchange the token for a
+short-lived access token at `{ANTHROPIC_BASE_URL}/v1/oauth/token` and send that
+token on every request. Otari answers that exchange at
+`POST /api/v1/oauth/token`, so a workload already set up this way for Anthropic
+moves to Otari by changing two variables:
+
+```bash
+export ANTHROPIC_BASE_URL="https://otari.example.com/api"
+export ANTHROPIC_FEDERATION_RULE_ID="<the id of the Otari federation rule>"
+export ANTHROPIC_ORGANIZATION_ID="<the UUID of the key's Otari organization>"
+export ANTHROPIC_IDENTITY_TOKEN_FILE="/var/run/secrets/otari/token"   # refreshed by the platform
+claude
+```
+
+- `ANTHROPIC_FEDERATION_RULE_ID` is the `id` that
+  `POST /api/v1/keys/{key_id}/federation-rules` returned (and
+  `GET /api/v1/keys/{key_id}/federation-rules` lists). The identity token must
+  match **that** rule; a token matching only another rule is refused.
+- `ANTHROPIC_ORGANIZATION_ID` is the UUID of the organization the key belongs
+  to: `organization.id` in `GET /api/v1/organizations/me`, read with the
+  master key. When set, it must be that organization.
+- `ANTHROPIC_WORKSPACE_ID`, optional, must be the key's `workspace_id` (a UUID,
+  in `GET /api/v1/keys/{key_id}`); Otari has no `default` alias.
+  `ANTHROPIC_SERVICE_ACCOUNT_ID`, optional, must be the key's `id`.
+- `ANTHROPIC_IDENTITY_TOKEN_FILE` (or `ANTHROPIC_IDENTITY_TOKEN`) holds the
+  identity token, for instance the one step 4 fetches from the metadata
+  server, rewritten before it expires.
+
+The access token lasts `federation_access_token_ttl_sec` seconds (600 by
+default, between 60 and 3600), and never past the identity token it was
+exchanged for; the SDKs refresh it before then. It authenticates exactly as the
+rule's key, the same way an identity token presented directly does, and it is
+checked again on every request: deleting the rule, deactivating the key, or the
+key expiring cuts it off at once. It is never the master key.
+
+The access token is stateless. Otari signs it with a key derived from
+`OTARI_SECRET_KEY` and stores nothing, so every replica that shares that secret
+accepts it, and rotating the secret (prepending a new key) keeps tokens signed
+with the old one valid until they expire. Without `OTARI_SECRET_KEY` the
+exchange answers `503 temporarily_unavailable`, while identity tokens presented
+directly keep working.
+
+A refused exchange answers in the OAuth error shape. A request that is not the
+`urn:ietf:params:oauth:grant-type:jwt-bearer` grant is
+`400 unsupported_grant_type`; one without an `assertion` or a
+`federation_rule_id` is `400 invalid_request`. Every refusal of the identity
+token itself, including a rule, organization, workspace or service account
+that does not match, is `401 invalid_grant` with one generic description,
+which the SDKs report with a hint to check the federation rule. A refusal
+writes nothing to the database.
+
+The endpoint takes no credential, since the identity token is one, and is
+mounted only when `federation_issuers` lists an issuer: otherwise it answers
+404.
+
 ## Other issuers
 
 Any OpenID Connect issuer that publishes a discovery document and signs with
@@ -192,3 +250,4 @@ issuer, for instance, puts `system:serviceaccount:<namespace>:<name>` in `sub`.
 
 - [Access control](access-control.md): API keys, service keys and budgets.
 - [Configuration](configuration.md): where `federation_issuers` is set.
+- [Use with Claude Code](use-with-claude-code.md): routing Claude Code through Otari.
