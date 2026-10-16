@@ -281,10 +281,11 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
     the height of what it replaces, or everything below it jumps on swap. Global chrome
     (sidebar, header, breadcrumbs) belongs to `AppShell` and not to a route component, which
     remounts it on every navigation. `window.location.reload()` is not a refresh button:
-    invalidate the affected keys instead, and the root error boundary is its one legitimate
-    caller. A pre-paint decision, the theme above all, is resolved in `index.html`'s inline
-    script as well as in `useTheme`, so a change to the storage key, the three-state
-    resolution or the attributes that carry it has to reach both. See
+    invalidate the affected keys instead. Its callers are the root error boundary and
+    `AutoUpdate`, which loads a new build on the next page change. A pre-paint decision,
+    the theme above all, is resolved in `index.html`'s inline script as well as in
+    `useTheme`, so a change to the storage key, the three-state resolution or the
+    attributes that carry it has to reach both. See
     [layout-stability.md](../skills/frontend-standards/layout-stability.md).
 
 12. **Numbers, money and dates go through `web/src/shared/helpers/format.ts`.** `Intl` does the
