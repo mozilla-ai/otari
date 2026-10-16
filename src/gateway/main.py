@@ -39,7 +39,7 @@ from gateway.api.trace_capture import TraceCaptureMiddleware
 from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
-from gateway.core.database import create_session, dispose_db, init_db
+from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.settings.tools import warn_about_tool_instances
@@ -304,8 +304,13 @@ async def _report_hosted_providers_config(config: GatewayConfig) -> None:
     # A failed start, as a misconfigured entry fails the config load: the
     # gateway would otherwise serve on an endpoint a stored provider is refused.
     await refuse_unsafe_configured_endpoints(config)
-    async with create_unit_of_work() as uow:
-        audit = await build_hosted_provider_service(uow, config=config).audit_config()
+    try:
+        async with create_unit_of_work() as uow:
+            audit = await build_hosted_provider_service(uow, config=config).audit_config()
+    except Exception as exc:
+        # Advisory only: the warnings below are worth a log line, not a failed start.
+        logger.warning("Could not audit hosted_providers against the database: %s", describe_database_error(exc))
+        return
     for provider in audit.shadowed:
         logger.warning(
             "hosted_providers.%s in the configuration is shadowed by a stored hosted provider of the same name, "

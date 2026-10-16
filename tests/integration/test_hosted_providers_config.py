@@ -417,6 +417,25 @@ def test_boot_logs_a_configured_provider_a_stored_row_shadows(
     assert CONFIG_KEY not in gateway_logs.text
 
 
+def test_boot_continues_when_the_audit_cannot_read_the_database(
+    test_config: GatewayConfig,
+    clean_database: None,
+    gateway_logs: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fails(_self: HostedProviderService) -> None:
+        raise RuntimeError(f"connection lost while reading {CONFIG_KEY}")
+
+    monkeypatch.setattr(HostedProviderService, "audit_config", _fails)
+    config = test_config.model_copy(update={"hosted_providers": {"openai": {"api_key": CONFIG_KEY}}})
+
+    for client in build_test_client(config):
+        assert client.get(f"{API_ROOT}/health/liveness").status_code == 200
+
+    assert "Could not audit hosted_providers" in gateway_logs.text
+    assert CONFIG_KEY not in gateway_logs.text
+
+
 def test_a_request_is_served_on_a_configured_provider(
     configured_client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
