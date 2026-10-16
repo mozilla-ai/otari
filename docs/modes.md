@@ -52,9 +52,12 @@ inference, files, batches, or other data-plane operations. Those paths return a
 descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
 point clients to the correct gateway.
 
-The dashboard hides deployment-wide provider management, leaving the
-organization-scoped provider keys that a standalone deployment also has. It also hides the Playground, whose
-whole purpose is to dispatch a completion. Deployment-wide APIs still require
+The dashboard hides the Providers page, whose stored instances are deployment-wide
+rather than per tenant, leaving the organization-scoped provider keys that a
+standalone deployment also has. It keeps the Hosted providers page, where an
+operator configures the credentials the deployment pays for (see
+[Managed models and BYO credentials](#managed-models-and-byo-credentials)). It
+also hides the Playground, whose whole purpose is to dispatch a completion. Deployment-wide APIs still require
 operator authority; organization-scoped APIs apply membership and role checks.
 
 A hosted control plane and its hybrid gateways form one system: the gateway
