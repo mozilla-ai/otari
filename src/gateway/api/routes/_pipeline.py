@@ -4785,12 +4785,10 @@ async def _apply_tool_charges(
 
     # The rate is stored per row, not just the cost, so per-tool spend stays
     # aggregatable in SQL (the row's own ``cost`` mixes tokens and tools) and a
-    # historical row keeps the rate it was billed at after a price change. A tool
-    # served under several labels has one rate, its cost over its billed calls, so
-    # billed calls times rate is still the tool's spend.
-    for tool_name, tool_cost in charges.tool_costs.items():
-        if billable.get(tool_name):
-            tool_meters[tool_name]["unit_rate"] = float(tool_cost / billable[tool_name])
+    # historical row keeps the rate it was billed at after a price change.
+    for tool_name, unit_rate in charges.unit_rates.items():
+        if tool_name in tool_meters:
+            tool_meters[tool_name]["unit_rate"] = float(unit_rate)
     commit_meters()
 
     if charges.lines:

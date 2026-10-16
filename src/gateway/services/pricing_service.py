@@ -805,14 +805,15 @@ class UnpricedToolLabel(NamedTuple):
 class ToolCharges(NamedTuple):
     """What a request's successful gateway-run tool calls cost.
 
-    ``lines`` holds one charge line per tool and label, ``tool_costs`` each
-    tool's cost before rounding, and ``unpriced`` the labels that ran calls no
-    row could price.
+    ``lines`` holds one charge line per tool and label, ``unit_rates`` each
+    tool's cost over its calls, and ``unpriced`` the labels that ran calls no
+    row could price. A tool served under several labels has one unit rate, so
+    its calls times that rate is still its spend.
     """
 
     total: Decimal
     lines: list[dict[str, float | int | str]]
-    tool_costs: dict[str, Decimal]
+    unit_rates: dict[str, Decimal]
     unpriced: list[UnpricedToolLabel]
 
 
@@ -881,7 +882,7 @@ async def price_tool_calls(
     # Keyed by tool and label, so two records of one label with different rate
     # keys still settle as one line.
     by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
-    tool_costs: dict[str, Decimal] = {}
+    by_tool: dict[str, tuple[int, Decimal]] = {}
     unpriced: dict[tuple[str, str, str], UnpricedToolLabel] = {}
     for entry, label, keys in priced:
         rate = _first_tool_rate(keys, rates)
@@ -892,7 +893,8 @@ async def price_tool_calls(
         )
         units, label_cost = by_label.get((entry.tool, label), (0, Decimal(0)))
         by_label[(entry.tool, label)] = (units + entry.calls, label_cost + cost)
-        tool_costs[entry.tool] = tool_costs.get(entry.tool, Decimal(0)) + cost
+        tool_calls, tool_cost = by_tool.get(entry.tool, (0, Decimal(0)))
+        by_tool[entry.tool] = (tool_calls + entry.calls, tool_cost + cost)
         if rate is None and keys and entry.unreported_calls:
             previous = unpriced.get((entry.tool, label, keys[0]))
             unpriced[(entry.tool, label, keys[0])] = UnpricedToolLabel(
@@ -911,8 +913,9 @@ async def price_tool_calls(
         }
         for (tool, label), (units, cost) in sorted(by_label.items())
     ]
-    total = quantize_cost(sum(tool_costs.values(), Decimal(0)))
-    return ToolCharges(total, lines, tool_costs, list(unpriced.values()))
+    total = quantize_cost(sum((cost for _calls, cost in by_tool.values()), Decimal(0)))
+    unit_rates = {tool: cost / calls for tool, (calls, cost) in by_tool.items()}
+    return ToolCharges(total, lines, unit_rates, list(unpriced.values()))
 
 
 def _tool_label(entry: LabelCalls) -> str:

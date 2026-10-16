@@ -764,7 +764,8 @@ def test_each_label_gets_a_line_priced_by_its_first_rate_key_with_a_row() -> Non
             {"meter": "web_search_calls", "label": _EXA, "units": 2, "unit_rate": 0.02, "cost": 0.04},
             {"meter": "web_search_calls", "label": "otari:web_search", "units": 3, "unit_rate": 0.01, "cost": 0.03},
         ]
-        assert charges.tool_costs == {"web_search": Decimal("0.07"), "web_fetch": Decimal("0.005")}
+        # 0.04 + 0.03 over five searches, so five times the rate is the tool's spend.
+        assert charges.unit_rates == {"web_search": Decimal("0.014"), "web_fetch": Decimal("0.005")}
         assert charges.total == Decimal("0.075")
         assert charges.unpriced == []
 
