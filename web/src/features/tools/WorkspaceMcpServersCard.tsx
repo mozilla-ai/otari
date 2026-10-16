@@ -175,14 +175,17 @@ export function WorkspaceMcpServersCard({
   }
 
   const submit = (draft: McpServerDraft) => {
-    // A save checks the connection when it adds a server or changes how it is
-    // reached, which shows as a check newer than the one the row had. When that
-    // check found a problem, or could not run, the dialog stays open on the
-    // stored row and says so, so the fix is an edit rather than a second add.
+    // A save checks the connection when it adds a server or changes its URL,
+    // token or allow-list, the same rule the service applies. When that check
+    // found a problem, or could not run, the dialog stays open on the stored
+    // row and says so, so the fix is an edit rather than a second add.
+    const checked =
+      editing === undefined ||
+      draft.url !== editing.url ||
+      draft.authorization_token !== undefined ||
+      JSON.stringify(draft.allowed_tools) !==
+        JSON.stringify(editing.allowed_tools)
     const settle = (server: WorkspaceMcpServer) => {
-      const checked =
-        editing === undefined ||
-        server.health?.checked_at !== editing.health?.checked_at
       if (
         checked &&
         (server.health === null || healthNeedsAttention(server.health))

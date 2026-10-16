@@ -538,6 +538,38 @@ describe("WorkspaceMcpServersCard", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
+  it("says so when an edit's check could not run, even on a server never checked", async () => {
+    // The gateway had no free check slot, so the row comes back with no health
+    // at all: the same as before the edit, which is why "did a check run" is
+    // read off what the edit changed rather than off the health it returned.
+    const servers = [workspaceMcpServer()]
+    mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.clear(screen.getByLabelText("URL"))
+    await user.type(screen.getByLabelText("URL"), "https://mcp.example.com/v2")
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+
+    expect(await screen.findByText(/too busy to check/)).toBeVisible()
+    expect(screen.getByRole("dialog")).toBeVisible()
+  })
+
+  it("closes on an edit that leaves the connection alone", async () => {
+    const servers = [workspaceMcpServer()]
+    mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.clear(screen.getByLabelText("Name"))
+    await user.type(screen.getByLabelText("Name"), "github-prod")
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
   it("rechecks a server from its row", async () => {
     const servers = [workspaceMcpServer()]
     const calls = mockApi({ servers })

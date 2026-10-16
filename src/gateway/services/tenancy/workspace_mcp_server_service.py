@@ -458,13 +458,23 @@ class WorkspaceMcpServerService:
         the gateway waits on a remote server for up to the discovery deadline.
         Returns false when no check slot was free, leaving the row's health as
         it was.
+
+        An edit can land while the check waits. The row is re-read under a lock
+        before the write, and a check of a URL, token or allow-list the row no
+        longer holds is dropped: that edit cleared health and runs its own.
         """
+        checked = (server.url, server.encrypted_token, server.allowed_tools)
         await self.db.commit()
         try:
             check = await _check(server)
         except McpCapacityUnavailable:
             logger.info("MCP server check skipped server_id=%s reason=capacity", server.id)
             return False
+        await self.db.refresh(server, with_for_update=True)
+        if (server.url, server.encrypted_token, server.allowed_tools) != checked:
+            await self.db.commit()
+            logger.info("MCP server check dropped server_id=%s reason=edited", server.id)
+            return True
         server.health = _health(server, check).model_dump(mode="json")
         await self.db.commit()
         await self.db.refresh(server)

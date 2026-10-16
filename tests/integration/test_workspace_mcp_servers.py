@@ -21,7 +21,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi import HTTPException, Response
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy
@@ -1291,3 +1291,31 @@ async def test_a_url_that_has_turned_unsafe_fails_the_check_without_connecting(
     assert rechecked.health is not None
     assert rechecked.health.error == CheckFailure.UNSAFE_URL
     assert len(check.seen) == 1, "only the create connected"
+
+
+async def test_a_check_overtaken_by_an_edit_does_not_record_health_for_the_old_url(
+    async_db: AsyncSession, check: _FakeCheck, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check runs outside the transaction, so an edit can land while it waits on the server."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(user=owner, workspace_id=workspace.id, request=_create())
+    check.result = ServerCheck(tool_names=[], failure=CheckFailure.UNREACHABLE)
+
+    async def edited_meanwhile(server: ResolvedMcpServer) -> ServerCheck:
+        # What a concurrent PATCH of the URL commits: the new URL, and no health.
+        await async_db.execute(
+            update(WorkspaceMcpServer)
+            .where(WorkspaceMcpServer.id == created.id)
+            .values(url=OTHER_PUBLIC_URL, health=None)
+        )
+        await async_db.commit()
+        return check.result
+
+    monkeypatch.setattr(mcp_stateless, "check_stored_server", edited_meanwhile)
+    rechecked = await service.check_server(user=owner, workspace_id=workspace.id, server_id=created.id)
+
+    assert rechecked.url == OTHER_PUBLIC_URL
+    assert rechecked.health is None, "the unreachable verdict was about the URL the edit replaced"
