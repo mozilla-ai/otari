@@ -115,7 +115,11 @@ def _joined(attributes: Mapping[str, Any], key: str) -> str | None:
     items = (value,) if isinstance(value, str) else value
     if not isinstance(items, list | tuple) or not items or not all(isinstance(item, str) for item in items):
         return None
-    joined = LIST_SEPARATOR.join(item.strip() for item in items)
+    stripped = [item.strip() for item in items]
+    # Each element is checked before the join, which would split one that held the separator.
+    if not all(is_identifier(item) for item in stripped):
+        return None
+    joined = LIST_SEPARATOR.join(stripped)
     return joined if is_identifier_list(joined) else None
 
 
