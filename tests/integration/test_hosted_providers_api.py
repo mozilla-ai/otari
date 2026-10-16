@@ -183,6 +183,19 @@ def test_a_credential_in_the_base_url_is_masked_and_an_echo_keeps_it(
     assert replaced.json()["api_base"] == "https://proxy.example.com/v2"
 
 
+def test_a_base_url_that_will_not_parse_is_shown_as_none(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Nothing can find the credential in an unparseable base to mask it, so none of it is shown."""
+    stored = "https://proxy-user:proxy-pass@[proxy.example.com/v1?token=t0ken"
+
+    created = _create(client, master_key_header, api_base=stored)
+    listed = client.get(PATH, headers=master_key_header).json()["data"][0]
+
+    assert (created["api_base"], listed["api_base"]) == (None, None)
+    assert _stored_api_base(db_session_factory) == stored
+
+
 def _stored_api_base(session_factory: Callable[[], Session]) -> str | None:
     session = session_factory()
     try:

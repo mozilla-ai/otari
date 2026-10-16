@@ -56,8 +56,18 @@ def normalize_api_base(api_base: str | None) -> str | None:
 
 
 def public_api_base(api_base: str | None) -> str | None:
-    """An endpoint as the API shows it, with a credential in its userinfo or query masked."""
-    return redact_url_secrets(api_base) if api_base is not None else None
+    """An endpoint as the API shows it, with a credential in its userinfo or query masked.
+
+    An endpoint that will not parse is shown as None rather than whole,
+    because nothing could find the credential in it to mask.
+    """
+    if api_base is None:
+        return None
+    try:
+        urlsplit(api_base)
+    except ValueError:
+        return None
+    return redact_url_secrets(api_base)
 
 
 def unmask_api_base(incoming: str, stored: str | None) -> str:
