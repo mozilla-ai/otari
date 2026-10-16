@@ -505,8 +505,11 @@ in place.
 
 The block is validated at load: an unknown implementation, a `provider_type`
 key (a named instance belongs in `providers:`), an unknown field, or a missing
-`api_key` for a provider that needs one fails the start. It is never shown by
-`/api/v1/settings`.
+`api_key` for a provider that needs one fails the start. With
+`OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`, an `api_base` that resolves to a
+private address fails it too, as it is refused for a provider stored through the
+page; that check runs at boot, because it resolves the host. The block is never
+shown by `/api/v1/settings`.
 
 A configured entry is never written to the database or encrypted. The Hosted
 providers page lists it with a `config.yml` badge and the API marks it

@@ -17,6 +17,7 @@ from gateway.core.settings.providers import HostedProviderEntry
 from gateway.models.providers import HostedProvider
 from gateway.repositories.providers import HostedProviderRepository
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider, credential_of, lookup_name
+from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 HostedSourceKind = Literal["database", "config"]
 
@@ -110,3 +111,25 @@ class HostedSources:
             return HostedSource(row=row, shadows_config=name in entries)
         entry = entries.get(name)
         return None if entry is None else HostedSource(entry=entry)
+
+
+async def refuse_unsafe_configured_endpoints(config: GatewayConfig) -> None:
+    """Refuse a ``hosted_providers:`` endpoint the SSRF gate rejects, as a stored provider's is refused at write.
+
+    A no-op unless ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`` turns the gate
+    on. Run at boot rather than at config load, because the gate resolves the
+    host.
+
+    Raises:
+        ValueError: every entry the gate rejects, by provider.
+    """
+    problems: list[str] = []
+    for provider, entry in config.hosted_provider_entries().items():
+        if not entry.api_base:
+            continue
+        try:
+            await validate_provider_api_base(entry.api_base)
+        except UnsafeURLError as exc:
+            problems.append(f"hosted_providers.{provider}.api_base: {exc}")
+    if problems:
+        raise ValueError("; ".join(problems))

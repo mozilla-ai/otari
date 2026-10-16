@@ -19,6 +19,7 @@ from any_llm import LLMProvider
 from gateway.api.routes.settings import _current_settings
 from gateway.core.config import GatewayConfig, load_config
 from gateway.core.settings.providers import parse_hosted_providers
+from gateway.services.providers import refuse_unsafe_configured_endpoints
 
 KEY = "sk-live-config-9876"
 
@@ -270,3 +271,20 @@ def test_an_empty_environment_block_leaves_the_file_block(tmp_path: Path, monkey
     config = _load(tmp_path, f"hosted_providers:\n  openai:\n    api_key: {KEY}\n")
 
     assert set(config.hosted_provider_entries()) == {"openai"}
+
+
+@pytest.mark.asyncio
+async def test_with_private_hosts_refused_a_private_endpoint_fails_the_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gate a stored provider's endpoint passes at write, applied to the entry at boot."""
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    config = _validated({"vllm": {"api_base": "http://127.0.0.1:8000/v1"}, "openai": {"api_key": KEY}})
+
+    with pytest.raises(ValueError, match=r"hosted_providers\.vllm\.api_base") as refused:
+        await refuse_unsafe_configured_endpoints(config)
+
+    assert "openai" not in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_by_default_a_private_endpoint_is_accepted() -> None:
+    await refuse_unsafe_configured_endpoints(_validated({"vllm": {"api_base": "http://127.0.0.1:8000/v1"}}))

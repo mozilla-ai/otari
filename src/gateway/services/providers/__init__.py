@@ -14,7 +14,7 @@ from gateway.services.providers._hosted_provider_service import (
     OrganizationExists,
     ResolvedHostedProvider,
 )
-from gateway.services.providers._hosted_sources import HostedSources
+from gateway.services.providers._hosted_sources import HostedSources, refuse_unsafe_configured_endpoints
 from gateway.services.providers._missing_credential import missing_provider_credential, unpriced_model_refusal
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
 from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client
@@ -52,6 +52,7 @@ __all__ = [
     "owned_endpoint_http_client",
     "provider_for",
     "refresh_provider_endpoint_cache",
+    "refuse_unsafe_configured_endpoints",
     "reset_provider_endpoint_cache",
     "run_provider_endpoint_refresher",
     "unpriced_model_refusal",

@@ -108,6 +108,7 @@ from gateway.services.provider_store_service import (
 )
 from gateway.services.providers import (
     load_provider_endpoints_at_startup,
+    refuse_unsafe_configured_endpoints,
     reset_provider_endpoint_cache,
     run_provider_endpoint_refresher,
 )
@@ -295,10 +296,14 @@ async def _report_hosted_providers_config(config: GatewayConfig) -> None:
     """Log the ``hosted_providers:`` entries a stored row shadows, and those restricted to no organization here.
 
     Read at boot rather than at config load, because both answers are in the
-    database. Names only, never a key.
+    database. Names only, never a key. An endpoint the SSRF gate rejects fails
+    the start.
     """
     if not config.hosted_providers:
         return
+    # A failed start, as a misconfigured entry fails the config load: the
+    # gateway would otherwise serve on an endpoint a stored provider is refused.
+    await refuse_unsafe_configured_endpoints(config)
     async with create_unit_of_work() as uow:
         audit = await build_hosted_provider_service(uow, config=config).audit_config()
     for provider in audit.shadowed:
