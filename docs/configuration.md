@@ -478,7 +478,7 @@ hosted_providers:
 | `client_args` | What the provider's SDK client needs beyond the key, such as Bedrock's region. |
 | `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
-| `models` | Model ids offered when the provider cannot list its own. |
+| `models` | Model ids a refresh offers when the provider cannot list its own. |
 
 A key may be left out for these providers only: the self-hosted backends
 `vllm`, `ollama`, `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`,
@@ -513,6 +513,8 @@ providers page lists it with a `config.yml` badge and the API marks it
 `source: "config"` with no `id`; changing or deleting it through the API answers
 `409`, so change it in the configuration and restart. Its models, their serving
 switches and their prices are managed on the page as any hosted provider's are.
+An entry starts with no models and serves only the ones switched on under it,
+so refresh its models or add them before it serves a request.
 A provider stored through the page or the API under the same name wins over the
 entry, and the start logs each entry it shadows; deleting the stored provider
 serves the entry again on the same models. Taking an entry out of the
