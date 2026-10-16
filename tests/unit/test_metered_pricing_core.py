@@ -389,6 +389,34 @@ def test_a_claude_estimate_reserves_a_1h_write_at_the_rate_it_settles_at() -> No
     assert estimate == _one_hour_writes(_pricing(**_HAIKU_5_5), 4_000) == Decimal("0.000800")
 
 
+def test_a_1h_estimate_still_covers_5m_writes_priced_above_twice_the_input_rate() -> None:
+    """A request asking for any 1h write is estimated as 1h, though most of its writes may be 5m.
+
+    The bundled snapshot's daoxe row prices a Claude cache write at 5x input.
+    """
+    pricing = _pricing(
+        model_key="daoxe:claude-haiku-4-5-20251001",
+        input_price_per_million=Decimal("1"),
+        output_price_per_million=Decimal("5"),
+        cache_write_price_per_million=Decimal("5"),
+    )
+    settled = calculate_token_cost(
+        pricing,
+        input_tokens=0,
+        output_tokens=0,
+        cache_write_tokens=10_000,
+        cache_write_1h_tokens=100,
+        cache_tokens_included=False,
+    )
+
+    estimate = estimate_metered_cost(
+        pricing, estimated_input_tokens=10_000, estimated_output_tokens=0, cache_write_ttl="1h"
+    )
+
+    assert settled == Decimal("0.049700")
+    assert estimate == Decimal("0.050000")
+
+
 def test_an_estimate_never_prices_below_the_input_rate() -> None:
     """A cache-write rate cheaper than input must not shrink the reservation."""
     pricing = _pricing(cache_write_price_per_million=Decimal("1"))
