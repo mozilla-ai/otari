@@ -251,6 +251,21 @@ def _usage_to_completion_usage(
     )
 
 
+_TERMINAL_STREAM_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed"})
+
+
+def _reached_terminal_event() -> Callable[[Any], bool]:
+    """A predicate, for one stream, that holds from the event that ends its response on."""
+    ended = False
+
+    def completes(chunk: Any) -> bool:
+        nonlocal ended
+        ended = ended or getattr(chunk, "type", None) in _TERMINAL_STREAM_EVENTS
+        return ended
+
+    return completes
+
+
 def _ensure_provider_supports_responses(provider: LLMProvider) -> None:
     if not serves_responses(provider):
         raise HTTPException(
@@ -296,9 +311,9 @@ class _ResponsesAdapter:
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        # Not checked yet: the chat-completions bridge synthesizes the terminal
-        # event whatever the upstream sent, so it cannot tell a cut stream here.
-        return None
+        # The chat-completions bridge emits a terminal event whatever its upstream
+        # sent, so this catches a cut native stream and not a cut bridged one.
+        return _reached_terminal_event()
 
     def stream_error_payload(self, exc: BaseException) -> str:
         return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
