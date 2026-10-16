@@ -1,13 +1,17 @@
 """Unit tests for the shared streaming_generator utility."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
 import anyio
 import anyio.lowlevel
 import pytest
 from any_llm.types.completion import CompletionUsage
+from sqlalchemy.exc import OperationalError
 
+from gateway.core.database import describe_database_error
+from gateway.log_config import logger as gateway_logger
 from gateway.streaming import (
     ANTHROPIC_STREAM_FORMAT,
     OPENAI_STREAM_FORMAT,
@@ -1026,6 +1030,142 @@ async def test_an_inline_settlement_the_client_leaves_during_still_finishes() ->
 
     assert settlement == ["complete started", "complete finished"]
     assert observed == [asyncio.CancelledError]
+
+
+# ---------------------------------------------------------------------------
+# Settlement failures in the log
+# ---------------------------------------------------------------------------
+
+_ROW_DATA = "sk-live-do-not-log"
+_DATABASE_FAILURE = OperationalError("UPDATE usage_logs", {}, Exception(f"DETAIL: Failing row contains ({_ROW_DATA})"))
+
+
+@pytest.fixture
+def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """The gateway logger does not propagate, so caplog sees it only with its handler attached."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.ERROR, logger="gateway")
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def _fails_with(exc: Exception, after_seconds: float = 0.0) -> Callable[..., Awaitable[None]]:
+    async def fail(*_: object) -> None:
+        await asyncio.sleep(after_seconds)
+        raise exc
+
+    return fail
+
+
+async def _settle_after_done(fail: Callable[..., Awaitable[None]]) -> None:
+    async for _event in streaming_generator(
+        stream=_items("hello", "usage"),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=fail,
+        on_error=_fail_on_error,
+        label="test:model",
+    ):
+        pass
+
+
+async def _settle_inline(fail: Callable[..., Awaitable[None]]) -> None:
+    async for _event in streaming_generator(
+        stream=_items("hello", "usage"),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=fail,
+        on_error=_fail_on_error,
+        label="test:model",
+        settle_before_done=True,
+    ):
+        pass
+
+
+async def _settle_inline_after_the_client_left(fail: Callable[..., Awaitable[None]]) -> None:
+    gen = streaming_generator(
+        stream=_items("hello", "usage"),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=fail,
+        on_error=_fail_on_error,
+        label="test:model",
+        keepalive_interval_seconds=_KEEPALIVE_INTERVAL,
+        settle_before_done=True,
+    )
+    await _read_until_the_client_leaves(gen, lambda received: received[-1] == OPENAI_STREAM_FORMAT.keepalive)
+
+
+async def _settle_an_upstream_error(fail: Callable[..., Awaitable[None]]) -> None:
+    async def fails_after_one_chunk() -> AsyncIterator[str]:
+        yield "hello"
+        raise _StatusCodeError(503)
+
+    async for _event in streaming_generator(
+        stream=fails_after_one_chunk(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=fail,
+        label="test:model",
+    ):
+        pass
+
+
+async def _settle_an_abandoned_stream(fail: Callable[..., Awaitable[None]]) -> None:
+    gen = streaming_generator(
+        stream=_ClosableStream(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        on_incomplete=fail,
+    )
+    await gen.__anext__()
+    await gen.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("settle", "settles_after_seconds"),
+    [
+        (_settle_after_done, 0.0),
+        (_settle_inline, 0.0),
+        (_settle_inline_after_the_client_left, _KEEPALIVE_INTERVAL * 5),
+        (_settle_an_upstream_error, 0.0),
+        (_settle_an_abandoned_stream, 0.0),
+    ],
+    ids=["after-done", "inline", "inline-after-the-client-left", "upstream-error", "abandoned"],
+)
+@pytest.mark.parametrize(
+    ("failure", "logged_as"),
+    [
+        (_DATABASE_FAILURE, describe_database_error(_DATABASE_FAILURE)),
+        (RuntimeError(f"could not write the row for {_ROW_DATA}"), "RuntimeError"),
+    ],
+    ids=["database-error", "other-error"],
+)
+async def test_a_settlement_failure_is_logged_without_its_message(
+    gateway_logs: pytest.LogCaptureFixture,
+    settle: Callable[[Callable[..., Awaitable[None]]], Awaitable[None]],
+    settles_after_seconds: float,
+    failure: Exception,
+    logged_as: str,
+) -> None:
+    """A database error's message carries its bound parameters and the row it touched."""
+    await settle(_fails_with(failure, after_seconds=settles_after_seconds))
+
+    [record] = [r for r in gateway_logs.records if r.getMessage().startswith("Failed to")]
+    assert record.getMessage().endswith(f": {logged_as}")
+    assert _ROW_DATA not in gateway_logs.text
 
 
 async def _consume_hanging_up_after(gen: AsyncIterator[str], hang_up: str) -> None:
