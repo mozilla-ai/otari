@@ -4758,8 +4758,10 @@ export interface paths {
          * @description Report every configured provider's reachability, with a last-checked time.
          *
          *     Covers the configured provider instances and every hosted provider switched
-         *     on, each hosted provider under its provider name. One whose stored key no
-         *     configured `OTARI_SECRET_KEY` reads is reported unreachable with that reason.
+         *     on, each hosted provider under its provider name. A hosted provider that a
+         *     configured instance of the same name shadows is not reported. One whose
+         *     stored key no configured `OTARI_SECRET_KEY` reads is reported unreachable
+         *     with that reason.
          *
          *     Reuses the per-provider model-discovery test path, so a provider is healthy
          *     when its credentials can list models. Results are served from the discovery
