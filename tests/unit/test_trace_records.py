@@ -111,6 +111,20 @@ def test_finish_reasons_are_kept_as_identifiers_joined_by_a_comma() -> None:
     assert span.attributes == {"gen_ai.response.finish_reasons": "stop,length"}
 
 
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("gen_ai.response.finish_reasons", "stop,the model gave up"),
+        ("gen_ai.response.finish_reasons", "stop,"),
+        ("gen_ai.response.finish_reasons", "x" * 100 + "," + "y" * 100),
+        ("error.type", "timeout,retry"),
+    ],
+)
+def test_a_list_is_kept_only_in_a_list_attribute_and_only_of_identifiers(key: str, value: str) -> None:
+    with pytest.raises(InvalidSpanError, match="identifier-shaped"):
+        _span(kind="llm", origin="otlp", attributes={key: value})
+
+
 def test_prose_in_an_attribute_string_is_refused() -> None:
     with pytest.raises(InvalidSpanError, match="identifier-shaped"):
         _span(attributes={"error.type": "connection reset by peer"})

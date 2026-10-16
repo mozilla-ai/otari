@@ -90,7 +90,7 @@ _NOT_A_NAME = (
 # The attributes a span may carry beyond its typed fields, with the scalar type each
 # takes. Anything a span needs to be queried by is a typed field instead.
 SPAN_ATTRIBUTES: Mapping[str, type] = {
-    "gen_ai.response.finish_reason": str,
+    "gen_ai.response.finish_reasons": str,
     "gen_ai.request.max_tokens": int,
     "error.type": str,
     "http.response.status_code": int,
@@ -104,6 +104,11 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
 }
+# The allowlisted attributes OTel defines as an array of strings. Each is stored as
+# its elements joined by LIST_SEPARATOR, so every stored attribute stays a scalar,
+# and each element is held to the identifier rule on its own.
+LIST_ATTRIBUTES = frozenset({"gen_ai.response.finish_reasons"})
+LIST_SEPARATOR = ","
 
 
 class InvalidSpanError(ValueError):
@@ -118,6 +123,11 @@ class InvalidSpanError(ValueError):
 def is_identifier(value: str) -> bool:
     """Whether a client-supplied name is safe to store as it is."""
     return IDENTIFIER_PATTERN.fullmatch(value) is not None and not any(pattern.search(value) for pattern in _NOT_A_NAME)
+
+
+def is_identifier_list(value: str) -> bool:
+    """Whether a list attribute, joined for storage, is short and each of its elements an identifier."""
+    return len(value) <= IDENTIFIER_MAX_LENGTH and all(is_identifier(part) for part in value.split(LIST_SEPARATOR))
 
 
 def is_endpoint(value: str) -> bool:
@@ -201,7 +211,9 @@ class SpanRecord:
                 raise InvalidSpanError("attributes may only hold allowlisted keys")
             if type(value) is not expected:
                 raise InvalidSpanError(f"attribute {key} must be a {expected.__name__}")
-            if isinstance(value, str) and not is_identifier(value):
+            if isinstance(value, str) and not (
+                is_identifier_list(value) if key in LIST_ATTRIBUTES else is_identifier(value)
+            ):
                 raise InvalidSpanError(f"attribute {key} must be identifier-shaped")
         object.__setattr__(self, "attributes", MappingProxyType(attributes))
 

@@ -207,8 +207,12 @@ def _hex_ids_to_base64(document: Any) -> None:
                 _hex_id_to_base64(record)
 
 
-def _any_value(value: Any) -> Any:
-    """Unwrap an OTLP AnyValue protobuf into a Python scalar (or None)."""
+def _any_value(value: Any, *, arrays: bool = False) -> Any:
+    """Unwrap an OTLP AnyValue protobuf into a Python scalar (or None).
+
+    With ``arrays``, an array becomes a tuple of its elements, each unwrapped the
+    same way, so a nested array or map is a None inside it.
+    """
     kind = value.WhichOneof("value")
     if kind == "string_value":
         return value.string_value
@@ -218,11 +222,16 @@ def _any_value(value: Any) -> Any:
         return value.double_value
     if kind == "bool_value":
         return value.bool_value
+    if kind == "array_value" and arrays:
+        return tuple(_any_value(item) for item in value.array_value.values)
     return None
 
 
-def _attributes(kv_list: Any) -> dict[str, Any]:
-    return {kv.key: _any_value(kv.value) for kv in kv_list}
+def _attributes(kv_list: Any, *, arrays: bool = False) -> dict[str, Any]:
+    # Only a trace asks for arrays. The usage and telemetry readers stringify or
+    # hash what they get (a metric's series key is every attribute's str()), so an
+    # array there would change what they store.
+    return {kv.key: _any_value(kv.value, arrays=arrays) for kv in kv_list}
 
 
 def _int(value: Any) -> int:
@@ -402,7 +411,7 @@ def _otlp_span(span: Any) -> OtlpSpan:
         start_time=_nanos_to_dt(span.start_time_unix_nano),
         end_time=_nanos_to_dt(span.end_time_unix_nano),
         failed=span.status.code == _STATUS_CODE_ERROR,
-        attributes=_attributes(span.attributes),
+        attributes=_attributes(span.attributes, arrays=True),
     )
 
 
