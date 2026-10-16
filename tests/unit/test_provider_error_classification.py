@@ -34,6 +34,7 @@ from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi import HTTPException
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
+from gateway.api.routes._helpers import SHOULD_RETRY_HEADER, with_retry_hint
 from gateway.api.routes._pipeline import (
     _FORWARDED_PARAMS,
     PROVIDER_ACCOUNT_QUOTA_DETAIL,
@@ -54,15 +55,13 @@ from gateway.api.routes._pipeline import (
     stream_error_message,
 )
 from gateway.api.routes._platform import (
-    SHOULD_RETRY_HEADER,
     _provider_failure_http_exc,
     get_shared_rejection,
-    is_provider_credential_rejection,
-    with_retry_hint,
 )
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.inference import (
+    is_provider_credential_rejection,
     is_retry_futile,
     is_upstream_request_fault,
     upstream_retry_after,

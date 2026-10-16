@@ -37,10 +37,10 @@ from typing import Any, TypeVar
 
 from fastapi import HTTPException, status
 
+from gateway.api.routes._attempt_metrics import record_abandoned_attempt
 from gateway.api.routes._platform import (
     _provider_failure_http_exc,
     get_shared_rejection,
-    record_abandoned_attempt,
 )
 from gateway.log_config import logger
 from gateway.services.inference import (

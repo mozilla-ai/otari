@@ -24,7 +24,6 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     failure_status_code,
 )
-from gateway.api.routes._platform import is_provider_credential_rejection
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
@@ -48,7 +47,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
-from gateway.services.inference import is_upstream_request_fault
+from gateway.services.inference import is_provider_credential_rejection, is_upstream_request_fault
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import (
     is_model_allowed,

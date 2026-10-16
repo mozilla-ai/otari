@@ -30,7 +30,7 @@ _WITHOUT_PROMETHEUS = textwrap.dedent(
     # Each metric is declared beside the code that increments it, so the absent
     # case has to hold across those modules rather than in gateway.metrics alone.
     from gateway.api import deps
-    from gateway.api.routes import _pipeline, _platform
+    from gateway.api.routes import _attempt_metrics, _pipeline
     from gateway.core import database
     from gateway import rate_limit
     from gateway.services import log_writer
@@ -40,7 +40,7 @@ _WITHOUT_PROMETHEUS = textwrap.dedent(
     _pipeline.record_tokens("prov", "model", 100, 50)
     _pipeline.record_cost("prov", "model", 0.25)
     _pipeline.record_inline_cost_settlement("attached")
-    _platform.record_abandoned_attempt("prov", "model", "timeout", 0)
+    _attempt_metrics.record_abandoned_attempt("prov", "model", "timeout", 0)
     deps.record_auth_failure("invalid_key")
     rate_limit.RATE_LIMIT_HITS.inc()
     _reservations.BUDGET_EXCEEDED.inc()

@@ -19,6 +19,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
 from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
+from gateway.services.inference import is_retry_futile
 from gateway.services.routing import RoutingSignal
 from gateway.services.traces import RequestTrace
 from gateway.services.url_safety import UnsafeURLError
@@ -442,3 +443,19 @@ def database_error(operation: str, exc: BaseException) -> HTTPException:
     """
     logger.error("%s failed: %s", operation, describe_database_error(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+
+
+# The OpenAI and Anthropic SDKs read this header before their own retry rule
+# (``_should_retry`` in each SDK's ``_base_client.py``), so ``false`` stops them
+# retrying a 5xx they would otherwise retry. The name is theirs, not Otari's.
+SHOULD_RETRY_HEADER = "x-should-retry"
+
+
+def with_retry_hint(exc: BaseException, status_code: int, headers: dict[str, str] | None) -> dict[str, str] | None:
+    """``headers`` for a provider failure answered with ``status_code``, telling the client not to retry a futile 5xx.
+
+    Only a 5xx carries it: an SDK does not retry the 4xx answers anyway.
+    """
+    if status_code < status.HTTP_500_INTERNAL_SERVER_ERROR or not is_retry_futile(exc):
+        return headers
+    return {**(headers or {}), SHOULD_RETRY_HEADER: "false"}

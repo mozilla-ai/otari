@@ -32,7 +32,7 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
     container_copies_step,
@@ -66,9 +66,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
-    SettledCost,
     _resolve_platform_credentials,
-    with_retry_hint,
 )
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
@@ -76,6 +74,7 @@ from gateway.api.routes._request_tags import (
     request_tags,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
+from gateway.api.routes._settlement import SettledCost
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork

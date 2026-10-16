@@ -64,7 +64,8 @@ from gateway.api.routes._pipeline import (
     stream_final_attempt_extra_seconds,
     stream_first_chunk_timeout_seconds,
 )
-from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
+from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute
+from gateway.api.routes._settlement import SettledCost
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (

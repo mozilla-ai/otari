@@ -41,7 +41,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import ContainerDep, extract_credential_token, get_config, get_db, get_log_writer
-from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -68,7 +68,6 @@ from gateway.api.routes._platform import (
     attempt_provider,
     build_attempt_client_args,
     run_platform_attempts,
-    with_retry_hint,
 )
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session

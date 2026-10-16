@@ -25,7 +25,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work_if_needed,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -54,14 +54,13 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
-    SettledCost,
     UnsupportedAttemptProviderError,
     attempt_provider,
     build_attempt_client_args,
-    with_retry_hint,
 )
 from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
+from gateway.api.routes._settlement import SettledCost
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork

@@ -14,6 +14,7 @@ from openai import APIConnectionError as _OpenAIAPIConnectionError
 from openai import APITimeoutError as _OpenAIAPITimeoutError
 
 from gateway.core.retry_after import bounded_retry_after
+from gateway.services.provider_kwargs import missing_credential
 from gateway.streaming import IncompleteStreamError
 
 # Statuses on which the billing-message probe runs. A 402 is payment required by
@@ -322,6 +323,22 @@ def is_upstream_request_fault(exc: BaseException) -> bool:
         code = (_body_error_field(body, "code") or "").lower()
         return not any(probe in message or probe in code for probe in _CREDENTIAL_MESSAGE_PROBES)
     return False
+
+
+def is_provider_credential_rejection(exc: BaseException) -> bool:
+    """Whether the provider refused the credential the gateway sent.
+
+    An upstream 401, or a 403 that is not the provider refusing the request itself
+    (see :func:`is_upstream_request_fault`).
+    """
+    if missing_credential(exc) is not None:
+        return False
+    kind, status_code = upstream_exception_shape(exc)
+    if kind == "timeout":
+        return False
+    if status_code == 401:
+        return True
+    return status_code == 403 and not is_upstream_request_fault(exc)
 
 
 def upstream_retry_after(exc: BaseException) -> str | None:
