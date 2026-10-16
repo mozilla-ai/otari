@@ -197,6 +197,17 @@ def test_an_llm_call_never_starts_before_its_step() -> None:
     assert llm.start_time >= step.start_time
 
 
+def test_an_llm_call_that_ended_before_its_step_began_never_starts_after_it_ends() -> None:
+    """A wall clock stepped back between the two readings must not turn the span inside out."""
+    trace = _trace()
+    trace.record_llm_call(_llm_call(_usage_row(timestamp=_T0 - timedelta(seconds=1), latency_ms=500)))
+
+    [llm] = trace.spans
+
+    assert llm.start_time is not None and llm.end_time is not None
+    assert llm.start_time <= llm.end_time
+
+
 # ---------------------------------------------------------------------------
 # The usage-row tap
 # ---------------------------------------------------------------------------
