@@ -17,7 +17,9 @@ Use the master key through `Authorization: Bearer <master-key>` or
 
 An operator manages every account on the deployment from the dashboard's
 Accounts page (`/api/v1/admin/users`): deactivate or reactivate one, grant or
-remove operator access, and send a password link. Deactivating an account ends
+remove operator access, and send a password link. The page lists accounts one
+page at a time and searches them by name or email (`search` on the route,
+matched case-insensitively). Deactivating an account ends
 its sessions and voids its pending verification and reset links, so
 reactivating it does not bring an old link back.
 

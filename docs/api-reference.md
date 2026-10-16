@@ -706,7 +706,11 @@ failure inside the gateway. Either way, a standalone gateway records the
 request's usage row with status `error`.
 On Messages, a stream the provider ends without `message_stop`, including one
 that sent no events at all, also ends in an `api_error` event rather than
-closing as if it had succeeded, and the request is settled as failed.
+closing as if it had succeeded, and the request is settled as failed. A Messages
+error event's `error.type` says whether a retry makes sense:
+`overloaded_error` and `rate_limit_error` when the provider failed the stream
+that way, `timeout_error` when it stopped responding (a read timeout, such as
+Bedrock's, or an upstream `504`), and `api_error` otherwise.
 
 ## Caller-orchestrated MCP
 
