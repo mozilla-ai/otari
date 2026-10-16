@@ -79,6 +79,7 @@ from gateway.api.deps import (
     get_budget_service,
     verify_api_key_or_master_key,
 )
+from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempt_metrics import record_abandoned_attempt
 from gateway.api.routes._attempts import (
     AdmitAttempt,
@@ -2640,7 +2641,7 @@ async def resolve_request_context(
         )
         resolve_latency_ms = (time.perf_counter() - start_time) * 1000
         request_id = route.request_id
-        response.headers[REQUEST_ID_HEADER] = request_id
+        set_request_id(raw_request, response, request_id)
         logger.info(
             "Platform resolve succeeded request_id=%s attempts=%d fallback_enabled=%s resolve_latency_ms=%.2f",
             route.request_id,
@@ -2651,7 +2652,7 @@ async def resolve_request_context(
         upstream_user = _end_user(adapter, config, route.workspace_id, user_id_from_request, route.user_id)
     else:
         request_id = str(uuid.uuid4())
-        response.headers[REQUEST_ID_HEADER] = request_id
+        set_request_id(raw_request, response, request_id)
         if db is None:
             raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
         # No session cookie is consulted *here*, and that is the point: this
