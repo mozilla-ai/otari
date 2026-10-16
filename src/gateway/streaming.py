@@ -338,9 +338,11 @@ async def streaming_generator(
         if not completed:
             raise IncompleteStreamError(chunks_received)
 
-        # Once the upstream is exhausted, hybrid mode settles before emitting
-        # the buffered terminal suffix. Standalone mode retains the historical
-        # order: chunks, done marker, then reconciliation.
+        # Once the upstream is exhausted, a caller that settles inline does so
+        # before the buffered terminal suffix; otherwise the order is chunks,
+        # done marker, then settlement. A settlement a client disconnect cut off
+        # would never run again, as the stream already counts as settled, so
+        # each one is shielded from the response's cancelled scope.
         if settle_before_done:
             settled = True
             settlement: S | None = None
@@ -361,9 +363,11 @@ async def streaming_generator(
                                 yield fmt.keepalive
                         settlement = settlement_task.result()
                     else:
-                        settlement = await on_complete(usage)
+                        with anyio.CancelScope(shield=True):
+                            settlement = await on_complete(usage)
                 elif on_no_usage is not None:
-                    await on_no_usage()
+                    with anyio.CancelScope(shield=True):
+                        await on_no_usage()
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
                 logger.error("Failed to log streaming usage for %s: %s", label, log_err)
@@ -384,10 +388,11 @@ async def streaming_generator(
             # can't be mistaken for an incomplete (disconnected) stream.
             settled = True
             try:
-                if has_usage:
-                    await on_complete(usage)
-                elif on_no_usage is not None:
-                    await on_no_usage()
+                with anyio.CancelScope(shield=True):
+                    if has_usage:
+                        await on_complete(usage)
+                    elif on_no_usage is not None:
+                        await on_no_usage()
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
                 logger.error("Failed to log streaming usage for %s: %s", label, log_err)
@@ -402,7 +407,8 @@ async def streaming_generator(
             yield fmt.done_marker
         settled = True
         try:
-            await on_error(e)
+            with anyio.CancelScope(shield=True):
+                await on_error(e)
         except Exception as log_err:
             logger.error("Failed to log streaming error usage: %s", log_err)
         # codeql[py/clear-text-logging-sensitive-data]
