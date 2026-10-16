@@ -297,6 +297,37 @@ def credential_ladder_empty(provider: LLMProvider, kwargs: dict[str, Any]) -> bo
     return not _kwargs_carry_a_credential(kwargs) and not _provider_env_key_present(provider)
 
 
+@dataclass(frozen=True, slots=True)
+class HostedLookup:
+    """How a candidate may be served by the deployment's hosted providers.
+
+    ``own_name_only`` marks a provider any-llm calls with no key: it already
+    works as it stands, so only the hosted provider of its own name may serve
+    it, and a refusal, a failure or no answer leaves it as it was.
+    """
+
+    own_name_only: bool
+
+    def accepts(self, response_provider: str, instance: str) -> bool:
+        """Whether a hosted answer for ``response_provider`` may serve the ``instance`` candidate."""
+        return not self.own_name_only or response_provider == instance
+
+
+def hosted_lookup(provider: LLMProvider, kwargs: dict[str, Any], *, configured: bool) -> HostedLookup | None:
+    """Whether the hosted providers may serve a candidate the ladder resolved, or ``None``.
+
+    A candidate the ladder found a credential for is never asked about, so BYO
+    precedence holds. A keyless provider is asked only when nothing configures
+    it: a ``providers:`` entry keeps its own connection even when all it sets is
+    an SDK option such as Bedrock's region, which carries no credential.
+    """
+    if credential_ladder_exhausted(provider, kwargs):
+        return HostedLookup(own_name_only=False)
+    if configured or not credential_ladder_empty(provider, kwargs):
+        return None
+    return HostedLookup(own_name_only=True)
+
+
 # Instances already reported as ignored, so the warning is logged once per
 # instance per process rather than on every overlay refresh.
 _uncredentialed_warned: set[str] = set()

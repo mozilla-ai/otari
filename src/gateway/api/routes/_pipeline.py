@@ -285,8 +285,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
-    credential_ladder_empty,
-    credential_ladder_exhausted,
+    hosted_lookup,
     keyless_placeholder_api_key,
     missing_credential,
     provider_key,
@@ -1815,16 +1814,8 @@ async def _serve_from_hosted_credential(
         # answer for now. Reaching the port from the compiler is separate work:
         # the compiler is synchronous and documented as doing no I/O.
         return resolved
-    # A provider any-llm calls with no key (a local vLLM, Bedrock on an instance
-    # profile) works with nothing configured, so it is asked about only to let the
-    # deployment's own hosted provider of that name serve it: an answer re-keyed
-    # elsewhere, a refusal or a failure leaves the request as it was. One the
-    # deployment configures keeps its own connection, even when all it sets is
-    # an SDK option such as Bedrock's region, which carries no credential.
-    own_name_only = not credential_ladder_exhausted(resolved.provider, resolved.kwargs)
-    if own_name_only and (
-        resolved.instance in ctx.config.providers or not credential_ladder_empty(resolved.provider, resolved.kwargs)
-    ):
+    lookup = hosted_lookup(resolved.provider, resolved.kwargs, configured=resolved.instance in ctx.config.providers)
+    if lookup is None:
         return resolved
 
     try:
@@ -1841,7 +1832,7 @@ async def _serve_from_hosted_credential(
             model=resolved.model,
         )
     except HostedAccessDeniedError as exc:
-        if own_name_only:
+        if lookup.own_name_only:
             return resolved
         # The port owns this refusal precisely so a caller need not name the
         # adapter that raised it, and the adapter's own wording is internal, so
@@ -1879,7 +1870,7 @@ async def _serve_from_hosted_credential(
         )
         raise adapter.error(403, denied_detail, ErrorKind.PERMISSION) from exc
     except Exception as exc:
-        if own_name_only:
+        if lookup.own_name_only:
             logger.warning(
                 "ModelProviderPort failed for %s:%s, which is served as configured: %s",
                 resolved.instance,
@@ -1928,9 +1919,9 @@ async def _serve_from_hosted_credential(
         # behind your request", and which internal step failed is not theirs.
         raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
 
-    if credential is None and not own_name_only:
+    if credential is None and not lookup.own_name_only:
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
-    if credential is None or (own_name_only and credential.response_provider != resolved.instance):
+    if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         # This build has no hosted path for the candidate. The candidate is
         # genuinely unserved, which is what it already was, so it goes to
         # any-llm uncredentialed and fails there exactly as it does today.
