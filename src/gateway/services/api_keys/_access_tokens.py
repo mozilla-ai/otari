@@ -15,7 +15,6 @@ a raw identity token before parsing anything.
 
 import base64
 import binascii
-import hashlib
 import hmac
 import json
 import uuid
@@ -23,6 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hmac as crypto_hmac
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from gateway.services.api_keys._federation import FederationRefusedError
@@ -71,7 +71,10 @@ def _unb64(segment: str) -> bytes:
 
 
 def _signature(secret: str, payload_segment: str) -> bytes:
-    return hmac.new(_signing_key(secret), f"{ACCESS_TOKEN_PREFIX}{payload_segment}".encode(), hashlib.sha256).digest()
+    """HMAC-SHA256 of the signed part, under the key HKDF derives from ``secret``; both from ``cryptography``."""
+    mac = crypto_hmac.HMAC(_signing_key(secret), hashes.SHA256())
+    mac.update(f"{ACCESS_TOKEN_PREFIX}{payload_segment}".encode())
+    return mac.finalize()
 
 
 def mint_access_token(claims: AccessTokenClaims, secrets: Sequence[str]) -> str:
