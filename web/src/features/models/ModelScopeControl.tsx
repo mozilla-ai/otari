@@ -4,7 +4,9 @@ import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
-import { useDiscoverableModels } from "@/shared/api/models"
+import { providerInstanceOf } from "@/features/models/modelKey"
+import { useModels } from "@/shared/api/models"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { useProviders } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
 
@@ -50,41 +52,56 @@ export function ModelScopeControl({
   description?: ReactNode
   anyLabel?: string
 }) {
-  const providers = useProviders()
-  const discoverable = useDiscoverableModels()
+  const models = useModels()
+  const { isOperator, isSettled } = useDeploymentOperator()
+  // Operator-only: an organization admin is refused it.
+  const providers = useProviders(isSettled && isOperator)
   const aliases = useAliases()
   const [mode, setMode] = useState<Mode>(modeOf(initial))
   const [entries, setEntries] = useState<string[]>(initial ?? [])
   const [query, setQuery] = useState("")
 
-  // The pickable catalog: a wildcard per configured provider, every discoverable
-  // model (already canonical instance:model), and each alias resolved to its
-  // target. Deduped by value, so an alias whose target is already discoverable
-  // does not appear twice. This is a pick-from-list control, not free text: every
-  // stored entry is a real, canonical selector the backend will accept.
+  // The pickable catalog: a wildcard per provider instance, every model, and
+  // each alias resolved to its target. It comes from GET /models, which is
+  // scoped to the caller's organization (its own providers and the deployment's
+  // managed models), not from the operator-only discovery or provider-config
+  // reads, which an organization admin cannot see. Deduped by value, so an alias
+  // whose target is already listed does not appear twice. Every stored entry is
+  // a canonical selector the backend will accept, so names that resolve through
+  // no instance are left out. An operator also gets a wildcard for every
+  // configured provider, which covers one whose models GET /models cannot list
+  // (discovery failed or unsupported, nothing priced).
   const catalog = useMemo<CatalogOption[]>(() => {
+    const ids = (models.data?.data ?? [])
+      .map((model) => model.id)
+      .filter((id) => providerInstanceOf(id) !== undefined)
+      .sort((a, b) => a.localeCompare(b))
+    const instances = [
+      ...new Set([
+        ...(providers.data?.providers ?? []).map((p) => p.instance),
+        ...ids.map((id) => providerInstanceOf(id) as string),
+      ]),
+    ].sort((a, b) => a.localeCompare(b))
     const candidates: CatalogOption[] = [
-      ...(providers.data?.providers ?? []).map((provider) => ({
-        id: `${provider.instance}:*`,
-        label: `${provider.instance}:*  ·  all ${provider.instance} models`,
+      ...instances.map((instance) => ({
+        id: `${instance}:*`,
+        label: `${instance}:*  ·  all ${instance} models`,
       })),
-      ...(discoverable.data?.providers ?? []).flatMap((prov) =>
-        prov.models.map((model) => ({ id: model.key, label: model.key })),
-      ),
+      ...ids.map((id) => ({ id, label: id })),
       ...(aliases.data ?? []).map((alias) => ({
         id: alias.target,
         label: `${alias.name}  ·  alias`,
       })),
     ]
-    // First label wins, so a discoverable model keeps its own name over the
-    // alias that resolves to it.
+    // First label wins, so a model keeps its own name over the alias that
+    // resolves to it.
     const seen = new Set<string>()
     return candidates.filter((option) => {
       if (!option.id || seen.has(option.id)) return false
       seen.add(option.id)
       return true
     })
-  }, [providers.data, discoverable.data, aliases.data])
+  }, [models.data, providers.data, aliases.data])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -136,8 +153,14 @@ export function ModelScopeControl({
     </Tab>
   )
 
-  const catalogEmpty =
-    !discoverable.isLoading && !providers.isLoading && catalog.length === 0
+  // A failed read and an empty one leave the same empty list; only the second
+  // means there is nothing to configure.
+  const catalogHint =
+    models.isError && catalog.length === 0
+      ? "Could not load the model catalog. Reload to try again."
+      : !models.isPending && catalog.length === 0
+        ? "No providers or models discovered yet. Configure a provider first, then scope this key."
+        : null
 
   return (
     <div className="flex flex-col gap-3">
@@ -181,11 +204,8 @@ export function ModelScopeControl({
               ))
             )}
           </div>
-          {catalogEmpty ? (
-            <span className="text-caption">
-              No providers or models discovered yet. Configure a provider first,
-              then scope this key.
-            </span>
+          {catalogHint ? (
+            <span className="text-caption">{catalogHint}</span>
           ) : (
             <ComboBox.Root
               allowsEmptyCollection
@@ -219,8 +239,8 @@ export function ModelScopeControl({
                       )}
                       emptyMessage={
                         catalog.length === 0
-                          ? "Looking for providers, models and aliases…"
-                          : "Everything discovered is already on the list."
+                          ? "Loading the model catalog…"
+                          : "Everything available is already on the list."
                       }
                       noMatchesMessage="Nothing matches what you typed."
                     />
