@@ -16,7 +16,7 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -26,14 +26,21 @@ import gateway.models  # noqa: F401  (registers every table on the shared metada
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.pricing_exceptions import OrganizationPricingOverlapError
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization
+from gateway.ports.model_provider_port import HostedCredential, HostedModels, ModelProviderPort
 from gateway.services.external_usage_service import _load_pricing_index, _resolve_pricing
 from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     validate_period,
 )
-from gateway.services.pricing_service import find_model_pricing, price_tool_calls
+from gateway.services.pricing_service import (
+    find_model_pricing,
+    load_organization_override_index,
+    price_tool_calls,
+    pricing_key_forms,
+    resolve_organization_override,
+)
 
 T = TypeVar("T")
 
@@ -93,6 +100,7 @@ async def _override(
     effective_from: datetime | None = None,
     effective_to: datetime | None = None,
     model_key: str = _MODEL_KEY,
+    origin: str | None = None,
 ) -> OrganizationModelPricing:
     row = OrganizationModelPricing(
         organization_id=organization_id,
@@ -102,6 +110,7 @@ async def _override(
         effective_from=effective_from or (_NOW - timedelta(days=1)),
         effective_to=effective_to,
         pricing_tiers=[],
+        origin=origin,
     )
     session.add(row)
     await session.flush()
@@ -120,6 +129,48 @@ def test_an_override_wins_over_the_deployment_price_list() -> None:
 
         assert pricing is not None
         assert pricing.input_price_per_million == _OVERRIDE_INPUT_RATE
+
+    _run(scenario)
+
+
+@pytest.mark.parametrize(
+    ("origin", "expected_rate"),
+    [
+        pytest.param(OPERATOR_ORIGIN, 0, id="set-by-the-operator"),
+        pytest.param(API_ORIGIN, _DEPLOYMENT_INPUT_RATE, id="set-by-the-organization"),
+        pytest.param("seed", _DEPLOYMENT_INPUT_RATE, id="seeded-for-the-organizations-key"),
+        pytest.param(None, _DEPLOYMENT_INPUT_RATE, id="written-before-origins"),
+    ],
+)
+def test_a_deployment_paid_request_reads_only_an_override_the_operator_set(
+    origin: str | None, expected_rate: float
+) -> None:
+    """Both resolution paths, the request's query and the batch index, agree on the rule."""
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        await _override(session, organization_id, rate=0, origin=origin)
+
+        pricing = await find_model_pricing(
+            session, "openai", "gpt-4o", as_of=_NOW, organization_id=organization_id, deployment_paid=True
+        )
+        organization_rate = await find_model_pricing(
+            session, "openai", "gpt-4o", as_of=_NOW, organization_id=organization_id
+        )
+        keys = pricing_key_forms(_MODEL_KEY)
+        index = await load_organization_override_index(session, organization_id, keys)
+        indexed = resolve_organization_override(index, keys, _NOW, deployment_paid=True)
+
+        assert pricing is not None
+        assert pricing.input_price_per_million == expected_rate
+        assert organization_rate is not None
+        assert organization_rate.input_price_per_million == 0, "the organization's own requests still read it"
+        if origin == OPERATOR_ORIGIN:
+            assert indexed is not None
+            assert indexed.input_price_per_million == 0
+        else:
+            assert indexed is None
 
     _run(scenario)
 
@@ -910,3 +961,38 @@ def test_the_import_path_does_not_persist_a_resolved_override() -> None:
         assert stored == []
 
     _run(scenario)
+
+
+class _RecordingPort:
+    """A model-provider port that serves ``openai`` except ``gpt-off``, recording what it was asked."""
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str | None]] = []
+
+    async def resolve_hosted_credential(
+        self, *, organization_id: uuid.UUID, workspace_id: uuid.UUID | None, provider: str, model: str | None
+    ) -> HostedCredential | None:
+        self.asked.append((provider, model))
+        if provider != "openai" or model == "gpt-off":
+            return None
+        return HostedCredential(api_key="sk-hosted", api_base=None, response_provider=provider)
+
+    async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
+        return {}
+
+
+def test_a_provider_the_port_does_not_serve_is_asked_once_for_all_its_models() -> None:
+    """An org-key refresh can name hundreds of models; one unserved provider costs one question, not one each."""
+    port = _RecordingPort()
+
+    async def scenario(session: AsyncSession) -> set[str]:
+        organization_id = await _organization(session)
+        service = OrganizationPricingService(session, _CONFIG, model_provider=cast(ModelProviderPort, port))
+        keys = ["openai:gpt-4o", "openai:gpt-off", *(f"nebius:model-{n}" for n in range(50))]
+        return await service.deployment_supplied_keys(organization_id, keys)
+
+    supplied = _run(scenario)
+
+    assert supplied == {"openai:gpt-4o"}
+    assert [ask for ask in port.asked if ask[0] == "nebius"] == [("nebius", None)]
+    assert ("openai", "gpt-off") in port.asked

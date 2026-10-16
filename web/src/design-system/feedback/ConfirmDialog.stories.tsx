@@ -45,6 +45,17 @@ export const Pending: Story = {
 }
 
 /**
+ * What the confirm would act on is still loading, so it cannot be pressed yet:
+ * a delete whose list is read when the dialog opens.
+ */
+export const ConfirmHeldBack: Story = {
+  args: {
+    body: "Working out what would be removed…",
+    isConfirmDisabled: true,
+  },
+}
+
+/**
  * The mutation came back with a refusal. The dialog stays open holding the
  * gateway's own message, rather than closing and losing it.
  */

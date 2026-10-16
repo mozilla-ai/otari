@@ -87,8 +87,8 @@ export function useGatewayHealth() {
 // 404: a gate cannot be built on a failed request, and hiding a destination
 // grants nothing either way.
 //
-// Read by the deployment accounts page alone, to word its own refusal, and it
-// holds that decision until this lands. Nothing else asks: the rail and the
+// Read by the deployment accounts and hosted providers pages, to word their own
+// refusal, and each holds that decision until this lands. Nothing else asks: the rail and the
 // Overview index need the answer before their first paint, so they take
 // `deployment_operator` off the organization context, which is the same
 // server-side predicate on a read the shell already makes (otari#836).
@@ -102,9 +102,10 @@ export function useDeploymentAdminAccess() {
         (body) => body.granted,
       ),
     staleTime: 60_000,
-    // No `enabled` parameter: the one caller sits behind a route declaring
-    // `surface: "admin"`, so a deployment that does not host `/admin` never
-    // renders it and the 404 never becomes a second reading of `surfaces`.
+    // No `enabled` parameter: both callers sit behind routes whose surfaces
+    // (`admin`, `hosted_providers`) are published on the same deployments, so
+    // one that does not host `/admin` never renders either, and the 404 never
+    // becomes a second reading of `surfaces`.
     // Deliberately not inferred from a 404 here either, which is the scattered
     // mode check the surface axis replaced; the ordinary retry policy applies,
     // and a failure is a failure.

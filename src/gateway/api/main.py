@@ -26,6 +26,7 @@ from gateway.api.routes import (
     health,
     hooks,
     hosted_mode,
+    hosted_providers,
     hybrid_mode,
     identity,
     images,
@@ -205,6 +206,9 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # form is read by a tenant's owners and admins, who operate nothing.
     RouterMount(providers.catalog_router, Plane.CONTROL),
     RouterMount(providers.router, Plane.CONTROL),
+    # The deployment's own upstream credentials and the models it offers on
+    # them. Operator-only, and answered 404 to anyone else like /admin.
+    RouterMount(hosted_providers.router, Plane.CONTROL),
     RouterMount(keys.router, Plane.CONTROL),
     # A service key managing its own end users, rather than the operator gate
     # ``keys.router`` holds over every key's.

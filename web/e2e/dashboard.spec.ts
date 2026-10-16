@@ -158,13 +158,17 @@ test.describe("dashboard core flows", () => {
 
     // The deployment's own rail, which neither loop above reaches: it is entered
     // from the account menu rather than from a row, and the menu closes on the
-    // way, so the rail is what carries you between its two pages once you are
+    // way, so the rail is what carries you between its pages once you are
     // in. Exact, because the organization rail also carries "Org settings".
     const menu = await openAccountMenu(page)
     await menu.getByRole("link", { name: "Deployment" }).click()
     await expect(pageHeading(page, "Settings")).toBeVisible()
     await nav(page).getByRole("link", { name: "Accounts", exact: true }).click()
     await expect(pageHeading(page, "Accounts")).toBeVisible()
+    await nav(page)
+      .getByRole("link", { name: "Hosted providers", exact: true })
+      .click()
+    await expect(pageHeading(page, "Hosted providers")).toBeVisible()
     // The way out names where it goes. Queried on the page rather than inside
     // the Sidebar landmark: the back row is in the scope band above the nav, the
     // same place the workspace switcher sits on the other rail.

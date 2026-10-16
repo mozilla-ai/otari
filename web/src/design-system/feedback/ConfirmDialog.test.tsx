@@ -61,4 +61,22 @@ describe("ConfirmDialog", () => {
     render(<ConfirmDialog {...base} isOpen isPending />)
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
   })
+
+  it("holds the confirm back while it is disabled, leaving Cancel live", async () => {
+    const onConfirm = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ConfirmDialog
+        {...base}
+        isOpen
+        isConfirmDisabled
+        onConfirm={onConfirm}
+      />,
+    )
+    const confirm = screen.getByRole("button", { name: "Delete" })
+    expect(confirm).toBeDisabled()
+    await user.click(confirm)
+    expect(onConfirm).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled()
+  })
 })

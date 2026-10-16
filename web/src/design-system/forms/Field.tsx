@@ -8,6 +8,8 @@ interface FieldProps {
   onChange: (value: string) => void
   placeholder?: string
   type?: "text" | "datetime-local" | "date" | "time"
+  /** The keyboard a phone offers: `"decimal"` for a rate or an amount. */
+  inputMode?: "text" | "decimal" | "numeric"
   isRequired?: boolean
   /** Renders the input read-only and dimmed. A caller that cannot write should
       say so on the field rather than only on the button that commits it. */
@@ -30,6 +32,7 @@ export function Field({
   onChange,
   placeholder,
   type = "text",
+  inputMode,
   isRequired,
   isDisabled,
   description,
@@ -50,7 +53,12 @@ export function Field({
       {/* No manual "*": HeroUI marks a required field's label through CSS
           ([data-required=true] > .label::after), so adding one renders two. */}
       <Label className="text-body">{label}</Label>
-      <Input type={type} placeholder={placeholder} autoFocus={autoFocus} />
+      <Input
+        type={type}
+        inputMode={inputMode}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+      />
       <FieldMessages shouldReserve={shouldReserveMessage}>
         {description ? (
           // HeroUI's Description renders through the TextField's "description"

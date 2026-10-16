@@ -282,6 +282,36 @@ class LastWorkspaceError(TenancyValidationError):
         super().__init__("An organization keeps at least one workspace; create another before deleting this one")
 
 
+class OrganizationInUseError(TenancyConflictError):
+    """An organization's workspaces still hold request-plane rows, which are ON DELETE RESTRICT.
+
+    ``WorkspaceInUseError``'s rule one level up: only an organization nothing has
+    been recorded against can go.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Only an organization with no usage can be deleted. This one still holds usage, "
+            "API keys, aliases or routing policies."
+        )
+
+
+class LastOrganizationError(TenancyValidationError):
+    """Deleting this organization would leave the caller in none."""
+
+    def __init__(self) -> None:
+        super().__init__("You cannot delete the only organization you belong to")
+
+
+class DefaultOrganizationDeletionError(TenancyValidationError):
+    """The organization first boot provisions is the deployment's own, and stays."""
+
+    def __init__(self) -> None:
+        super().__init__("The deployment's default organization cannot be deleted")
+
+
 class InvitationNotFoundError(TenancyNotFoundError):
     """No invitation matches the token or id given.
 
@@ -374,6 +404,7 @@ class SignupRegistrationUnresolvedError(TenancyError):
 
 
 __all__ = [
+    "DefaultOrganizationDeletionError",
     "ForeignTenancyError",
     "InvalidRoleError",
     "InvitationAlreadyPendingError",
@@ -382,6 +413,7 @@ __all__ = [
     "InvitationExpiredError",
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",
+    "LastOrganizationError",
     "LastWorkspaceError",
     "MembershipUpdateError",
     "NoActiveOrganizationError",
@@ -391,6 +423,7 @@ __all__ = [
     "OrganizationDomainClaimedHereError",
     "OrganizationDomainNotFoundError",
     "OrganizationDomainNotVerifiedError",
+    "OrganizationInUseError",
     "OrganizationMemberAddressUnprovenError",
     "OrganizationMemberAddressUnresolvedError",
     "OrganizationMemberAlreadyExistsError",

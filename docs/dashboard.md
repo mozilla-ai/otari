@@ -113,6 +113,29 @@ The organization view contains tenant-wide administration:
   the process-wide credential list, which a deployment operator manages and
   which is served to every organization; it appears in standalone mode only.
 
+The deployment view, opened from the account menu, holds what belongs to the
+gateway process rather than to any organization on it:
+
+- Settings, the running configuration.
+- Accounts, every account on the deployment.
+- Hosted providers, the keys the deployment serves inference on for a request
+  that brings no credential of its own. A request is served on one only after
+  the organization's own keys and the configured providers have not answered.
+  Adding a provider offers every model it lists on the key; each model carries a
+  serving switch and a price, set per million tokens or per 1,000 requests or
+  images, and a model nothing prices arrives switched off. Refresh models asks
+  one provider again, and Refresh and purge asks every provider and then removes
+  priced models nothing on the deployment serves, along with the model lists of
+  providers nothing configures any more, listing them before anything is
+  removed. A provider kept to one organization shows which; that restriction
+  is set through `/api/v1/hosted-providers`. A provider defined in the
+  `hosted_providers:` block of `config.yml` carries a `config.yml` badge and
+  cannot be edited, switched or removed here, while its models can; adding a
+  provider of the same name overrides it, which the form warns about.
+
+Accounts and Hosted providers are listed only for a deployment operator, and
+answer anyone else that they are not available to them.
+
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
 settings response.
@@ -134,7 +157,13 @@ each model is billed at. An organization may set its own rate for a model it
 supplies the provider key for. A model reached through one of the deployment's
 own provider instances is not one of those: the deployment holds that credential
 and settles its upstream bill, so its rate is the deployment price list's, which
-is `/api/v1/pricing` and has no page of its own. The models.dev defaults are
+is `/api/v1/pricing` and has no page of its own. The same holds for a model the
+deployment serves on one of its hosted providers: a request served there is
+priced only from a rate the deployment operator set, either the price list or a
+rate the operator set for this organization, never from one the organization
+wrote itself, even one written while its own key still covered the model. A rate
+the operator set for an organization is listed beside the organization's own,
+and only the operator may change or remove it. The models.dev defaults are
 likewise kept current through `/api/v1/pricing/refresh` rather than from the
 dashboard.
 

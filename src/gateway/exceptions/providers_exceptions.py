@@ -1,4 +1,4 @@
-"""Errors the provider-key surfaces raise, and the HTTP status each carries."""
+"""Errors the provider-key and hosted-provider surfaces raise, and the HTTP status each carries."""
 
 from gateway.exceptions import (
     TenancyConflictError,
@@ -204,7 +204,151 @@ class ProviderEndpointInvalidError(TenancyValidationError):
     """A name, provider, base URL or default field the endpoint cannot be saved with."""
 
 
+class HostedCatalogEmptyError(TenancyConflictError):
+    """A catalog sweep was asked for while no hosted provider offers a model.
+
+    Refused rather than run: the sweep keeps what is offered and removes the
+    rest, so with nothing offered the whole deployment price list would read as
+    serving nothing. A deployment in that state is unconfigured, which is a
+    different thing from one whose catalog has drifted.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No hosted provider offers a model yet, so there is nothing to reconcile the catalog against. "
+            "Configure a provider and its models first."
+        )
+
+
+class HostedModelAlreadyOfferedError(TenancyConflictError):
+    """The unique index is the arbiter; a racing insert's conflict is mapped to this."""
+
+    def __init__(self, provider: str, model: str | None) -> None:
+        if model is None:
+            super().__init__(f"A model being offered is already offered on the '{provider}' hosted provider")
+        else:
+            super().__init__(f"'{model}' is already offered on the '{provider}' hosted provider")
+
+
+class HostedModelNameRequiredError(TenancyValidationError):
+    """A model name that is blank once trimmed: half of a pricing key nothing could price."""
+
+    def __init__(self) -> None:
+        super().__init__("A model name is required")
+
+
+class HostedModelNotFoundError(TenancyNotFoundError):
+    def __init__(self, model_id: object) -> None:
+        super().__init__(f"Hosted model {model_id} not found")
+
+
+class HostedProviderAlreadyExistsError(TenancyConflictError):
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"A hosted provider for '{provider}' is already configured")
+
+
+class HostedProviderApiBaseMaskedError(TenancyValidationError):
+    """An endpoint carrying the credential mask that is not the stored endpoint echoed back.
+
+    The API shows a stored ``api_base`` with the password in its userinfo and
+    its query values masked. Echoed back unchanged it keeps the stored value;
+    edited, there is no telling which credential the mask stood for, and
+    taken literally the mask would be sent to the provider as one.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("The endpoint carries a masked credential. Enter the endpoint in full to change it.")
+
+
+class HostedProviderClientArgsUnreadableError(TenancyValidationError):
+    """A masked client argument was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    provider. Refused so the operator enters the value in full, which is what
+    a rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked client argument keeps the stored value, and there is none that can be read back. "
+            "Enter the client arguments in full."
+        )
+
+
+class HostedProviderKeyRequiredError(TenancyValidationError):
+    """The base was repointed at another origin without the key being entered again.
+
+    Repointing alone would send the stored key to an endpoint the caller chose
+    without the caller ever having to know the key. The origin is the scheme,
+    the host and the port: the same host over plain HTTP or on another port is
+    another endpoint.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Pointing a hosted provider at another origin requires entering its key again")
+
+
+class HostedProviderNotFoundError(TenancyNotFoundError):
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' not found")
+
+
+class HostedProviderReadOnlyError(TenancyConflictError):
+    """A change asked of a hosted provider defined in configuration, which has no row to change.
+
+    Its key, base, extras and switch are the configuration's to change. Its
+    models are not, and are administered as a stored provider's are. Creating
+    a stored provider of the same name is allowed, and that row wins.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"Hosted provider '{provider}' is defined in config.yml; change it there, "
+            "or create a stored provider of the same name to override it"
+        )
+
+
+class HostedProviderUnknownProviderError(TenancyValidationError):
+    """A ``provider`` that is blank, or names no any-llm implementation this build can dispatch to.
+
+    Refused on the way in rather than discovered at dispatch, with the same
+    alias folding ``OrgProviderKeyUnknownProviderError`` applies.
+    """
+
+    def __init__(self, provider: str) -> None:
+        if not provider:
+            super().__init__("A provider is required")
+        else:
+            super().__init__(f"'{provider}' is not a known provider implementation")
+
+
+class HostedProviderUnknownOrganizationError(TenancyValidationError):
+    """A restriction naming an organization this deployment does not hold."""
+
+    def __init__(self, organization_id: object) -> None:
+        super().__init__(f"No organization with id {organization_id} exists on this deployment")
+
+
+class HostedProviderUnsafeApiBaseError(TenancyValidationError):
+    """An ``api_base`` the SSRF gate refused; the message is that gate's own."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
 __all__ = [
+    "HostedCatalogEmptyError",
+    "HostedModelAlreadyOfferedError",
+    "HostedModelNameRequiredError",
+    "HostedModelNotFoundError",
+    "HostedProviderAlreadyExistsError",
+    "HostedProviderApiBaseMaskedError",
+    "HostedProviderNotFoundError",
+    "HostedProviderClientArgsUnreadableError",
+    "HostedProviderKeyRequiredError",
+    "HostedProviderUnknownOrganizationError",
+    "HostedProviderUnknownProviderError",
+    "HostedProviderUnsafeApiBaseError",
     "OrgDefaultProviderKeyConflictError",
     "OrgProviderKeyAlreadyExistsError",
     "OrgProviderKeyArchivedError",
