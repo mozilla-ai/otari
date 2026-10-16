@@ -234,8 +234,8 @@ class HostedProviderModel(Base):
     hosted provider may also be declared in configuration with no row of its
     own, and its roster still lives here.
 
-    The switch is one-sided at dispatch: a row switched off refuses, and a
-    model with no row is served but not advertised.
+    Dispatch serves only a model whose row is switched on: a row switched
+    off and a model with no row are both refused.
     """
 
     __tablename__ = "hosted_provider_models"

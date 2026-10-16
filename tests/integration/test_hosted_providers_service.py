@@ -1035,17 +1035,22 @@ async def test_the_runtime_resolves_the_row_the_surface_wrote(
     assert await service.resolve("anthropic", organization_id=None) is None
 
 
-async def test_a_disabled_model_is_refused_and_an_unlisted_one_serves(
+async def test_only_a_model_switched_on_under_the_provider_serves(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    """The gate is two-sided: a model switched off and a model with no row are both refused."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-4o-mini": ("0.15", "0.6")})
     service = _service(async_db)
-    await _provider(service, monkeypatch, "gpt-4o")
-    [model] = (await service.list_models("openai")).data
-    await service.update_model("openai", model.id, HostedModelUpdateRequest(enabled=False))
+    await _provider(service, monkeypatch, "gpt-4o", "gpt-4o-mini")
+    models = {model.model: model for model in (await service.list_models("openai")).data}
+    assert await service.resolve("openai", "gpt-4o", organization_id=None) is not None
+
+    await service.update_model("openai", models["gpt-4o"].id, HostedModelUpdateRequest(enabled=False))
+    await service.remove_model("openai", models["gpt-4o-mini"].id)
 
     assert await service.resolve("openai", "gpt-4o", organization_id=None) is None
-    assert await service.resolve("openai", "gpt-4o-mini", organization_id=None) is not None
+    assert await service.resolve("openai", "gpt-4o-mini", organization_id=None) is None
+    assert await service.resolve("openai", "o3", organization_id=None) is None
     assert await service.resolve("openai", organization_id=None) is not None
 
 

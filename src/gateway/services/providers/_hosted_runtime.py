@@ -35,9 +35,7 @@ class HostedProviderRuntime:
 
         The same refusals as :meth:`resolve`, so the listing and the resolve
         agree: a provider switched off, one restricted to another organization
-        and one whose ciphertext no configured key reads are all absent. A model
-        with no row is served but not advertised, because the offered list is
-        discovery's best effort.
+        and one whose ciphertext no configured key reads are all absent.
         """
         async with self.uow:
             serveable = [
@@ -57,9 +55,9 @@ class HostedProviderRuntime:
 
         None covers every case the caller is not asked to tell apart: no row, a
         provider switched off or restricted to another organization, a model
-        switched off, and a ciphertext no configured key reads. The model gate
-        is one-sided: a row that exists and is switched off refuses, while a
-        model with no row serves.
+        the provider does not offer switched on, and a ciphertext no configured
+        key reads. A model with no row is refused, so the operator's roster is
+        the whole of what the deployment's credential serves.
         """
         async with self.uow:
             row = await self.providers.get_by_provider(lookup_name(provider))
@@ -67,6 +65,6 @@ class HostedProviderRuntime:
                 return None
             if model is not None:
                 offered = await self.models.get_by_model(row.provider, model)
-                if offered is not None and not offered.enabled:
+                if offered is None or not offered.enabled:
                     return None
             return credential_of(row)
