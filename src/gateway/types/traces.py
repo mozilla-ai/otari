@@ -11,8 +11,9 @@ The records carry the privacy rules, so nothing downstream can weaken them:
   ``attributes``, takes only the keys in :data:`SPAN_ATTRIBUTES`, each with a
   scalar value. An id must be id-shaped, and every other string a short
   identifier that does not look like an email address, a file path or a
-  credential, so prose and the obvious kinds of personal data are refused. There
-  is no field for a raw OTLP body.
+  credential, so prose and the obvious kinds of personal data are refused. A
+  gateway step's name, the endpoint label the gateway chose, has a shape of its
+  own. There is no field for a raw OTLP body.
 - **Tenant first.** Every key starts with the workspace, and every read takes
   a :class:`TraceScope` the caller derived from the authenticated principal, so
   an id a client chose never reaches another tenant's rows.
@@ -65,9 +66,14 @@ SESSION_SOURCES: tuple[SessionSource, ...] = ("client", "harness", "otlp", "none
 # an identifier, never prose. 128 characters is room for any tool, model or
 # provider name and for a namespaced identifier, and too little for a sentence to
 # matter if one did fit the character set.
-IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_.:/@+-]{1,128}$")
+IDENTIFIER_MAX_LENGTH = 128
+IDENTIFIER_PATTERN = re.compile(rf"^[A-Za-z0-9_.:/@+-]{{1,{IDENTIFIER_MAX_LENGTH}}}$")
 # An id is narrower still: a hash, a UUID, OTel hex, or one of those with a prefix.
 ID_PATTERN = re.compile(rf"^[A-Za-z0-9_.:-]{{1,{TRACE_ID_MAX_LENGTH}}}$")
+# A gateway step is named for the endpoint label that served it. The gateway chose
+# that value, so it is held to this shape instead of the identifier rule, which
+# refuses a leading slash as a client's file path.
+ENDPOINT_PATTERN = re.compile(r"^/v[0-9]+(?:/[a-z_]+)+$")
 
 # Values that fit the character set and are still a client's data rather than a
 # name: an email address, a file path, or something shaped like a credential.
@@ -112,6 +118,11 @@ class InvalidSpanError(ValueError):
 def is_identifier(value: str) -> bool:
     """Whether a client-supplied name is safe to store as it is."""
     return IDENTIFIER_PATTERN.fullmatch(value) is not None and not any(pattern.search(value) for pattern in _NOT_A_NAME)
+
+
+def is_endpoint(value: str) -> bool:
+    """Whether a name the gateway chose is shaped like one of its endpoint labels."""
+    return len(value) <= IDENTIFIER_MAX_LENGTH and ENDPOINT_PATTERN.fullmatch(value) is not None
 
 
 def _check_choice(name: str, value: str, choices: tuple[str, ...]) -> None:
@@ -169,8 +180,9 @@ class SpanRecord:
         _check_choice("outcome", self.outcome, SPAN_OUTCOMES)
         for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id"):
             _check_id(name, getattr(self, name))
+        if not (self.origin == "gateway" and self.kind == "step" and is_endpoint(self.name)):
+            _check_identifier("name", self.name)
         for name in (
-            "name",
             "operation",
             "error_class",
             "model",

@@ -19,7 +19,7 @@ from decimal import Decimal
 from gateway.log_config import logger
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._turns import TurnFacts
-from gateway.types.traces import SpanRecord, TraceWrite, is_identifier
+from gateway.types.traces import SpanRecord, TraceWrite, is_endpoint, is_identifier
 
 # The settled status of an attempt a later candidate made up for, and of one that served.
 _ABSORBED = "absorbed"
@@ -266,7 +266,7 @@ class RequestTrace:
             span_id=self.request_id,
             kind="step",
             origin="gateway",
-            name=identifier_or_none(self.endpoint) or "request",
+            name=self.endpoint if is_endpoint(self.endpoint) else "request",
             opens_turn=self.turn is not None and self.turn.opens_turn and not self.subagent,
             outcome="ok" if ok else "error",
             error_class=error_class,

@@ -76,8 +76,9 @@ without a name.
 
 ## Turns, steps and tools
 
-- A **step** is one request to the gateway. Every retry is a step of its own,
-  with its own cost.
+- A **step** is one request to the gateway, named for the endpoint that served
+  it, such as `/v1/chat/completions`. Every retry is a step of its own, with its
+  own cost.
 - A **turn** starts at a step whose last input is the user's own text, and
   includes the steps after it that hand tool results back to the model. A turn
   is **failed** when its last step failed, **incomplete** when the response was
