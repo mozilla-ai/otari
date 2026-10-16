@@ -8,6 +8,7 @@ reads another organization's traces, whose ids answer 404 like ones that do
 not exist.
 """
 
+import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,8 @@ from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.traces import Trace, TraceSpan
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+
+from .test_otlp import _agent_span, _exempt_key, _otlp_traces
 
 _T0 = datetime(2026, 10, 7, 12, tzinfo=UTC)
 
@@ -210,6 +213,7 @@ def test_the_operator_reads_every_workspace_of_their_organization_and_the_detail
     assert tool["approximate"] is True
     assert tool["parent_span_id"] == "req-1"
     assert tool["start_time"].startswith("2026-10-07T12:00:10")
+    assert {(span["otel_trace_id"], span["otel_span_id"]) for span in detail["spans"]} == {(None, None)}
 
 
 def test_a_request_opens_the_session_it_was_traced_into_inside_the_scope_only(
@@ -315,3 +319,21 @@ def test_an_id_in_two_workspaces_read_without_naming_one_is_a_conflict(
     response = _operator_get(client, world, "/traces/s-two")
 
     assert response.status_code == status.HTTP_409_CONFLICT
+
+
+def test_a_span_received_over_otlp_reads_back_with_the_otel_ids_it_was_sent(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    span = _agent_span("5b8efff798038103d269b633813fc60c", "eee19b7ec3c1b174")
+    assert client.post("/otlp/v1/traces", json=_otlp_traces(span), headers=headers).status_code == status.HTTP_200_OK
+
+    deadline = time.monotonic() + 10
+    while not (items := client.get(f"{API_ROOT}/traces", headers=master_key_header).json()["items"]):
+        assert time.monotonic() < deadline, "the exported span was never written"
+        time.sleep(0.1)
+    [trace] = items
+    detail = client.get(f"{API_ROOT}/traces/{trace['trace_id']}", headers=master_key_header).json()
+
+    [read] = detail["spans"]
+    assert (read["otel_trace_id"], read["otel_span_id"]) == ("5b8efff798038103d269b633813fc60c", "eee19b7ec3c1b174")
