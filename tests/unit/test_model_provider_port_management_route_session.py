@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.routes.organization_pricing import get_organization_pricing_service
 from gateway.core import database
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.organization_pricing_service import OrganizationPricingService
 
@@ -31,13 +32,17 @@ class _NullModelProviderPort:
 
 
 class _RecordingContainer:
-    """Stands in for the composition-root container, recording ``resolve``'s session arg."""
+    """Stands in for the composition-root container, recording ``resolve``'s session and Unit of Work."""
 
     def __init__(self) -> None:
         self.resolved_with: list[AsyncSession | None] = []
+        self.units_of_work: list[UnitOfWork | None] = []
 
-    def resolve(self, port: type[ModelProviderPort], session: AsyncSession | None) -> ModelProviderPort:
+    def resolve(
+        self, port: type[ModelProviderPort], session: AsyncSession | None, *, uow: UnitOfWork | None = None
+    ) -> ModelProviderPort:
         self.resolved_with.append(session)
+        self.units_of_work.append(uow)
         return cast(ModelProviderPort, _NullModelProviderPort())
 
 
@@ -54,7 +59,13 @@ def test_organization_pricing_service_shares_its_own_request_session(monkeypatch
     async def probe(
         service: Annotated[OrganizationPricingService, Depends(get_organization_pricing_service)],
     ) -> dict[str, bool]:
-        return {"shared": len(container.resolved_with) == 1 and container.resolved_with[0] is service.db}
+        [uow] = container.units_of_work
+        return {
+            "shared": len(container.resolved_with) == 1
+            and container.resolved_with[0] is service.db
+            and uow is not None
+            and uow._session is service.db
+        }
 
     response = TestClient(app).get("/probe")
 

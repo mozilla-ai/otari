@@ -50,10 +50,17 @@ from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.pricing_exceptions import (
     OrganizationPricingManagedModelError,
     OrganizationPricingNotFoundError,
+    OrganizationPricingOperatorRateError,
     OrganizationPricingOverlapError,
 )
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.pricing import API_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import (
+    API_ORIGIN,
+    OPERATOR_ORIGIN,
+    ModelPricing,
+    OrganizationModelPricing,
+    PriceSource,
+)
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.repositories.pricing import OrganizationModelPricingRepository
@@ -250,13 +257,27 @@ class OrganizationPricingService:
         deployment-supplied instance would let a tenant name its own cost basis,
         and a zero would make the model free and spend no budget.
 
-        Gotcha: this runs at write time only.
-        A stored override still applies if the organization later loses BYO coverage.
+        This runs at write time only, so it cannot stop an override written while
+        BYO covered the model from outliving that key. Settlement closes that:
+        a request the deployment paid for is priced only from an override the
+        operator wrote (``pricing_service.resolve_model_pricing``).
         """
-        if await DeploymentUserService(self.db).has_administration_access(user):
+        if await self._operates_deployment(user):
             return
         if model_key in await self.deployment_supplied_keys(organization_id, [model_key]):
             raise OrganizationPricingManagedModelError(model_key)
+
+    async def _operates_deployment(self, user: TenancyUser) -> bool:
+        return await DeploymentUserService(self.db).has_administration_access(user)
+
+    async def _origin_for(self, user: TenancyUser) -> str:
+        """The origin a rate ``user`` writes is stored under, which settlement reads back."""
+        return OPERATOR_ORIGIN if await self._operates_deployment(user) else API_ORIGIN
+
+    async def _raise_if_operator_rate(self, user: TenancyUser, row: OrganizationModelPricing) -> None:
+        """Refuse an organization manager's edit or delete of a rate the operator set."""
+        if row.origin == OPERATOR_ORIGIN and not await self._operates_deployment(user):
+            raise OrganizationPricingOperatorRateError(row.model_key)
 
     async def deployment_supplied_keys(self, organization_id: uuid.UUID, model_keys: Collection[str]) -> set[str]:
         """Which of ``model_keys`` the deployment pays the upstream bill for.
@@ -268,9 +289,10 @@ class OrganizationPricingService:
 
         Asked in a batch because the organization's BYO providers have to be
         resolved before the port can be asked at all, and that is one query for
-        an answer that does not change between models. The port call stays per
-        model: whether a hosted credential serves one is a question about that
-        model.
+        an answer that does not change between models. The port is asked once
+        per provider first: ``model`` can only make it refuse, so a provider it
+        serves no credential for serves none of its models, and only a provider
+        it does serve is asked again per model.
 
         Two callers want different things from the same answer.
         :meth:`raise_if_deployment_supplied` refuses an override for such a
@@ -280,9 +302,31 @@ class OrganizationPricingService:
         if not model_keys:
             return set()
         byo = await self.provider_keys.get_byo_providers(organization_id=organization_id)
-        return {
-            model_key for model_key in model_keys if await self._is_deployment_supplied(organization_id, model_key, byo)
-        }
+        provider_served: dict[str, bool] = {}
+        supplied: set[str] = set()
+        for model_key in model_keys:
+            split = split_selector(model_key)
+            if split is not None and split[0] not in byo and not is_deployment_instance_key(self.config, model_key):
+                provider = split[0]
+                if provider not in provider_served:
+                    provider_served[provider] = await self._hosted_serves_provider(organization_id, provider)
+                if not provider_served[provider]:
+                    continue
+            if await self._is_deployment_supplied(organization_id, model_key, byo):
+                supplied.add(model_key)
+        return supplied
+
+    async def _hosted_serves_provider(self, organization_id: uuid.UUID, provider: str) -> bool:
+        """Whether the port serves ``provider`` at all, before any model is named."""
+        if self.model_provider is None:
+            return False
+        try:
+            credential = await self.model_provider.resolve_hosted_credential(
+                organization_id=organization_id, workspace_id=None, provider=provider, model=None
+            )
+        except HostedAccessDeniedError:
+            return True
+        return credential is not None
 
     async def _is_deployment_supplied(
         self, organization_id: uuid.UUID, model_key: str, byo_providers: Collection[str]
@@ -421,7 +465,7 @@ class OrganizationPricingService:
             effective_from=effective_from,
             effective_to=effective_to,
             unit=override.unit,
-            origin=API_ORIGIN,
+            origin=await self._origin_for(user),
         )
         self.db.add(row)
         await self._flush_or_conflict(organization_id, model_key, effective_from)
@@ -517,6 +561,7 @@ class OrganizationPricingService:
         """
         organization_id = await self._writable_organization_id(user)
         row = await self._owned_row(organization_id, pricing_id)
+        await self._raise_if_operator_rate(user, row)
         await self.raise_if_deployment_supplied(user, row.model_key, organization_id)
 
         effective_from = normalize_effective_at(override.effective_from)
@@ -544,7 +589,7 @@ class OrganizationPricingService:
         # offered-models surface seeded carries ``seed`` and its refresh moves it
         # to each day's community default; leaving that marking on a rate an
         # admin has just set would have the next refresh overwrite it.
-        row.origin = API_ORIGIN
+        row.origin = await self._origin_for(user)
         await self._flush_or_conflict(organization_id, row.model_key, effective_from, exclude_id=row.id)
         return row
 
@@ -557,6 +602,7 @@ class OrganizationPricingService:
         """
         organization_id = await self._writable_organization_id(user)
         row = await self._owned_row(organization_id, pricing_id)
+        await self._raise_if_operator_rate(user, row)
         await self.db.delete(row)
         await self.db.flush()
 

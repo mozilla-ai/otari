@@ -30,6 +30,7 @@ import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
+import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -152,6 +153,11 @@ const AdminAccountsRoute = AdminAccountsRouteImport.update({
   path: '/admin/accounts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminHostedProvidersRoute = AdminHostedProvidersRouteImport.update({
+  id: '/admin/hosted-providers',
+  path: '/admin/hosted-providers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -256,6 +262,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -291,6 +298,7 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -331,6 +339,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -372,6 +381,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -407,6 +417,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -446,6 +457,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -486,6 +498,7 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRoute
   AdminAccountsRoute: typeof AdminAccountsRoute
+  AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -635,6 +648,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/accounts'
       fullPath: '/admin/accounts'
       preLoaderRoute: typeof AdminAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/hosted-providers': {
+      id: '/admin/hosted-providers'
+      path: '/admin/hosted-providers'
+      fullPath: '/admin/hosted-providers'
+      preLoaderRoute: typeof AdminHostedProvidersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models/': {
@@ -842,6 +862,7 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRoute,
   AdminAccountsRoute: AdminAccountsRoute,
+  AdminHostedProvidersRoute: AdminHostedProvidersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

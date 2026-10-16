@@ -1753,7 +1753,7 @@
         {
           "name": "List Catalog",
           "request": {
-            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the models.dev default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
+            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the models.dev default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels every organization reaches, at the deployment's rates, and nothing\nthat belongs to a tenant.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2689,6 +2689,409 @@
     {
       "item": [
         {
+          "name": "List Hosted Providers",
+          "request": {
+            "description": "List the providers this deployment serves hosted inference on.\n\nStored providers and those defined in the configuration's\n``hosted_providers:`` block alike, each marked with its ``source``.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Hosted Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_key\": \"<your OpenAI API key>\",\n  \"provider\": \"openai\"\n}"
+            },
+            "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error. A\nprovider the configuration defines may be created too, and the stored one\nthen serves instead.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers"
+            }
+          }
+        },
+        {
+          "name": "Refresh Catalog",
+          "request": {
+            "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh"
+            }
+          }
+        },
+        {
+          "name": "Preview Catalog Refresh",
+          "request": {
+            "description": "What a catalog sweep would remove, without removing it.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "refresh",
+                "preview"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh/preview"
+            }
+          }
+        },
+        {
+          "name": "Update Hosted Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Rotate the key, repoint the base, or turn a provider off.\n\nA provider defined in configuration answers 409: it is changed there.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Hosted Provider",
+          "request": {
+            "description": "Remove a provider and its roster, leaving the runtime with no hosted path for it.\n\nA provider defined in configuration answers 409. A stored provider that\noverrides a configured one keeps the roster, which the configured one\nserves again.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Available Models",
+          "request": {
+            "description": "Ask the provider what it serves on its credential.\n\nDials the upstream on every call rather than caching: the caller is the\nadmin form's model picker, opened rarely and entitled to a current answer.\nFailure comes back in the body, so the picker can fall back to a text box.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "available-models"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/available-models",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Hosted Models",
+          "request": {
+            "description": "List the models offered on one provider, with the price each currently serves at.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models?skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add Hosted Model",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"input_price_per_million\": 2.5,\n  \"model\": \"gpt-4o\",\n  \"output_price_per_million\": 10\n}"
+            },
+            "description": "Offer a model on a provider, optionally at a custom price.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh Hosted Models",
+          "request": {
+            "description": "Ask the provider again and offer whatever is newly listed.\n\nNothing already offered is removed, even when the provider no longer lists\nit. New models follow the offer rule, seeded with the community default\nprice and off when nothing prices them. A seeded price nobody changed moves\nwith the default. An offered model whose stored price has since been\ndeleted is seeded again, or switched off where the default does not price\nit, even one an operator switched on: a refresh never switches a model on.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models/refresh",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Hosted Model",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Reprice one offered model, toggle whether it is served, or both.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Hosted Model",
+          "request": {
+            "description": "Stop offering a model on a provider. Its pricing history stays.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "hosted-providers"
+    },
+    {
+      "item": [
+        {
           "name": "Create Image",
           "request": {
             "body": {
@@ -3466,7 +3869,7 @@
         {
           "name": "List Discoverable Models",
           "request": {
-            "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /api/v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\noperator-gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
+            "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /api/v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\noperator-gated because a provider error message describes the gateway's own\nconfiguration.\n\nCovers the configured provider instances and every hosted provider switched\non, whatever organization it is restricted to. A hosted provider that a\nconfigured instance of the same name shadows is not listed.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
             "header": [],
             "method": "GET",
             "url": {
@@ -3662,6 +4065,26 @@
               }
             ],
             "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me"
+            }
+          }
+        },
+        {
+          "name": "Delete Active Organization",
+          "request": {
+            "description": "Delete the caller's active organization, if it has no usage, and move the caller out of it.\n\nOwners and admins only. Its workspaces, memberships, invitations and\norganization-level settings go with it. Refused for the deployment's default\norganization, for the only organization the caller belongs to, and for one\nwhose workspaces still hold usage, API keys, aliases or routing policies, so\na deletion never takes spend history with it.\n\nAnswers with the caller's context in the organization they are moved to,\ntheir oldest other one.",
+            "header": [],
+            "method": "DELETE",
             "url": {
               "host": [
                 "{{baseUrl}}"
@@ -5599,7 +6022,7 @@
               },
               "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0,\n  \"effective_from\": \"2024-01-01T00:00:00Z\"\n}"
             },
-            "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today.",
+            "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today, and with a 403 for a rate the deployment operator\nset, which only the operator may change.",
             "header": [
               {
                 "key": "Content-Type",
@@ -5633,7 +6056,7 @@
         {
           "name": "Delete Organization Pricing",
           "request": {
-            "description": "Remove an override, returning the model to the deployment price list.",
+            "description": "Remove an override, returning the model to the deployment price list.\n\nRefused with a 403 for a rate the deployment operator set, which only the\noperator may remove.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -5878,6 +6301,36 @@
             "description": "Make a key the organization's default for its provider. Organization owners and admins only.",
             "header": [],
             "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "default"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/default",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unset Org Provider Key Default",
+          "request": {
+            "description": "Stop a key being the organization's default for its provider. Organization owners and admins only.\n\nIdempotent: a key that is not the default is returned unchanged. With no default, a request\nthat names no instance gets the provider's earliest-created key the workspace has not disabled.",
+            "header": [],
+            "method": "DELETE",
             "url": {
               "host": [
                 "{{baseUrl}}"
@@ -8184,7 +8637,7 @@
         {
           "name": "List Pricing",
           "request": {
-            "description": "List all model pricing.",
+            "description": "List all model pricing.\n\nA hosted provider restricted to another organization than the caller's is\nleft out, as it is from the catalog.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8250,7 +8703,7 @@
         {
           "name": "List Current Pricing",
           "request": {
-            "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is.",
+            "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is. A hosted provider restricted to another organization\nthan the caller's is left out of both.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8439,7 +8892,7 @@
         {
           "name": "Get Pricing",
           "request": {
-            "description": "Get pricing for a specific model as of a timestamp.",
+            "description": "Get pricing for a specific model as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8509,7 +8962,7 @@
         {
           "name": "Get Pricing History",
           "request": {
-            "description": "Return the full pricing history for a model.",
+            "description": "Return the full pricing history for a model.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8811,7 +9264,7 @@
         {
           "name": "Provider Health",
           "request": {
-            "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
+            "description": "Report every configured provider's reachability, with a last-checked time.\n\nCovers the configured provider instances and every hosted provider switched\non, each hosted provider under its provider name. A hosted provider that a\nconfigured instance of the same name shadows is not reported. One whose\nstored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is\nreported unreachable with that reason.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
             "header": [],
             "method": "GET",
             "url": {

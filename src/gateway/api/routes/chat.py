@@ -53,7 +53,7 @@ from gateway.api.routes._pipeline import (
     stream_error_message,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, with_retry_hint
-from gateway.api.routes._request_tags import RequestMetadata, request_tags
+from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -473,6 +473,7 @@ async def chat_completions(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
+    tags_header: RequestTagsHeader,
 ) -> ChatCompletion | Response:
     """OpenAI-compatible chat completions endpoint.
 
@@ -498,6 +499,7 @@ async def chat_completions(
         billing=billing,
         tool_ports=tool_ports,
         idempotency=idempotency,
+        tags_header=tags_header,
     )
 
 
@@ -517,6 +519,7 @@ async def run_chat_completion(
     tool_ports: ToolPorts,
     session_principal: SessionPrincipal | None = None,
     idempotency: IdempotencyGuard | None = None,
+    tags_header: str | None = None,
 ) -> ChatCompletion | Response:
     """Serve one chat completion, from the resolved preamble to the response.
 
@@ -607,7 +610,7 @@ async def run_chat_completion(
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
-            tags=request_tags(request.metadata),
+            tags=resolved_tags(tags_header, request.metadata),
             turn=read_turn("chat", request.messages),
             session_label=request.session_label,
         )

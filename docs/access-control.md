@@ -44,6 +44,31 @@ account, never another one: an address sent with it is the operator's sign-in
 address, and on an unclaimed deployment it claims the deployment. It refuses an
 address another account holds, and that refusal points to the password link.
 
+## Hosted providers
+
+A hosted provider is a provider key the deployment itself owns and pays for,
+with the roster of models it offers on that key and the rate it charges for
+each. Only a deployment operator manages them: the master key, the bootstrap
+operator's session, or the session of an account granted operator access. That
+covers every route under `/api/v1/hosted-providers`, reads included. Any other
+signed-in account, whatever its role in whichever organization, gets the same
+`404` that `/api/v1/admin` gives, and an API key gets `401`. Organization owners
+and admins manage their own organization's provider keys, never these.
+
+A hosted provider is the last rung of the credential ladder: a request is
+served on it only when no provider instance the deployment configures and no
+provider key of the caller's organization covers the model.
+
+Adding a provider offers every model its key lists. A model the deployment
+price list already prices is switched on at that rate. Otherwise, where
+`default_pricing` is on, the model is seeded with its models.dev rate and
+switched on; where it is off, or models.dev does not price the model, the model
+is offered switched off until the operator prices it. Refreshing a provider's
+models moves a seeded rate nobody has changed to the current default, and
+leaves a rate the operator set alone. The API never returns a hosted provider's
+key, only its last four characters, and it masks credentials in `client_args`
+and in the base URL.
+
 ## Organizations and workspaces
 
 An organization is the tenant boundary. It owns workspaces, members, provider
@@ -65,6 +90,15 @@ Organization and workspace memberships use four roles:
 The API key that authenticates a request determines its workspace. A caller
 cannot select another workspace with a header. Master-key inference uses the
 default workspace.
+
+An owner or admin can delete their active organization from Organization →
+General (`DELETE /api/v1/organizations/me`) while it has no usage: the gateway
+refuses an organization whose workspaces still hold usage, API keys, aliases or
+routing policies, so a deletion never takes spend history with it. The
+deployment's default organization and the only organization the caller belongs
+to cannot be deleted either. Its workspaces, memberships and organization-level
+settings go with it, and everyone whose active organization it was moves to
+another organization they belong to.
 
 ## Users and identities
 

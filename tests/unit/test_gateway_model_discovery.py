@@ -1,8 +1,9 @@
 """Unit tests for the model discovery cache and service."""
 
 import asyncio
+import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +17,7 @@ from gateway.core.config import GatewayConfig
 from gateway.services.model_discovery_service import (
     _ERROR_MAX_CHARS,
     _MIN_REFRESH_INTERVAL_SECONDS,
+    DiscoveryDial,
     ModelCache,
     ProviderDiscovery,
     _CacheEntry,
@@ -27,6 +29,8 @@ from gateway.services.model_discovery_service import (
     discover_all_models,
     discover_models_with_status,
     discover_provider_models,
+    discovery_sources,
+    get_model_cache,
     refresh_discovery_cache,
     run_discovery_refresher,
 )
@@ -719,7 +723,7 @@ class TestDiscoveryStallGuards:
             patch.object(mds, "_discover_uncached", side_effect=flaky),
         ):
             all_models = await discover_all_models(config)
-            statuses = await discover_models_with_status(config)
+            statuses = await discover_models_with_status(config, hosted=None)
 
         assert [name for name, _ in all_models] == ["good"]  # bad dropped from catalog
         by_provider = {d.provider: d for d in statuses}
@@ -1167,7 +1171,7 @@ class TestBackgroundDiscovery:
                 new=AsyncMock(return_value=[_make_model("fresh-model")]),
             ) as mock_alist,
         ):
-            discoveries = await discover_models_with_status(config, force=True)
+            discoveries = await discover_models_with_status(config, hosted=None, force=True)
 
         assert mock_alist.await_count == 1
         assert [model.id for model in discoveries[0].models] == ["fresh-model"]
@@ -1191,7 +1195,7 @@ class TestBackgroundDiscovery:
         seen = 0
         reached = asyncio.Event()
 
-        async def refresh(cfg: GatewayConfig) -> None:
+        async def refresh(cfg: GatewayConfig, *, hosted: object) -> None:
             nonlocal seen
             seen += 1
             on_call(seen)
@@ -1199,7 +1203,7 @@ class TestBackgroundDiscovery:
                 reached.set()
 
         with patch("gateway.services.model_discovery_service.refresh_discovery_cache", side_effect=refresh):
-            task = asyncio.create_task(run_discovery_refresher(config, interval=0.001))
+            task = asyncio.create_task(run_discovery_refresher(config, hosted=None, interval=0.001))
             try:
                 await asyncio.wait_for(reached.wait(), timeout=5)
             finally:
@@ -1262,13 +1266,13 @@ class TestBackgroundDiscovery:
         rounds = 0
         reached = asyncio.Event()
 
-        async def refresh(_cfg: GatewayConfig) -> None:
+        async def refresh(_cfg: GatewayConfig, *, hosted: object) -> None:
             nonlocal rounds
             rounds += 1
             reached.set()
 
         with patch("gateway.services.model_discovery_service.refresh_discovery_cache", side_effect=refresh):
-            task = asyncio.create_task(run_discovery_refresher(config, interval=0.001))
+            task = asyncio.create_task(run_discovery_refresher(config, hosted=None, interval=0.001))
             try:
                 # Several ticks' worth of time, with caching off the whole way.
                 await asyncio.sleep(0.05)
@@ -1330,7 +1334,7 @@ class TestRefresherCadence:
                 new=AsyncMock(side_effect=RuntimeError("provider down")),
             ),
         ):
-            assert await refresh_discovery_cache(config) is True
+            assert await refresh_discovery_cache(config, hosted=None) is True
 
         cache.clear()
         with (
@@ -1341,7 +1345,7 @@ class TestRefresherCadence:
                 new=AsyncMock(return_value=[_make_model("gpt-4o")]),
             ),
         ):
-            assert await refresh_discovery_cache(config) is False
+            assert await refresh_discovery_cache(config, hosted=None) is False
 
     def test_discovery_disabled_stops_the_background_dialing_too(self) -> None:
         """`model_discovery: false` means "do not dial providers", unattended included.
@@ -1352,3 +1356,73 @@ class TestRefresherCadence:
         """
         assert background_discovery_enabled(self._config(discovery=False)) is False
         assert background_discovery_enabled(self._config(discovery=True)) is True
+
+
+class TestHostedProviderDiscovery:
+    """The deployment's hosted providers in the operator views, and not in the catalog's phase 1."""
+
+    @staticmethod
+    def _hosted(calls: list[str]) -> Callable[[], Awaitable[dict[str, DiscoveryDial]]]:
+        async def mistral() -> ProviderDiscovery:
+            calls.append("mistral")
+            return ProviderDiscovery(provider="mistral", models=[_make_model("mistral-large", owned_by="mistral")])
+
+        async def hosted() -> dict[str, DiscoveryDial]:
+            return {"mistral": mistral}
+
+        return hosted
+
+    @pytest.mark.asyncio
+    async def test_the_operator_listing_dials_a_hosted_provider_and_caches_it_by_name(self) -> None:
+        get_model_cache().clear()
+        config = GatewayConfig(providers={}, model_cache_ttl_seconds=300)
+        calls: list[str] = []
+        hosted = self._hosted(calls)
+
+        first = await discover_models_with_status(config, hosted=hosted)
+        second = await discover_models_with_status(config, hosted=hosted)
+
+        assert [(item.provider, [model.id for model in item.models]) for item in first] == [
+            ("mistral", ["mistral-large"])
+        ]
+        assert [item.provider for item in second] == ["mistral"]
+        assert calls == ["mistral"]
+        assert get_model_cache().checked_at("mistral") is not None
+
+    @pytest.mark.asyncio
+    async def test_a_forced_listing_redials_a_hosted_provider(self) -> None:
+        get_model_cache().clear()
+        config = GatewayConfig(providers={}, model_cache_ttl_seconds=300)
+        calls: list[str] = []
+        hosted = self._hosted(calls)
+
+        await discover_models_with_status(config, hosted=hosted)
+        await refresh_discovery_cache(config, hosted=hosted)
+
+        assert calls == ["mistral", "mistral"]
+
+    @pytest.mark.asyncio
+    async def test_a_failure_to_read_the_hosted_providers_leaves_the_configured_instances(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = GatewayConfig(providers={"openai": {"api_key": "sk-test"}})
+
+        async def hosted() -> dict[str, DiscoveryDial]:
+            raise RuntimeError("password=hunter2")
+
+        with caplog.at_level(logging.WARNING):
+            sources = await discovery_sources(config, hosted)
+
+        assert sources == {"openai": None}
+        assert "Could not read the hosted providers" in caplog.text
+        assert "hunter2" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_the_catalog_does_not_list_a_hosted_providers_upstream_listing(self) -> None:
+        """Its roster reaches the catalog through the port, so a cached dial must not widen it."""
+        get_model_cache().clear()
+        config = GatewayConfig(providers={}, model_cache_ttl_seconds=300)
+        await discover_models_with_status(config, hosted=self._hosted([]))
+
+        assert await discover_all_models(config) == []
+        assert await discover_all_models(config, provider_filter="mistral") == []

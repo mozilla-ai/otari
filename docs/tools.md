@@ -369,7 +369,8 @@ instead, running the code on the sandbox unless every model runs it natively.
 [Hybrid mode](#who-runs-a-tool) skips no attempt.
 
 An `anthropic-beta` header travels only as far as it can be honored: against a
-provider with no Messages API of its own it is dropped rather than refused,
+provider with no Messages API of its own it is dropped rather than refused, and
+so is a `context_management` field, which configures one of those betas,
 because a beta names an Anthropic feature that provider was never going to
 serve, and refusing it would make the request fail purely because its model
 changed. On Responses a claimed `code_interpreter` is answered with a

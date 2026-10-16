@@ -21,7 +21,13 @@ from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.services.model_discovery_service import discover_provider_models, get_model_cache
+from gateway.services.model_discovery_service import (
+    DiscoveryDial,
+    HostedDiscovery,
+    discover_provider_models,
+    discovery_sources,
+    get_model_cache,
+)
 
 # A forced refresh only clears the cached listing when the provider's last dial is
 # older than this. clear(instance) also detaches the in-flight discovery, so
@@ -69,6 +75,7 @@ async def check_provider_health(
     *,
     refresh: bool = False,
     serve_stale: bool = False,
+    dial: DiscoveryDial | None = None,
 ) -> ProviderHealth:
     """Report one instance's reachability via the shared model-discovery path.
 
@@ -83,10 +90,12 @@ async def check_provider_health(
     view: the background refresher owns the dialing, so an hourly poll must not
     be the thing that pays a 10s timeout for an unreachable provider. It is
     ignored under ``refresh``, which exists precisely to bypass the cache.
+
+    ``dial`` checks a hosted provider rather than a configured instance.
     """
     if refresh and _refresh_should_redial(instance):
         get_model_cache().clear(instance)
-    discovery = await discover_provider_models(config, instance, serve_stale=serve_stale and not refresh)
+    discovery = await discover_provider_models(config, instance, serve_stale=serve_stale and not refresh, dial=dial)
     return ProviderHealth(
         instance=instance,
         ok=discovery.error is None,
@@ -100,19 +109,29 @@ async def check_provider_health(
 async def check_all_provider_health(
     config: GatewayConfig,
     *,
+    hosted: HostedDiscovery | None,
     refresh: bool = False,
     serve_stale: bool = False,
 ) -> list[ProviderHealth]:
-    """Check every configured instance concurrently, keeping per-provider errors.
+    """Check every configured instance and hosted provider concurrently, keeping per-provider errors.
+
+    A hosted provider is reported under its provider name, unless a configured
+    instance of that name shadows it, as it does at dispatch. Every hosted
+    provider switched on is checked, whatever organization it is restricted
+    to: this is the deployment's view.
 
     One provider that somehow escapes ``discover_provider_models`` (which reports
     failure rather than raising) must not sink the whole health view, so a stray
     exception is surfaced as that instance's error, mirroring
     ``discover_models_with_status``.
     """
-    instances = list(config.providers)
+    dials = await discovery_sources(config, hosted)
+    instances = list(dials)
     results = await asyncio.gather(
-        *(check_provider_health(config, name, refresh=refresh, serve_stale=serve_stale) for name in instances),
+        *(
+            check_provider_health(config, name, refresh=refresh, serve_stale=serve_stale, dial=dial)
+            for name, dial in dials.items()
+        ),
         return_exceptions=True,
     )
     health: list[ProviderHealth] = []

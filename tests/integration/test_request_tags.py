@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -160,6 +161,100 @@ def test_messages_forwards_no_metadata_and_tags_the_rest(
     # metadata reaches it: not the caller's id, and not its tags.
     assert "metadata" not in captured
     assert _row(db_session, "tags-messages").tags == {"feature": "smart-window", **_TAGS}
+
+
+def _tag_filter(client: TestClient, headers: dict[str, str], tag: str) -> list[dict[str, Any]]:
+    response = client.get(f"{API_ROOT}/usage", params={"tag": tag}, headers=headers)
+    assert response.status_code == 200, response.text
+    rows: list[dict[str, Any]] = response.json()
+    return rows
+
+
+def test_chat_header_tags_are_recorded_under_body_tags_and_never_reach_the_provider(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def mock_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured.update(kwargs)
+        return _completion()
+
+    headers = {**master_key_header, "Otari-Tags": "agent=bug-fix, run=1234,purpose=header,note=a%2Cb"}
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        response = _chat(client, headers, "tags-header-chat", metadata={"purpose": "body"})
+
+    assert response.status_code == 200, response.text
+    assert "metadata" not in captured
+    assert "Otari-Tags" not in str(captured)
+    tags = {"agent": "bug-fix", "run": "1234", "purpose": "body", "note": "a,b"}
+    assert _row(db_session, "tags-header-chat").tags == tags
+    rows = _tag_filter(client, master_key_header, "run:1234")
+    assert [row["user_id"] for row in rows] == ["tags-header-chat"]
+
+
+def test_messages_header_tags_are_recorded_and_filterable(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    client.post(f"{API_ROOT}/users", json={"user_id": "tags-header-messages"}, headers=master_key_header)
+    captured: dict[str, Any] = {}
+
+    async def mock_amessages(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        raise _ProviderDown
+
+    with patch("gateway.api.routes.messages.amessages", new=mock_amessages):
+        client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hi"}],
+                "metadata": {"user_id": "tags-header-messages"},
+            },
+            headers={**master_key_header, "Otari-Tags": "agent=claude-code,run=42"},
+        )
+
+    assert captured, "amessages was never called"
+    assert "Otari-Tags" not in str(captured)
+    assert _row(db_session, "tags-header-messages").tags == {"agent": "claude-code", "run": "42"}
+    rows = _tag_filter(client, master_key_header, "agent:claude-code")
+    assert [row["user_id"] for row in rows] == ["tags-header-messages"]
+
+
+def test_a_repeated_tags_header_is_read_as_one_list(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    async def mock_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _completion()
+
+    client.post(f"{API_ROOT}/users", json={"user_id": "tags-header-twice"}, headers=master_key_header)
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "hi"}], "user": "tags-header-twice"},
+            headers=[*master_key_header.items(), ("Otari-Tags", "agent=bug-fix"), ("Otari-Tags", "run=1234")],
+        )
+
+    assert response.status_code == 200, response.text
+    assert _row(db_session, "tags-header-twice").tags == {"agent": "bug-fix", "run": "1234"}
+
+
+@pytest.mark.parametrize("value", ["agent", "agent=a,agent=b", ",".join(f"k{i}=v" for i in range(17))])
+def test_a_malformed_tags_header_is_refused(client: TestClient, master_key_header: dict[str, str], value: str) -> None:
+    response = _chat(client, {**master_key_header, "Otari-Tags": value}, "tags-header-bad")
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["code"] == "invalid_request"
+    assert body["detail"][0]["loc"] == ["header", "Otari-Tags"]
+
+
+def test_header_and_body_tags_past_the_bound_together_are_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = {**master_key_header, "Otari-Tags": ",".join(f"h{i}=v" for i in range(8))}
+    response = _chat(client, headers, "tags-header-over", metadata={f"b{i}": "v" for i in range(9)})
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["header", "Otari-Tags"]
 
 
 # ---------------------------------------------------------------------------

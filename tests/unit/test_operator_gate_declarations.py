@@ -27,6 +27,7 @@ from fastapi.routing import APIRoute
 import gateway.api.routes
 from gateway.api.deps import (
     require_deployment_operator,
+    require_deployment_operator_or_absent,
     verify_api_key_or_master_key,
     verify_catalog_reader,
     verify_catalog_reader_or_public,
@@ -40,6 +41,7 @@ from gateway.api.routes import (
     catalog,
     end_users,
     hooks,
+    hosted_providers,
     keys,
     mail,
     maintenance_mode,
@@ -102,6 +104,9 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tools", tools.router, verify_catalog_reader),
     ("usage.key", usage.key_router, verify_api_key_or_master_key),
     ("hooks", hooks.router, hooks.verify_hook_caller),
+    # Operator-only, with the 404 the admin surface answers rather than the 403:
+    # the deployment's own credentials are not a surface to confirm to a member.
+    ("hosted_providers", hosted_providers.router, require_deployment_operator_or_absent),
 ]
 
 

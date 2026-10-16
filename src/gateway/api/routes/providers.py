@@ -22,7 +22,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
+from gateway.api.deps import (
+    HostedProviderServiceDep,
+    get_config,
+    get_db,
+    require_deployment_operator,
+    verify_catalog_reader,
+)
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -279,9 +285,16 @@ def _to_health_schema(health: ProviderHealth) -> ProviderHealthSchema:
 @router.get("/providers/health")
 async def provider_health(
     config: Annotated[GatewayConfig, Depends(get_config)],
+    hosted: HostedProviderServiceDep,
     refresh: bool = False,
 ) -> ProviderHealthResponse:
     """Report every configured provider's reachability, with a last-checked time.
+
+    Covers the configured provider instances and every hosted provider switched
+    on, each hosted provider under its provider name. A hosted provider that a
+    configured instance of the same name shadows is not reported. One whose
+    stored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is
+    reported unreachable with that reason.
 
     Reuses the per-provider model-discovery test path, so a provider is healthy
     when its credentials can list models. Results are served from the discovery
@@ -296,6 +309,7 @@ async def provider_health(
     """
     results = await check_all_provider_health(
         config,
+        hosted=hosted.discovery_dials,
         refresh=refresh,
         serve_stale=background_discovery_enabled(config) and not refresh,
     )

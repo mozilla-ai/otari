@@ -639,13 +639,36 @@ describe("OrganizationProvidersPage", () => {
     await renderPage(<OrganizationProvidersPage />)
 
     await user.click(
-      await screen.findByRole("button", { name: "Make default" }),
+      await screen.findByRole("button", { name: "Make default provider" }),
     )
 
     await waitFor(() => {
       expect(requests.some((request) => request.url.endsWith("/default"))).toBe(
         true,
       )
+    })
+  })
+
+  it("removes the organization default from the key that holds it", async () => {
+    const requests = mockApi({
+      keys: [orgProviderKey({ is_org_default: true })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Default provider, click to remove",
+      }),
+    )
+
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" && request.url.endsWith("/default"),
+        ),
+      ).toBe(true)
     })
   })
 

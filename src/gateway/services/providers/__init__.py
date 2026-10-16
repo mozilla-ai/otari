@@ -2,11 +2,19 @@
 
 This package holds the organization-scoped side (the models a BYO key offers,
 which of them the runtime serves, and the rate each is charged at) and the
-endpoints a workspace or one of its users owns. The deployment's own instances
+endpoints a workspace or one of its users owns, and the hosted providers the
+deployment serves on its own credentials. The deployment's config instances
 are still in the flat modules beside `services/`, and move here when the
 domain's migration reaches them (`DOMAINS.md`).
 """
 
+from gateway.services.providers._hosted_provider_service import (
+    HostedProviderService,
+    LiveByoPairs,
+    OrganizationExists,
+    ResolvedHostedProvider,
+)
+from gateway.services.providers._hosted_sources import HostedSources, refuse_unsafe_configured_endpoints
 from gateway.services.providers._missing_credential import missing_provider_credential, unpriced_model_refusal
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
 from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client
@@ -27,9 +35,14 @@ from gateway.services.providers._provider_endpoint_cache import (
 from gateway.services.providers._provider_endpoint_service import ProviderEndpointService
 
 __all__ = [
+    "HostedProviderService",
+    "HostedSources",
+    "LiveByoPairs",
+    "OrganizationExists",
     "OrgProviderModelService",
     "OwnedEndpoint",
     "ProviderEndpointService",
+    "ResolvedHostedProvider",
     "acompletion",
     "amessages",
     "aresponses",
@@ -39,6 +52,7 @@ __all__ = [
     "owned_endpoint_http_client",
     "provider_for",
     "refresh_provider_endpoint_cache",
+    "refuse_unsafe_configured_endpoints",
     "reset_provider_endpoint_cache",
     "run_provider_endpoint_refresher",
     "unpriced_model_refusal",

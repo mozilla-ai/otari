@@ -78,6 +78,7 @@ _SETTING_NAMES = frozenset(
         "guardrail_thread_pool_size",
         "guardrails_url",
         "host",
+        "hosted_providers",
         "idempotency_lease_sec",
         "idempotency_retention_sec",
         "idempotency_sweep_interval_sec",

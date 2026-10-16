@@ -4,6 +4,39 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.27.0](https://github.com/mozilla-ai/otari/releases/tag/v0.27.0) - 2026-10-16
+
+
+
+### Bug Fixes
+
+- **budgets:** Read the budget gate's timestamps back UTC-aware on SQLite in [#2349](https://github.com/mozilla-ai/otari/pull/2349) by [@daavoo](https://github.com/daavoo) ([`57b8e8c`](https://github.com/mozilla-ai/otari/commit/57b8e8c28a8ac6317b3b4947b95b01392afcb58f))
+- **traces:** Keep every Sessions row on one line in [#2342](https://github.com/mozilla-ai/otari/pull/2342) by [@jigjigjig](https://github.com/jigjigjig) ([`28b580b`](https://github.com/mozilla-ai/otari/commit/28b580b4170b372b60a1b8fe341e7beed7590944))
+- **inference:** Log port and reservation-move failures without their messages in [#2363](https://github.com/mozilla-ai/otari/pull/2363) by [@claude[bot]](https://github.com/claude[bot]) ([`199e9c9`](https://github.com/mozilla-ai/otari/commit/199e9c9a509797026f873b7009ba26d649b003bb))
+- **ci:** Publish the smoke container on loopback, keep it for its log, and bound docker calls in [#2389](https://github.com/mozilla-ai/otari/pull/2389) by [@daavoo](https://github.com/daavoo) ([`7decee7`](https://github.com/mozilla-ai/otari/commit/7decee738f3b3ac0d9523d94d36d21505ddbe4e1))
+- **dashboard:** Move Create organization into the switcher's organization section in [#2394](https://github.com/mozilla-ai/otari/pull/2394) by [@hasangzl](https://github.com/hasangzl) ([`a27d990`](https://github.com/mozilla-ai/otari/commit/a27d9903e446a5d807de7127b099a96a294f1eaa))
+
+
+### Features
+
+- **usage:** Tell an overlay about each usage row a request settles in [#2332](https://github.com/mozilla-ai/otari/pull/2332) by [@daavoo](https://github.com/daavoo) ([`c22d510`](https://github.com/mozilla-ai/otari/commit/c22d510beece49533e7a38dbb57a465c6ce8259d))
+- **inference:** Send gemini the end-user identifier as a label by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`6482723`](https://github.com/mozilla-ai/otari/commit/6482723f7ac463948e0e0065b93125c42fb34fae))
+- **inference:** Send meta the end-user identifier as safety_identifier in [#2339](https://github.com/mozilla-ai/otari/pull/2339) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`3d31f80`](https://github.com/mozilla-ai/otari/commit/3d31f80a9fb7d3fd6f250db9bd80baec1c410592))
+- **usage:** Record on each usage row whether the deployment paid for it in [#2338](https://github.com/mozilla-ai/otari/pull/2338) by [@daavoo](https://github.com/daavoo) ([`e3d8de4`](https://github.com/mozilla-ai/otari/commit/e3d8de416ae3dc34ecc8ea91963dcfc744b672fc))
+- **otlp:** Book Claude Platform spans once, at their cache convention in [#2340](https://github.com/mozilla-ai/otari/pull/2340) by [@daavoo](https://github.com/daavoo) ([`32b7da8`](https://github.com/mozilla-ai/otari/commit/32b7da88a1618e03db1dca31115136bbf3ac93f9))
+- **routing:** Show the automatic fallbacks callers get in [#2343](https://github.com/mozilla-ai/otari/pull/2343) by [@hasangzl](https://github.com/hasangzl) ([`d18fd6e`](https://github.com/mozilla-ai/otari/commit/d18fd6eeb4a6f9b2ab61b9095afbc062197719b0))
+- **keys:** Set a key's own budget from the keys page in [#2345](https://github.com/mozilla-ai/otari/pull/2345) by [@hasangzl](https://github.com/hasangzl) ([`739aa95`](https://github.com/mozilla-ai/otari/commit/739aa95ce80ca8e0b0f7c2b167cba94c4c8f2a2c))
+- **mail:** Draw every account email in the dashboard's sign-in frame in [#2388](https://github.com/mozilla-ai/otari/pull/2388) by [@jigjigjig](https://github.com/jigjigjig) ([`6e28436`](https://github.com/mozilla-ai/otari/commit/6e284363cd24067164d124395abebece933fd1c5))
+- **providers:** Hosted-provider tables, repositories and service in [#2010](https://github.com/mozilla-ai/otari/pull/2010) by [@tbille](https://github.com/tbille) ([`78158ac`](https://github.com/mozilla-ai/otari/commit/78158ac755bfadfe8b458869f816b5a12f7d139e))
+- **providers:** Hosted-providers operator API and surface in [#2011](https://github.com/mozilla-ai/otari/pull/2011) by [@tbille](https://github.com/tbille) ([`a7a6bdb`](https://github.com/mozilla-ai/otari/commit/a7a6bdb0483770a097ed6860f7e0e2142402334d))
+- **providers:** Serve hosted providers at dispatch in [#2013](https://github.com/mozilla-ai/otari/pull/2013) by [@tbille](https://github.com/tbille) ([`77823fb`](https://github.com/mozilla-ai/otari/commit/77823fb7882411941a00d64ab16002a81d79152b))
+- **dashboard:** Hosted providers page on the deployment rail in [#2346](https://github.com/mozilla-ai/otari/pull/2346) by [@tbille](https://github.com/tbille) ([`359fa80`](https://github.com/mozilla-ai/otari/commit/359fa8029e3399f67b9439732e64386b933e300f))
+- **catalog:** Hosted providers take part in discovery and health in [#2347](https://github.com/mozilla-ai/otari/pull/2347) by [@tbille](https://github.com/tbille) ([`81cdb13`](https://github.com/mozilla-ai/otari/commit/81cdb137036282db0acd00ad6d9c065c6b244c4f))
+- **providers:** Hosted providers from config.yml and the environment in [#2348](https://github.com/mozilla-ai/otari/pull/2348) by [@tbille](https://github.com/tbille) ([`0817f88`](https://github.com/mozilla-ai/otari/commit/0817f88c140fefc66e52917d68a4abf5ec59f4db))
+- **organizations:** Let owners and admins delete an organization with no usage in [#2395](https://github.com/mozilla-ai/otari/pull/2395) by [@hasangzl](https://github.com/hasangzl) ([`7e3c847`](https://github.com/mozilla-ai/otari/commit/7e3c84729697ae08b68793374c59d637be0eccc4))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.26.0...v0.27.0
 ## [0.26.0](https://github.com/mozilla-ai/otari/releases/tag/v0.26.0) - 2026-10-15
 
 
