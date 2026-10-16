@@ -181,7 +181,9 @@ async def _chunks_or_keepalive(stream: AsyncIterator[Any], interval_seconds: flo
     finally:
         if pending is not None:
             pending.cancel()
-            with suppress(BaseException):
+            # Unshielded, a canceled scope would cancel ``pending`` again on every
+            # loop pass and cut short the cleanup its one cancellation starts.
+            with anyio.CancelScope(shield=True), suppress(BaseException):
                 await pending
 
 
@@ -431,7 +433,7 @@ async def streaming_generator(
                     logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
             # Iterating the source never closes it, so a stream the client abandoned
             # would hold the provider's connection until garbage collection.
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
 
 
 async def iterate_streaming_attempts(
@@ -537,7 +539,7 @@ async def iterate_streaming_attempts(
                     is_final_attempt=is_final_attempt,
                 ),
             )
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
             last_exception = exc
             continue
         except BaseException as exc:
@@ -551,13 +553,15 @@ async def iterate_streaming_attempts(
                     is_final_attempt=is_final_attempt or not retryable,
                 ),
             )
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
             last_exception = exc
             if not retryable:
                 raise
             continue
 
-        return attempt, _stitched(first_chunk, stream)
+        first: asyncio.Future[C] = asyncio.get_running_loop().create_future()
+        first.set_result(first_chunk)
+        return attempt, _Prefetched(first, stream)
 
     if last_exception is not None:
         raise last_exception
@@ -604,7 +608,7 @@ async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> 
         first.cancel()
         with suppress(BaseException):
             await first
-        await _close_stream_quietly(stream)
+        await close_stream_quietly(stream)
         raise
     if first.done():
         try:
@@ -612,7 +616,7 @@ async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> 
         except StopAsyncIteration:
             return _empty_async_iter()
         except BaseException:
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
             raise
     return _Prefetched(first, stream)
 
@@ -649,13 +653,7 @@ class _Prefetched(AsyncIterator[C]):
             first.cancel()
             with suppress(BaseException):
                 await first
-        await _close_stream_quietly(self._remaining)
-
-
-async def _stitched(first: C, remaining: AsyncIterator[C]) -> AsyncIterator[C]:
-    yield first
-    async for chunk in remaining:
-        yield chunk
+        await close_stream_quietly(self._remaining)
 
 
 async def _empty_async_iter() -> AsyncIterator[C]:
@@ -663,8 +661,9 @@ async def _empty_async_iter() -> AsyncIterator[C]:
     yield  # unreachable; makes this a generator
 
 
-async def _close_stream_quietly(stream: AsyncIterator[Any]) -> None:
+async def close_stream_quietly(stream: AsyncIterator[Any]) -> None:
+    """Close ``stream`` if it can be closed, even while a client disconnect is canceling the caller."""
     close = getattr(stream, "aclose", None)
     if callable(close):
-        with suppress(BaseException):
+        with anyio.CancelScope(shield=True), suppress(BaseException):
             await close()
