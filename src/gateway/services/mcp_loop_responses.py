@@ -620,6 +620,10 @@ class _ResponsesToolLoopStrategy:
     def stream_exiting(self, state: _ResponsesStreamState, pool: ToolBackend) -> bool:
         if not state.function_calls:
             return True
+        if getattr(state.deferred_terminal, "type", None) != "response.completed":
+            # The round stopped short (incomplete, failed, or cut), so a call's
+            # arguments may be cut too: run none of them and end the stream here.
+            return True
         owned_specs: list[dict[str, Any]] = []
         has_foreign = False
         for idx in sorted(state.function_calls):
@@ -808,13 +812,15 @@ async def responses_tool_loop_stream(
     ``output_index``. ``response.function_call_arguments.done``, if present,
     overrides the running buffer with the terminal argument string.
 
-    Loop continuation is decided on the round's terminal event
-    (``response.completed``, ``response.incomplete`` or ``response.failed``):
-    if any buffered function_call items exist AND all are owned by the pool,
-    execute them, append the originals plus the ``function_call_output`` items
-    to ``input_data``, drop the terminal event, and start the next round. If
-    any foreign function_call is present (or none at all), forward the
-    terminal event last and exit.
+    Loop continuation is decided on the round's terminal event. A round that
+    ended in ``response.completed`` with buffered function_call items all owned
+    by the pool has them executed, the originals plus the
+    ``function_call_output`` items appended to ``input_data``, its terminal
+    event dropped, and the next round started. Every other round ends the
+    stream, with its terminal event, if it had one, forwarded last: one with a
+    foreign function_call (or none at all), and one that ended in
+    ``response.incomplete`` or ``response.failed`` or without a terminal event,
+    whose calls may be cut short and are not run.
     """
     # aclosing makes downstream closes (client disconnect) propagate to the
     # engine generator, and through it to the upstream provider stream,
