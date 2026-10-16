@@ -406,7 +406,9 @@ async def _within_inline_limit(
         try:
             uri = await limit.upload(src.data, src.mime, src.filename or "")
         except Exception as exc:  # noqa: BLE001 - counted as oversized and refused by the caller
-            logger.warning("content normalizer: provider upload failed for a %d byte %s: %s", size, src.kind, exc)
+            logger.warning(
+                "content normalizer: provider upload failed for a %d byte %s: %s", size, src.kind, type(exc).__name__
+            )
         else:
             stats.uploaded += 1
             return _uploaded_file_block(src, uri)
