@@ -226,4 +226,22 @@ describe("draftFrom", () => {
       output: "",
     })
   })
+
+  it("leaves the hidden cache boxes blank for a price that is not per token", () => {
+    const row: HostedModel = {
+      id: "m3",
+      provider: "openai",
+      model: "dall-e-3",
+      input_price_per_million: 40000,
+      output_price_per_million: 0,
+      cache_read_price_per_million: 0.25,
+      cache_write_price_per_million: 3.75,
+      unit: "images",
+      price_source: "deployment",
+      enabled: true,
+      created_at: "2026-09-16T00:00:00Z",
+      updated_at: null,
+    }
+    expect(draftFrom(row)).toMatchObject({ cacheRead: "", cacheWrite: "" })
+  })
 })

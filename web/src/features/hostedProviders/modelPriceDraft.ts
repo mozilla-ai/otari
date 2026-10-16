@@ -62,8 +62,10 @@ export function draftFrom(model: HostedModel): PriceDraft {
         : toEnteredRate(input, unit),
     ),
     output: unit === "tokens" ? asText(model.output_price_per_million) : "",
-    cacheRead: asText(model.cache_read_price_per_million),
-    cacheWrite: asText(model.cache_write_price_per_million),
+    cacheRead:
+      unit === "tokens" ? asText(model.cache_read_price_per_million) : "",
+    cacheWrite:
+      unit === "tokens" ? asText(model.cache_write_price_per_million) : "",
   }
 }
 
