@@ -180,11 +180,18 @@ def test_a_gemini_native_tool_reaches_the_provider_untouched_on_messages(
 
 
 @pytest.fixture
-def small_inline_client(
-    test_config: GatewayConfig, clean_database: None, monkeypatch: pytest.MonkeyPatch
-) -> Generator[TestClient]:
-    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
-    yield from build_test_client(test_config.model_copy(update={"files_gemini_inline_max_bytes": 100}))
+def small_inline_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    # A config of its own, with the key declared at construction: a copy's providers do not survive the boot,
+    # so the key would come from the environment, which CI sets to a real one.
+    config = GatewayConfig(
+        database_url=test_config.database_url,
+        master_key=test_config.master_key,
+        auto_migrate=False,
+        require_pricing=False,
+        providers={"gemini": {"api_key": "g-key"}},
+        files_gemini_inline_max_bytes=100,
+    )
+    yield from build_test_client(config)
 
 
 def _key_header(client: TestClient, test_config: GatewayConfig) -> dict[str, str]:
