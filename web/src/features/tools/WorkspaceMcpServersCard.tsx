@@ -266,24 +266,18 @@ export function WorkspaceMcpServersCard({
     {
       id: "allowed_tools",
       header: "Tools",
-      // An empty list reads as "All", not as "0 allowed", because that is what
-      // the gateway does with it: `mcp_client` takes a falsy `allowed_tools` as
-      // no allow-list at all, so `[]` exposes every tool exactly as null does.
-      // This form never sends `[]`, but a row created over the API can hold one,
-      // and a cell claiming no tools were exposed would be the opposite of true.
       // A passing check gives the real count; without one, the allow-list is
-      // all there is to say. The names would be an unbounded column (the list
-      // runs to hundreds), so they live in the Health popover and the dialog.
+      // all there is to say. `[]` is a list that admits nothing, which is how
+      // the tool loop reads it: this form never sends one, but a row created
+      // over the API can hold it. The names would be an unbounded column (the
+      // list runs to hundreds), so they live in the Health popover and dialog.
       cell: (row) => {
-        // `[]` counts as a list here, admitting none, as the tool loop reads it.
         const counted = toolCountLabel(row.health, row.allowed_tools !== null)
         if (counted) return <span className="whitespace-nowrap">{counted}</span>
-        const hasAllowList =
-          row.allowed_tools !== null && row.allowed_tools.length > 0
-        return hasAllowList ? (
-          <span>{row.allowed_tools?.length} allowed</span>
-        ) : (
+        return row.allowed_tools === null ? (
           <span className="text-muted">All</span>
+        ) : (
+          <span>{row.allowed_tools.length} allowed</span>
         )
       },
     },

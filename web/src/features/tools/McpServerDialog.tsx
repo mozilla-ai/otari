@@ -36,11 +36,8 @@ export interface McpServerDraft {
 }
 
 // Comma-separated in the form, a list on the wire, and null rather than `[]`
-// for "expose every tool this server offers". Both reach that behavior today,
-// because `mcp_client` reads a falsy allow-list as no allow-list at all, but
-// null is what the column stores for the absent case and what the endpoint's
-// own description names, so sending `[]` would only add a second spelling of
-// one state.
+// for "expose every tool this server offers": the tool loop reads `[]` as a
+// deny-all, so a blank field must not send one.
 function parseAllowedTools(raw: string): string[] | null {
   const names = raw
     .split(",")

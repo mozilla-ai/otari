@@ -192,17 +192,16 @@ describe("WorkspaceMcpServersCard", () => {
     )
   })
 
-  it("reads an empty allow-list as every tool, the way the gateway does", async () => {
-    // `mcp_client` takes a falsy `allowed_tools` as no allow-list at all, so a
-    // row holding `[]` exposes every tool exactly as null does. "0 allowed"
-    // would tell an operator the opposite. This form never sends `[]`, but the
-    // API accepts one, so a row can arrive here holding it.
+  it("reads an empty allow-list as admitting no tool, the way the gateway does", async () => {
+    // The tool loop treats `[]` as a deny-all, distinct from null. "All" would
+    // tell an operator the opposite. This form never sends `[]`, but the API
+    // accepts one, so a row can arrive here holding it.
     const servers = [workspaceMcpServer({ allowed_tools: [] })]
     mockApi({ servers })
     await renderLoaded(servers)
 
-    expect(screen.getByText("All")).toBeVisible()
-    expect(screen.queryByText("0 allowed")).not.toBeInTheDocument()
+    expect(screen.getByText("0 allowed")).toBeVisible()
+    expect(screen.queryByText("All")).not.toBeInTheDocument()
   })
 
   it("registers a server from the add form", async () => {
