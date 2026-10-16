@@ -111,9 +111,10 @@ The organization view contains tenant-wide administration:
   models are serving, and a key serving none of them is marked, because every
   request through it is refused until a switch is on. The star on a key makes
   it the organization's default for its provider, and clicking a filled star
-  removes that. A workspace uses the key it set to "Always use this key",
-  otherwise the organization's default, otherwise the oldest key; a key it set
-  to "Never use this key" is passed over at every step. Deployment providers is
+  removes that. For a provider the deployment has no credential of its own
+  for, a workspace uses the key it set to "Always use this key", otherwise the
+  organization's default, otherwise the oldest key; a key it set to "Never use
+  this key" is passed over at every step. Deployment providers is
   the process-wide credential list, which a deployment operator manages and
   which is served to every organization; it appears in standalone mode only.
 

@@ -6,9 +6,10 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 - `otari_web_search`, a search backend
 - `otari_web_fetch`, a bounded public-web fetcher
 
-Code execution needs a sandbox (`sandbox_url` or `sandbox_provider`) and Search
-a search provider (`web_search_provider` or `web_search_url`). Fetch runs in the
-gateway.
+Code execution needs a sandbox: a `sandbox_url` for the default `protocol`
+provider, or a hosted `sandbox_provider` such as `e2b`, which needs none. Search
+needs a search provider (`web_search_provider` or `web_search_url`). Fetch runs
+in the gateway.
 One request may declare any of them together, and MCP servers beside them: see
 [Combining tools](#combining-tools).
 
@@ -405,8 +406,9 @@ others; the header wins over the deployment default:
    request where the workspace has not pinned. A value outside that vocabulary
    is a 400.
 
-With no sandbox (neither `sandbox_url` nor `sandbox_provider`) there is nothing
-to bring the code to, so a provider
+With no sandbox (no `sandbox_url` for the `protocol` provider, and no hosted
+`sandbox_provider` such as `e2b`) there is nothing to bring the code to, so a
+provider
 declaration is always forwarded and no policy is read for it. Asking for `otari`
 without a sandbox is a 400. The explicit `otari_code_execution` type is always
 run by Otari, whatever the executor says. When a claimed declaration runs on the
