@@ -111,7 +111,12 @@ def test_a_completion_records_its_step_and_llm_call(
     spans = _by_kind(_wait_for_spans(db_session_factory, request_id, 2))
 
     step, llm = spans["step"], spans["llm"]
-    assert (step.span_id, step.outcome, step.parent_span_id) == (request_id, "ok", None)
+    assert (step.span_id, step.name, step.outcome, step.parent_span_id) == (
+        request_id,
+        "/v1/chat/completions",
+        "ok",
+        None,
+    )
     assert (llm.parent_span_id, llm.outcome, llm.request_id) == (request_id, "ok", request_id)
     assert (llm.input_tokens, llm.output_tokens) == (10, 5)
     with db_session_factory() as session:

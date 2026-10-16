@@ -87,7 +87,7 @@ def _trace(session: Session, workspace_id: uuid.UUID, trace_id: str, *, failed: 
                 span_id=span_id,
                 kind="step",
                 origin="gateway",
-                name="step",
+                name="/v1/chat/completions",
                 request_id=f"{trace_id}-{span_id}",
                 outcome="error" if failed and span_id == "req-2" else "ok",
                 opens_turn=opens,
@@ -209,6 +209,7 @@ def test_the_operator_reads_every_workspace_of_their_organization_and_the_detail
         1,
         ["req-1", "req-2"],
     )
+    assert {span["name"] for span in detail["spans"] if span["kind"] == "step"} == {"/v1/chat/completions"}
     tool = next(span for span in detail["spans"] if span["kind"] == "tool")
     assert tool["approximate"] is True
     assert tool["parent_span_id"] == "req-1"

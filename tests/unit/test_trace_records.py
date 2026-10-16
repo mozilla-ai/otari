@@ -83,6 +83,16 @@ def test_prose_in_a_trace_id_is_refused() -> None:
         )
 
 
+def test_a_gateway_step_is_named_for_its_endpoint() -> None:
+    assert _span(name="/v1/chat/completions").name == "/v1/chat/completions"
+
+
+def test_finish_reasons_are_kept_as_identifiers_joined_by_a_comma() -> None:
+    span = _span(kind="llm", origin="otlp", attributes={"gen_ai.response.finish_reasons": "stop,length"})
+
+    assert span.attributes == {"gen_ai.response.finish_reasons": "stop,length"}
+
+
 def test_prose_in_an_attribute_string_is_refused() -> None:
     with pytest.raises(InvalidSpanError, match="identifier-shaped"):
         _span(attributes={"error.type": "connection reset by peer"})
