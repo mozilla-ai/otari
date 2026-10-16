@@ -16,6 +16,7 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import TypeVar, cast
 
 import pytest
@@ -35,12 +36,16 @@ from gateway.services.organization_pricing_service import (
     validate_period,
 )
 from gateway.services.pricing_service import (
+    ToolRate,
+    UnpricedToolLabel,
     find_model_pricing,
     load_organization_override_index,
     price_tool_calls,
     pricing_key_forms,
     resolve_organization_override,
+    resolve_tool_rate,
 )
+from gateway.types.tool_charges import LabelCalls
 
 T = TypeVar("T")
 
@@ -596,14 +601,12 @@ def test_the_tool_gate_and_the_settlement_agree_on_both_key_spellings() -> None:
         gate = await find_model_pricing(
             session, "otari", "web_search", as_of=_NOW, use_defaults=False, organization_id=organization_id
         )
-        total, lines, unpriced = await price_tool_calls(
-            session, {"web_search": 1}, as_of=_NOW, organization_id=organization_id
-        )
+        charges = await price_tool_calls(session, [_calls()], as_of=_NOW, organization_id=organization_id)
 
         assert gate is not None, "the gate admits the request"
-        assert unpriced == [], "so the settlement must not call it unpriced"
-        assert total == 1.0
-        assert lines[0]["cost"] == 1.0
+        assert charges.unpriced == [], "so the settlement must not call it unpriced"
+        assert charges.total == 1.0
+        assert charges.lines[0]["cost"] == 1.0
 
     _run(scenario)
 
@@ -640,15 +643,13 @@ def test_both_lookup_paths_pick_the_canonical_row_when_both_spellings_exist() ->
         via_model_path = await find_model_pricing(
             session, "otari", "web_search", as_of=_NOW, use_defaults=False, organization_id=organization_id
         )
-        total, _lines, unpriced = await price_tool_calls(
-            session, {"web_search": 1}, as_of=_NOW, organization_id=organization_id
-        )
+        charges = await price_tool_calls(session, [_calls()], as_of=_NOW, organization_id=organization_id)
 
         assert via_model_path is not None
-        assert unpriced == []
+        assert charges.unpriced == []
         # Both resolve the canonical row: 1_000_000 / 1e6 == $1.00 per call.
         assert via_model_path.input_price_per_million == 1_000_000.0
-        assert total == 1.0
+        assert charges.total == 1.0
 
     _run(scenario)
 
@@ -686,13 +687,277 @@ def test_the_deployment_price_list_also_prefers_the_canonical_tool_key() -> None
         await session.flush()
 
         gate = await find_model_pricing(session, "otari", "web_search", as_of=_NOW, use_defaults=False)
-        total, _lines, unpriced = await price_tool_calls(session, {"web_search": 1}, as_of=_NOW)
+        charges = await price_tool_calls(session, [_calls()], as_of=_NOW)
 
         assert gate is not None
-        assert unpriced == []
+        assert charges.unpriced == []
         # Both resolve the canonical row: 1_000_000 / 1e6 == $1.00 per call.
         assert gate.input_price_per_million == 1_000_000.0
-        assert total == 1.0
+        assert charges.total == 1.0
+
+    _run(scenario)
+
+
+# =============================================================================
+# Tool calls by label (design L)
+#
+# Each label is priced at the costs its calls reported, plus its first priced
+# rate key's rate for each call that reported none, plus its enrichment costs.
+# Rates here are per call in the per-million convention: 10_000 is $0.01.
+# =============================================================================
+
+
+def _calls(
+    *,
+    tool: str = "web_search",
+    label: str | None = None,
+    rate_keys: tuple[str, ...] | None = None,
+    calls: int = 1,
+    unreported_calls: int | None = None,
+    reported_cost: str = "0",
+    enrichment_cost: str = "0",
+) -> LabelCalls:
+    return LabelCalls(
+        tool=tool,
+        label=label,
+        rate_keys=rate_keys,
+        calls=calls,
+        unreported_calls=calls if unreported_calls is None else unreported_calls,
+        reported_cost=Decimal(reported_cost),
+        enrichment_cost=Decimal(enrichment_cost),
+    )
+
+
+async def _tool_price(session: AsyncSession, model_key: str, rate: float) -> None:
+    session.add(
+        ModelPricing(
+            model_key=model_key,
+            effective_at=_NOW - timedelta(days=1),
+            input_price_per_million=rate,
+            output_price_per_million=0.0,
+        )
+    )
+    await session.flush()
+
+
+_EXA = "exa:exa-search"
+
+
+def test_each_label_gets_a_line_priced_by_its_first_rate_key_with_a_row() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, _EXA, 20_000.0)
+        await _tool_price(session, "otari:web_search", 10_000.0)
+        await _tool_price(session, "otari:web_fetch", 5_000.0)
+
+        charges = await price_tool_calls(
+            session,
+            [
+                _calls(label=_EXA, rate_keys=(_EXA, "otari:web_search"), calls=2),
+                _calls(calls=3),
+                _calls(tool="web_fetch", label="tabstack:tabstack", rate_keys=("tabstack:tabstack", "otari:web_fetch")),
+            ],
+            as_of=_NOW,
+        )
+
+        assert charges.lines == [
+            {"meter": "web_fetch_calls", "label": "tabstack:tabstack", "units": 1, "unit_rate": 0.005, "cost": 0.005},
+            {"meter": "web_search_calls", "label": _EXA, "units": 2, "unit_rate": 0.02, "cost": 0.04},
+            {"meter": "web_search_calls", "label": "otari:web_search", "units": 3, "unit_rate": 0.01, "cost": 0.03},
+        ]
+        assert charges.tool_costs == {"web_search": Decimal("0.07"), "web_fetch": Decimal("0.005")}
+        assert charges.total == Decimal("0.075")
+        assert charges.unpriced == []
+
+    _run(scenario)
+
+
+def test_a_reported_cost_comes_first_and_the_rate_prices_only_the_rest() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, _EXA, 10_000.0)
+
+        charges = await price_tool_calls(
+            session,
+            [_calls(label=_EXA, rate_keys=(_EXA,), calls=3, unreported_calls=1, reported_cost="0.012")],
+            as_of=_NOW,
+        )
+
+        [line] = charges.lines
+        assert line["cost"] == pytest.approx(0.022)
+        assert line["unit_rate"] == pytest.approx(0.022 / 3)
+        assert charges.total == Decimal("0.022")
+
+    _run(scenario)
+
+
+def test_a_reported_zero_is_billed_at_zero_although_a_rate_exists() -> None:
+    """A search with no hits that its provider reported as free costs nothing; the rate is for unreported calls."""
+
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, _EXA, 10_000.0)
+
+        charges = await price_tool_calls(
+            session,
+            [_calls(label=_EXA, rate_keys=(_EXA,), unreported_calls=0, reported_cost="0")],
+            as_of=_NOW,
+        )
+
+        assert charges.lines == [
+            {"meter": "web_search_calls", "label": _EXA, "units": 1, "unit_rate": 0.0, "cost": 0.0}
+        ]
+        assert charges.total == 0
+        assert charges.unpriced == []
+
+    _run(scenario)
+
+
+def test_enrichment_costs_are_added_to_the_search_that_ran_them() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, _EXA, 10_000.0)
+
+        charges = await price_tool_calls(
+            session,
+            [
+                _calls(
+                    label=_EXA,
+                    rate_keys=(_EXA,),
+                    calls=2,
+                    unreported_calls=1,
+                    reported_cost="0.005",
+                    enrichment_cost="0.003",
+                )
+            ],
+            as_of=_NOW,
+        )
+
+        # 0.005 reported + 0.01 for the unreported call + 0.003 of enrichment.
+        assert charges.total == Decimal("0.018")
+        assert charges.lines[0]["cost"] == pytest.approx(0.018)
+
+    _run(scenario)
+
+
+def test_a_label_with_no_row_and_no_reported_cost_keeps_a_zero_line_and_names_its_first_rate_key() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        charges = await price_tool_calls(
+            session,
+            [_calls(label=_EXA, rate_keys=(_EXA, "otari:web_search"), calls=2)],
+            as_of=_NOW,
+        )
+
+        assert charges.lines == [
+            {"meter": "web_search_calls", "label": _EXA, "units": 2, "unit_rate": 0.0, "cost": 0.0}
+        ]
+        assert charges.unpriced == [UnpricedToolLabel("web_search", _EXA, _EXA, 2)]
+
+    _run(scenario)
+
+
+def test_a_label_with_no_row_still_bills_what_its_calls_reported() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        charges = await price_tool_calls(
+            session,
+            [_calls(label=_EXA, rate_keys=(_EXA,), calls=2, unreported_calls=1, reported_cost="0.005")],
+            as_of=_NOW,
+        )
+
+        assert charges.total == Decimal("0.005")
+        assert charges.unpriced == [UnpricedToolLabel("web_search", _EXA, _EXA, 1)]
+
+    _run(scenario)
+
+
+def test_an_organization_key_label_is_priced_under_the_fallback_row_and_never_looked_up() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, "org:tavily", 90_000.0)
+        await _tool_price(session, "otari:web_search", 10_000.0)
+
+        charges = await price_tool_calls(
+            session, [_calls(label="org:tavily", rate_keys=("otari:web_search",))], as_of=_NOW
+        )
+
+        assert charges.lines == [
+            {"meter": "web_search_calls", "label": "org:tavily", "units": 1, "unit_rate": 0.01, "cost": 0.01}
+        ]
+
+    _run(scenario)
+
+
+def test_empty_rate_keys_price_nothing_and_warn_about_nothing() -> None:
+    """A hybrid credential's calls carry no rate keys (design K): only a reported cost would count."""
+
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, "otari:web_search", 10_000.0)
+
+        charges = await price_tool_calls(session, [_calls(rate_keys=())], as_of=_NOW)
+
+        assert charges.lines == [
+            {"meter": "web_search_calls", "label": "otari:web_search", "units": 1, "unit_rate": 0.0, "cost": 0.0}
+        ]
+        assert charges.total == 0
+        assert charges.unpriced == []
+
+    _run(scenario)
+
+
+def test_two_records_of_one_label_settle_as_one_line() -> None:
+    """The omitted label and an explicit ``otari:web_search`` are the same label, whatever their rate keys."""
+
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, "otari:web_search", 10_000.0)
+
+        charges = await price_tool_calls(
+            session,
+            [_calls(calls=2), _calls(label="otari:web_search", rate_keys=("otari:web_search",))],
+            as_of=_NOW,
+        )
+
+        assert charges.lines == [
+            {"meter": "web_search_calls", "label": "otari:web_search", "units": 3, "unit_rate": 0.01, "cost": 0.03}
+        ]
+
+    _run(scenario)
+
+
+def test_an_override_prices_its_rate_key_ahead_of_the_deployment_row() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _tool_price(session, _EXA, 20_000.0)
+        await _override(session, organization_id, rate=5_000.0, model_key=_EXA)
+
+        charges = await price_tool_calls(
+            session,
+            [_calls(label=_EXA, rate_keys=(_EXA, "otari:web_search"))],
+            as_of=_NOW,
+            organization_id=organization_id,
+        )
+
+        assert charges.total == Decimal("0.005")
+
+    _run(scenario)
+
+
+def test_one_calls_rate_keys_resolve_through_the_same_lookup() -> None:
+    """The lookup a gate reads for one resolved call: first key with a row, overrides and both spellings included."""
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _tool_price(session, "otari:web_search", 10_000.0)
+        await _override(session, organization_id, rate=30_000.0, model_key="exa/exa-search")
+
+        fallback = await resolve_tool_rate(session, (_EXA, "otari:web_search"), as_of=_NOW)
+        overridden = await resolve_tool_rate(
+            session, (_EXA, "otari:web_search"), as_of=_NOW, organization_id=organization_id
+        )
+        unpriced = await resolve_tool_rate(session, ("tabstack:tabstack",), as_of=_NOW)
+        nothing = await resolve_tool_rate(session, (), as_of=_NOW)
+
+        assert isinstance(fallback, ToolRate)
+        assert fallback.rate_key == "otari:web_search"
+        assert overridden is not None
+        assert overridden.rate_key == _EXA
+        assert overridden.pricing.input_price_per_million == 30_000.0
+        assert unpriced is None
+        assert nothing is None
 
     _run(scenario)
 

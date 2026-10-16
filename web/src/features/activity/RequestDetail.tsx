@@ -1,7 +1,7 @@
 import { Button } from "@heroui/react"
 
 import type { UsageEntry } from "@/client"
-import { isTokenChargeLine, isUnitChargeLine } from "@/client"
+import { isTokenChargeLine, isToolChargeLine, isUnitChargeLine } from "@/client"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { formatUnitRate } from "@/shared/helpers/format"
@@ -212,8 +212,19 @@ export function RequestDetail({
               // rather than rendered through one of the two rate formats, which
               // would print an undefined rate as "NaN / 1M".
               const meter = String(line.meter ?? "")
+              // A tool runs under one line per label, so the label keeps the
+              // lines of one meter apart.
+              const label = isToolChargeLine(line) ? line.label : null
               return (
-                <DetailField key={meter} label={meter.replaceAll("_", " ")}>
+                <DetailField
+                  key={label === null ? meter : `${meter} ${label}`}
+                  label={meter.replaceAll("_", " ")}
+                >
+                  {label === null ? null : (
+                    <>
+                      <code className="break-all">{label}</code>:{" "}
+                    </>
+                  )}
                   {isUnitChargeLine(line)
                     ? `${formatTokenCount(line.units)} at ${formatUnitRate(line.unit_rate)} each, ${formatUSD(line.cost)}`
                     : isTokenChargeLine(line)

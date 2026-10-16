@@ -19221,6 +19221,53 @@
         "title": "TokenChargeLine",
         "type": "object"
       },
+      "ToolChargeLine": {
+        "additionalProperties": true,
+        "description": "A gateway-run tool's charge line, one per tool and label.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.",
+        "properties": {
+          "cost": {
+            "description": "USD charged for this line.",
+            "title": "Cost",
+            "type": "number"
+          },
+          "label": {
+            "description": "What served the calls: '<provider>:<instance>' for a search or fetch instance, 'builtin:builtin_fetch' for the built-in fetcher, 'org:<provider>' for an organization's own key, or 'otari:<tool>' for any other gateway-run tool.",
+            "title": "Label",
+            "type": "string"
+          },
+          "meter": {
+            "description": "What was metered, e.g. 'request' or 'web_search_calls'.",
+            "title": "Meter",
+            "type": "string"
+          },
+          "unit_rate": {
+            "description": "USD per call.",
+            "title": "Unit Rate",
+            "type": "number"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Calls billed on this meter.",
+            "title": "Units"
+          }
+        },
+        "required": [
+          "meter",
+          "units",
+          "unit_rate",
+          "cost",
+          "label"
+        ],
+        "title": "ToolChargeLine",
+        "type": "object"
+      },
       "ToolMeter": {
         "additionalProperties": true,
         "description": "One gateway-run tool's call counts on a request.\n\nA TypedDict rather than a model, and every key optional, so a stored entry\nserializes back as it was written: a model with defaults would put\n``\"unit_rate\": null`` on every tool that has never been priced.",
@@ -21194,6 +21241,9 @@
               {
                 "items": {
                   "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ToolChargeLine"
+                    },
                     {
                       "$ref": "#/components/schemas/TokenChargeLine"
                     },

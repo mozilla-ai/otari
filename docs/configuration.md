@@ -852,6 +852,13 @@ search a workspace's organization search key served is priced under
 `otari:web_search` instead, since the deployment cannot price the organization's
 own provider account.
 
+A fetch instance's rate is keyed the same way (`tabstack:tabstack` for an
+instance named `tabstack` backed by `tabstack`), and so is the built-in
+fetcher's, `builtin:builtin_fetch`; their providers need no entry under
+`providers:` either. These rates take effect once fetch instances serve the
+in-loop fetch tool. Until then an in-loop fetch is priced under
+`otari:web_fetch`.
+
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
 search unit (one query over up to 100 documents, a long document counting as

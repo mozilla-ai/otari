@@ -7,6 +7,7 @@ These tests assert ``users.spend`` and not only the usage row.
 from __future__ import annotations
 
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -20,12 +21,15 @@ from any_llm.types.completion import (
     Function,
 )
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.routes.chat import log_usage
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.services.tool_usage import TOOL_METER_NAMESPACE
+from gateway.services.tool_usage import TOOL_METER_NAMESPACE, ToolUsageTally
 
 from .conftest import MODEL_NAME
 
@@ -208,6 +212,7 @@ async def test_search_calls_are_metered_priced_and_spent(
     assert tools["web_search"]["unit_rate"] == pytest.approx(_SEARCH_UNIT_COST)
 
     line = next(entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls")
+    assert line["label"] == "otari:web_search"
     assert line["units"] == 2
     assert line["cost"] == pytest.approx(2 * _SEARCH_UNIT_COST)
 
@@ -261,6 +266,111 @@ async def test_failed_search_is_counted_but_never_billed(
     tools = (row.billing_meters or {})[TOOL_METER_NAMESPACE]
     assert tools["web_search"] == {"billed": 0, "errors": 1}
     assert not any(entry["meter"] == "web_search_calls" for entry in (row.pricing_breakdown or []))
+
+
+@pytest.mark.asyncio
+async def test_a_search_with_no_hits_is_billed_at_the_rate(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    model_pricing: dict[str, Any],
+    search_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A zero-result success is billed; the old backend reports no cost, so the rate prices it."""
+    user_id = api_key_obj["user_id"]
+    responses = [_completion(tool_call=True), _completion(tool_call=False)]
+
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
+        patch("gateway.services.web_search_backend.WebSearchBackend._search", new=AsyncMock(return_value=[])),
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "otari_web_search"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    row = _latest_row(db_session_factory, user_id)
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 1
+    line = next(entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls")
+    assert line == {
+        "meter": "web_search_calls",
+        "label": "otari:web_search",
+        "units": 1,
+        "unit_rate": pytest.approx(_SEARCH_UNIT_COST),
+        "cost": pytest.approx(_SEARCH_UNIT_COST),
+    }
+
+
+class _Writer:
+    def __init__(self) -> None:
+        self.logs: list[UsageLog] = []
+
+    async def put(self, log: UsageLog) -> bool:
+        self.logs.append(log)
+        return True
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_a_reported_zero_settles_at_zero_beside_an_unreported_call_at_the_rate(async_db: AsyncSession) -> None:
+    """Both halves of a zero-hit search: a provider that reports 0 is billed 0, one that reports nothing the rate.
+
+    The old backend never reports a cost, so the tally is filled here as an
+    instance-backed search would fill it.
+    """
+    for model_key in ("exa:exa-search", "otari:web_search"):
+        async_db.add(
+            ModelPricing(
+                model_key=model_key, input_price_per_million=_SEARCH_RATE_PER_MILLION, output_price_per_million=0.0
+            )
+        )
+    await async_db.commit()
+    tally = ToolUsageTally()
+    no_hits = "No results for query: 'otari'"
+    tally.record_result(
+        "web_search", no_hits, label="exa:exa-search", rate_keys=("exa:exa-search", "otari:web_search"), cost=Decimal(0)
+    )
+    tally.record_result("web_search", no_hits)
+    writer = _Writer()
+
+    await log_usage(
+        db=async_db,
+        log_writer=writer,
+        api_key_id=None,
+        model=MODEL_NAME,
+        provider=None,
+        endpoint="/v1/chat/completions",
+        usage_override=CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+        tool_tally=tally,
+    )
+
+    [row] = writer.logs
+    assert row.pricing_breakdown == [
+        {"meter": "web_search_calls", "label": "exa:exa-search", "units": 1, "unit_rate": 0.0, "cost": 0.0},
+        {
+            "meter": "web_search_calls",
+            "label": "otari:web_search",
+            "units": 1,
+            "unit_rate": _SEARCH_UNIT_COST,
+            "cost": _SEARCH_UNIT_COST,
+        },
+    ]
+    meter = (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]
+    assert meter == {"billed": 2, "errors": 0, "unit_rate": pytest.approx(_SEARCH_UNIT_COST / 2)}
+    assert row.cost == Decimal("0.01")
 
 
 @pytest.mark.asyncio

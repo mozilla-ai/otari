@@ -165,6 +165,29 @@ With `require_pricing: true`, an unpriced gateway-run tool is refused before the
 model call. A failed tool invocation is recorded but not charged. Charges settle
 on the final usage row alongside model tokens.
 
+The usage row's pricing breakdown has one line per tool and label, and the
+dashboard's request detail shows each line with its label. The label says what
+served the calls:
+
+- `<provider>:<instance>` for a search or fetch instance, and
+  `builtin:builtin_fetch` for the built-in fetcher;
+- `org:<provider>` for a workspace's
+  [organization search key](#organization-search-keys);
+- `otari:<tool>` for everything else: code execution, MCP tools, and web search
+  on the legacy settings.
+
+A call is priced at the cost its provider reported, when it reports one, and
+otherwise at the first of its label's rows that has a price: an instance's own
+`<provider>:<instance>` or `builtin:builtin_fetch`, then `otari:web_search` or
+`otari:web_fetch`. An organization key's calls take the `otari:` row only,
+since the deployment cannot price the organization's own account. A search also
+adds what its enrichment fetches reported. The line's `unit_rate` is its cost
+over its calls.
+
+Instances do not serve the in-loop tools yet, and the in-loop tool runs
+organization keys on the older backend, so today's lines are labeled
+`otari:<tool>`.
+
 Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
 without a model tool loop. A search a workspace's

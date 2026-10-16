@@ -16062,6 +16062,44 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * ToolChargeLine
+         * @description A gateway-run tool's charge line, one per tool and label.
+         *
+         *     A subclass with ``label`` required, rather than a defaulted field on
+         *     :class:`UnitChargeLine`, so the per-request, rerank and image lines, and a
+         *     stored tool line without a label, serialize back without a
+         *     ``"label": null`` they never had.
+         */
+        ToolChargeLine: {
+            /**
+             * Cost
+             * @description USD charged for this line.
+             */
+            cost: number;
+            /**
+             * Label
+             * @description What served the calls: '<provider>:<instance>' for a search or fetch instance, 'builtin:builtin_fetch' for the built-in fetcher, 'org:<provider>' for an organization's own key, or 'otari:<tool>' for any other gateway-run tool.
+             */
+            label: string;
+            /**
+             * Meter
+             * @description What was metered, e.g. 'request' or 'web_search_calls'.
+             */
+            meter: string;
+            /**
+             * Unit Rate
+             * @description USD per call.
+             */
+            unit_rate: number;
+            /**
+             * Units
+             * @description Calls billed on this meter.
+             */
+            units: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * ToolMeter
          * @description One gateway-run tool's call counts on a request.
          *
@@ -16701,7 +16739,7 @@ export interface components {
             /** Policy Name */
             policy_name?: string | null;
             /** Pricing Breakdown */
-            pricing_breakdown: (components["schemas"]["TokenChargeLine"] | components["schemas"]["UnitChargeLine"] | {
+            pricing_breakdown: (components["schemas"]["ToolChargeLine"] | components["schemas"]["TokenChargeLine"] | components["schemas"]["UnitChargeLine"] | {
                 [key: string]: unknown;
             })[] | null;
             /** Prompt Tokens */

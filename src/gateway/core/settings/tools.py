@@ -533,6 +533,14 @@ class ToolSettings(BaseModel):
         """
         return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
 
+    def fetch_tool_providers(self) -> set[str]:
+        """The distinct providers backing the fetch instances, ``builtin`` among them.
+
+        The prefixes of the ``<provider>:<instance>`` keys a fetch instance's
+        calls are priced under, ``builtin:builtin_fetch`` included.
+        """
+        return {instance.provider for instance in effective_fetch_instances(self).values()}
+
     def search_tools_without_backend_url(self) -> list[str]:
         """Search tools whose provider needs an ``api_base`` and has none to inherit.
 

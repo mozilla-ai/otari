@@ -4742,7 +4742,7 @@ async def _apply_tool_charges(
     """Fold a request's gateway-run tool calls onto its usage row.
 
     Writes the counts under the reserved ``tools`` meter namespace, appends one
-    charge line per priced tool, and adds their cost to the row's total.
+    charge line per tool and label, and adds their cost to the row's total.
 
     Never raises. Settlement must not turn an accounting problem into a failed
     response; the precedent is :func:`log_gateway_rejection`. A pricing lookup that
@@ -4770,9 +4770,9 @@ async def _apply_tool_charges(
         commit_meters()
         return
     try:
-        tool_cost, lines, unpriced = await price_tool_calls(
+        charges = await price_tool_calls(
             db,
-            billable,
+            tally.label_calls(),
             as_of=usage_log.timestamp,
             organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
         )
@@ -4785,24 +4785,26 @@ async def _apply_tool_charges(
 
     # The rate is stored per row, not just the cost, so per-tool spend stays
     # aggregatable in SQL (the row's own ``cost`` mixes tokens and tools) and a
-    # historical row keeps the rate it was billed at after a price change.
-    for line in lines:
-        tool_name = str(line["meter"]).removesuffix("_calls")
-        if tool_name in tool_meters:
-            tool_meters[tool_name]["unit_rate"] = float(line["unit_rate"])
+    # historical row keeps the rate it was billed at after a price change. A tool
+    # served under several labels has one rate, its cost over its billed calls, so
+    # billed calls times rate is still the tool's spend.
+    for tool_name, tool_cost in charges.tool_costs.items():
+        if billable.get(tool_name):
+            tool_meters[tool_name]["unit_rate"] = float(tool_cost / billable[tool_name])
     commit_meters()
 
-    if lines:
-        usage_log.pricing_breakdown = list(usage_log.pricing_breakdown or []) + lines
-    if tool_cost:
-        usage_log.cost = (usage_log.cost or Decimal(0)) + tool_cost
-    for tool in unpriced:
+    if charges.lines:
+        usage_log.pricing_breakdown = list(usage_log.pricing_breakdown or []) + charges.lines
+    if charges.total:
+        usage_log.cost = (usage_log.cost or Decimal(0)) + charges.total
+    for unpriced in charges.unpriced:
         logger.warning(
-            "Gateway tool '%s' ran %d time(s) but has no pricing; recorded without cost. "
+            "Gateway tool '%s' ran %d time(s) as '%s' with no reported cost and no pricing; recorded without cost. "
             "Price it with POST /api/v1/pricing using model_key '%s'.",
-            tool,
-            billable[tool],
-            gateway_tool_pricing_key(tool),
+            unpriced.tool,
+            unpriced.calls,
+            unpriced.label,
+            unpriced.rate_key,
         )
 
 

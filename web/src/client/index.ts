@@ -153,6 +153,7 @@ export type InFlightResponse = Schemas["InFlightResponse"]
 // per-million or a per-call rate.
 export type TokenChargeLine = Schemas["TokenChargeLine"]
 export type UnitChargeLine = Schemas["UnitChargeLine"]
+export type ToolChargeLine = Schemas["ToolChargeLine"]
 /** One line of a row's `pricing_breakdown`, of whichever of the three shapes. */
 export type ChargeLine = NonNullable<UsageEntry["pricing_breakdown"]>[number]
 
@@ -182,6 +183,14 @@ export function isUnitChargeLine(line: ChargeLine): line is UnitChargeLine {
   return (
     hasChargeFields(line) &&
     typeof (line as Record<string, unknown>).unit_rate === "number"
+  )
+}
+// A per-call line that also names what served the calls. A stored tool line
+// without a label reads as a plain per-call line.
+export function isToolChargeLine(line: ChargeLine): line is ToolChargeLine {
+  return (
+    isUnitChargeLine(line) &&
+    typeof (line as Record<string, unknown>).label === "string"
   )
 }
 export function isTokenChargeLine(line: ChargeLine): line is TokenChargeLine {

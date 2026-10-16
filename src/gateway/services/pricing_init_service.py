@@ -173,9 +173,9 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
 
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
 
-    # A search tool's flat rate is keyed ``<provider>:<tool>``, and its provider is
-    # never under ``providers``.
-    search_providers = config.search_tool_providers()
+    # A search or fetch instance's flat rate is keyed ``<provider>:<instance>``, and
+    # its provider is never under ``providers``.
+    tool_providers = config.search_tool_providers() | config.fetch_tool_providers()
 
     for raw_model_key, pricing_config in config.pricing.items():
         model_key = normalize_pricing_key(config, raw_model_key)
@@ -184,7 +184,7 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         if (
             instance not in config.providers
             and instance not in config.decision_providers
-            and instance not in search_providers
+            and instance not in tool_providers
             and instance != GATEWAY_TOOL_PRICING_PROVIDER
         ):
             logger.warning(

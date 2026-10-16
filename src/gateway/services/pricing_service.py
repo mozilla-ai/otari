@@ -21,6 +21,7 @@ from gateway.services.pricing import (
     request_rate,
     resolve_as_of,
 )
+from gateway.types.tool_charges import LabelCalls
 
 # Bound on the model keys named in one ``IN()`` list, so a batched override load
 # stays under SQLite's default limit of 999 bind parameters in a statement.
@@ -783,74 +784,170 @@ class RequestPrices:
         return self._resolved[key]
 
 
-async def price_tool_calls(
+class ToolRate(NamedTuple):
+    """The pricing row that prices a gateway-run tool call, and the rate key it was found under."""
+
+    rate_key: str
+    pricing: ModelPricing
+
+
+class UnpricedToolLabel(NamedTuple):
+    """A label whose calls reported no cost and whose rate keys found no pricing row."""
+
+    tool: str
+    label: str
+    #: The row an operator would add: the label's first rate key.
+    rate_key: str
+    #: The calls that went unpriced: those that reported no cost.
+    calls: int
+
+
+class ToolCharges(NamedTuple):
+    """What a request's successful gateway-run tool calls cost.
+
+    ``lines`` holds one charge line per tool and label, ``tool_costs`` each
+    tool's cost before rounding, and ``unpriced`` the labels that ran calls no
+    row could price.
+    """
+
+    total: Decimal
+    lines: list[dict[str, float | int | str]]
+    tool_costs: dict[str, Decimal]
+    unpriced: list[UnpricedToolLabel]
+
+
+async def resolve_tool_rate(
     db: AsyncSession,
-    billable_calls: dict[str, int],
+    rate_keys: Sequence[str],
     *,
     as_of: datetime | None = None,
     organization_id: uuid.UUID | None = None,
-) -> tuple[Decimal, list[dict[str, float | int | str]], list[str]]:
-    """Price a request's successful gateway-run tool calls.
+) -> ToolRate | None:
+    """The first of one call's rate keys that has a pricing row, with that row.
 
-    Returns the total USD cost, one auditable charge line per tool, and the names
-    of the tools that had no pricing row. Charge lines use the same shape
-    ``calculate_metered_cost`` produces so both kinds share
-    ``UsageLog.pricing_breakdown`` and the dashboard's renderer, except that a tool
-    line carries ``unit_rate`` (USD per call) where a token line carries
-    ``rate_per_million``. That key is what tells a reader, and the UI, which unit
-    convention applies.
-
-    A tool with no pricing row contributes units at a zero rate, so the work stays
-    on the row and in the audit trail even when the operator has not priced it.
-    Lookups pass ``use_defaults=False``: MCP tool names come from a caller-supplied
-    server, and the models.dev fallback matches on a bare name, so a tool named
-    after a real model would otherwise be billed at that model's
-    per-million-token rate divided by a million.
+    The lookup :func:`price_tool_calls` prices a label with, for a caller that
+    holds one resolved call: in key order, first match winning, each key
+    resolved through the organization's overrides first and in both spellings,
+    and never through the models.dev fallback.
     """
-    tools = [tool for tool in sorted(billable_calls) if billable_calls[tool] > 0]
-    if not tools:
-        return Decimal(0), [], []
-    rates = await _tool_rates(db, tools, as_of=as_of, organization_id=organization_id)
+    rates = await _tool_rates(db, rate_keys, as_of=as_of, organization_id=organization_id)
+    return _first_tool_rate(rate_keys, rates)
 
-    total = Decimal(0)
-    lines: list[dict[str, float | int | str]] = []
-    unpriced: list[str] = []
-    for tool in tools:
-        units = billable_calls[tool]
-        pricing = rates.get(tool)
-        if pricing is None:
-            unpriced.append(tool)
-        unit_rate = flat_request_cost(pricing)
-        cost = units * unit_rate
-        total += cost
-        # ``float`` for the JSON charge line, as above; the returned total that
-        # settles the row stays Decimal.
-        lines.append({"meter": f"{tool}_calls", "units": units, "unit_rate": float(unit_rate), "cost": float(cost)})
-    return quantize_cost(total), lines, unpriced
+
+def _first_tool_rate(rate_keys: Sequence[str], rates: Mapping[str, ModelPricing]) -> ToolRate | None:
+    for rate_key in rate_keys:
+        pricing = rates.get(rate_key)
+        if pricing is not None:
+            return ToolRate(rate_key, pricing)
+    return None
+
+
+async def price_tool_calls(
+    db: AsyncSession,
+    calls: Sequence[LabelCalls],
+    *,
+    as_of: datetime | None = None,
+    organization_id: uuid.UUID | None = None,
+) -> ToolCharges:
+    """Price a request's successful gateway-run tool calls, per tool and label.
+
+    A label costs the costs its calls reported, plus its first rate key's rate
+    for each call that reported none, plus what its enrichment fetches
+    reported. A label or rate keys of ``None`` mean the tool's own
+    ``otari:<tool>`` row; an empty tuple of rate keys prices nothing, so only
+    reported costs count.
+
+    Charge lines use the shape ``calculate_metered_cost`` produces so both
+    kinds share ``UsageLog.pricing_breakdown`` and the dashboard's renderer,
+    except that a tool line carries ``unit_rate`` (USD per call, the label's
+    cost over its calls) where a token line carries ``rate_per_million``. That
+    key is what tells a reader, and the UI, which unit convention applies. A
+    tool line also names its ``label``.
+
+    A label with no reported cost and no pricing row still gets a line, at a
+    zero rate, so the work stays on the row and in the audit trail even when
+    the operator has not priced it. Lookups skip the models.dev fallback: MCP
+    tool names come from a caller-supplied server, and the fallback matches on
+    a bare name, so a tool named after a real model would otherwise be billed
+    at that model's per-million-token rate divided by a million.
+    """
+    priced = [(entry, _tool_label(entry), _tool_rate_keys(entry)) for entry in calls if entry.calls > 0]
+    if not priced:
+        return ToolCharges(Decimal(0), [], {}, [])
+    rates = await _tool_rates(
+        db, {key for _entry, _label, keys in priced for key in keys}, as_of=as_of, organization_id=organization_id
+    )
+
+    # Keyed by tool and label, so two records of one label with different rate
+    # keys still settle as one line.
+    by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
+    tool_costs: dict[str, Decimal] = {}
+    unpriced: dict[tuple[str, str], UnpricedToolLabel] = {}
+    for entry, label, keys in priced:
+        rate = _first_tool_rate(keys, rates)
+        cost = (
+            entry.reported_cost
+            + entry.unreported_calls * flat_request_cost(rate.pricing if rate is not None else None)
+            + entry.enrichment_cost
+        )
+        units, label_cost = by_label.get((entry.tool, label), (0, Decimal(0)))
+        by_label[(entry.tool, label)] = (units + entry.calls, label_cost + cost)
+        tool_costs[entry.tool] = tool_costs.get(entry.tool, Decimal(0)) + cost
+        if rate is None and keys and entry.unreported_calls:
+            previous = unpriced.get((entry.tool, label))
+            unpriced[(entry.tool, label)] = UnpricedToolLabel(
+                entry.tool, label, keys[0], entry.unreported_calls + (previous.calls if previous else 0)
+            )
+
+    # ``float`` for the JSON charge line; the returned total that settles the
+    # row stays Decimal.
+    lines: list[dict[str, float | int | str]] = [
+        {
+            "meter": f"{tool}_calls",
+            "label": label,
+            "units": units,
+            "unit_rate": float(cost / units),
+            "cost": float(cost),
+        }
+        for (tool, label), (units, cost) in sorted(by_label.items())
+    ]
+    total = quantize_cost(sum(tool_costs.values(), Decimal(0)))
+    return ToolCharges(total, lines, tool_costs, list(unpriced.values()))
+
+
+def _tool_label(entry: LabelCalls) -> str:
+    return entry.label if entry.label is not None else gateway_tool_pricing_key(entry.tool)
+
+
+def _tool_rate_keys(entry: LabelCalls) -> tuple[str, ...]:
+    return entry.rate_keys if entry.rate_keys is not None else (gateway_tool_pricing_key(entry.tool),)
 
 
 async def _tool_rates(
     db: AsyncSession,
-    tools: list[str],
+    rate_keys: Iterable[str],
     *,
     as_of: datetime | None,
     organization_id: uuid.UUID | None = None,
 ) -> dict[str, ModelPricing]:
-    """Latest-as-of pricing for several gateway tools, in one query.
+    """Latest-as-of pricing for several tool rate keys, in one query per table.
 
-    One statement rather than a lookup per tool: an MCP pool can put up to
+    One statement rather than a lookup per key: an MCP pool can put up to
     ``MAX_TOOL_NAMES`` distinct names on a single request, and this runs on the
-    settlement path. Results are assigned into a dict keyed on the tool, so the
-    last row for a tool is the one that wins, and each ``ORDER BY`` below is
-    arranged to make that the right row: least-preferred key spelling first where
-    both are in play, then oldest period first, so the survivor is the canonical
-    spelling's newest applicable row. That is the same precedence
+    settlement path. Results are assigned into a dict keyed on the rate key, so
+    the last row for a key is the one that wins, and each ``ORDER BY`` below is
+    arranged to make that the right row: least-preferred key spelling first
+    where both are in play, then oldest period first, so the survivor is the
+    canonical spelling's newest applicable row. That is the same precedence
     :func:`find_model_pricing` applies one key at a time. The models.dev
     fallback is deliberately not consulted (see the note in
     :func:`price_tool_calls`).
     """
     lookup_time = normalize_effective_at(as_of)
-    # Both spellings, mapped back to the tool, because the gate that admits the
+    canonical_keys = set(rate_keys)
+    if not canonical_keys:
+        return {}
+    # Both spellings, mapped back to the rate key, because the gate that admits the
     # request resolves through ``find_model_pricing`` and that tries the canonical
     # ``otari:tool`` *and* the legacy ``otari/tool``. Matching only the canonical
     # one here made the gate and the settlement disagree: a tool priced under the
@@ -859,15 +956,9 @@ async def _tool_rates(
     # ``normalize_pricing_key`` returns a key unchanged when its prefix is an
     # unconfigured instance, so the read side closes the gap rather than trusting
     # that it never happens.
-    canonical_keys = {f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}" for tool in tools}
-    keys = {
-        key: tool
-        for tool in tools
-        for key in (
-            f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}",
-            f"{GATEWAY_TOOL_PRICING_PROVIDER}/{tool}",
-        )
-    }
+    keys = {form: rate_key for rate_key in canonical_keys for form in pricing_key_forms(rate_key)[1:]}
+    # Last, so a rate key that is also another key's legacy spelling maps to itself.
+    keys.update({rate_key: rate_key for rate_key in canonical_keys})
     stmt = (
         select(ModelPricing)
         .where(ModelPricing.model_key.in_(keys), ModelPricing.effective_at <= lookup_time)

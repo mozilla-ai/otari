@@ -63,6 +63,24 @@ class UnitChargeLine(_OpenShape):
     cost: float = Field(description="USD charged for this line.")
 
 
+class ToolChargeLine(UnitChargeLine):
+    """A gateway-run tool's charge line, one per tool and label.
+
+    A subclass with ``label`` required, rather than a defaulted field on
+    :class:`UnitChargeLine`, so the per-request, rerank and image lines, and a
+    stored tool line without a label, serialize back without a
+    ``"label": null`` they never had.
+    """
+
+    label: str = Field(
+        description=(
+            "What served the calls: '<provider>:<instance>' for a search or fetch instance, "
+            "'builtin:builtin_fetch' for the built-in fetcher, 'org:<provider>' for an organization's "
+            "own key, or 'otari:<tool>' for any other gateway-run tool."
+        )
+    )
+
+
 class ToolMeter(TypedDict, total=False):
     """One gateway-run tool's call counts on a request.
 
@@ -120,7 +138,10 @@ ChargeLine = Annotated[
     # defeats it. A stored line carrying a null, a list or a nested object was
     # rejected by every arm and took the whole usage page down with a 500, which is
     # the exact failure this is here to prevent.
-    TokenChargeLine | UnitChargeLine | dict[str, Any],
+    #
+    # `ToolChargeLine` before `UnitChargeLine`, whose every field it has, or no
+    # line would ever be parsed as a tool line.
+    ToolChargeLine | TokenChargeLine | UnitChargeLine | dict[str, Any],
     Field(union_mode="left_to_right"),
 ]
 MeterMap = Annotated[BillingMeters | dict[str, Any], Field(union_mode="left_to_right")]

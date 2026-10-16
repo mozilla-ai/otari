@@ -27,6 +27,11 @@ backend is unreachable. A failed call is counted and never billed.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from decimal import Decimal
+
+from gateway.types.tool_charges import LabelCalls
+
 # Every tool backend marks a recoverable failure by prefixing the string it hands
 # back to the model. The tool loop's own error path uses the same prefix, so this
 # is the single vocabulary for "the call ran but did not work".
@@ -55,6 +60,14 @@ def is_tool_error(result: str) -> bool:
     return result.startswith(TOOL_ERROR_SENTINEL)
 
 
+@dataclass(slots=True)
+class _LabelTotals:
+    calls: int = 0
+    unreported_calls: int = 0
+    reported_cost: Decimal = Decimal(0)
+    enrichment_cost: Decimal = Decimal(0)
+
+
 class ToolUsageTally:
     """Counts one request's gateway-run tool calls, split billable vs failed.
 
@@ -63,24 +76,53 @@ class ToolUsageTally:
     money, so both are counted: the bill follows the work, not the winner.
     """
 
-    __slots__ = ("_counts", "_overflowed")
+    __slots__ = ("_counts", "_labels", "_overflowed")
 
     def __init__(self) -> None:
         self._counts: dict[str, dict[str, int]] = {}
+        self._labels: dict[tuple[str, str | None, tuple[str, ...] | None], _LabelTotals] = {}
         self._overflowed = False
 
-    def record_result(self, tool: str, result: str) -> None:
-        """Record a call that returned, classifying it on the sentinel."""
-        self._record(tool, failed=is_tool_error(result))
+    def record_result(
+        self,
+        tool: str,
+        text: str,
+        *,
+        label: str | None = None,
+        rate_keys: tuple[str, ...] | None = None,
+        cost: Decimal | None = None,
+        enrichment_cost: Decimal | None = None,
+    ) -> None:
+        """Record a call that returned, classifying it on the sentinel.
+
+        A successful call is kept under its label with its rate keys (see
+        :class:`~gateway.types.tool_charges.LabelCalls`), and with the cost its
+        provider reported, where ``None`` means it reported none and a rate
+        prices the call. A failed call's costs are dropped, since it is never
+        billed.
+        """
+        failed = is_tool_error(text)
+        key = self._record(tool, failed=failed)
+        if failed:
+            return
+        totals = self._labels.setdefault((key, label, rate_keys), _LabelTotals())
+        totals.calls += 1
+        if cost is None:
+            totals.unreported_calls += 1
+        else:
+            totals.reported_cost += cost
+        if enrichment_cost is not None:
+            totals.enrichment_cost += enrichment_cost
 
     def record_failure(self, tool: str) -> None:
         """Record a call that raised. Counted, never billed."""
         self._record(tool, failed=True)
 
-    def _record(self, tool: str, *, failed: bool) -> None:
+    def _record(self, tool: str, *, failed: bool) -> str:
         key = self._key(tool)
         entry = self._counts.setdefault(key, {"billed": 0, "errors": 0})
         entry["errors" if failed else "billed"] += 1
+        return key
 
     def _key(self, tool: str) -> str:
         name = (tool or OVERFLOW_TOOL_NAME)[:MAX_TOOL_NAME_CHARS]
@@ -100,8 +142,23 @@ class ToolUsageTally:
         return not self._counts
 
     def billable_calls(self) -> dict[str, int]:
-        """Successful calls per tool, the units a charge line is priced on."""
+        """Successful calls per tool."""
         return {tool: counts["billed"] for tool, counts in self._counts.items() if counts["billed"]}
+
+    def label_calls(self) -> list[LabelCalls]:
+        """Successful calls per tool and label, the units settlement prices."""
+        return [
+            LabelCalls(
+                tool=tool,
+                label=label,
+                rate_keys=rate_keys,
+                calls=totals.calls,
+                unreported_calls=totals.unreported_calls,
+                reported_cost=totals.reported_cost,
+                enrichment_cost=totals.enrichment_cost,
+            )
+            for (tool, label, rate_keys), totals in self._labels.items()
+        ]
 
     def meters(self) -> dict[str, dict[str, float]]:
         """The nested meter payload, sorted so a row's JSON is stable.

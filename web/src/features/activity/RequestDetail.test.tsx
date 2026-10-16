@@ -299,6 +299,47 @@ describe("RequestDetail", () => {
     expect(screen.getByText(/2 at .* each/)).toBeInTheDocument()
   })
 
+  it("shows one line per label for a tool that ran under several", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          pricing_breakdown: [
+            {
+              meter: "web_fetch_calls",
+              label: "builtin:builtin_fetch",
+              units: 2,
+              unit_rate: 0.01,
+              cost: 0.02,
+            },
+            {
+              meter: "web_fetch_calls",
+              label: "tabstack:tabstack",
+              units: 1,
+              unit_rate: 0.005,
+              cost: 0.005,
+            },
+            // A tool line an older gateway stored, without a label.
+            {
+              meter: "web_search_calls",
+              units: 3,
+              unit_rate: 0.01,
+              cost: 0.03,
+            },
+          ],
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getAllByText("web fetch calls")).toHaveLength(2)
+    expect(screen.getByText("builtin:builtin_fetch")).toBeInTheDocument()
+    expect(screen.getByText("tabstack:tabstack")).toBeInTheDocument()
+    expect(screen.getByText(/2 at .* each/)).toBeInTheDocument()
+    expect(screen.getByText(/3 at .* each/)).toBeInTheDocument()
+  })
+
   it("shows the provider-reported compute time alongside Total time", async () => {
     // provider_latency_ms is a diagnostic alongside Total time (otari#337); this
     // asserts the row's value actually reaches the "Provider time" field rather
