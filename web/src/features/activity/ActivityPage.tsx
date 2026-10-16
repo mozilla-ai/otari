@@ -147,9 +147,8 @@ export function ActivityPage() {
   const providerFilter = url.get("provider")
   const toolFilter = url.get("tool")
   const page = Math.max(0, url.getNumber("page"))
-  // Snap URL-supplied sizes to the nearest offered option: selection latency
-  // grows linearly with rows on the page, so an old bookmark with size=500
-  // must not resurrect second-long checkbox clicks, and a hand-edited size=0
+  // Snap URL-supplied sizes to the nearest offered option: an old bookmark
+  // with size=500 must not render a page of 500 rows, and a hand-edited size=0
   // or size=-5 must not reach the API as an invalid limit (or leave the
   // rows-per-page select showing a value it does not offer).
   const rawPageSize = url.getNumber("size")
