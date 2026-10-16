@@ -253,7 +253,7 @@ async def normalize_request_messages(
             provider_container=provider_container,
             inline_limit=inline_limit,
         )
-    except ProviderAttachmentError:
+    except (ProviderAttachmentError, InlineAttachmentsTooLargeError):
         raise
     except Exception as exc:  # noqa: BLE001 - never fail the request or leak the reservation
         if provider_container:
@@ -264,8 +264,6 @@ async def normalize_request_messages(
             raise ProviderUploadFailedError from exc
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)
         return messages, NormalizationStats()
-    if stats.oversized:
-        raise InlineAttachmentsTooLargeError(config.files_gemini_inline_max_bytes)
     return normalized, stats
 
 

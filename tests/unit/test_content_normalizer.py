@@ -14,7 +14,11 @@ import pytest
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
-from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
+from gateway.exceptions.files_exceptions import (
+    AttachedFileUnavailableError,
+    InlineAttachmentsTooLargeError,
+    ProviderUploadFailedError,
+)
 from gateway.services import content_normalizer as cn
 from gateway.services.content_normalizer import name_container_copies, normalize_messages, stage_container_blocks
 from gateway.services.file_extractors import ExtractionResult
@@ -624,10 +628,8 @@ async def test_an_anthropic_attachment_is_uploaded_as_a_file_part_the_bridge_for
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("upload", [None, _Uploads(fail=True)])
-async def test_an_attachment_that_cannot_be_moved_is_left_and_counted_as_oversized(upload: Any) -> None:
+async def test_an_attachment_that_cannot_be_moved_refuses_the_request(upload: Any) -> None:
     msgs = [_document_msg(200)]
 
-    out, stats = await _normalize_within(msgs, cn.InlineLimit(max_bytes=100, upload=upload))
-
-    assert out == msgs
-    assert (stats.uploaded, stats.oversized) == (0, 1)
+    with pytest.raises(InlineAttachmentsTooLargeError):
+        await _normalize_within(msgs, cn.InlineLimit(max_bytes=100, upload=upload))

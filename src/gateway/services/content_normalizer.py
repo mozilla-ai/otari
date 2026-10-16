@@ -33,7 +33,11 @@ from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
-from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
+from gateway.exceptions.files_exceptions import (
+    AttachedFileUnavailableError,
+    InlineAttachmentsTooLargeError,
+    ProviderUploadFailedError,
+)
 from gateway.log_config import logger
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
 from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for, uploads_attachments
@@ -683,6 +687,9 @@ async def normalize_messages(
 
     The Responses endpoint accepts a bare-string ``input``; iterating that would
     walk it character-by-character, so non-list ``messages`` are returned as-is.
+
+    Raises:
+        InlineAttachmentsTooLargeError: attachments pass ``inline_limit`` and could not be moved.
     """
     stats = NormalizationStats()
     if not config.file_understanding_enabled or not isinstance(messages, list):
@@ -723,4 +730,7 @@ async def normalize_messages(
             stats.dropped,
             stats.chars_added,
         )
+    if inline_limit is not None and stats.oversized:
+        # The provider would refuse the request anyway; refusing it here names the cause.
+        raise InlineAttachmentsTooLargeError(inline_limit.max_bytes)
     return out, stats
