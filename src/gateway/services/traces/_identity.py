@@ -23,7 +23,7 @@ SESSION_TAG = "session_id"
 
 # Headers in which an agent harness sends its own session id, and the harness each
 # one belongs to. Claude Code sends ``x-claude-code-session-id`` on every request of
-# a session. Other harnesses are added as their requests are confirmed.
+# a session.
 HARNESS_SESSION_HEADERS: Mapping[str, str] = {"x-claude-code-session-id": "claude-code"}
 
 # Headers a harness sends only on a subagent's requests. A subagent shares its parent's
@@ -99,8 +99,7 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
 
     Only the product name is kept, mapped to the name the harness is known by, and
     only when it is identifier-shaped. A request a harness marked with its own
-    session header is that harness whatever its ``User-Agent`` says, and one
-    Codex marked as its own is ``codex`` whichever Codex client sent it.
+    session header is that harness whatever its ``User-Agent`` says.
     """
     for header, harness in HARNESS_SESSION_HEADERS.items():
         if headers.get(header):
