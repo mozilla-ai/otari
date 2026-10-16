@@ -369,6 +369,55 @@ async def test_a_provider_instance_is_never_asked_for_a_host_the_policy_refuses(
     assert failure.provider is None, "refused before any provider was called"
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/admin",
+        "http://10.0.0.5/",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://[::1]/",
+        "http://224.0.0.1/",
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_provider_instance_is_never_asked_for_an_address_that_is_not_public(url: str) -> None:
+    backend = WebFetchBackend(_fake(leak_url=True))
+
+    assert await _call(backend, url) == "[tool error] URL invalid or disallowed by gateway safety policy"
+    assert backend.take_last_failure() == WebToolFailure.of(None, None, "url_invalid")
+
+
+@pytest.mark.asyncio
+async def test_a_provider_instance_may_be_asked_for_a_public_address() -> None:
+    text = await _call(WebFetchBackend(_fake()), f"http://{_PUBLIC_IP}/page")
+
+    assert text.startswith(f"Source: http://{_PUBLIC_IP}/page\n")
+
+
+@pytest.mark.parametrize(
+    ("found", "text", "tag"),
+    [
+        (
+            "https://blocked.example.com/landing",
+            "[tool error] URL disallowed by workspace domain policy",
+            "domain_policy",
+        ),
+        ("http://10.0.0.1/landing", "[tool error] URL invalid or disallowed by gateway safety policy", "url_invalid"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_page_a_provider_found_where_the_policy_refuses_is_refused(found: str, text: str, tag: str) -> None:
+    """A provider follows redirects on its own side, so where it reports finding the page is checked too."""
+    tally = ToolUsageTally()
+    policy = DomainPolicy(blocked=canonicalize_domain_rules(["blocked.example.com"]))
+    backend = WebFetchBackend(_fake(final_url=found), policy=policy, tally=tally)
+
+    assert await _call(backend, "https://example.com/out") == text
+    assert backend.take_last_fetch() is None
+    assert backend.take_last_failure() == WebToolFailure.of(None, None, tag)
+    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 0, "errors": 1}}
+
+
 @pytest.mark.asyncio
 async def test_a_search_declaration_narrows_the_hosts_a_fetch_instance_is_asked_for() -> None:
     grant = apply_web_access_policy(
