@@ -10,7 +10,15 @@ from typing import Any
 
 import pytest
 
-from gateway.services.traces import AnsweredCall, RequestTrace, SessionRef, TurnFacts, harness_of, read_turn
+from gateway.services.traces import (
+    AnsweredCall,
+    RequestTrace,
+    SessionRef,
+    TurnFacts,
+    harness_of,
+    is_subagent,
+    read_turn,
+)
 from gateway.services.traces import resolve_session as resolve
 from gateway.services.traces._collector import client_tool_span_id
 
@@ -71,6 +79,12 @@ def test_the_same_label_from_two_users_is_two_sessions() -> None:
 )
 def test_the_harness_comes_from_the_user_agents_product_name(headers: dict[str, str], expected: str | None) -> None:
     assert harness_of(headers) == expected
+
+
+def test_a_claude_code_subagent_is_marked_by_its_agent_header() -> None:
+    assert is_subagent(_CLAUDE_CODE | {"x-claude-code-agent-id": "a1b2c3"})
+    assert not is_subagent(_CLAUDE_CODE)
+    assert not is_subagent(_CLAUDE_CODE | {"x-claude-code-agent-id": " "})
 
 
 # ---------------------------------------------------------------------------

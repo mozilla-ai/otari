@@ -60,7 +60,9 @@ need nothing extra when the request carries the conversation as usual: the
 user's message last when a turn starts, the tool results last when the model's
 tool calls are answered, each with the call id the model gave it. In a Messages
 request, any `system` messages after them are skipped; Claude Code sends one on
-almost every request. A Responses request that continues with
+almost every request. A Claude Code subagent sends its parent's session id and
+an `x-claude-code-agent-id` of its own, and its requests open no turn, since it
+works inside its parent's turn. A Responses request that continues with
 `previous_response_id` carries only the new items, so its tools are recorded
 without a name.
 
