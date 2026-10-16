@@ -33146,6 +33146,12 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "The deployment holds the credential that serves the model."
+          },
+          "409": {
+            "description": "The period overlaps one already stored for the model."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -33190,6 +33196,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "The deployment operator set the rate."
           },
           "422": {
             "content": {
@@ -33250,6 +33259,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "The deployment serves the model, or the deployment operator set the rate."
           },
           "422": {
             "content": {
@@ -38962,6 +38974,9 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -39016,6 +39031,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
           },
           "422": {
             "content": {

@@ -22797,6 +22797,20 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationModelPricingPublic"];
                 };
             };
+            /** @description The deployment holds the credential that serves the model. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The period overlaps one already stored for the model. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -22832,6 +22846,13 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationModelPricingPublic"];
                 };
             };
+            /** @description The deployment serves the model, or the deployment operator set the rate. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -22856,6 +22877,13 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The deployment operator set the rate. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25127,6 +25155,13 @@ export interface operations {
                     "application/json": components["schemas"]["PricingResponse"];
                 };
             };
+            /** @description Nothing prices the model, or its hosted provider is restricted to another organization. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -25189,6 +25224,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PricingResponse"][];
                 };
+            };
+            /** @description Nothing prices the model, or its hosted provider is restricted to another organization. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -661,7 +661,14 @@ async def list_current_pricing(
     return CurrentPricingPage(data=[PricingResponse.from_model(row) for row in rows], count=count)
 
 
-@catalog_router.get("/{model_key:path}/history")
+@catalog_router.get(
+    "/{model_key:path}/history",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
+        }
+    },
+)
 async def get_pricing_history(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -685,7 +692,14 @@ async def get_pricing_history(
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
-@catalog_router.get("/{model_key:path}")
+@catalog_router.get(
+    "/{model_key:path}",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
+        }
+    },
+)
 async def get_pricing(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],

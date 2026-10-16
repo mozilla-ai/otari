@@ -309,7 +309,14 @@ async def list_organization_pricing(
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_403_FORBIDDEN: {"description": "The deployment holds the credential that serves the model."},
+        status.HTTP_409_CONFLICT: {"description": "The period overlaps one already stored for the model."},
+    },
+)
 async def create_organization_pricing(
     body: OrganizationModelPricingCreate,
     identity: CurrentIdentity,
@@ -343,7 +350,14 @@ async def create_organization_pricing(
     return response
 
 
-@router.put("/{pricing_id}")
+@router.put(
+    "/{pricing_id}",
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "The deployment serves the model, or the deployment operator set the rate."
+        }
+    },
+)
 async def replace_organization_pricing(
     pricing_id: uuid.UUID,
     body: OrganizationModelPricingUpdate,
@@ -368,7 +382,11 @@ async def replace_organization_pricing(
     return response
 
 
-@router.delete("/{pricing_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{pricing_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_403_FORBIDDEN: {"description": "The deployment operator set the rate."}},
+)
 async def delete_organization_pricing(
     pricing_id: uuid.UUID,
     identity: CurrentIdentity,
