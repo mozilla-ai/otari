@@ -4,6 +4,25 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.28.0](https://github.com/mozilla-ai/otari/releases/tag/v0.28.0) - 2026-10-16
+
+
+
+### Bug Fixes
+
+- **messages:** Drop context_management for a model with no Messages API of its own by [@daavoo](https://github.com/daavoo) ([`dfe8949`](https://github.com/mozilla-ai/otari/commit/dfe8949d3f4b76934e4d45d26b4bd8f6b3137472))
+- **providers:** Let an org provider key's default be removed in [#2401](https://github.com/mozilla-ai/otari/pull/2401) by [@hasangzl](https://github.com/hasangzl) ([`1dc0a19`](https://github.com/mozilla-ai/otari/commit/1dc0a191b6c017a84da54d37aae2eef1ca4bad35))
+- **web:** Let organization admins set a member's ceiling on Members & roles in [#2402](https://github.com/mozilla-ai/otari/pull/2402) by [@hasangzl](https://github.com/hasangzl) ([`e55585e`](https://github.com/mozilla-ai/otari/commit/e55585e405a29fff1264a13f3453779e28b7a6e4))
+- **web:** List the caller's models in the model access picker in [#2403](https://github.com/mozilla-ai/otari/pull/2403) by [@hasangzl](https://github.com/hasangzl) ([`425e3d3`](https://github.com/mozilla-ai/otari/commit/425e3d3f8971a994be24d539f32a72e9afbd6083))
+
+
+### Features
+
+- **usage:** Read request tags from an Otari-Tags header in [#2351](https://github.com/mozilla-ai/otari/pull/2351) by [@daavoo](https://github.com/daavoo) ([`5c17f63`](https://github.com/mozilla-ai/otari/commit/5c17f63f335d7a344c26cc5f9232935f1c3d558c))
+- **BREAKING:** **providers:** Serve only declared providers, on the key their declaration names in [#2344](https://github.com/mozilla-ai/otari/pull/2344) by [@daavoo](https://github.com/daavoo) ([`a910770`](https://github.com/mozilla-ai/otari/commit/a910770a18da57c27bec10105500f17e15fef07f))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.27.0...v0.28.0
 ## [0.27.0](https://github.com/mozilla-ai/otari/releases/tag/v0.27.0) - 2026-10-16
 
 
