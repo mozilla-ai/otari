@@ -133,8 +133,9 @@ class SandboxFileBridge:
 
         try:
             file_id = await self.store_output(filename, chunks())
-        except Exception:  # noqa: BLE001 - a file that cannot be stored must not fail the reply
-            logger.exception("Could not store a %d byte provider output", len(data))
+        except Exception as exc:  # noqa: BLE001 - a file that cannot be stored must not fail the reply
+            # The class only: a storage backend's error can carry its paths and settings.
+            logger.warning("Could not store a %d byte provider output: %s", len(data), type(exc).__name__)
             return None
         if file_id is not None:
             self._provider_files_left -= 1
