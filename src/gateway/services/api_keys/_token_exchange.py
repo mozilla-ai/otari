@@ -158,7 +158,5 @@ class FederationTokenExchange:
         token = mint_access_token(
             AccessTokenClaims(rule_id=rule_id, api_key_id=api_key_id, expires_at=expires_at), self._secrets
         )
-        logger.debug(
-            "Exchanged an identity token from %s for rule %s of API key %s", identity.issuer, rule_id, api_key_id
-        )
+        logger.debug("Exchanged an identity token from %s for rule %s", identity.issuer, rule_id)
         return token, int(expires_at - now)
