@@ -866,7 +866,7 @@ def _settles_after_one_await(log: list[str], name: str) -> Callable[..., Awaitab
 async def _read_until_the_client_leaves(
     gen: AsyncIterator[str], leaves: Callable[[list[str]], bool]
 ) -> list[type[BaseException]]:
-    """Read ``gen`` as Starlette does, cancelling its task group once ``leaves`` accepts the events read so far.
+    """Read ``gen`` as Starlette does, canceling its task group once ``leaves`` accepts the events read so far.
 
     Starlette answers a disconnect that way, and the cancellation is redelivered at every await until the task leaves
     the group. ``aclose()`` throws one ``GeneratorExit`` instead, so it cannot show whether settling survives that.
@@ -894,7 +894,7 @@ async def _read_until_the_client_leaves(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("keepalive_interval", [0.0, _KEEPALIVE_INTERVAL], ids=["direct", "keepalive"])
-async def test_a_stream_cancelled_by_a_client_disconnect_settles_once_and_closes_its_source(
+async def test_a_stream_canceled_by_a_client_disconnect_settles_once_and_closes_its_source(
     keepalive_interval: float,
 ) -> None:
     source = _ClosableStream()
