@@ -978,6 +978,35 @@ async def test_a_failed_stream_whose_client_leaves_while_it_settles_still_settle
     assert observed == [asyncio.CancelledError]
 
 
+@pytest.mark.asyncio
+async def test_an_inline_settlement_the_client_leaves_during_still_finishes() -> None:
+    """The client leaves on a keepalive sent while the settlement is pending."""
+    settlement: list[str] = []
+
+    async def on_complete(usage: CompletionUsage) -> None:
+        settlement.append("complete started")
+        await asyncio.sleep(_KEEPALIVE_INTERVAL * 5)
+        settlement.append("complete finished")
+
+    gen = streaming_generator(
+        stream=_items("hello", "usage"),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=on_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        on_incomplete=_settles_after_one_await(settlement, "incomplete"),
+        keepalive_interval_seconds=_KEEPALIVE_INTERVAL,
+        settle_before_done=True,
+    )
+
+    observed = await _read_until_the_client_leaves(gen, lambda received: received[-1] == OPENAI_STREAM_FORMAT.keepalive)
+
+    assert settlement == ["complete started", "complete finished"]
+    assert observed == [asyncio.CancelledError]
+
+
 async def _consume_hanging_up_after(gen: AsyncIterator[str], hang_up: str) -> None:
     """Read ``gen`` as Starlette does, ending the task scope once ``hang_up`` is read.
 
