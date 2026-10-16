@@ -1,4 +1,4 @@
-"""Gemini on the request path: native code execution, native tools and attachments past the inline limit.
+"""Gemini on the request path: native code execution, native tools, attachments past the inline limit and caching.
 
 The pure logic is covered by ``tests/unit/test_code_executor.py`` and
 ``tests/unit/test_content_normalizer.py``. These pin what reaches the provider
@@ -13,9 +13,17 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionMessage,
+    Choice,
+    CompletionUsage,
+    PromptTokensDetails,
+)
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
+from openai.types.responses import Response, ResponseUsage
+from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.services.files import FileService
@@ -253,3 +261,75 @@ def test_an_attachment_that_cannot_be_moved_is_refused_on_messages_too(
     assert response.status_code == 400, response.text
     assert "inline" in response.text
     assert seen == {}
+
+
+def test_gemini_is_served_on_responses(client: TestClient, api_key_header: dict[str, str]) -> None:
+    """any-llm serves Gemini's Responses API through Interactions, so the route does not refuse it."""
+    seen: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        seen.update(kwargs)
+        return Response(
+            id="resp_test",
+            created_at=0.0,
+            model="gemini-2.5-flash",
+            object="response",
+            status=cast(Any, "completed"),
+            output=[],
+            parallel_tool_calls=False,
+            tool_choice="auto",
+            tools=[],
+            usage=ResponseUsage(
+                input_tokens=5,
+                input_tokens_details=InputTokensDetails(cached_tokens=0),
+                output_tokens=2,
+                output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
+                total_tokens=7,
+            ),
+        )
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        response = client.post(f"{API_ROOT}/responses", json={"model": _GEMINI, "input": "hi"}, headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    assert str(seen.get("provider") or seen.get("model", "")).startswith("gemini")
+
+
+def test_a_cache_write_on_chat_is_billed_at_the_write_price(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str]
+) -> None:
+    """Gemini's context caches (and Anthropic) report the write on ``prompt_tokens_details``."""
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "gemini:gemini-cache-write",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 0.0,
+            "cache_read_price_per_million": 0.25,
+            "cache_write_price_per_million": 2.0,
+            "effective_at": "2020-01-01T00:00:00Z",
+        },
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+    completion = _chat_response()
+    completion.usage = CompletionUsage(
+        prompt_tokens=3_000_000,
+        completion_tokens=0,
+        total_tokens=3_000_000,
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=0, cache_write_tokens=1_000_000),
+    )
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=completion)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "gemini:gemini-cache-write", "messages": [{"role": "user", "content": "hi"}]},
+            headers=api_key_header,
+        )
+    assert response.status_code == 200, response.text
+
+    logs = client.get(
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/chat/completions"}, headers=master_key_header
+    ).json()
+    # Two million fresh input tokens at 1.0 and one million written at 2.0.
+    assert logs[0]["cost"] == pytest.approx(4.0)
