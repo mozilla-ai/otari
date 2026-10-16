@@ -197,13 +197,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    snapshot = json.loads(args.template.read_text())
+    snapshot = json.loads(args.template.read_text(encoding="utf-8"))
     try:
         if args.publish_readme:
             token = os.environ.get("RAILWAY_API_TOKEN")
             if not token:
                 raise FetchError("--publish-readme needs a Railway API token in RAILWAY_API_TOKEN")
-            publish_readme(snapshot["code"], args.listing.read_text(), token)
+            publish_readme(snapshot["code"], args.listing.read_text(encoding="utf-8"), token)
             print(f"Published {args.listing.name} as the README of the live Railway template {snapshot['code']!r}.")
         live = fetch_template(snapshot["code"])
     except FetchError as exc:
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     problems = diff_config(snapshot, live.get("serializedConfig") or {})
-    readme_diff = diff_readme(args.listing.read_text(), live.get("readme") or "")
+    readme_diff = diff_readme(args.listing.read_text(encoding="utf-8"), live.get("readme") or "")
 
     if not problems and not readme_diff:
         print(f"The live Railway template {snapshot['code']!r} matches template.json and listing.md.")

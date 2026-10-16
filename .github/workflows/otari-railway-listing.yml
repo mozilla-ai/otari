@@ -37,8 +37,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+    # main as it is now, not the triggering commit, so a run that starts late
+    # cannot publish an older listing over a newer one.
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
+        ref: main
         persist-credentials: false
 
     - name: Publish the README and compare with the live template

@@ -94,7 +94,7 @@ def bump(root: Path, version: str) -> str | None:
     """Bump the files under ``root``. Return the previous version, or None when already current."""
     directory = root / RAILWAY_DIR
     paths = {name: directory / name for name in ("template.json", "listing.md", "README.md")}
-    texts = {name: path.read_text() for name, path in paths.items()}
+    texts = {name: path.read_text(encoding="utf-8") for name, path in paths.items()}
 
     new = parse_version(version)
     old = pinned_version(json.loads(texts["template.json"]))
@@ -103,7 +103,7 @@ def bump(root: Path, version: str) -> str | None:
 
     bumped = bump_texts(texts, old, new)
     for name, path in paths.items():
-        path.write_text(bumped[name])
+        path.write_text(bumped[name], encoding="utf-8")
     return old
 
 
