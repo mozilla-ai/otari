@@ -50,7 +50,6 @@ from any_llm.exceptions import AnyLLMError, MissingApiKeyError
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import (
-    AMBIENT_CREDENTIAL_PROVIDERS,
     KEYLESS_SELF_HOSTED_PROVIDERS,
     PROVIDER_TYPE_ALIASES,
     RESERVED_PROVIDER_INSTANCE_NAMES,
@@ -151,6 +150,20 @@ _PROVIDER_NAMES: frozenset[str] = frozenset(
     {provider.value for provider in LLMProvider} | set(PROVIDER_TYPE_ALIASES) | RESERVED_PROVIDER_INSTANCE_NAMES
 )
 
+
+# Providers authenticating from cloud SDK credentials this gateway cannot see:
+# an EC2 instance profile, an SSO session, or an ambient boto3 chain. They are
+# the same category as Vertex AI's application default credentials, which
+# ``docs/configuration.md`` already groups with Bedrock, and an entry naming one
+# with nothing configured is precisely the ambient case. Splitting the
+# category on whether any-llm happens to declare a variable name would be an
+# accident of upstream spelling rather than a difference in kind.
+#
+# Deliberately *not* here: gemini (raises ``MissingApiKeyError`` outright when no
+# key resolves, so it genuinely needs one) and azure/azureopenai (an Entra ID
+# deployment still needs an endpoint from config, so an empty ``kwargs`` means
+# nothing is configured and nothing can serve it anyway).
+AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
 
 # Keys ``get_provider_kwargs`` can return that credential nothing on their own:
 # transport tuning an operator attached to an instance. An instance carrying only

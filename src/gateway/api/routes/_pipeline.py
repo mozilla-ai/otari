@@ -1735,14 +1735,14 @@ async def _funding_unavailable(
     return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
 
 
-async def _missing_credential_refusal(
+async def _provider_not_configured(
     ctx: RequestContext,
     resolved: ResolvedProvider,
     exc: MissingApiKeyError,
     *,
     adapter: FormatAdapter[Any, Any],
 ) -> HTTPException:
-    """Release the reservation, record the refusal, and return the 424 ``exc`` maps to."""
+    """Map the ``MissingApiKeyError`` the declaration check raised to its 424: release, record, respond."""
     missing = MissingCredential.from_error(exc)
     await release_reservation(ctx)
     await log_gateway_rejection(
@@ -1865,7 +1865,7 @@ async def _serve_from_hosted_credential(
         # The port keys its access decision on the organization alone, so a
         # request with no organization (no workspace resolved for it) has
         # nothing to ask about.
-        raise await _missing_credential_refusal(ctx, resolved, missing, adapter=adapter)
+        raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
 
     try:
         credential = await port.resolve_hosted_credential(
@@ -1963,7 +1963,7 @@ async def _serve_from_hosted_credential(
     if credential is None and not lookup.own_name_only:
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
-        raise await _missing_credential_refusal(ctx, resolved, missing, adapter=adapter)
+        raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
 
     try:
         upstream = LLMProvider(credential.response_provider)

@@ -20,9 +20,10 @@ from dataclasses import dataclass, field
 
 from any_llm import AnyLLM, LLMProvider
 
-from gateway.core.config import AMBIENT_CREDENTIAL_PROVIDERS, KEYLESS_SELF_HOSTED_PROVIDERS, GatewayConfig
+from gateway.core.config import KEYLESS_SELF_HOSTED_PROVIDERS, GatewayConfig
 from gateway.log_config import logger
 from gateway.services.pricing import ModelsDevPrice, current_index
+from gateway.services.provider_kwargs import AMBIENT_CREDENTIAL_PROVIDERS
 
 
 @dataclass

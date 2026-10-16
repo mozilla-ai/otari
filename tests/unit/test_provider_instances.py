@@ -14,7 +14,6 @@ from any_llm.exceptions import AnyLLMError, MissingApiKeyError
 
 from gateway.api.routes.pricing import _candidate_model_keys
 from gateway.core.config import (
-    AMBIENT_CREDENTIAL_PROVIDERS,
     KEYLESS_SELF_HOSTED_PROVIDERS,
     GatewayConfig,
     ModelCapabilityConfig,
@@ -26,6 +25,7 @@ from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _KEYLESS_PLACEHOLDER_API_KEY,
+    AMBIENT_CREDENTIAL_PROVIDERS,
     get_provider_kwargs,
     keyless_placeholder_api_key,
     missing_declared_credential,
@@ -208,20 +208,13 @@ def test_bare_keyed_entry_warns(monkeypatch: pytest.MonkeyPatch, caplog: pytest.
     assert "OPENAI_API_KEY" in text
 
 
-def test_bare_keyed_entry_warns_although_its_variable_is_set(
+def test_bare_keyed_entry_with_env_credential_warns_nothing_at_load(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # The entry must name the variable for a call to use it.
+    # Not a load-time warning: the startup prune reports the entry as ignored,
+    # with the api_key line to add (test_entry_naming_no_key_lacks_one_although_the_variable_is_set).
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     config = GatewayConfig(**yaml.safe_load("providers:\n  openai:\n"))
-    text = _validate_capturing_warnings(config, caplog)
-    assert "OPENAI_API_KEY" in text and "api_key" in text
-    assert "sk-from-env" not in text
-
-
-def test_bare_ambient_credential_entry_warns_nothing(caplog: pytest.LogCaptureFixture) -> None:
-    # A bare entry is how a provider authenticating from the cloud role is declared.
-    config = GatewayConfig(**yaml.safe_load("providers:\n  bedrock:\n  sagemaker:\n"))
     assert _validate_capturing_warnings(config, caplog) == ""
 
 
@@ -314,7 +307,7 @@ def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
     assert overriding - declares_nothing == classified, (
         "any-llm's uncredentialed-provider roster changed. Every provider overriding "
         "_verify_and_set_api_key must be classified in config.py "
-        "(KEYLESS_SELF_HOSTED_PROVIDERS), config.py (AMBIENT_CREDENTIAL_PROVIDERS) or here "
+        "(KEYLESS_SELF_HOSTED_PROVIDERS), provider_kwargs.py (AMBIENT_CREDENTIAL_PROVIDERS) or here "
         "(_KEYED_DESPITE_OVERRIDING). Unclassified names are treated as keyed, which is "
         "the direction that hands a working request to a hosted fleet."
     )

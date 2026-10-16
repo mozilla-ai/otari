@@ -200,19 +200,17 @@ def _resolve_batch_provider(
         return impl, get_provider_kwargs(config, impl, instance=provider)
     impl = _parse_provider(provider)
     kwargs = get_provider_kwargs(config, impl, workspace_id=workspace_id)
-    _refuse_undeclared(config, impl.value, impl, kwargs)
+    try:
+        require_declared_credential(config, impl.value, impl, kwargs)
+    except MissingApiKeyError as exc:
+        raise _not_configured(exc) from exc
     return impl, kwargs
 
 
-def _refuse_undeclared(config: GatewayConfig, instance: str, provider: LLMProvider, kwargs: dict[str, Any]) -> None:
-    """Answer the ``MissingApiKeyError`` :func:`require_declared_credential` raises as a 424."""
-    try:
-        require_declared_credential(config, instance, provider, kwargs)
-    except MissingApiKeyError as exc:
-        missing = MissingCredential.from_error(exc)
-        raise HTTPException(
-            status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code)
-        ) from exc
+def _not_configured(exc: MissingApiKeyError) -> HTTPException:
+    """The 424 a ``MissingApiKeyError`` maps to."""
+    missing = MissingCredential.from_error(exc)
+    return HTTPException(status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code))
 
 
 async def _lifecycle_workspace_id(db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None) -> uuid.UUID:
@@ -445,7 +443,10 @@ async def create_batch(
         )
 
     provider_kwargs = resolved.kwargs
-    _refuse_undeclared(config, resolved.instance, provider, provider_kwargs)
+    try:
+        require_declared_credential(config, resolved.instance, provider, provider_kwargs)
+    except MissingApiKeyError as exc:
+        raise _not_configured(exc) from exc
 
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
     # into users.spend, at create time and again when results are accounted.
