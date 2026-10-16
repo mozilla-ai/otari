@@ -143,6 +143,16 @@ def test_messages_tool_results_under_a_trailing_system_message_answer_their_call
     )
 
 
+def test_messages_a_system_message_after_a_server_tool_use_opens_no_turn() -> None:
+    history = [
+        {"role": "user", "content": "x"},
+        {"role": "assistant", "content": [{"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search"}]},
+        _OPERATOR_NOTE,
+    ]
+
+    assert read_turn("messages", history) == TurnFacts(opens_turn=False)
+
+
 def test_chat_trailing_tool_messages_answer_the_assistants_calls() -> None:
     history = [
         {"role": "user", "content": "x"},
