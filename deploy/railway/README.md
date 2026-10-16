@@ -15,7 +15,7 @@ The template stands up two services and a bucket:
 | --- | --- | --- |
 | **otari** | `mzdotai/otari:0.15.0` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health/readiness`, which fails while the database is unreachable. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
-| **otari-files** | Railway bucket | S3-compatible object storage for the bytes behind the Files API: uploads, attachments, and files a sandbox produced. They survive a redeploy and every replica reads the same bucket. Billed per stored GB; see [Files](#files). |
+| **otari-files** | Railway bucket | S3-compatible object storage for the bytes behind the Files API: uploads, attachments, and files a sandbox produced. They survive a redeploy, for the week `OTARI_FILES_RETENTION_HOURS` keeps them, and every replica reads the same bucket. Billed per stored GB; see [Files](#files). |
 
 Otari is a good fit for a one-click deploy: the app keeps no state on its own
 disk, its stateful dependencies are Postgres and the bucket, the image is
@@ -43,6 +43,7 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_FILES_S3_BUCKET` | `${{otari-files.BUCKET}}` | Pre-wired to the bucket's S3 name; leave as-is. |
 | `OTARI_FILES_S3_ENDPOINT_URL` | `${{otari-files.ENDPOINT}}` | Pre-wired to the bucket's S3 endpoint; leave as-is. |
 | `OTARI_FILES_S3_REGION` | `${{otari-files.REGION}}` | Pre-wired to the bucket's region, which Railway reports as `auto`; leave as-is. |
+| `OTARI_FILES_RETENTION_HOURS` | `168` | Pre-set, so a stored file expires after a week and the sweep removes its bytes from the bucket. Delete the variable, or leave it blank, to keep files until you delete them; see [Files](#files). |
 | `AWS_ACCESS_KEY_ID` | `${{otari-files.ACCESS_KEY_ID}}` | Pre-wired to the bucket's access key. Otari's S3 backend takes credentials from boto3's default chain, so they travel under the AWS names; see the Bedrock note under [Files](#files). |
 | `AWS_SECRET_ACCESS_KEY` | `${{otari-files.SECRET_ACCESS_KEY}}` | Pre-wired to the bucket's secret key; leave as-is. |
 | `PORT` | `8000` | Pre-set for Railway's deploy-time healthcheck, which probes the port in `PORT`, not the target port. Otari listens on `OTARI_PORT` (pinned to `8000` in the image) and never reads `PORT`, so keep the two equal. |
@@ -94,9 +95,20 @@ Three things to know:
   own would sign its requests with the bucket's keys, which AWS rejects, so give
   Bedrock its own keys on the Providers page or in `OTARI_CONFIG_YAML`.
 - Railway bills a bucket per stored GB and keeps no backups of it. A deleted
-  bucket stays restorable for 52 hours, after which its objects are gone. The
-  file sweep (`files_retention_hours`, off by default) is how to bound what
-  accumulates.
+  bucket stays restorable for 52 hours, after which its objects are gone.
+  `OTARI_FILES_RETENTION_HOURS` bounds what accumulates: a file in the bucket
+  past that age stops being served, and the sweep (hourly by default,
+  `files_sweep_interval_sec`) then removes its bytes. This covers files a
+  sandbox produced as well as uploads. The template sets a week; the image
+  default keeps a file until it is deleted, and deleting the variable or
+  leaving it blank restores that. A file's expiry is fixed when it is
+  uploaded, so changing the value affects later uploads only. An existing
+  deploy never receives a new template variable, so its bucket keeps growing
+  until someone sets the variable on its otari service by hand. Where a
+  provider's own code execution reads attached files, keep the value well
+  above an hour: a copy never outlives the file's expiry, and the provider
+  needs at least an hour; see
+  [A file the provider's own code execution reads](../../docs/files.md#a-file-the-providers-own-code-execution-reads).
 - To run without the bucket, do it in this order. First set
   `OTARI_FILES_ENABLED=false` on the otari service and let it redeploy. Then
   delete the bucket and the six `otari-files` variables. The order matters:
