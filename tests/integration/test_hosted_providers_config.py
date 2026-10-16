@@ -200,6 +200,23 @@ async def test_a_configured_provider_is_discovered_and_falls_back_to_its_declare
     assert calls[0]["api_key"] == CONFIG_KEY
 
 
+@pytest.mark.asyncio
+async def test_declared_models_do_not_hide_a_credential_the_provider_refuses(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a provider with no listing falls back; a bad key still reads as a failure."""
+
+    async def _refused(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(provider=impl_name, models=[], error="401 invalid api key")
+
+    monkeypatch.setattr(DIAL, _refused)
+    service = _service(async_db, _configured(models=["my-model"]))
+
+    discovery = await (await service.discovery_dials())["openai"]()
+
+    assert (discovery.models, discovery.error) == ([], "401 invalid api key")
+
+
 # --------------------------------------------------------------------------- #
 # Read-only, and the roster
 # --------------------------------------------------------------------------- #

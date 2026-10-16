@@ -487,7 +487,12 @@ class HostedProviderService:
     async def _dial(
         self, provider: str, credential: ResolvedHostedProvider, declared: tuple[str, ...] = ()
     ) -> ProviderDiscovery:
-        """List the provider's models, falling back to ``declared`` where it cannot list them."""
+        """List the provider's models, falling back to ``declared`` where it has no listing to ask.
+
+        Only a provider without a model-listing endpoint falls back, as a
+        configured instance does. Any other failure, a bad key or an
+        unreachable upstream, is reported as it came, so health still says so.
+        """
         discovery = await test_provider_credentials(
             provider,
             api_key=credential.api_key,
@@ -495,7 +500,7 @@ class HostedProviderService:
             client_args=credential.client_args,
             timeout=self.config.model_discovery_timeout_seconds,
         )
-        if declared and (discovery.error is not None or discovery.discovery_unsupported):
+        if declared and discovery.discovery_unsupported:
             models = [Model(id=model, created=0, object="model", owned_by=provider) for model in declared]
             return ProviderDiscovery(provider=provider, models=models)
         return discovery
