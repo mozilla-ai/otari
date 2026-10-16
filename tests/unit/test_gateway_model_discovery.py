@@ -1,6 +1,7 @@
 """Unit tests for the model discovery cache and service."""
 
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -28,6 +29,7 @@ from gateway.services.model_discovery_service import (
     discover_all_models,
     discover_models_with_status,
     discover_provider_models,
+    discovery_sources,
     get_model_cache,
     refresh_discovery_cache,
     run_discovery_refresher,
@@ -1398,6 +1400,22 @@ class TestHostedProviderDiscovery:
         await refresh_discovery_cache(config, hosted=hosted)
 
         assert calls == ["mistral", "mistral"]
+
+    @pytest.mark.asyncio
+    async def test_a_failure_to_read_the_hosted_providers_leaves_the_configured_instances(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = GatewayConfig(providers={"openai": {"api_key": "sk-test"}})
+
+        async def hosted() -> dict[str, DiscoveryDial]:
+            raise RuntimeError("password=hunter2")
+
+        with caplog.at_level(logging.WARNING):
+            sources = await discovery_sources(config, hosted)
+
+        assert sources == {"openai": None}
+        assert "Could not read the hosted providers" in caplog.text
+        assert "hunter2" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_the_catalog_does_not_list_a_hosted_providers_upstream_listing(self) -> None:

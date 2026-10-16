@@ -35,6 +35,7 @@ from any_llm import AnyLLM, LLMProvider, alist_models
 from any_llm.types.model import Model
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import describe_database_error
 from gateway.log_config import logger
 from gateway.services.provider_kwargs import get_provider_kwargs, keyless_placeholder_api_key
 from gateway.services.upstream_redaction import redact_upstream_message
@@ -293,12 +294,22 @@ async def discovery_sources(config: GatewayConfig, hosted: HostedDiscovery | Non
 
     ``None`` in place of a dial means a configured instance, dialed from
     ``config``. A hosted provider an instance of the same name shadows is left
-    out, because the instance serves every request that names it.
+    out, because the instance serves every request that names it. A failure to
+    read the hosted providers leaves the configured instances to answer alone.
     """
     sources: dict[str, DiscoveryDial | None] = dict.fromkeys(_discoverable_instances(config))
-    if hosted is not None:
-        for provider, dial in (await hosted()).items():
-            sources.setdefault(provider, dial)
+    if hosted is None:
+        return sources
+    try:
+        dials = await hosted()
+    except Exception as exc:
+        logger.warning(
+            "Could not read the hosted providers for discovery; listing configured instances only: %s",
+            describe_database_error(exc),
+        )
+        return sources
+    for provider, dial in dials.items():
+        sources.setdefault(provider, dial)
     return sources
 
 
