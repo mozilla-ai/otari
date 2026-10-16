@@ -33734,6 +33734,56 @@
       }
     },
     "/api/v1/organizations/me/provider-keys/{key_id}/default": {
+      "delete": {
+        "description": "Stop a key being the organization's default for its provider. Organization owners and admins only.\n\nIdempotent: a key that is not the default is returned unchanged. With no default, a request\nthat names no instance gets the provider's earliest-created key the workspace has not disabled.",
+        "operationId": "provider-keys-unset_org_provider_key_default",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Unset Org Provider Key Default",
+        "tags": [
+          "provider-keys"
+        ]
+      },
       "post": {
         "description": "Make a key the organization's default for its provider. Organization owners and admins only.",
         "operationId": "provider-keys-set_org_provider_key_default",

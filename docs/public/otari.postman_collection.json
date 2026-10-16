@@ -6326,6 +6326,36 @@
           }
         },
         {
+          "name": "Unset Org Provider Key Default",
+          "request": {
+            "description": "Stop a key being the organization's default for its provider. Organization owners and admins only.\n\nIdempotent: a key that is not the default is returned unchanged. With no default, a request\nthat names no instance gets the provider's earliest-created key the workspace has not disabled.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "default"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/default",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "List Org Provider Key Models",
           "request": {
             "description": "List the models offered on one key, each with the rate it currently serves at.\n\nOrganization owners and admins only. ``count`` is the total rather than the\npage length, so a client knows whether another page is owed.",

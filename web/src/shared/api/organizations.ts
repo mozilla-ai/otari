@@ -741,6 +741,18 @@ export function useSetOrgProviderKeyDefault() {
   })
 }
 
+export function useUnsetOrgProviderKeyDefault() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (keyId: string) =>
+      apiFetch<OrgProviderKey>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/default`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+  })
+}
+
 // Permanent, and the API accepts it only for a key that is already archived.
 export function useDeleteOrgProviderKey() {
   const queryClient = useQueryClient()

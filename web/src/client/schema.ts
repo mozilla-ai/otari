@@ -3339,7 +3339,14 @@ export interface paths {
          * @description Make a key the organization's default for its provider. Organization owners and admins only.
          */
         post: operations["provider-keys-set_org_provider_key_default"];
-        delete?: never;
+        /**
+         * Unset Org Provider Key Default
+         * @description Stop a key being the organization's default for its provider. Organization owners and admins only.
+         *
+         *     Idempotent: a key that is not the default is returned unchanged. With no default, a request
+         *     that names no instance gets the provider's earliest-created key the workspace has not disabled.
+         */
+        delete: operations["provider-keys-unset_org_provider_key_default"];
         options?: never;
         head?: never;
         patch?: never;
@@ -23205,6 +23212,37 @@ export interface operations {
         };
     };
     "provider-keys-set_org_provider_key_default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-unset_org_provider_key_default": {
         parameters: {
             query?: never;
             header?: never;

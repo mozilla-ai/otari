@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
+import type { IconType } from "react-icons"
 import {
   FiArchive,
   FiEdit2,
@@ -56,6 +57,7 @@ import {
   useProviderKeyEncryption,
   useRestoreOrgProviderKey,
   useSetOrgProviderKeyDefault,
+  useUnsetOrgProviderKeyDefault,
   useUpdateOrgProviderKey,
 } from "@/shared/api/organizations"
 import { useOrganizationPricing } from "@/shared/api/pricing"
@@ -64,6 +66,12 @@ import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
+
+// The star filled is the key that is the default, so the glyph shows the state
+// its press toggles.
+const FilledStar: IconType = (props) => (
+  <FiStar {...props} fill="currentColor" />
+)
 
 // Every period one model can carry, which is what the editor reads. Generous
 // rather than tuned: the read is narrowed to a single model, so this bounds the
@@ -323,6 +331,7 @@ export function OrganizationProvidersPage() {
   const restore = useRestoreOrgProviderKey()
   const remove = useDeleteOrgProviderKey()
   const setDefault = useSetOrgProviderKeyDefault()
+  const unsetDefault = useUnsetOrgProviderKeyDefault()
 
   const [adding, setAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
@@ -515,10 +524,18 @@ export function OrganizationProvidersPage() {
                 }
               />
               <RowAction
-                icon={FiStar}
-                label="Make default"
-                isDisabled={row.is_org_default || setDefault.isPending}
-                onPress={() => setDefault.mutate(row.id)}
+                icon={row.is_org_default ? FilledStar : FiStar}
+                label={
+                  row.is_org_default
+                    ? "Default provider, click to remove"
+                    : "Make default provider"
+                }
+                isDisabled={setDefault.isPending || unsetDefault.isPending}
+                onPress={() =>
+                  (row.is_org_default ? unsetDefault : setDefault).mutate(
+                    row.id,
+                  )
+                }
               />
               <RowAction
                 icon={FiEdit2}
@@ -583,7 +600,8 @@ export function OrganizationProvidersPage() {
           overrides.error ??
           archive.error ??
           restore.error ??
-          setDefault.error
+          setDefault.error ??
+          unsetDefault.error
         }
       />
 

@@ -166,6 +166,20 @@ async def set_org_provider_key_default(
     return await service.set_org_default_for_user(user=current_identity, key_id=key_id)
 
 
+@org_router.delete("/{key_id}/default")
+async def unset_org_provider_key_default(
+    service: OrgProviderKeyServiceDep,
+    current_identity: CurrentIdentity,
+    key_id: uuid.UUID,
+) -> OrgProviderKeyPublic:
+    """Stop a key being the organization's default for its provider. Organization owners and admins only.
+
+    Idempotent: a key that is not the default is returned unchanged. With no default, a request
+    that names no instance gets the provider's earliest-created key the workspace has not disabled.
+    """
+    return await service.unset_org_default_for_user(user=current_identity, key_id=key_id)
+
+
 # ==============================================================================
 # Offered models
 # ==============================================================================

@@ -459,6 +459,7 @@ DELETE /api/v1/organizations/me/provider-keys/{key_id}                        # 
 POST /api/v1/organizations/me/provider-keys/{key_id}/archive                  # dashboard-only
 POST /api/v1/organizations/me/provider-keys/{key_id}/restore                  # dashboard-only
 POST /api/v1/organizations/me/provider-keys/{key_id}/default                  # dashboard-only
+DELETE /api/v1/organizations/me/provider-keys/{key_id}/default                # dashboard-only
 # The models offered on one of those keys, their rates and their serving
 # switches (otari#643 follow-up). Same surface, same reason: an SDK caller sends
 # a model and a key, and which of an organization's adopted models are served
