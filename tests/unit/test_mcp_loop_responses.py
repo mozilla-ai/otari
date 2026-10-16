@@ -1011,20 +1011,19 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["incomplete", "failed"])
-async def test_stream_continues_past_a_round_that_ended_unfinished_like_a_completed_one(
+async def test_stream_runs_no_gateway_call_from_a_round_that_ended_unfinished(
     monkeypatch: pytest.MonkeyPatch, status: str
 ) -> None:
-    """A round that asked only for the gateway's tool and ended unfinished is not shown its terminal event.
+    """A round that stopped partway through the gateway's call ends the stream with its own terminal event.
 
-    The client sees one terminal event, the last one, and its usage counts the
-    earlier round's output tokens as a completed round's would be.
+    The call's arguments may be cut, so the loop runs nothing and does not ask for
+    another round, and the client is handed the unfinished response.
     """
-    fc = _function_call("call_1", "fetch_url", '{"u": "x"}')
     iter_streams = iter(
         [
             _async_iter(
-                _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _output_item_added(0, _function_call("call_1", "fetch_url", "")),
+                _function_call_args_delta(0, "fc_item_1", '{"u": "ht'),
                 _response_terminal(status, output_tokens=5),
             ),
             _async_iter(_text_delta("msg_1", 0, "done"), _response_terminal("completed", output_tokens=3)),
@@ -1035,21 +1034,54 @@ async def test_stream_continues_past_a_round_that_ended_unfinished_like_a_comple
         return next(iter_streams)
 
     monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
 
     events = [
         event
         async for event in responses_tool_loop_stream(
             completion_kwargs={"model": "fake", "input_data": "go"},
-            pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+            pool=cast(Any, pool),
             max_iterations=5,
         )
     ]
 
-    assert [e.type for e in events if e.type.removeprefix("response.") in _TERMINAL_EVENT_TYPES] == [
-        "response.completed"
+    assert [e.type for e in events] == [f"response.{status}"]
+    assert cast(Any, events[-1]).response.usage.output_tokens == 5
+    assert pool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_stream_runs_no_gateway_call_from_a_round_cut_before_its_terminal_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A round the provider cut partway through the gateway's call ends the stream without a terminal event."""
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, _function_call("call_1", "fetch_url", "")),
+                _function_call_args_delta(0, "fc_item_1", '{"u": "ht'),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "done"), _response_terminal("completed", output_tokens=3)),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
     ]
-    assert events[-1].type == "response.completed"
-    assert cast(Any, events[-1]).response.usage.output_tokens == 8
+
+    assert events == []
+    assert pool.calls == []
 
 
 @pytest.mark.asyncio
@@ -1089,10 +1121,10 @@ async def test_stream_counts_earlier_rounds_output_on_a_final_round_that_ended_u
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["incomplete", "failed"])
-async def test_stream_mixed_batch_that_ended_unfinished_announces_the_gateway_search_before_its_terminal(
+async def test_stream_mixed_batch_that_ended_unfinished_runs_no_gateway_call(
     monkeypatch: pytest.MonkeyPatch, status: str
 ) -> None:
-    """The gateway's search is run and announced on the way out, and the round's terminal event still comes last."""
+    """The caller is handed its own call and the unfinished response; the gateway's search does not run."""
     search = _function_call("call_search", "web_search", '{"query": "otari"}')
     foreign = _function_call("call_foreign", "user_tool", "{}")
     iter_streams = iter(
@@ -1123,11 +1155,9 @@ async def test_stream_mixed_batch_that_ended_unfinished_announces_the_gateway_se
 
     assert [(e.type, getattr(getattr(e, "item", None), "type", None)) for e in events] == [
         ("response.output_item.added", "function_call"),
-        ("response.output_item.added", "web_search_call"),
-        ("response.output_item.done", "web_search_call"),
         (f"response.{status}", None),
     ]
-    assert pool.calls == [("web_search", {"query": "otari"})]
+    assert pool.calls == []
 
 
 @pytest.mark.asyncio
