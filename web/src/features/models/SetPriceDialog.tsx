@@ -14,9 +14,9 @@ import {
   unitRateLabel,
 } from "@/features/models/pricingUnit"
 
-// Per-1M rates entered by an operator to reprice imported usage rows. Input and
-// output are required; the cache rates are optional (blank folds those tokens
-// into the fresh-input charge, matching how unset cache pricing behaves).
+// Per-1M rates an operator enters to price a model. Input and output are
+// required; the cache rates are optional (blank folds those tokens into the
+// fresh-input charge, matching how unset cache pricing behaves).
 // `unit` is set only by a dialog that offers the choice, and a rate for
 // requests or images arrives already converted to its per-million value.
 export interface ManualRates {
