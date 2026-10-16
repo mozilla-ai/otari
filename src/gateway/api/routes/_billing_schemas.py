@@ -5,8 +5,8 @@ and until now the response models described them only as "some object" and "a
 list of some objects". That is what the wire contract said, so every generated
 client (the dashboard's, and every SDK core, which come from the same spec) had
 to hand back an untyped blob and let the caller guess. The shapes are not
-actually open: six producers write charge lines and all six write one of the two
-below.
+actually open: six producers write charge lines and all six write one of the
+shapes below.
 
 Each field pairs its precise shapes with a permissive fallback arm, and that
 fallback is load-bearing rather than defensive clutter. These models validate
@@ -95,7 +95,8 @@ class ToolMeter(TypedDict, total=False):
     billed: int
     #: Failed calls, which are counted but never charged.
     errors: int
-    #: USD per call at the time of the request.
+    #: USD per call at the time of the request: the tool's cost over its billed
+    #: calls, so billed calls times this rate is its spend across every label.
     unit_rate: float | None
 
 

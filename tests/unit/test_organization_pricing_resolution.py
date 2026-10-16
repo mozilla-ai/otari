@@ -866,6 +866,23 @@ def test_a_label_with_no_row_still_bills_what_its_calls_reported() -> None:
     _run(scenario)
 
 
+def test_records_of_one_label_name_each_unpriced_first_rate_key() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        charges = await price_tool_calls(
+            session,
+            [_calls(label=_EXA, rate_keys=("a:x",), calls=2), _calls(label=_EXA, rate_keys=("b:x",))],
+            as_of=_NOW,
+        )
+
+        assert charges.unpriced == [
+            UnpricedToolLabel("web_search", _EXA, "a:x", 2),
+            UnpricedToolLabel("web_search", _EXA, "b:x", 1),
+        ]
+        assert [line["units"] for line in charges.lines] == [3]
+
+    _run(scenario)
+
+
 def test_an_organization_key_label_is_priced_under_the_fallback_row_and_never_looked_up() -> None:
     async def scenario(session: AsyncSession) -> None:
         await _tool_price(session, "org:tavily", 90_000.0)

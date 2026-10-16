@@ -4776,7 +4776,7 @@ async def _apply_tool_charges(
             as_of=usage_log.timestamp,
             organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
         )
-    except SQLAlchemyError as exc:
+    except DATABASE_ERRORS as exc:
         logger.error(
             "Failed to price gateway tool calls; counts recorded without cost: %s", describe_database_error(exc)
         )

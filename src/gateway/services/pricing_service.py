@@ -882,7 +882,7 @@ async def price_tool_calls(
     # keys still settle as one line.
     by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
     tool_costs: dict[str, Decimal] = {}
-    unpriced: dict[tuple[str, str], UnpricedToolLabel] = {}
+    unpriced: dict[tuple[str, str, str], UnpricedToolLabel] = {}
     for entry, label, keys in priced:
         rate = _first_tool_rate(keys, rates)
         cost = (
@@ -894,8 +894,8 @@ async def price_tool_calls(
         by_label[(entry.tool, label)] = (units + entry.calls, label_cost + cost)
         tool_costs[entry.tool] = tool_costs.get(entry.tool, Decimal(0)) + cost
         if rate is None and keys and entry.unreported_calls:
-            previous = unpriced.get((entry.tool, label))
-            unpriced[(entry.tool, label)] = UnpricedToolLabel(
+            previous = unpriced.get((entry.tool, label, keys[0]))
+            unpriced[(entry.tool, label, keys[0])] = UnpricedToolLabel(
                 entry.tool, label, keys[0], entry.unreported_calls + (previous.calls if previous else 0)
             )
 

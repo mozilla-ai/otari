@@ -374,6 +374,30 @@ async def test_a_reported_zero_settles_at_zero_beside_an_unreported_call_at_the_
 
 
 @pytest.mark.asyncio
+async def test_a_pricing_lookup_that_times_out_keeps_the_counts_on_the_row(async_db: AsyncSession) -> None:
+    """A connect timeout raises a bare ``TimeoutError``; settlement still writes the row with its tool counts."""
+    tally = ToolUsageTally()
+    tally.record_result("web_search", "results")
+    writer = _Writer()
+
+    with patch("gateway.api.routes._pipeline.price_tool_calls", new=AsyncMock(side_effect=TimeoutError)):
+        await log_usage(
+            db=async_db,
+            log_writer=writer,
+            api_key_id=None,
+            model=MODEL_NAME,
+            provider=None,
+            endpoint="/v1/chat/completions",
+            usage_override=CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+            tool_tally=tally,
+        )
+
+    [row] = writer.logs
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE] == {"web_search": {"billed": 1, "errors": 0}}
+    assert not any(entry["meter"] == "web_search_calls" for entry in (row.pricing_breakdown or []))
+
+
+@pytest.mark.asyncio
 async def test_fetch_call_is_metered_priced_and_spent(
     client: TestClient,
     api_key_header: dict[str, str],
