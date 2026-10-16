@@ -26,6 +26,10 @@ SESSION_TAG = "session_id"
 # a session. Other harnesses are added as their requests are confirmed.
 HARNESS_SESSION_HEADERS: Mapping[str, str] = {"x-claude-code-session-id": "claude-code"}
 
+# Headers a harness sends only on a subagent's requests. A subagent shares its parent's
+# session id and works inside the parent's turn, so the task it was handed is no new prompt.
+HARNESS_SUBAGENT_HEADERS = frozenset({"x-claude-code-agent-id"})
+
 # ``User-Agent`` product names a harness is known by, where it differs from the name shown.
 _HARNESS_PRODUCTS: Mapping[str, str] = {"claude-cli": "claude-code"}
 
@@ -68,6 +72,11 @@ def resolve_session(
         if (key := _clean(headers.get(header))) is not None:
             return SessionRef(source="harness", key=key)
     return None
+
+
+def is_subagent(headers: Mapping[str, str]) -> bool:
+    """Whether the request's harness marked it as one of a subagent's."""
+    return any(_clean(headers.get(header)) is not None for header in HARNESS_SUBAGENT_HEADERS)
 
 
 def harness_of(headers: Mapping[str, str]) -> str | None:
