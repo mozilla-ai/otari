@@ -1,0 +1,44 @@
+name: Otari Railway Listing
+
+# Publishes deploy/railway/listing.md as the live Railway template's README
+# whenever it changes on main, then runs the drift check against the result
+# (scripts/check_railway_template.py --publish-readme). The README is the one
+# part of the template Railway's public API writes, through templatePublish;
+# the script reads the listing's description, category and icon back first and
+# sends them unchanged, since the mutation replaces them all.
+#
+# The check that follows still fails while the live image tag or variables
+# disagree with template.json, which only the template editor can fix.
+#
+# RAILWAY_API_TOKEN is a Railway account or workspace token with access to the
+# mozilla-ai workspace that owns the template. Standard library only, so no
+# environment is installed.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deploy/railway/listing.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: otari-railway-listing
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish listing.md to the live template
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Publish the README and compare with the live template
+      env:
+        RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      run: python3 scripts/check_railway_template.py --publish-readme

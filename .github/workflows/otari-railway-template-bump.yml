@@ -1,0 +1,133 @@
+name: Otari Railway Template Bump
+
+# Opens a PR that moves deploy/railway to the release just published: the
+# image tag in template.json, listing.md and the README, plus the README's
+# example versions (scripts/bump_railway_template.py). A pre-release opens
+# nothing, and neither does a release not above the pinned version, such as a
+# patch to an older minor line.
+#
+# The PR cannot finish the job. Railway's public API has no mutation that
+# writes a template's services or variables, so the live template's image tag
+# is changed by hand in the template editor; the PR body lists the step, and
+# the railway-template check (otari-railway-template.yml) fails on the PR until
+# it is done. The live README follows on merge, through
+# otari-railway-listing.yml.
+#
+# Opens the PR as the otari-bot GitHub App, like otari-release.yml: a PR opened
+# with the default GITHUB_TOKEN starts no workflows, so the title, template and
+# railway-template checks would never run on it.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to pin the template to (e.g. v0.29.0); its GitHub Release must exist"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: otari-railway-template-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Open the template bump PR
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve the release tag
+        id: ver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          if [[ ! $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease,isDraft --jq '.isPrerelease or .isDraft')" != "false" ]; then
+            echo "::error::$TAG is not a published release"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      # Standard library only, so the runner's Python needs no project install.
+      - name: Bump the image tag
+        id: bump
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: python3 scripts/bump_railway_template.py "$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Write the PR body
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          PREVIOUS: ${{ steps.bump.outputs.previous }}
+        run: |
+          cat > /tmp/pr-body.md <<EOF
+          Moves the Railway template snapshot in \`deploy/railway/\` from \`mzdotai/otari:$PREVIOUS\` to \`mzdotai/otari:$VERSION\`, following the [v$VERSION release](https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION). Opened by \`.github/workflows/otari-railway-template-bump.yml\`.
+
+          This PR does not change the live template. Railway's public API has no mutation that writes a template's services or variables, so the image tag is changed by hand, and the \`railway-template\` check fails until it is. Before merging:
+
+          1. Wait for the **Publish Otari Docker Image** run for \`v$VERSION\` to push \`mzdotai/otari:$VERSION\`.
+          2. Read the [release notes](https://github.com/$GITHUB_REPOSITORY/releases) from v$PREVIOUS to v$VERSION. A variable a release now requires goes on the live template and into \`template.json\` on this branch, as does a changed variable description.
+          3. In the Railway template editor on the mozilla-ai account, open the **otari** service and set **Source image** to \`mzdotai/otari:$VERSION\`. Save the template.
+          4. Deploy the template once to a throwaway project; check \`/api/v1/health/readiness\` and one \`/api/v1/chat/completions\` request.
+          5. Re-run the \`railway-template\` check. The image line should be gone; the README diff stays until merge, when \`otari-railway-listing.yml\` publishes \`listing.md\` to the live template.
+
+          ## PR Type
+
+          - [x] Infrastructure / CI
+
+          ## Relevant issues
+
+          ## Checklist
+
+          - [x] I understand the code I am submitting.
+          - [x] Documentation was updated where necessary.
+
+          ## AI Usage
+
+          - [x] No AI was used.
+
+          **AI Model/Tool used:** none, this PR is opened by a release workflow.
+          EOF
+
+      - name: Generate App token
+        if: steps.bump.outputs.changed == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open the bump PR
+        if: steps.bump.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          # Committed through the API as the App, so the commit is attributed
+          # to otari-bot[bot] whichever account dispatched the run.
+          sign-commits: true
+          base: main
+          branch: chore/railway-template-${{ steps.ver.outputs.version }}
+          delete-branch: true
+          add-paths: deploy/railway
+          commit-message: "chore(railway): pin the template to otari ${{ steps.ver.outputs.version }}"
+          title: "chore(railway): pin the template to otari ${{ steps.ver.outputs.version }}"
+          body-path: /tmp/pr-body.md
