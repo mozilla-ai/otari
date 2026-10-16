@@ -418,9 +418,11 @@ async def streaming_generator(
         # cancels every await made inside it, these included.
         with anyio.CancelScope(shield=True):
             if settlement_task is not None and not settlement_task.done():
-                settlement_task.cancel()
-                with suppress(BaseException):
+                try:
                     await settlement_task
+                except Exception as log_err:
+                    # codeql[py/clear-text-logging-sensitive-data]
+                    logger.error("Failed to log streaming usage for %s: %s", label, log_err)
             if not settled and on_incomplete is not None:
                 try:
                     await on_incomplete()
