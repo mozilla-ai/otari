@@ -39,6 +39,7 @@ standalone deployment is not a hosted multi-tenant one:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -187,6 +188,28 @@ class WorkspaceMcpServerHealth(BaseModel):
     missing_allowed_tools: list[str] = Field(
         default_factory=list, description="Allow-listed names the server did not offer"
     )
+    tools: list[str] = Field(
+        default_factory=list,
+        description=f"Every tool name the server offers, allowed or not, up to {MAX_ALLOWED_TOOLS}; empty on a failure",
+    )
+
+
+class WorkspaceMcpServerCheckRequest(BaseModel):
+    """Connection details to check without storing them, for a form to test before it saves.
+
+    ``server_id`` names a stored server whose token stands in when
+    ``authorization_token`` is omitted, so an edit form can test a new URL with
+    a token it was never shown. ``""`` checks with no token at all.
+    """
+
+    url: str = Field(min_length=1, max_length=2048, description="Streamable HTTP MCP endpoint")
+    authorization_token: str | None = Field(
+        default=None, max_length=8192, description="Bearer token; omit to use the stored server's, if any"
+    )
+    allowed_tools: list[Annotated[str, Field(max_length=MAX_TOOL_NAME_LENGTH)]] | None = Field(
+        default=None, max_length=MAX_ALLOWED_TOOLS, description="The allow-list to report the catalog against"
+    )
+    server_id: uuid.UUID | None = Field(default=None, description="A stored server whose token to use")
 
 
 class WorkspaceMcpServerPublic(BaseModel):
@@ -263,6 +286,23 @@ def _encrypted(token: str) -> str:
         raise SecretBoxUnavailableTenancyError("MCP server authorization tokens") from None
 
 
+def _stored_token(server: WorkspaceMcpServer) -> str | None:
+    """The row's token in the clear.
+
+    Raises:
+        SecretDecryptionError: the stored token will not decrypt.
+        SecretBoxUnavailableError: ``OTARI_SECRET_KEY`` is not configured.
+    """
+    return decrypt_secret(server.encrypted_token) if server.encrypted_token else None
+
+
+def _connect(url: str, token: str | None, *, server_id: uuid.UUID | None = None) -> Awaitable[ServerCheck]:
+    """The connection check itself, looked up at call time so a test can stand in for the network."""
+    return mcp_stateless.check_stored_server(
+        ResolvedMcpServer(id=server_id or uuid.uuid4(), name="check", url=url, authorization_token=token)
+    )
+
+
 async def _check(server: WorkspaceMcpServer) -> ServerCheck:
     """Run the connection check on a stored row, settling its URL and token first.
 
@@ -273,40 +313,29 @@ async def _check(server: WorkspaceMcpServer) -> ServerCheck:
         McpCapacityUnavailable: no check slot was free, so nothing was checked.
     """
     try:
-        token = decrypt_secret(server.encrypted_token) if server.encrypted_token else None
+        token = _stored_token(server)
     except (SecretDecryptionError, SecretBoxUnavailableError):
         return ServerCheck(tool_names=[], failure=CheckFailure.CREDENTIALS_UNAVAILABLE)
     try:
         await validate_mcp_url(server.url, has_authorization_token=token is not None)
     except UnsafeURLError:
         return ServerCheck(tool_names=[], failure=CheckFailure.UNSAFE_URL)
-    return await mcp_stateless.check_stored_server(
-        ResolvedMcpServer(
-            id=server.id,
-            name=server.name,
-            url=server.url,
-            authorization_token=token,
-            enabled=server.enabled,
-            purpose_hint=server.purpose_hint,
-            allowed_tools=server.allowed_tools,
-        )
-    )
+    return await _connect(server.url, token, server_id=server.id)
 
 
-def _health(server: WorkspaceMcpServer, check: ServerCheck) -> WorkspaceMcpServerHealth:
-    offered = set(check.tool_names)
-    missing = (
-        []
-        if check.failure is not None or server.allowed_tools is None
-        else [name for name in dict.fromkeys(server.allowed_tools) if name not in offered]
-    )
+def _health(allowed_tools: list[str] | None, check: ServerCheck) -> WorkspaceMcpServerHealth:
+    """Read a check against an allow-list. A falsy allow-list admits every tool, as the tool loop reads it."""
+    offered = list(dict.fromkeys(name for name in check.tool_names if len(name) <= MAX_TOOL_NAME_LENGTH))
+    failed = check.failure is not None
+    allowed = list(dict.fromkeys(allowed_tools)) if allowed_tools else None
     return WorkspaceMcpServerHealth(
-        status="healthy" if check.failure is None else "failing",
+        status="failing" if failed else "healthy",
         checked_at=datetime.now(UTC).isoformat(),
         error=check.failure,
         http_status=check.http_status,
-        tool_count=len(offered) if check.failure is None else None,
-        missing_allowed_tools=missing,
+        tool_count=None if failed else len(offered) if allowed is None else len(set(allowed) & set(offered)),
+        missing_allowed_tools=[] if failed or allowed is None else [name for name in allowed if name not in offered],
+        tools=offered[:MAX_ALLOWED_TOOLS],
     )
 
 
@@ -475,7 +504,7 @@ class WorkspaceMcpServerService:
             await self.db.commit()
             logger.info("MCP server check dropped server_id=%s reason=edited", server.id)
             return True
-        server.health = _health(server, check).model_dump(mode="json")
+        server.health = _health(server.allowed_tools, check).model_dump(mode="json")
         await self.db.commit()
         await self.db.refresh(server)
         logger.info("MCP server checked server_id=%s outcome=%s", server.id, check.failure or "ok")
@@ -645,6 +674,35 @@ class WorkspaceMcpServerService:
             await self.db.refresh(server)
         return WorkspaceMcpServerPublic.from_model(server)
 
+    async def check_connection(
+        self, *, user: User, workspace_id: uuid.UUID, request: WorkspaceMcpServerCheckRequest
+    ) -> WorkspaceMcpServerHealth:
+        """Check connection details without storing anything, for a form to test before it saves.
+
+        An unsafe URL is refused with the same 400 a create gets, since this is
+        the form that would go on to store it.
+        """
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        token: str | None = None
+        if request.authorization_token is not None:
+            token = request.authorization_token or None
+        elif request.server_id is not None:
+            server = await self._get_or_404(resolved_workspace_id, request.server_id)
+            try:
+                token = _stored_token(server)
+            except (SecretDecryptionError, SecretBoxUnavailableError):
+                check = ServerCheck(tool_names=[], failure=CheckFailure.CREDENTIALS_UNAVAILABLE)
+                return _health(request.allowed_tools, check)
+        await _validate_url(request.url, has_token=token is not None)
+        # Ended before waiting on a remote server, as `_record_check` does.
+        await self.db.commit()
+        try:
+            check = await _connect(request.url, token, server_id=request.server_id)
+        except McpCapacityUnavailable:
+            raise WorkspaceMcpServerCheckBusyError from None
+        logger.info("MCP server connection tested workspace_id=%s outcome=%s", workspace_id, check.failure or "ok")
+        return _health(request.allowed_tools, check)
+
     async def check_server(
         self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID
     ) -> WorkspaceMcpServerPublic:
@@ -669,6 +727,7 @@ class WorkspaceMcpServerService:
 
 __all__ = [
     "MAX_MCP_SERVERS_PER_WORKSPACE",
+    "WorkspaceMcpServerCheckRequest",
     "WorkspaceMcpServerCreate",
     "WorkspaceMcpServerHealth",
     "WorkspaceMcpServerPublic",

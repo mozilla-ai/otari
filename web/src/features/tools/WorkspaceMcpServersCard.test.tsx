@@ -3,7 +3,11 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationContext, WorkspaceMcpServer } from "@/client"
+import type {
+  OrganizationContext,
+  WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
+} from "@/client"
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import {
@@ -24,6 +28,7 @@ function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
   servers = [] as WorkspaceMcpServer[],
   written,
+  tested,
   writeStatus,
   writeDetail,
   role = "owner",
@@ -32,6 +37,8 @@ function mockApi({
   servers?: WorkspaceMcpServer[]
   // What a successful write answers with, when it is not the first listed row.
   written?: WorkspaceMcpServer
+  // What Test connection answers with.
+  tested?: WorkspaceMcpServerHealth
   writeStatus?: number
   writeDetail?: string
   // The caller's organization role; a member-view test lowers it.
@@ -58,6 +65,9 @@ function mockApi({
       }
       if (method === "GET") {
         return Response.json({ data: servers, count: servers.length })
+      }
+      if (url.endsWith("/mcp-servers/check")) {
+        return Response.json(tested ?? health())
       }
       return Response.json(written ?? servers[0] ?? workspaceMcpServer())
     }
@@ -501,6 +511,88 @@ describe("WorkspaceMcpServersCard", () => {
       within(detail).getByText(/Check the authorization token/),
     ).toBeVisible()
     expect(within(detail).getByText(/^Checked /)).toBeVisible()
+    expect(within(detail).getByText("list_issues, get_issue")).toBeVisible()
+  })
+
+  it("tests the typed connection without saving, and picks tools from what it lists", async () => {
+    const calls = mockApi({
+      tested: health({ tools: ["list_issues", "get_issue", "close_issue"] }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
+    )
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    expect(await screen.findByText(/The server offers 3 tools/)).toBeVisible()
+    const post = writes(calls).find((call) => call.url.endsWith("/check"))
+    expect(post?.body).toEqual({
+      url: "https://mcp.example.com/github",
+      allowed_tools: null,
+    })
+    expect(
+      writes(calls).filter((call) => !call.url.endsWith("/check")),
+    ).toEqual([])
+
+    await user.click(screen.getByRole("button", { name: "get_issue" }))
+    await user.click(screen.getByRole("button", { name: "close_issue" }))
+    expect(screen.getByLabelText("Allowed tools")).toHaveValue(
+      "get_issue, close_issue",
+    )
+    expect(screen.getByRole("button", { name: "get_issue" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await user.click(screen.getByRole("button", { name: "get_issue" }))
+    expect(screen.getByLabelText("Allowed tools")).toHaveValue("close_issue")
+  })
+
+  it("says why a test failed", async () => {
+    mockApi({
+      tested: health({
+        status: "failing",
+        error: "not_found",
+        http_status: 404,
+        tool_count: null,
+        tools: [],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
+    )
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    expect(await screen.findByText(/The test failed\./)).toBeVisible()
+    expect(screen.getByText(/HTTP 404/)).toBeVisible()
+  })
+
+  it("tests an edit with the stored token unless a new one is typed", async () => {
+    const servers = [workspaceMcpServer({ has_token: true })]
+    const calls = mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    await waitFor(() =>
+      expect(
+        writes(calls).find((call) => call.url.endsWith("/check"))?.body,
+      ).toEqual({
+        url: servers[0].url,
+        allowed_tools: null,
+        server_id: servers[0].id,
+      }),
+    )
   })
 
   it("keeps the add form open on the stored server when its check fails", async () => {

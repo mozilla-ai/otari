@@ -11,8 +11,13 @@ describe("mcpServerHealth", () => {
   it("counts the tools a passing check found", () => {
     expect(healthLabel(health({ tool_count: 1 }))).toBe("1 TOOL")
     expect(healthLabel(health({ tool_count: 12 }))).toBe("12 TOOLS")
-    expect(healthDetail(health({ tool_count: 12 }))).toBe(
-      "Connected and listed 12 tools.",
+    expect(healthDetail(health({ tool_count: 2, tools: ["a", "b"] }))).toBe(
+      "Connected. The server offers 2 tools.",
+    )
+    expect(
+      healthDetail(health({ tool_count: 1, tools: ["a", "b", "c"] })),
+    ).toBe(
+      "Connected. The allow-list admits 1 of the 3 tools the server offers.",
     )
     expect(healthNeedsAttention(health())).toBe(false)
   })

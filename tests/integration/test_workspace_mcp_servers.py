@@ -57,6 +57,7 @@ from gateway.services.secret_box import decrypt_secret, generate_secret_key
 from gateway.services.tenancy.workspace_mcp_server_service import (
     MAX_ALLOWED_TOOLS,
     MAX_MCP_SERVERS_PER_WORKSPACE,
+    WorkspaceMcpServerCheckRequest,
     WorkspaceMcpServerCreate,
     WorkspaceMcpServerService,
     WorkspaceMcpServerUpdate,
@@ -1125,6 +1126,7 @@ async def test_a_stored_server_is_checked_and_its_health_recorded(async_db: Asyn
     assert created.health.error is None
     assert created.health.tool_count == 2
     assert created.health.missing_allowed_tools == ["close_issue"]
+    assert created.health.tools == ["list_issues", "get_issue"]
     listed = await service.list_servers(user=owner, workspace_id=workspace.id)
     assert listed.data[0].health == created.health
 
@@ -1319,3 +1321,106 @@ async def test_a_check_overtaken_by_an_edit_does_not_record_health_for_the_old_u
 
     assert rechecked.url == OTHER_PUBLIC_URL
     assert rechecked.health is None, "the unreachable verdict was about the URL the edit replaced"
+
+
+async def test_the_catalog_is_reported_against_the_allow_list(async_db: AsyncSession, check: _FakeCheck) -> None:
+    """Every offered name is listed, so a form can pick from it; the count is what the allow-list admits."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    check.result = ServerCheck(tool_names=["list_issues", "get_issue", "close_issue"])
+
+    created = await WorkspaceMcpServerService(async_db).create_server(
+        user=owner, workspace_id=workspace.id, request=_create(allowed_tools=["get_issue"])
+    )
+
+    assert created.health is not None
+    assert created.health.tools == ["list_issues", "get_issue", "close_issue"]
+    assert created.health.tool_count == 1
+    assert created.health.missing_allowed_tools == []
+
+
+# --------------------------------------------------------------------------- #
+# Testing connection details before saving them
+# --------------------------------------------------------------------------- #
+
+
+async def test_unsaved_details_are_checked_and_nothing_is_stored(async_db: AsyncSession, check: _FakeCheck) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    check.result = ServerCheck(tool_names=["list_issues", "get_issue"])
+
+    health = await service.check_connection(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMcpServerCheckRequest(
+            url=PUBLIC_URL, authorization_token="ghp_typed", allowed_tools=["list_issues", "nope"]
+        ),
+    )
+
+    assert [(seen.url, seen.authorization_token) for seen in check.seen] == [(PUBLIC_URL, "ghp_typed")]
+    assert health.status == "healthy"
+    assert health.tools == ["list_issues", "get_issue"]
+    assert health.tool_count == 1
+    assert health.missing_allowed_tools == ["nope"]
+    assert (await service.list_servers(user=owner, workspace_id=workspace.id)).count == 0
+
+
+async def test_an_edit_form_tests_with_the_stored_token_unless_it_sends_one(
+    async_db: AsyncSession, check: _FakeCheck
+) -> None:
+    """Omitted means the stored token, "" means none, and a value means that value: the update's three states."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(
+        user=owner, workspace_id=workspace.id, request=_create(authorization_token="ghp_stored")
+    )
+
+    for token in (None, "", "ghp_typed"):
+        await service.check_connection(
+            user=owner,
+            workspace_id=workspace.id,
+            request=WorkspaceMcpServerCheckRequest(
+                url=OTHER_PUBLIC_URL, authorization_token=token, server_id=created.id
+            ),
+        )
+
+    assert [seen.authorization_token for seen in check.seen[1:]] == ["ghp_stored", None, "ghp_typed"]
+    assert all(seen.url == OTHER_PUBLIC_URL for seen in check.seen[1:])
+
+
+async def test_a_test_refuses_an_unsafe_url_the_way_a_create_does(async_db: AsyncSession, check: _FakeCheck) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+
+    with pytest.raises(WorkspaceMcpServerUnsafeUrlError):
+        await WorkspaceMcpServerService(async_db).check_connection(
+            user=owner,
+            workspace_id=workspace.id,
+            request=WorkspaceMcpServerCheckRequest(url="http://93.184.216.34/mcp", authorization_token="ghp_typed"),
+        )
+
+    assert check.seen == []
+
+
+async def test_a_test_is_for_managers_and_refused_when_the_gateway_is_busy(
+    async_db: AsyncSession, check: _FakeCheck
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=member.id, role="member")
+    service = WorkspaceMcpServerService(async_db)
+    request = WorkspaceMcpServerCheckRequest(url=PUBLIC_URL)
+
+    with pytest.raises(NotAuthorizedError):
+        await service.check_connection(user=member, workspace_id=workspace.id, request=request)
+    check.busy = True
+    with pytest.raises(WorkspaceMcpServerCheckBusyError):
+        await service.check_connection(user=owner, workspace_id=workspace.id, request=request)

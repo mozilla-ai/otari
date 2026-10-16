@@ -1,6 +1,9 @@
 import { useState } from "react"
+import { FiCheck } from "react-icons/fi"
 
 import type { WorkspaceMcpServer } from "@/client"
+import { Button } from "@/design-system/actions/Button"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
@@ -8,6 +11,7 @@ import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
+import { useTestWorkspaceMcpServerConnection } from "@/shared/api/tools"
 
 // The form behind both Add and Edit, one component rather than two: the only
 // field that behaves differently between them is the bearer token, and keeping
@@ -69,6 +73,61 @@ function urlProblem(raw: string, willHaveToken: boolean): string | undefined {
   return undefined
 }
 
+// The server's catalog as a check listed it, each name a toggle on the
+// allow-list, so choosing what to expose is picking from what is there rather
+// than typing names from memory. An allow-listed name the server does not offer
+// is called out, because a request would quietly expose nothing for it.
+function ToolPicker({
+  tools,
+  allowed,
+  onToggle,
+}: {
+  tools: string[]
+  allowed: string[]
+  onToggle: (name: string) => void
+}) {
+  const missing = allowed.filter((name) => !tools.includes(name))
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm text-muted">
+        {tools.length === 0
+          ? "Connected. The server offers no tools."
+          : `Connected. The server offers ${tools.length} ${tools.length === 1 ? "tool" : "tools"}; select one to add it to Allowed tools or take it off.`}
+      </p>
+      {tools.length > 0 ? (
+        <ul
+          aria-label="Tools the server offers"
+          className="flex max-h-40 flex-wrap gap-1 overflow-y-auto"
+        >
+          {tools.map((name) => {
+            const isAllowed = allowed.includes(name)
+            return (
+              <li key={name}>
+                <Button
+                  size="sm"
+                  aria-pressed={isAllowed}
+                  onPress={() => onToggle(name)}
+                  className="gap-1"
+                >
+                  {isAllowed ? (
+                    <FiCheck aria-hidden className="size-3" />
+                  ) : null}
+                  <span className="font-mono">{name}</span>
+                </Button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
+      {missing.length > 0 ? (
+        <InfoBanner tone="warning">
+          Not offered by the server: {missing.join(", ")}
+        </InfoBanner>
+      ) : null}
+    </div>
+  )
+}
+
 // What a save's connection check found, when it found something. The server is
 // stored either way, which is what the first word says.
 function CheckNotice({ server }: { server: WorkspaceMcpServer }) {
@@ -80,7 +139,7 @@ function CheckNotice({ server }: { server: WorkspaceMcpServer }) {
           ? "Saved, but the gateway was too busy to check the connection. Use Recheck on the server's row."
           : health.status === "failing"
             ? `Saved, but the gateway could not use this server. ${healthDetail(health)}`
-            : `Saved. ${healthDetail(health)}`}
+            : "Saved. Some allowed tools are not offered by the server; they are named below."}
       </InfoBanner>
     </div>
   )
@@ -97,6 +156,8 @@ export interface McpServerDialogProps {
    * just stored.
    */
   saved?: WorkspaceMcpServer
+  /** Where Test connection checks the draft, without storing it. */
+  workspaceId: string
   isPending: boolean
   error: unknown
   onSubmit: (draft: McpServerDraft) => void
@@ -107,6 +168,7 @@ export function McpServerDialog({
   onOpenChange,
   editing,
   saved,
+  workspaceId,
   isPending,
   error,
   onSubmit,
@@ -170,6 +232,42 @@ export function McpServerDialog({
     })
   }
 
+  const tokenField = typedToken ? token.trim() : clearToken ? "" : undefined
+  // A test answers for the URL and token it was run with, and stops answering
+  // once either changes. The allow-list is left out on purpose: the picker below
+  // edits it, and the catalog a test listed does not depend on it.
+  const connection = JSON.stringify([url.trim(), tokenField ?? null])
+  const test = useTestWorkspaceMcpServerConnection()
+  const [testedConnection, setTestedConnection] = useState<string>()
+  const testIsCurrent = testedConnection === connection && !test.isPending
+  const tested = testIsCurrent ? test.data : undefined
+  // The stored server's own last check, while the draft still describes the
+  // connection that check was made on.
+  const stored =
+    editing && url.trim() === editing.url && tokenField === undefined
+      ? editing.health
+      : null
+  const listed = [tested, stored].find((health) => health?.status === "healthy")
+  const allowed = parseAllowedTools(allowedTools) ?? []
+  const toggleTool = (name: string) => {
+    const next = allowed.includes(name)
+      ? allowed.filter((entry) => entry !== name)
+      : [...allowed, name]
+    setAllowedTools(next.join(", "))
+  }
+  const runTest = () => {
+    setTestedConnection(connection)
+    test.mutate({
+      workspaceId,
+      body: {
+        url: url.trim(),
+        authorization_token: tokenField,
+        allowed_tools: parseAllowedTools(allowedTools),
+        server_id: editing?.id,
+      },
+    })
+  }
+
   const submit = () => {
     if (isInvalid) return
     onSubmit({
@@ -206,6 +304,15 @@ export function McpServerDialog({
       isSubmitDisabled={isInvalid}
       isDirty={isDirty}
       error={error}
+      footerStart={
+        <Button
+          onPress={runTest}
+          isPending={test.isPending}
+          isDisabled={url.trim() === "" || urlReason !== undefined}
+        >
+          Test connection
+        </Button>
+      }
     >
       {saved ? <CheckNotice server={saved} /> : null}
       <Field
@@ -278,6 +385,21 @@ export function McpServerDialog({
         placeholder="Comma separated, blank for every tool"
         description="Only these tool names are exposed to the model. Blank exposes every tool the server offers."
       />
+      <div role="status" className="flex flex-col gap-2">
+        {testIsCurrent ? <ErrorBanner error={test.error} /> : null}
+        {tested?.status === "failing" ? (
+          <InfoBanner tone="warning">
+            The test failed. {healthDetail(tested)}
+          </InfoBanner>
+        ) : null}
+        {listed ? (
+          <ToolPicker
+            tools={listed.tools ?? []}
+            allowed={allowed}
+            onToggle={toggleTool}
+          />
+        ) : null}
+      </div>
 
       <div className="flex flex-col gap-1">
         <Checkbox isSelected={enabled} onChange={setEnabled}>

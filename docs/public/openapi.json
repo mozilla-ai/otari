@@ -22837,6 +22837,66 @@
         "title": "WorkspaceCreate",
         "type": "object"
       },
+      "WorkspaceMcpServerCheckRequest": {
+        "description": "Connection details to check without storing them, for a form to test before it saves.\n\n``server_id`` names a stored server whose token stands in when\n``authorization_token`` is omitted, so an edit form can test a new URL with\na token it was never shown. ``\"\"`` checks with no token at all.",
+        "properties": {
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The allow-list to report the catalog against",
+            "title": "Allowed Tools"
+          },
+          "authorization_token": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bearer token; omit to use the stored server's, if any",
+            "title": "Authorization Token"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A stored server whose token to use",
+            "title": "Server Id"
+          },
+          "url": {
+            "description": "Streamable HTTP MCP endpoint",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "WorkspaceMcpServerCheckRequest",
+        "type": "object"
+      },
       "WorkspaceMcpServerCreate": {
         "description": "Request body for registering a server.\n\n``authorization_token`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`providers.ProviderCredential` and `OrgProviderKey` already use.",
         "properties": {
@@ -22968,6 +23028,14 @@
             ],
             "description": "Live tools the allow-list admits; null when the check failed",
             "title": "Tool Count"
+          },
+          "tools": {
+            "description": "Every tool name the server offers, allowed or not, up to 200; empty on a failure",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
           }
         },
         "required": [
@@ -46117,6 +46185,71 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/check": {
+      "post": {
+        "description": "Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.\n\nWhat a form's Test button calls before it saves. Answers with what a stored\nserver's `health` would say, and records nothing. Pass `server_id` and omit\n`authorization_token` to test with that server's stored token. The URL is\nchecked for SSRF safety first, with the same 400 a create gets.",
+        "operationId": "mcp-servers-check_workspace_mcp_server_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "Every check slot on this gateway was busy. Try again shortly."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Workspace Mcp Server Connection",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}": {
       "delete": {
         "description": "Delete a server and the token stored with it. Organization owners/admins or this workspace's owners/admins.",
@@ -46251,7 +46384,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check": {
       "post": {
-        "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the tools the allow-list admits, and stores the\noutcome as `health`. A server that fails is still a 200, with\n`health.status` set to `failing`. A 429 means every check slot on this\ngateway was busy and nothing was recorded.",
+        "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the server's tools, and stores the outcome as\n`health`. A server that fails is still a 200, with `health.status` set to\n`failing`. A 429 means every check slot on this gateway was busy and\nnothing was recorded.",
         "operationId": "mcp-servers-check_workspace_mcp_server",
         "parameters": [
           {

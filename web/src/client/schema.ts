@@ -6422,6 +6422,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Workspace Mcp Server Connection
+         * @description Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     What a form's Test button calls before it saves. Answers with what a stored
+         *     server's `health` would say, and records nothing. Pass `server_id` and omit
+         *     `authorization_token` to test with that server's stored token. The URL is
+         *     checked for SSRF safety first, with the same 400 a create gets.
+         */
+        post: operations["mcp-servers-check_workspace_mcp_server_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}": {
         parameters: {
             query?: never;
@@ -6464,10 +6489,10 @@ export interface paths {
          * Check Workspace Mcp Server
          * @description Check a server's connection now. Organization owners/admins or this workspace's owners/admins.
          *
-         *     Opens one session, lists the tools the allow-list admits, and stores the
-         *     outcome as `health`. A server that fails is still a 200, with
-         *     `health.status` set to `failing`. A 429 means every check slot on this
-         *     gateway was busy and nothing was recorded.
+         *     Opens one session, lists the server's tools, and stores the outcome as
+         *     `health`. A server that fails is still a 200, with `health.status` set to
+         *     `failing`. A 429 means every check slot on this gateway was busy and
+         *     nothing was recorded.
          */
         post: operations["mcp-servers-check_workspace_mcp_server"];
         delete?: never;
@@ -17265,6 +17290,36 @@ export interface components {
             name: string;
         };
         /**
+         * WorkspaceMcpServerCheckRequest
+         * @description Connection details to check without storing them, for a form to test before it saves.
+         *
+         *     ``server_id`` names a stored server whose token stands in when
+         *     ``authorization_token`` is omitted, so an edit form can test a new URL with
+         *     a token it was never shown. ``""`` checks with no token at all.
+         */
+        WorkspaceMcpServerCheckRequest: {
+            /**
+             * Allowed Tools
+             * @description The allow-list to report the catalog against
+             */
+            allowed_tools?: string[] | null;
+            /**
+             * Authorization Token
+             * @description Bearer token; omit to use the stored server's, if any
+             */
+            authorization_token?: string | null;
+            /**
+             * Server Id
+             * @description A stored server whose token to use
+             */
+            server_id?: string | null;
+            /**
+             * Url
+             * @description Streamable HTTP MCP endpoint
+             */
+            url: string;
+        };
+        /**
          * WorkspaceMcpServerCreate
          * @description Request body for registering a server.
          *
@@ -17338,6 +17393,11 @@ export interface components {
              * @description Live tools the allow-list admits; null when the check failed
              */
             tool_count?: number | null;
+            /**
+             * Tools
+             * @description Every tool name the server offers, allowed or not, up to 200; empty on a failure
+             */
+            tools?: string[];
         };
         /**
          * WorkspaceMcpServerPublic
@@ -28442,6 +28502,48 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "mcp-servers-check_workspace_mcp_server_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerHealth"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Every check slot on this gateway was busy. Try again shortly. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

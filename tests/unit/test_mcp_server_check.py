@@ -115,11 +115,12 @@ async def test_a_working_server_reports_its_tools(mcp_url: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_allow_list_narrows_what_a_check_reports(mcp_url: str) -> None:
+async def test_a_check_lists_the_whole_catalog_whatever_the_allow_list(mcp_url: str) -> None:
+    """The reader is choosing what to allow, so the catalog is not narrowed for them."""
     check = await check_stored_server(_server(mcp_url, allowed_tools=["list_issues", "missing_tool"]))
 
     assert check.failure is None
-    assert check.tool_names == ["list_issues"]
+    assert sorted(check.tool_names) == ["close_issue", "list_issues"]
 
 
 @pytest.mark.asyncio

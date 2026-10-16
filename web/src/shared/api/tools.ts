@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  CheckWorkspaceMcpServerRequest,
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
   CreateWorkspaceMcpServerRequest,
@@ -21,6 +22,7 @@ import type {
   UpdateWorkspaceWebSearchConfigRequest,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
   WorkspaceMcpServers,
   WorkspaceWebSearchConfig,
 } from "@/client"
@@ -474,6 +476,24 @@ export function useCheckWorkspaceMcpServer() {
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
     },
+  })
+}
+
+// Checks connection details without storing anything: the dialog's Test
+// button. Nothing to invalidate, since nothing was written.
+export function useTestWorkspaceMcpServerConnection() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: CheckWorkspaceMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServerHealth>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/check`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 

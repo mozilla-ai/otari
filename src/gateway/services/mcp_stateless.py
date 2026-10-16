@@ -670,8 +670,9 @@ class CheckFailure(StrEnum):
 class ServerCheck:
     """What one connection check found.
 
-    ``tool_names`` lists the live tools the stored allowlist admits, and is
-    empty on a failure. ``http_status`` is set when the server refused with one.
+    ``tool_names`` lists the server's whole live catalog, whatever the stored
+    allowlist admits, and is empty on a failure. ``http_status`` is set when
+    the server refused with one.
     """
 
     tool_names: list[str]
@@ -781,13 +782,14 @@ def classify_check_failure(exc: BaseException) -> tuple[CheckFailure, int | None
 
 
 async def check_stored_server(server: ResolvedMcpServer) -> ServerCheck:
-    """Connect to a stored server once and list the tools its allowlist admits.
+    """Connect to a server once and list its whole tool catalog.
 
     The same bounded session discovery opens, with its failures named by cause
     rather than collapsed into one code: the reader is whoever configured the
     server, and the difference between a rejected token and a wrong path is
-    theirs to act on. URL safety and the credential are the caller's to settle
-    first, as they are for discovery.
+    theirs to act on. The catalog ignores the allowlist, because the reader is
+    also choosing what to put on it. URL safety and the credential are the
+    caller's to settle first, as they are for discovery.
 
     Raises:
         McpCapacityUnavailable: no discovery slot freed up in time, so nothing was checked.
@@ -811,7 +813,7 @@ async def _check_once(server: ResolvedMcpServer) -> ServerCheck:
     stack = AsyncExitStack()
     try:
         session = await stack.enter_async_context(open_session(server, screen_answers=True))
-        listed = await collect_tools(session, allowed_tools=server.allowed_tools)
+        listed = await collect_tools(session, allowed_tools=None)
         return ServerCheck(tool_names=[tool.name for tool in listed])
     finally:
         await _close_bounded(stack)

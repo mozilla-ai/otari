@@ -98,7 +98,11 @@ export function healthDetail(health: WorkspaceMcpServerHealth): string {
   if (missing.length > 0) {
     return `The server does not offer ${missing.join(", ")}, so the allow-list exposes ${health.tool_count ?? 0} of its names.`
   }
-  return `Connected and listed ${health.tool_count ?? 0} ${health.tool_count === 1 ? "tool" : "tools"}.`
+  const admitted = health.tool_count ?? 0
+  const offered = health.tools?.length || admitted
+  return admitted === offered
+    ? `Connected. The server offers ${offered} ${offered === 1 ? "tool" : "tools"}.`
+    : `Connected. The allow-list admits ${admitted} of the ${offered} tools the server offers.`
 }
 
 /** Whether a check found something the operator should look at. */

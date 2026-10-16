@@ -657,6 +657,8 @@ export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
 export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
 export type WorkspaceMcpServerHealth = Schemas["WorkspaceMcpServerHealth"]
 export type McpServerCheckFailure = Schemas["CheckFailure"]
+export type CheckWorkspaceMcpServerRequest =
+  Schemas["WorkspaceMcpServerCheckRequest"]
 export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =

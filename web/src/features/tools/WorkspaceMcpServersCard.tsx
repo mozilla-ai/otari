@@ -92,6 +92,11 @@ function healthCell(server: WorkspaceMcpServer) {
     >
       <div className="flex max-w-xs flex-col gap-1">
         <p className="text-sm">{healthDetail(health)}</p>
+        {(health.tools ?? []).length > 0 ? (
+          <p className="max-h-32 overflow-y-auto font-mono text-xs break-words">
+            {(health.tools ?? []).join(", ")}
+          </p>
+        ) : null}
         <p className="text-caption">
           Checked {formatDateTime(health.checked_at)}
         </p>
@@ -372,6 +377,7 @@ export function WorkspaceMcpServersCard({
         onOpenChange={setDialogOpen}
         editing={editing}
         saved={saved}
+        workspaceId={selected.workspace_id}
         isPending={create.isPending || update.isPending}
         error={editing ? update.error : create.error}
         onSubmit={submit}

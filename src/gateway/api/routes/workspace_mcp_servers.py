@@ -21,7 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.services.tenancy.workspace_mcp_server_service import (
+    WorkspaceMcpServerCheckRequest,
     WorkspaceMcpServerCreate,
+    WorkspaceMcpServerHealth,
     WorkspaceMcpServerPublic,
     WorkspaceMcpServerService,
     WorkspaceMcpServersPublic,
@@ -125,12 +127,36 @@ async def check_workspace_mcp_server(
 ) -> WorkspaceMcpServerPublic:
     """Check a server's connection now. Organization owners/admins or this workspace's owners/admins.
 
-    Opens one session, lists the tools the allow-list admits, and stores the
-    outcome as `health`. A server that fails is still a 200, with
-    `health.status` set to `failing`. A 429 means every check slot on this
-    gateway was busy and nothing was recorded.
+    Opens one session, lists the server's tools, and stores the outcome as
+    `health`. A server that fails is still a 200, with `health.status` set to
+    `failing`. A 429 means every check slot on this gateway was busy and
+    nothing was recorded.
     """
     return await service.check_server(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+
+
+@router.post(
+    "/check",
+    responses={
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "description": "Every check slot on this gateway was busy. Try again shortly."
+        }
+    },
+)
+async def check_workspace_mcp_server_connection(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    body: WorkspaceMcpServerCheckRequest,
+) -> WorkspaceMcpServerHealth:
+    """Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.
+
+    What a form's Test button calls before it saves. Answers with what a stored
+    server's `health` would say, and records nothing. Pass `server_id` and omit
+    `authorization_token` to test with that server's stored token. The URL is
+    checked for SSRF safety first, with the same 400 a create gets.
+    """
+    return await service.check_connection(user=current_identity, workspace_id=workspace_id, request=body)
 
 
 @router.delete("/{server_id}")

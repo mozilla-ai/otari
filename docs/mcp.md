@@ -424,9 +424,17 @@ A server that fails its check is still stored. `health.status` is `failing` and
 answered, but not as a streamable HTTP MCP server), `limits_exceeded`,
 `unsafe_url`, `credentials_unavailable` (the stored token will not decrypt), or
 `connection_failed`. `health.http_status` carries the status where the server
-refused with one. A passing check reports `tool_count`, the number of tools the
-allow-list admits, and `missing_allowed_tools`, the allow-listed names the server
-does not offer.
+refused with one. A passing check reports `tools`, every tool name the server
+offers whatever the allow-list says (up to 200), `tool_count`, the number of
+those the allow-list admits, and `missing_allowed_tools`, the allow-listed names
+the server does not offer.
+
+`POST /check` (on the collection, with no server id) checks connection details
+without storing anything, which is what the dashboard's **Test connection**
+button calls before a save. It takes `url`, `authorization_token` and
+`allowed_tools`, and answers with what `health` would say. Pass `server_id` and
+omit `authorization_token` to test with that server's stored token; `""` tests
+with none. An unsafe URL is refused with the same `400` a create gets.
 
 `health` is `null` until a check has run. It is also `null` after a connection
 change when every check slot on the gateway was busy; `POST /{server_id}/check`

@@ -891,6 +891,7 @@ export function workspaceMcpServerHealth(
     http_status: null,
     tool_count: 2,
     missing_allowed_tools: [],
+    tools: ["list_issues", "get_issue"],
     ...overrides,
   }
 }

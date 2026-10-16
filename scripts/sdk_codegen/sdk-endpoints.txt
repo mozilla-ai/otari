@@ -494,6 +494,7 @@ DELETE /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}             # 
 # by id in `mcp_server_ids` on a completion request, which is already covered.
 GET /api/v1/workspaces/{workspace_id}/mcp-servers                             # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers                            # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/check                      # operator surface
 PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface

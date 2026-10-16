@@ -12392,6 +12392,49 @@
           }
         },
         {
+          "name": "Check Workspace Mcp Server Connection",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"url\": \"string\"\n}"
+            },
+            "description": "Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.\n\nWhat a form's Test button calls before it saves. Answers with what a stored\nserver's `health` would say, and records nothing. Pass `server_id` and omit\n`authorization_token` to test with that server's stored token. The URL is\nchecked for SSRF safety first, with the same 400 a create gets.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                "check"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/check",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Update Workspace Mcp Server",
           "request": {
             "body": {
@@ -12476,7 +12519,7 @@
         {
           "name": "Check Workspace Mcp Server",
           "request": {
-            "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the tools the allow-list admits, and stores the\noutcome as `health`. A server that fails is still a 200, with\n`health.status` set to `failing`. A 429 means every check slot on this\ngateway was busy and nothing was recorded.",
+            "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the server's tools, and stores the outcome as\n`health`. A server that fails is still a 200, with `health.status` set to\n`failing`. A 429 means every check slot on this gateway was busy and\nnothing was recorded.",
             "header": [],
             "method": "POST",
             "url": {
