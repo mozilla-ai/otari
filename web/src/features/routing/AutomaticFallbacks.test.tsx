@@ -1,5 +1,4 @@
 import { screen, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 
 import type { AutomaticFallback, FallbackOffering } from "@/client"
@@ -54,7 +53,7 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).queryByText(/No backup/)).not.toBeInTheDocument()
   })
 
-  it("keeps the short label for a mixed provider and opens both owners on press", async () => {
+  it("labels a mixed provider's tools as plain text, not a control", async () => {
     const gpt: AutomaticFallback = {
       ...SONNET,
       id: "openai/gpt-x",
@@ -68,14 +67,13 @@ describe("AutomaticFallbacks", () => {
         offering("bedrock:openai.gpt-x", [], ["web_search"]),
       ],
     }
-    const user = userEvent.setup()
     await renderWithRouter(<AutomaticFallbacks fallbacks={[gpt]} />)
 
     const row = await rowOf("GPT X")
-    await user.click(within(row).getByRole("button", { name: "Own tools" }))
+    expect(within(row).getByText("Own tools")).toBeInTheDocument()
     expect(
-      await screen.findByText("Own: search, code · Otari's: fetch"),
-    ).toBeInTheDocument()
+      within(row).queryByRole("button", { name: "Own tools" }),
+    ).not.toBeInTheDocument()
   })
 
   it("names each provider once, and Bedrock without Amazon", async () => {
@@ -139,6 +137,22 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).getByText("No backup · pinned")).toBeInTheDocument()
     expect(within(row).queryByText("Anthropic")).not.toBeInTheDocument()
     expect(within(row).queryByLabelText("then")).not.toBeInTheDocument()
+  })
+
+  it("marks a model pinned once most of its requests are", async () => {
+    await renderWithRouter(
+      <AutomaticFallbacks
+        fallbacks={[
+          {
+            ...SONNET,
+            pinned: SONNET.requests - 3,
+            pinned_provider: "anthropic",
+          },
+        ]}
+      />,
+    )
+    const row = await rowOf("Claude Sonnet 5.5")
+    expect(within(row).getByText("No backup · pinned")).toBeInTheDocument()
   })
 
   it("keeps the chain when only some requests were pinned", async () => {
