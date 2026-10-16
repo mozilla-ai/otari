@@ -33,6 +33,7 @@ from gateway.api.deps import (
     set_config,
 )
 from gateway.api.main import register_routers
+from gateway.api.request_id import with_request_id
 from gateway.api.trace_capture import TraceCaptureMiddleware
 from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
@@ -888,16 +889,16 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
 
     A body field survives where a header does not (a proxy that drops it, an SDK
     that surfaces only the body), so a client can map the refusal from either.
+    An error keeps the ``Otari-Request-ID`` its request was given (``gateway.api.request_id``).
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
     code = error_code_of(exc.headers)
     if code is None:
-        return await http_exception_handler(request, exc)
-    return JSONResponse(
-        {"detail": exc.detail, "code": code},
-        status_code=exc.status_code,
-        headers=exc.headers,
+        return with_request_id(request, await http_exception_handler(request, exc))
+    return with_request_id(
+        request,
+        JSONResponse({"detail": exc.detail, "code": code}, status_code=exc.status_code, headers=exc.headers),
     )
 
 

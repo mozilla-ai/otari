@@ -1348,6 +1348,7 @@ def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
     assert response.status_code == 502
     assert response.json() == {"detail": "All upstream providers failed"}
     assert response.headers["Otari-Attempt-ID"] == "att-b"
+    assert response.headers["Otari-Request-ID"] == "stream-req-fail"
 
 
 def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
