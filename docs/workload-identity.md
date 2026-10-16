@@ -14,7 +14,10 @@ active flag and expiry, its user being blocked, its model allow-list, its
 budgets and ceilings, and whether it is a service key.
 
 Workload identity is available in standalone and hosted modes. A hybrid
-gateway verifies no keys of its own and refuses the setting at startup.
+gateway verifies no keys of its own and refuses the setting at startup. It also
+needs `OTARI_SECRET_KEY`, which signs the access tokens of the
+[token exchange](#claude-code-and-the-anthropic-sdks): with `federation_issuers`
+set and no `OTARI_SECRET_KEY`, the gateway refuses to start.
 
 ## How a token is checked
 
@@ -54,8 +57,10 @@ Otari reads the issuer's signing-key location from
 configured one, unless the entry names a `jwks_uri` itself. Both are fetched
 over https only, without following redirects, through the same outbound
 address checks as other gateway fetches: a host that resolves to a private,
-loopback or link-local address is refused unless
-`OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS=true`, for an issuer on your own network.
+loopback or link-local address is refused unless the
+`federation_allow_private_hosts` setting (`OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS`)
+is on, for an issuer on your own network. Like `federation_issuers`, it is read
+and validated when the gateway starts.
 
 Keys are cached for an hour per process. A token naming a key id the cache
 lacks refetches at most once a minute, which picks up a rotation without
@@ -190,26 +195,39 @@ token on every request. Otari answers that exchange at
 moves to Otari by changing two variables:
 
 ```bash
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
 export ANTHROPIC_BASE_URL="https://otari.example.com/api"
 export ANTHROPIC_FEDERATION_RULE_ID="<the id of the Otari federation rule>"
 export ANTHROPIC_ORGANIZATION_ID="<the UUID of the key's Otari organization>"
-export ANTHROPIC_IDENTITY_TOKEN_FILE="/var/run/secrets/otari/token"   # refreshed by the platform
+unset ANTHROPIC_WORKSPACE_ID   # or set it to the key's Otari workspace id
+export ANTHROPIC_IDENTITY_TOKEN_FILE="/var/run/otari/identity-token"
 claude
 ```
+
+Unset `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` first. In the Anthropic
+SDKs either one, when set, takes precedence over the federation variables,
+which are then ignored with only a one-time warning on the `anthropic` logger;
+Claude Code checks them ahead of the federation variables too.
 
 - `ANTHROPIC_FEDERATION_RULE_ID` is the `id` that
   `POST /api/v1/keys/{key_id}/federation-rules` returned (and
   `GET /api/v1/keys/{key_id}/federation-rules` lists). The identity token must
   match **that** rule; a token matching only another rule is refused.
-- `ANTHROPIC_ORGANIZATION_ID` is the UUID of the organization the key belongs
-  to: `organization.id` in `GET /api/v1/organizations/me`, read with the
-  master key. When set, it must be that organization.
-- `ANTHROPIC_WORKSPACE_ID`, optional, must be the key's `workspace_id` (a UUID,
-  in `GET /api/v1/keys/{key_id}`); Otari has no `default` alias.
-  `ANTHROPIC_SERVICE_ACCOUNT_ID`, optional, must be the key's `id`.
+- `ANTHROPIC_ORGANIZATION_ID` is the UUID of the Otari organization the key
+  belongs to: `organization.id` in `GET /api/v1/organizations/me`. That route
+  answers the caller's own organization, so read it with the authority that
+  manages the key: the master key, or a dashboard session of the operator.
+  When set, it must be that organization.
+- `ANTHROPIC_WORKSPACE_ID`, optional, must be the key's `workspace_id`, a UUID
+  the operator reads in `GET /api/v1/keys/{key_id}`. Otari has no `default`
+  alias. `ANTHROPIC_SERVICE_ACCOUNT_ID`, optional, must be the key's `id`.
 - `ANTHROPIC_IDENTITY_TOKEN_FILE` (or `ANTHROPIC_IDENTITY_TOKEN`) holds the
-  identity token, for instance the one step 4 fetches from the metadata
-  server, rewritten before it expires.
+  identity token; see [Keeping the token file fresh](#keeping-the-token-file-fresh).
+
+These are Otari's ids, not Anthropic's. A deployment that already sets
+`ANTHROPIC_ORGANIZATION_ID` or `ANTHROPIC_WORKSPACE_ID` to an Anthropic value
+must replace or unset it, because Otari checks every one that is set, and an
+Anthropic value never matches.
 
 The access token lasts `federation_access_token_ttl_sec` seconds (600 by
 default, between 60 and 3600), and never past the identity token it was
@@ -218,12 +236,11 @@ rule's key, the same way an identity token presented directly does, and it is
 checked again on every request: deleting the rule, deactivating the key, or the
 key expiring cuts it off at once. It is never the master key.
 
-The access token is stateless. Otari signs it with a key derived from
-`OTARI_SECRET_KEY` and stores nothing, so every replica that shares that secret
-accepts it, and rotating the secret (prepending a new key) keeps tokens signed
-with the old one valid until they expire. Without `OTARI_SECRET_KEY` the
-exchange answers `503 temporarily_unavailable`, while identity tokens presented
-directly keep working.
+The access token is stateless. Otari signs it with HMAC-SHA256 under a key
+HKDF derives from `OTARI_SECRET_KEY`, and stores nothing, so every replica that
+shares that secret accepts it, and rotating the secret (prepending a new key)
+keeps tokens signed with the old one valid until they expire. This is why
+federation needs `OTARI_SECRET_KEY` to start.
 
 A refused exchange answers in the OAuth error shape. A request that is not the
 `urn:ietf:params:oauth:grant-type:jwt-bearer` grant is
@@ -237,6 +254,53 @@ writes nothing to the database.
 The endpoint takes no credential, since the identity token is one, and is
 mounted only when `federation_issuers` lists an issuer: otherwise it answers
 404.
+
+### Keeping the token file fresh
+
+Claude Code and the SDKs reread `ANTHROPIC_IDENTITY_TOKEN_FILE` at every
+exchange, but on Cloud Run (and Compute Engine) nothing writes that file: the
+metadata server hands out tokens on request. Run a small refresher beside the
+workload. It asks the metadata server for a token with `format=full`, through
+`google-auth`, writes it to a 0600 file atomically, so a reader never sees half
+a token, and rewrites it every 30 minutes, well inside the token's hour.
+Hackbot's runtime already does this for its Anthropic credentials.
+
+```python
+import os
+import tempfile
+import threading
+
+import google.auth.transport.requests
+from google.oauth2 import id_token
+
+AUDIENCE = "https://otari.example.com"
+TOKEN_FILE = "/var/run/otari/identity-token"
+REFRESH_SECONDS = 30 * 60
+
+
+def write_token() -> None:
+    # On Google Cloud this reads the metadata server's identity endpoint with format=full.
+    token = id_token.fetch_id_token(google.auth.transport.requests.Request(), AUDIENCE)
+    directory = os.path.dirname(TOKEN_FILE)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=directory)  # created 0600
+    with os.fdopen(fd, "w") as handle:
+        handle.write(token)
+    os.replace(temporary, TOKEN_FILE)
+
+
+def refresh_forever() -> None:
+    stop = threading.Event()
+    while not stop.wait(REFRESH_SECONDS):
+        write_token()
+
+
+write_token()  # before the workload starts
+threading.Thread(target=refresh_forever, daemon=True).start()
+```
+
+On GKE, a projected service account token volume can write the file instead,
+with its own refresh.
 
 ## Other issuers
 
