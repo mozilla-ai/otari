@@ -345,7 +345,7 @@ async def streaming_generator(
         # before the buffered terminal suffix; otherwise the order is chunks,
         # done marker, then settlement. A settlement a client disconnect cut off
         # would never run again, as the stream already counts as settled, so
-        # each one is shielded from the response's cancelled scope.
+        # each one is shielded from the response's canceled scope.
         if settle_before_done:
             settled = True
             settlement: S | None = None
