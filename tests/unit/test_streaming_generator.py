@@ -1,9 +1,10 @@
 """Unit tests for the shared streaming_generator utility."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import anyio
+import anyio.lowlevel
 import pytest
 from any_llm.types.completion import CompletionUsage
 
@@ -851,24 +852,53 @@ async def test_a_stream_the_client_abandons_closes_its_source() -> None:
     assert source.closed
 
 
+def _settles_after_one_await(log: list[str], name: str) -> Callable[..., Awaitable[None]]:
+    """A settlement callback that suspends before it finishes, as a database write does."""
+
+    async def settle(*_: object) -> None:
+        log.append(f"{name} started")
+        await asyncio.sleep(0)
+        log.append(f"{name} finished")
+
+    return settle
+
+
+async def _read_until_the_client_leaves(
+    gen: AsyncIterator[str], leaves: Callable[[list[str]], bool]
+) -> list[type[BaseException]]:
+    """Read ``gen`` as Starlette does, cancelling its task group once ``leaves`` accepts the events read so far.
+
+    Starlette answers a disconnect that way, and the cancellation is redelivered at every await until the task leaves
+    the group. ``aclose()`` throws one ``GeneratorExit`` instead, so it cannot show whether settling survives that.
+    Returns what the reading task raised.
+    """
+    observed: list[type[BaseException]] = []
+
+    async def stream_response(scope: anyio.CancelScope) -> None:
+        received: list[str] = []
+        try:
+            async for event in gen:
+                received.append(event)
+                if leaves(received):
+                    scope.cancel()
+            # Starlette's closing send, where a cancellation the generator did not raise surfaces.
+            await anyio.lowlevel.checkpoint()
+        except BaseException as exc:
+            observed.append(type(exc))
+            raise
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(stream_response, task_group.cancel_scope)
+    return observed
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("keepalive_interval", [0.0, _KEEPALIVE_INTERVAL], ids=["direct", "keepalive"])
 async def test_a_stream_cancelled_by_a_client_disconnect_settles_once_and_closes_its_source(
     keepalive_interval: float,
 ) -> None:
-    """Starlette answers a disconnect by cancelling the response's task group, which cancels every await after it.
-
-    ``aclose()`` throws one ``GeneratorExit`` instead, so it cannot show whether settling and closing survive that.
-    """
     source = _ClosableStream()
     settlement: list[str] = []
-    observed: list[type[BaseException]] = []
-
-    async def on_incomplete() -> None:
-        settlement.append("started")
-        await asyncio.sleep(0)
-        settlement.append("finished")
-
     gen = streaming_generator(
         stream=source,
         format_chunk=_format_chunk,
@@ -877,24 +907,72 @@ async def test_a_stream_cancelled_by_a_client_disconnect_settles_once_and_closes
         on_complete=_noop_complete,
         on_error=_fail_on_error,
         label="test:model",
-        on_incomplete=on_incomplete,
+        on_incomplete=_settles_after_one_await(settlement, "incomplete"),
         keepalive_interval_seconds=keepalive_interval,
     )
 
-    async def stream_response(scope: anyio.CancelScope) -> None:
-        received = 0
-        try:
-            async for _event in gen:
-                received += 1
-                if received == 5:
-                    scope.cancel()
-        except BaseException as exc:
-            observed.append(type(exc))
-            raise
+    observed = await _read_until_the_client_leaves(gen, lambda received: len(received) == 5)
 
-    async with anyio.create_task_group() as task_group:
-        task_group.start_soon(stream_response, task_group.cancel_scope)
-
-    assert settlement == ["started", "finished"]
+    assert settlement == ["incomplete started", "incomplete finished"]
     assert source.closed
+    assert observed == [asyncio.CancelledError]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chunks", "settle_before_done", "last_event_read", "callback"),
+    [
+        (("hello", "usage"), False, OPENAI_STREAM_FORMAT.done_marker, "complete"),
+        (("hello",), False, OPENAI_STREAM_FORMAT.done_marker, "no_usage"),
+        (("hello", "usage"), True, "data: usage\n\n", "complete"),
+        (("hello",), True, "data: hello\n\n", "no_usage"),
+    ],
+    ids=["after-done-with-usage", "after-done-without-usage", "before-done-with-usage", "before-done-without-usage"],
+)
+async def test_a_completed_stream_whose_client_leaves_while_it_settles_still_settles(
+    chunks: tuple[str, ...], settle_before_done: bool, last_event_read: str, callback: str
+) -> None:
+    settlement: list[str] = []
+    gen = streaming_generator(
+        stream=_items(*chunks),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_settles_after_one_await(settlement, "complete"),
+        on_error=_fail_on_error,
+        label="test:model",
+        on_no_usage=_settles_after_one_await(settlement, "no_usage"),
+        on_incomplete=_settles_after_one_await(settlement, "incomplete"),
+        settle_before_done=settle_before_done,
+    )
+
+    observed = await _read_until_the_client_leaves(gen, lambda received: received[-1] == last_event_read)
+
+    assert settlement == [f"{callback} started", f"{callback} finished"]
+    assert observed == [asyncio.CancelledError]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stream_whose_client_leaves_while_it_settles_still_settles() -> None:
+    async def fails_after_one_chunk() -> AsyncIterator[str]:
+        yield "hello"
+        raise _StatusCodeError(503)
+
+    settlement: list[str] = []
+    gen = streaming_generator(
+        stream=fails_after_one_chunk(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=ANTHROPIC_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_settles_after_one_await(settlement, "error"),
+        label="test:model",
+        on_incomplete=_settles_after_one_await(settlement, "incomplete"),
+    )
+
+    observed = await _read_until_the_client_leaves(
+        gen, lambda received: received[-1] == ANTHROPIC_STREAM_FORMAT.error_payload
+    )
+
+    assert settlement == ["error started", "error finished"]
     assert observed == [asyncio.CancelledError]
