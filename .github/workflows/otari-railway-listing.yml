@@ -10,6 +10,8 @@ name: Otari Railway Listing
 # The check that follows still fails while the live image tag or variables
 # disagree with template.json, which only the template editor can fix.
 #
+# A dispatch runs on main only, so an unmerged listing.md never goes live.
+#
 # RAILWAY_API_TOKEN is a Railway account or workspace token with access to the
 # mozilla-ai workspace that owns the template. Standard library only, so no
 # environment is installed.
@@ -31,6 +33,7 @@ concurrency:
 jobs:
   publish:
     name: Publish listing.md to the live template
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
