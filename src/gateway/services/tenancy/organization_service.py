@@ -1480,6 +1480,7 @@ class OrganizationService:
                     role=membership.role,
                     accept_link=accept_link,
                     expiry_hours=config.invitation_expiry_hours,
+                    asset_root=mailer.asset_root,
                 ),
             )
             mail_sent = delivery.delivered

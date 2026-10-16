@@ -38,11 +38,14 @@ def render_invitation_email(
     role: str,
     accept_link: str,
     expiry_hours: int,
+    asset_root: str | None = None,
 ) -> MailMessage:
     """Render the invitation message for one recipient."""
     return render_email(
         "invitation",
         subject="You're invited to join {{ORGANIZATION_NAME}} on Otari",
+        preheader="{{INVITER}} invited you as {{ROLE_ARTICLE}} {{ROLE}}. The invitation expires in {{VALID_DAYS}}.",
+        asset_root=asset_root,
         values={
             "ORGANIZATION_NAME": organization_name,
             "INVITER": _inviter(inviter_name, inviter_email),

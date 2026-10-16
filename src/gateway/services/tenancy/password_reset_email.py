@@ -9,11 +9,13 @@ from gateway.services.mail import MailMessage, render_email
 from gateway.services.tenancy.tokens import format_expiry
 
 
-def render_password_reset_email(*, reset_link: str, expiry_hours: int) -> MailMessage:
+def render_password_reset_email(*, reset_link: str, expiry_hours: int, asset_root: str | None = None) -> MailMessage:
     """Render the password-reset message for one recipient."""
     return render_email(
         "password_reset",
         subject="Set or reset your Otari password",
+        preheader="The link expires in {{VALID_PERIOD}} and can only be used once.",
+        asset_root=asset_root,
         values={
             "RESET_LINK": reset_link,
             "VALID_PERIOD": format_expiry(expiry_hours),
@@ -21,7 +23,9 @@ def render_password_reset_email(*, reset_link: str, expiry_hours: int) -> MailMe
     )
 
 
-def render_account_exists_email(*, sign_in_link: str, has_password: bool, provider: str | None) -> MailMessage:
+def render_account_exists_email(
+    *, sign_in_link: str, has_password: bool, provider: str | None, asset_root: str | None = None
+) -> MailMessage:
     """Render the notice that the address already has an account, saying how it signs in.
 
     ``provider`` is the label of the provider the account signs in with, or ``None`` when that is not known.
@@ -45,6 +49,8 @@ def render_account_exists_email(*, sign_in_link: str, has_password: bool, provid
         "account_exists",
         subject="You already have an Otari account",
         values={"SIGN_IN_HINT": hint, "SIGN_IN_LINK": sign_in_link},
+        preheader="This address already has an Otari account, so nothing was changed.",
+        asset_root=asset_root,
     )
 
 

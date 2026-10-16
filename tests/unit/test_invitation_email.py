@@ -120,5 +120,12 @@ def test_render_invitation_email_names_the_inviter_by_address_as_well_as_name() 
 def test_render_invitation_email_offers_the_role_rather_than_membership() -> None:
     _, html, _ = _render(role="admin")
 
-    assert "to join as an admin." in html
+    assert "as an <strong>admin</strong>." in html
     assert "become a member" not in html
+
+
+def test_render_invitation_email_previews_the_inviter_and_the_expiry_in_the_inbox() -> None:
+    _, html, text = _render(role="admin")
+
+    assert "Ada (ada@example.com) invited you as an admin. The invitation expires in 7 days." in html
+    assert "invited you as an admin." not in text
