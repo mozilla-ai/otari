@@ -203,7 +203,7 @@ def test_an_empty_or_unexpected_input_says_nothing(dialect: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _trace(*, session: SessionRef | None, turn: TurnFacts | None) -> RequestTrace:
+def _trace(*, session: SessionRef | None, turn: TurnFacts | None, subagent: bool = False) -> RequestTrace:
     return RequestTrace(
         request_id="req-2",
         workspace_id=_WORKSPACE,
@@ -215,6 +215,7 @@ def _trace(*, session: SessionRef | None, turn: TurnFacts | None) -> RequestTrac
         session=session,
         harness="claude-code",
         turn=turn,
+        subagent=subagent,
     )
 
 
@@ -226,6 +227,20 @@ def test_a_request_in_a_session_writes_into_the_sessions_trace() -> None:
     assert write.trace_id == session.trace_id(_WORKSPACE, "alice")
     assert (write.session_source, write.harness) == ("harness", "claude-code")
     assert write.spans[0].opens_turn is True
+
+
+def test_a_subagents_request_opens_no_turn_but_records_the_tools_it_answers() -> None:
+    answered = (AnsweredCall(call_id="toolu_1", name="Bash", is_error=False),)
+
+    prompt = _trace(session=None, turn=TurnFacts(opens_turn=True), subagent=True).finish(
+        status_code=200, completed=True
+    )
+    results = _trace(session=None, turn=TurnFacts(opens_turn=False, answered=answered), subagent=True).finish(
+        status_code=200, completed=True
+    )
+
+    assert prompt.spans[0].opens_turn is False
+    assert [span.tool_name for span in results.spans if span.kind == "tool"] == ["Bash"]
 
 
 def test_answered_calls_become_client_tool_spans_ending_when_this_request_arrived() -> None:
