@@ -172,6 +172,24 @@ def test_the_step_ends_with_what_the_client_got(
     assert (write.trace_id, write.session_source) == ("req-1", "none")
 
 
+def test_a_step_is_named_for_the_endpoint_that_served_it() -> None:
+    write = _trace().finish(status_code=200, completed=True)
+
+    assert write.spans[0].name == "/v1/chat/completions"
+
+
+def test_an_llm_call_never_starts_before_its_step() -> None:
+    """Latency is rounded to the millisecond, so a call measured from the step's start can reach back past it."""
+    trace = _trace()
+    # Ended 2,900.4 ms after the step started, with its latency rounded up to 2,901 ms.
+    trace.record_llm_call(_llm_call(_usage_row(timestamp=_T0 + timedelta(microseconds=2_900_400), latency_ms=2901)))
+
+    step, llm = trace.finish(status_code=200, completed=True).spans
+
+    assert step.start_time is not None and llm.start_time is not None
+    assert llm.start_time >= step.start_time
+
+
 # ---------------------------------------------------------------------------
 # The usage-row tap
 # ---------------------------------------------------------------------------

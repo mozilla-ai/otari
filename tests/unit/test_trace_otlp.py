@@ -4,6 +4,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from gateway.core.config import GatewayConfig
 from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
@@ -116,6 +118,19 @@ def test_text_in_a_span_name_or_attribute_never_reaches_the_document() -> None:
     [span] = write.spans
     assert (span.name, span.tool_name, span.outcome, span.error_class) == ("execute_tool", None, "error", "error")
     assert "merger" not in repr(span)
+
+
+@pytest.mark.parametrize(
+    ("reasons", "stored"),
+    [(["stop"], "stop"), (("tool_calls",), "tool_calls"), (["stop", "length"], "stop,length")],
+)
+def test_finish_reasons_sent_as_an_array_are_kept(reasons: Any, stored: str) -> None:
+    [write] = _project(
+        _span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.response.finish_reasons": reasons}),
+    )
+
+    [span] = write.spans
+    assert span.attributes == {"gen_ai.response.finish_reasons": stored}
 
 
 def test_a_span_with_no_ids_is_skipped() -> None:
