@@ -11,7 +11,7 @@ REFERENCES`` but no ``ADD CONSTRAINT``, so ``api_keys`` is not rebuilt: a
 rebuild reflects it, and its partial index is what reflection loses.
 
 Revision ID: c9e1a3f5b7d2
-Revises: b7d9f1a3c5e8
+Revises: e4410dfaf0db
 Create Date: 2026-10-15
 """
 
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c9e1a3f5b7d2"
-down_revision: str | Sequence[str] | None = "b7d9f1a3c5e8"
+down_revision: str | Sequence[str] | None = "e4410dfaf0db"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
