@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import anyio
 from any_llm.types.completion import CompletionUsage
 
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.usage import (
     GatewayUsage,
     cache_read_tokens_of,
@@ -146,6 +147,13 @@ def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> Com
         reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
         provider_web_searches=provider_web_searches_of(update) or provider_web_searches_of(current),
     )
+
+
+def _describe_settlement_error(exc: Exception) -> str:
+    """Name a settlement failure without the row data a database error's message can carry."""
+    if isinstance(exc, DATABASE_ERRORS):
+        return describe_database_error(exc)
+    return type(exc).__name__
 
 
 _KEEPALIVE_DUE = object()
@@ -373,7 +381,7 @@ async def streaming_generator(
                     await _shielded(on_no_usage)
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to log streaming usage for %s: %s", label, log_err)
+                logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
             if settlement is not None and attach_settlement is not None:
                 try:
                     attach_settlement(cost_carrier, settlement)
@@ -397,7 +405,7 @@ async def streaming_generator(
                     await _shielded(on_no_usage)
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to log streaming usage for %s: %s", label, log_err)
+                logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
     except Exception as e:
         # A carrier may have been buffered just before the upstream failed. It
         # remains an ordinary provider event and must precede the safe error.
@@ -411,7 +419,7 @@ async def streaming_generator(
         try:
             await _shielded(on_error, e)
         except Exception as log_err:
-            logger.error("Failed to log streaming error usage: %s", log_err)
+            logger.error("Failed to log streaming error usage: %s", _describe_settlement_error(log_err))
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Streaming error for %s: %s", label, e)
     finally:
@@ -423,13 +431,17 @@ async def streaming_generator(
                     await settlement_task
                 except Exception as log_err:
                     # codeql[py/clear-text-logging-sensitive-data]
-                    logger.error("Failed to log streaming usage for %s: %s", label, log_err)
+                    logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
             if not settled and on_incomplete is not None:
                 try:
                     await on_incomplete()
                 except Exception as log_err:
-                    # codeql[py/clear-text-logging-sensitive-data]
-                    logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
+                    logger.error(
+                        "Failed to settle incomplete stream for %s: %s",
+                        # codeql[py/clear-text-logging-sensitive-data]
+                        label,
+                        _describe_settlement_error(log_err),
+                    )
             # Iterating the source never closes it, so a stream the client abandoned
             # would hold the provider's connection until garbage collection.
             await close_stream_quietly(stream)
