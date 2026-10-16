@@ -31,6 +31,27 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("names the model and the API key in full, which the row cuts short", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          model: "claude-sonnet-4-5-20250929",
+          api_key_id: "key-1",
+          api_key_name: "production-backend-service",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    const field = (label: string): string =>
+      screen.getByText(label, { exact: true }).parentElement!.textContent ?? ""
+    expect(field("Model")).toContain("claude-sonnet-4-5-20250929")
+    expect(field("API key")).toContain("production-backend-service")
+    expect(field("API key ID")).toContain("key-1")
+  })
+
   it("shows a skipped candidate as a note, not as an error", async () => {
     mockApi()
     renderPage(

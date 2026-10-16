@@ -241,7 +241,7 @@ export function describeSource(source: string): string {
 //
 // One total is the least useful number on the row: on a cached agent workload it
 // is ~98% cache read, so every row shows a large, similar-looking figure. The
-// composition is what varies, so the column renders the split.
+// row shows input and output apart, and Input names its cache share.
 
 export interface TokenComposition {
   // Input tokens billed at the full input rate (the prompt minus whatever was
@@ -292,7 +292,7 @@ export function buildTokenComposition(
 
 // A row's gateway-run tool calls, read out of the reserved `tools` meter namespace.
 // Nested under one key so a caller-named MCP tool can never collide with a token
-// meter (which the billed-token SQL and `TokenBar` both read by name).
+// meter (which the billed-token SQL and `buildTokenComposition` both read by name).
 export type ToolUsage = {
   tool: string
   billed: number
@@ -343,29 +343,6 @@ export function computeToolCost(entry: UsageEntry): number | null {
     0,
   )
 }
-
-// Segment order runs input side first (fresh, then the two cache buckets), then
-// output. Shading is one hue at four lightnesses, assigned for legibility rather
-// than for price: every fill clears the track it sits on, adjacent fills differ
-// enough to show their boundary, and the bucket that is usually the bulk (cache
-// read) takes a mid tone instead of the palest step, so a cache-heavy row reads
-// as a filled bar and a fresh-input row as a dark one. Nothing is encoded by hue,
-// and the tooltip / accessible name carry every number, so the bar adds a shape
-// to scan and removes no information.
-export const TOKEN_SEGMENTS: {
-  key: keyof Omit<TokenComposition, "total">
-  label: string
-  fill: string
-}[] = [
-  { key: "fresh", label: "Fresh input", fill: "var(--color-chart-ramp-1)" },
-  { key: "cacheRead", label: "Cache read", fill: "var(--color-chart-ramp-3)" },
-  {
-    key: "cacheWrite",
-    label: "Cache write",
-    fill: "var(--color-chart-ramp-4)",
-  },
-  { key: "output", label: "Output", fill: "var(--color-chart-ramp-2)" },
-]
 
 // The pricing key a usage row bills against. A row stores the instance and the
 // bare model separately (`log_usage` is called with `provider=resolved.instance,

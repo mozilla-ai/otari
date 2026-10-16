@@ -692,8 +692,7 @@ describe("UsagePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Tokens" }))
 
-    // The four billed buckets are legended: the same encoding as the Activity
-    // page's per-row token bar.
+    // The four billed buckets are legended.
     expect(await screen.findByText("Fresh input")).toBeInTheDocument()
     expect(screen.getByText("Cache read")).toBeInTheDocument()
     expect(screen.getByText("Cache write")).toBeInTheDocument()
