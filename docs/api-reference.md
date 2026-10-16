@@ -240,7 +240,8 @@ nested form, `"metadata": {"spend_logs_metadata": {...}}`, is read as well, so a
 client moving off a LiteLLM proxy keeps its attribution unchanged; a nested key
 wins over a flat one of the same name. The limits are OpenAI's: up to 16 string
 pairs, keys up to 64 characters and values up to 512. A null value is ignored,
-and anything else is refused with a 422.
+and anything else is refused with a 422. Tags are stored as sent, so never put
+a secret in one.
 
 What reaches the provider depends on the surface. Chat Completions and Messages
 never forward the caller's `metadata`. On Messages, `metadata.user_id` names the
