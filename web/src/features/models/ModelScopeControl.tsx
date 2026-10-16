@@ -153,14 +153,16 @@ export function ModelScopeControl({
     </Tab>
   )
 
-  // A failed read and an empty one leave the same empty list; only the second
-  // means there is nothing to configure.
-  const catalogHint =
-    models.isError && catalog.length === 0
-      ? "Could not load the model catalog. Reload to try again."
-      : !models.isPending && catalog.length === 0
-        ? "No providers or models discovered yet. Configure a provider first, then scope this key."
-        : null
+  // A failed read and an empty one both leave little or nothing to pick; only
+  // the second means there is nothing to configure. A failed read is said even
+  // when aliases or provider wildcards still fill the list, which is then
+  // incomplete.
+  const catalogHint = models.isError
+    ? "Could not load the model catalog. Reload to try again."
+    : !models.isPending && catalog.length === 0
+      ? "No providers or models discovered yet. Configure a provider first, then scope this key."
+      : null
+  const showPicker = catalog.length > 0 || models.isPending
 
   return (
     <div className="flex flex-col gap-3">
@@ -206,7 +208,8 @@ export function ModelScopeControl({
           </div>
           {catalogHint ? (
             <span className="text-caption">{catalogHint}</span>
-          ) : (
+          ) : null}
+          {showPicker ? (
             <ComboBox.Root
               allowsEmptyCollection
               menuTrigger="input"
@@ -254,7 +257,7 @@ export function ModelScopeControl({
                 </ListBox>
               </ComboBox.Popover>
             </ComboBox.Root>
-          )}
+          ) : null}
         </div>
       ) : null}
     </div>

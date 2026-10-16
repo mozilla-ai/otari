@@ -24,13 +24,14 @@ function mockApi({
   modelsStatus = 200,
   operator = false,
   providers = [] as string[],
+  aliases = [] as { name: string; target: string }[],
 } = {}) {
   const urls: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     urls.push(url)
     if (url.includes(`${API_ROOT}/organizations/me/aliases`)) {
-      return json([{ name: "fast", target: "byok-openai:gpt-4o-mini" }])
+      return json(aliases)
     }
     if (url.endsWith(`${API_ROOT}/organizations/me`)) {
       return json(organizationContext({ deployment_operator: operator }))
@@ -81,6 +82,7 @@ describe("ModelScopeControl", () => {
         // A bare name resolves through no instance, so it is no selector.
         "fast",
       ],
+      aliases: [{ name: "fast", target: "byok-openai:gpt-4o-mini" }],
     })
     const user = userEvent.setup()
     const onChange = renderControl()
@@ -158,5 +160,23 @@ describe("ModelScopeControl", () => {
     expect(
       screen.queryByText(/No providers or models discovered yet/),
     ).not.toBeInTheDocument()
+  })
+
+  it("still says the read failed when aliases fill the list", async () => {
+    mockApi({
+      modelsStatus: 500,
+      aliases: [{ name: "fast", target: "byok-openai:gpt-4o-mini" }],
+    })
+    const user = userEvent.setup()
+    renderControl()
+
+    expect(
+      await screen.findByText(/Could not load the model catalog/),
+    ).toBeInTheDocument()
+    // What did load stays pickable.
+    await user.type(await screen.findByLabelText("Add a model"), "fast")
+    expect(
+      await screen.findByRole("option", { name: "fast · alias" }),
+    ).toBeInTheDocument()
   })
 })
