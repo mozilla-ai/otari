@@ -3,9 +3,10 @@
 For ``builtin_fetch`` the backend opens the built-in fetcher's retrieval client
 for the request, and the fetcher checks every hop against the request's domain
 policy (contract G2) and never reaches a private host. For a provider instance
-it sends through the app's web provider client, and checks the requested URL's
-host against the policy before the call, since the provider follows redirects
-on its own side.
+it sends through the app's web provider client. The provider follows redirects
+on its own side, so the backend checks the requested URL before the call, and
+the URL the provider reports finding the page at after it: the host must pass
+the policy and, when it is an IP address, be a public one.
 
 What the model reads is contract G1's: the page under its source and content
 type, or one fixed ``[tool error]`` text per kind of failure. A provider
@@ -50,7 +51,12 @@ from gateway.services.tools._web_names import (
 )
 from gateway.services.tools._web_tool_failure import WebToolFailure
 from gateway.services.web_retrieval_network import truncate_utf8
-from gateway.services.web_retrieval_policy import DomainPolicy, WebURLValidationError, canonicalize_web_url
+from gateway.services.web_retrieval_policy import (
+    CanonicalWebURL,
+    DomainPolicy,
+    WebURLValidationError,
+    canonicalize_web_url,
+)
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -189,8 +195,8 @@ class WebFetchBackend:
                 checked = canonicalize_web_url(url)
             except WebURLValidationError:
                 return self._refused(URL_INVALID_TAG, _URL_INVALID_TEXT)
-            if not self._policy.permits(checked.origin.host):
-                return self._refused(DOMAIN_POLICY_TAG, _DOMAIN_POLICY_TEXT)
+            if (refusal := self._refusal(checked)) is not None:
+                return refusal
             url = str(checked.url)
         resolved = self._resolved
         try:
@@ -206,6 +212,9 @@ class WebFetchBackend:
             return self._failed(self._raised(exc, INTERNAL_ERROR_TAG), None)
         if (error := page.error) is not None:
             return self._failed(WebToolFailure.of(resolved.provider, error.status, error.tag), error.status)
+        if not self._builtin and (found := fetched_url(page.final_url)) is not None:
+            if (refusal := self._refusal(found)) is not None:
+                return refusal
         self._last_page = page
         return _page_text(page)
 
@@ -228,8 +237,18 @@ class WebFetchBackend:
         )
         return WebToolFailure.of(self._resolved.provider, None, tag)
 
+    def _refusal(self, url: CanonicalWebURL) -> str | None:
+        """The refusal of a URL a provider instance is asked for or reports, ``None`` when it is permitted."""
+        host = url.origin.host
+        if not self._policy.permits(host):
+            return self._refused(DOMAIN_POLICY_TAG, _DOMAIN_POLICY_TEXT)
+        # The built-in fetcher's rule for an address: neither multicast nor any range short of global.
+        if host.ip is not None and (host.ip.is_multicast or not host.ip.is_global):
+            return self._refused(URL_INVALID_TAG, _URL_INVALID_TEXT)
+        return None
+
     def _refused(self, tag: str, text: str) -> str:
-        """A call refused before any provider was called."""
+        """A call the gateway's own checks refused, of the URL asked for or of where a provider found the page."""
         self._last_failure = WebToolFailure.of(None, None, tag)
         return text
 

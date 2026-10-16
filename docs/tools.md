@@ -562,9 +562,11 @@ does not run on fetch instances yet, so the built-in fetcher above still enriche
 search results. `POST /api/v1/search-tools/{name}/test` with a `url` tries an
 instance.
 
-On a fetch instance, Otari checks the requested URL's host against the domain
-policy before the call; the provider fetches the page and follows its redirects
-on its own side. A provider's failure reaches the model as
+On a fetch instance, the provider fetches the page and follows its redirects on
+its own side. Otari checks the requested URL before the call, and the URL the
+provider reports finding the page at after it: its host must pass the domain
+policy and, when it is an IP address, be a public one, as with the built-in
+fetcher. A provider's failure reaches the model as
 `[tool error] <provider> fetch failed (<tag>)`, with the HTTP status when there is
 one, and never with the provider's own message.
 
