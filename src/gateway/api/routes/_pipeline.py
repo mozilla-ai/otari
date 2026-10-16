@@ -2972,12 +2972,11 @@ async def resolve_request_context(
     session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
     trace: RequestTrace | None = None
     if config.trace_capture_enabled and workspace_id is not None:
-        if turn is not None and is_subagent(raw_request.headers):
-            turn = replace(turn, opens_turn=False)
         trace = RequestTrace(
             session=session,
             harness=harness_of(raw_request.headers),
             turn=turn,
+            subagent=is_subagent(raw_request.headers),
             request_id=request_id,
             workspace_id=workspace_id,
             user_id=user_id,
