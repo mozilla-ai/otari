@@ -25,10 +25,12 @@ from gateway.services.traces._collector import client_tool_span_id
 _WORKSPACE = uuid.uuid4()
 _CLAUDE_CODE = {"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-claude-code-session-id": "b57732d4"}
 _CODEX_THREAD = "0199e5a1-7c2b-7d4e-9f10-2a3b4c5d6e7f"
+_CODEX_SUBAGENT_THREAD = "0199e5a1-8d3c-7e5f-a021-3b4c5d6e7f80"
 _CODEX = {
     "originator": "codex_exec",
     "user-agent": "codex_exec/0.154.0 (Linux 6.8.0; x86_64) unknown (codex_exec; 0.154.0)",
     "session-id": _CODEX_THREAD,
+    "thread-id": _CODEX_THREAD,
 }
 
 
@@ -45,6 +47,18 @@ def test_codexs_own_session_header_names_the_session() -> None:
     assert resolve(_CODEX, session_label=None, tags=None) == SessionRef(source="harness", key=_CODEX_THREAD)
 
 
+def test_a_codex_subagent_is_a_session_of_its_own_thread() -> None:
+    subagent = _CODEX | {"thread-id": _CODEX_SUBAGENT_THREAD}
+
+    assert resolve(subagent, session_label=None, tags=None) == SessionRef(source="harness", key=_CODEX_SUBAGENT_THREAD)
+
+
+def test_a_codex_request_without_a_thread_id_is_keyed_on_its_session_id() -> None:
+    headers = {key: value for key, value in _CODEX.items() if key != "thread-id"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key=_CODEX_THREAD)
+
+
 @pytest.mark.parametrize("marker", ["originator", "user-agent"])
 def test_either_header_codex_marks_its_requests_with_is_enough(marker: str) -> None:
     headers = {marker: _CODEX[marker], "session-id": _CODEX_THREAD}
@@ -54,7 +68,7 @@ def test_either_header_codex_marks_its_requests_with_is_enough(marker: str) -> N
 
 
 def test_a_session_id_header_from_another_client_names_no_session() -> None:
-    headers = {"user-agent": "python-httpx/0.28", "session-id": _CODEX_THREAD}
+    headers = {"user-agent": "python-httpx/0.28", "session-id": _CODEX_THREAD, "thread-id": _CODEX_THREAD}
 
     assert resolve(headers, session_label=None, tags=None) is None
     assert harness_of(headers) == "python-httpx"
