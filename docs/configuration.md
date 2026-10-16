@@ -875,9 +875,9 @@ instance inherits from `web_search_url`. Provider options and request filters
 are covered in [Built-in tools](tools.md).
 
 An instance takes its key only from its own `api_key`, such as
-`"${EXA_API_KEY}"` above. Unlike an LLM provider's `providers:` entry, it never falls back to the
-provider's environment variable, so an entry for a provider that needs a key and
-carries none stops startup. A tool carrying an `api_key` must use an HTTPS
+`"${EXA_API_KEY}"` above, as an LLM provider's `providers:` entry does. An entry
+for a search provider that needs a key and carries none stops startup, where an
+LLM provider's entry is ignored with a warning. A tool carrying an `api_key` must use an HTTPS
 `api_base`; a keyless local SearXNG endpoint may use HTTP.
 
 Rules for instances:
