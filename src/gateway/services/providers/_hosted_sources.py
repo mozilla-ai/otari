@@ -43,6 +43,11 @@ class HostedSource:
         return self.row.provider if self.row is not None else self._entry.provider
 
     @property
+    def identity(self) -> tuple[str, uuid.UUID | None]:
+        """What serves the provider: a configuration entry, or one stored row."""
+        return (self.source, None if self.row is None else self.row.id)
+
+    @property
     def enabled(self) -> bool:
         return self.row.enabled if self.row is not None else self._entry.enabled
 

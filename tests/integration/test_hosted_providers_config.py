@@ -336,6 +336,33 @@ async def test_a_roster_outliving_its_entry_serves_nothing_and_the_sweep_removes
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("apply", [False, True])
+async def test_a_sweep_drops_a_listing_whose_entry_a_stored_row_replaced_mid_dial(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, apply: bool
+) -> None:
+    """The configured key answered the listing, so it is not credited to the stored key that now serves the provider."""
+    service = _service(async_db, _configured())
+    await service.add_model(
+        "openai", HostedModelCreateRequest(model="o3", input_price_per_million=2, output_price_per_million=8)
+    )
+
+    async def _dial_and_store(impl_name: str, **_: object) -> ProviderDiscovery:
+        _discovery(monkeypatch)
+        await _store(service)
+        return ProviderDiscovery(
+            provider=impl_name, models=[Model(id="gpt-5", object="model", created=0, owned_by=impl_name)]
+        )
+
+    monkeypatch.setattr(DIAL, _dial_and_store)
+    result = await service.refresh_catalog(apply=apply)
+
+    [answer] = result.providers
+    assert (answer.source, answer.added, answer.error is not None) == ("config", [], True)
+    roster = (await async_db.execute(select(HostedProviderModel.model))).scalars().all()
+    assert roster == ["o3"]
+
+
+@pytest.mark.asyncio
 async def test_the_sweep_removes_the_roster_of_the_only_provider_and_keeps_every_price(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

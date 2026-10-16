@@ -37,7 +37,9 @@ LiveByoPairs = Callable[[Collection[str]], Awaitable[set[tuple[uuid.UUID, str]]]
 UNDECRYPTABLE = (
     "The stored key cannot be decrypted. Was OTARI_SECRET_KEY rotated? Re-enter the credential, then try again."
 )
-REMOVED_MID_SWEEP = "The provider was removed while the sweep ran, so nothing was offered on it."
+REMOVED_MID_SWEEP = (
+    "The provider was removed, switched off or replaced while the sweep ran, so nothing was offered on it."
+)
 
 
 def _prefix(model_key: str) -> str | None:
@@ -115,11 +117,13 @@ class HostedCatalogSweep:
             # out, say), and serves nothing; it is not offered, and an apply
             # removes it with the prices it was keeping.
             orphaned = sorted(await self.models.rostered_providers() - defined)
-            # Both paths drop what a provider removed or switched off mid-dial
-            # listed, so the preview classifies the prices exactly as the apply.
-            present = {source.provider for source in sources if source.enabled}
-            for answer in dialed:
-                if answer.provider not in present:
+            # Both paths drop what a provider removed, switched off or replaced
+            # by another source mid-dial listed, so the preview classifies the
+            # prices exactly as the apply, and a listing is never credited to a
+            # credential that did not answer it.
+            present = {source.provider: source.identity for source in sources if source.enabled}
+            for (source, _, _), answer in zip(serving, dialed, strict=True):
+                if present.get(answer.provider) != source.identity:
                     answer.added = []
                     answer.error = REMOVED_MID_SWEEP
                 elif apply:
