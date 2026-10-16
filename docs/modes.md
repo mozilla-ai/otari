@@ -56,9 +56,10 @@ The dashboard hides the Providers page, whose stored instances are deployment-wi
 rather than per tenant, leaving the organization-scoped provider keys that a
 standalone deployment also has. It keeps the Hosted providers page, where an
 operator configures the credentials the deployment pays for (see
-[Managed models and BYO credentials](#managed-models-and-byo-credentials)). It
-also hides the Playground, whose whole purpose is to dispatch a completion. Deployment-wide APIs still require
-operator authority; organization-scoped APIs apply membership and role checks.
+[Hosted providers and BYO credentials](#hosted-providers-and-byo-credentials)).
+It also hides the Playground, whose whole purpose is to dispatch a completion.
+Deployment-wide APIs still require operator authority; organization-scoped APIs
+apply membership and role checks.
 
 A hosted control plane and its hybrid gateways form one system: the gateway
 resolves credentials from the control plane and reports usage back so the
@@ -118,16 +119,16 @@ served as if it did not exist. Any standalone or hosted deployment configures
 them on the Hosted providers page or through `/api/v1/hosted-providers`.
 
 What a hosted provider contributes to the catalog is its roster: the models
-switched on under it, answered for the caller's organization. It also takes
-part in the operator's views of the deployment's credentials, beside the
-configured instances. `GET /api/v1/models/discoverable` lists what each hosted
-provider's stored key can reach, and `GET /api/v1/providers/health` reports
-whether it answers, each under the provider's name. Both are the deployment's
-view, so a provider restricted to one organization is included, and a provider
-switched off is not. A hosted provider whose key no configured
-`OTARI_SECRET_KEY` reads is reported unhealthy with that reason rather than
-dialed. A configured instance named like a hosted provider shadows it here as
-it does at dispatch, so only the instance is listed.
+switched on under it, answered for the caller's organization. It also takes part
+in the operator's views of the deployment's credentials, beside the configured
+instances. `GET /api/v1/models/discoverable` lists what each hosted provider's
+stored key can reach, and `GET /api/v1/providers/health` reports whether it
+answers, each under the provider's name. Both are the deployment's view, so a
+provider restricted to one organization is included, and a provider switched off
+is not. A hosted provider whose stored key cannot be decrypted with the
+configured `OTARI_SECRET_KEY` is reported unhealthy with that reason rather than
+dialed. A configured instance named like a hosted provider shadows it here as it
+does at dispatch, so only the instance is listed.
 
 Being in those views means a hosted provider's model listing is dialed upstream
 on the deployment's stored key, at its `api_base` when one is set. The
