@@ -90,7 +90,10 @@ An agent that exports OpenTelemetry spans to `/otlp/v1/traces` (see
 [Importing external usage](external-usage.md)) has every span kept on its
 trace, including its own `invoke_agent` and `execute_tool` spans, with the span
 tree it sent. Span names and attribute values are kept only when they are
-identifier-shaped.
+identifier-shaped. The read API returns each of these spans with the
+`otel_trace_id` and `otel_span_id` it was exported with, in lowercase hex, so it
+can be joined back to the same trace in another backend. A span the gateway
+records itself has neither.
 
 ## Reading traces
 
