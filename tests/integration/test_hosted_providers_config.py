@@ -146,6 +146,10 @@ async def test_a_configured_provider_serves_on_its_configured_credential(
 ) -> None:
     _discovery(monkeypatch)
     service = _service(async_db, _configured(api_base="https://hosted.test/v1", client_args={"timeout": 9}))
+    assert await service.resolve("openai", "gpt-4o", organization_id=None) is None, "served before it was offered"
+    await service.add_model(
+        "openai", HostedModelCreateRequest(model="gpt-4o", input_price_per_million=2.5, output_price_per_million=10)
+    )
 
     resolved = await service.resolve("openai", "gpt-4o", organization_id=uuid.uuid4())
 
@@ -336,6 +340,16 @@ def configured_client(test_config: GatewayConfig, clean_database: None) -> Gener
     yield from build_test_client(config)
 
 
+def _offer(client: TestClient, headers: dict[str, str], provider: str, model: str) -> None:
+    """Put ``model`` on ``provider``'s roster, priced and so switched on: nothing off the roster serves."""
+    offered = client.post(
+        f"{PATH}/{provider}/models",
+        json={"model": model, "input_price_per_million": 2.5, "output_price_per_million": 10},
+        headers=headers,
+    )
+    assert offered.status_code == 201, offered.text
+
+
 @pytest.fixture
 def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
     """The gateway logger does not propagate, so caplog sees it only with its handler attached."""
@@ -413,6 +427,7 @@ def test_a_request_is_served_on_a_configured_provider(
         ).status_code
         == 200
     )
+    _offer(configured_client, master_key_header, "openai", "gpt-4o")
     captured: dict[str, object] = {}
 
     async def fake_acompletion(**kwargs: object) -> None:
@@ -450,6 +465,7 @@ def test_a_request_is_served_on_a_keyless_configured_provider(
         ).status_code
         == 200
     )
+    _offer(keyless_client, master_key_header, "vllm", "qwen3-32b")
     captured: dict[str, object] = {}
 
     async def fake_acompletion(**kwargs: object) -> None:
