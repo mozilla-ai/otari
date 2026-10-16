@@ -88,7 +88,11 @@ export const API_KEY_COLUMN: RequestColumn = {
   id: "api_key",
   header: "API key",
   cell: (entry) => (
-    <span className="block truncate text-muted" title={apiKeyLabel(entry)}>
+    // The title is the whole id when the label had to shorten it.
+    <span
+      className="block truncate text-muted"
+      title={entry.api_key_name ?? entry.api_key_id ?? "—"}
+    >
       {apiKeyLabel(entry)}
     </span>
   ),

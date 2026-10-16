@@ -105,6 +105,28 @@ describe("RequestDetail", () => {
     ).toHaveTextContent("1,200")
   })
 
+  it("titles a named user with the name, while the copy keeps the id", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
+          user_alias: "Alice Example",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("Alice Example")).toHaveAttribute(
+      "title",
+      "Alice Example",
+    )
+    expect(
+      screen.getByRole("button", { name: "Copy user id" }),
+    ).toBeInTheDocument()
+  })
+
   it("shows the reasoning tokens, and a dash for a row that never recorded them", async () => {
     mockApi()
     const { unmount } = renderPage(

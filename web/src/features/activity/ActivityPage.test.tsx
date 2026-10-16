@@ -1634,7 +1634,11 @@ describe("ActivityPage table-scan avoidance", () => {
     })
     renderPage(<ActivityPage />, "/activity?range=24h")
 
-    expect(await screen.findByText("abcdef12…")).toBeInTheDocument()
+    // Shortened in the cell, whole on hover.
+    expect(await screen.findByText("abcdef12…")).toHaveAttribute(
+      "title",
+      "abcdef123456",
+    )
   })
 })
 

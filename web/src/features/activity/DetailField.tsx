@@ -6,7 +6,7 @@ import { CopyableValue } from "@/design-system/actions/CopyField"
 // (a request id, an api key id): they are what an operator pastes into a log
 // search or a support thread, and a mistyped character makes them useless.
 // Such a value keeps to one line, ellipsized rather than wrapped, with the
-// whole of it as its title; `isId` sets it in mono.
+// whole of what it shows as its title; `isId` sets it in mono.
 export function DetailField({
   label,
   copyValue,
@@ -36,7 +36,9 @@ export function DetailField({
             className={isId ? "text-mono-caption" : "text-body"}
             isTruncated
           >
-            <span title={copyValue}>{children}</span>
+            <span title={typeof children === "string" ? children : copyValue}>
+              {children}
+            </span>
           </CopyableValue>
         </span>
       ) : (
