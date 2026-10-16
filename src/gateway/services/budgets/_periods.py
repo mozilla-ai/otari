@@ -76,11 +76,8 @@ def seconds_until(end: datetime, now: datetime) -> int:
     """Whole seconds from ``now`` until ``end``, rounded up and never less than one.
 
     Rounded up so a client that waits this long lands in the next window rather
-    than a fraction of a second before it. A naive ``end`` is read as UTC, which
-    is how SQLite hands back a stored timestamp.
+    than a fraction of a second before it.
     """
-    if end.tzinfo is None:
-        end = end.replace(tzinfo=UTC)
     return max(math.ceil((end - now).total_seconds()), 1)
 
 

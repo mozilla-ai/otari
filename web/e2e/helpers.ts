@@ -284,11 +284,13 @@ export function table(page: Page, ariaLabel: string): Locator {
 }
 
 // Data rows only. The header is a `row` too, so it is excluded by requiring the
-// row-header cell that every data row carries. Note an empty table still renders
-// one such row, holding its empty message: assert the message rather than a count
-// of zero.
+// row-header cell that every data row carries. An empty or loading table renders
+// one such row as well, a colspan cell holding "Loading…" or its empty message,
+// in a body react-aria marks `data-empty`. That body is excluded, or a wait for
+// rows passes on the spinner and the next press lands on it.
 export function tableRows(page: Page, ariaLabel: string): Locator {
   return table(page, ariaLabel)
+    .locator("tbody:not([data-empty])")
     .getByRole("row")
     .filter({ has: page.getByRole("rowheader") })
 }

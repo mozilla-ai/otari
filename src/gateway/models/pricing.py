@@ -24,10 +24,10 @@ UNIT_METERS: tuple[str, ...] = ("requests", "search_units", "images")
 # The largest count one attempt may report under any meter.
 MAX_REPORTED_UNITS = 1_000_000
 
-# ``origin`` on the same two tables is ``config``, ``api``, ``migration`` or
-# ``seed``. ``seed`` belongs to ``organization_model_pricing`` alone: it marks a
-# rate the offered-models surface copied from the community dataset on the
-# organization's behalf, the one origin a later refresh may move. Named because
+# ``origin`` on the same two tables is ``config``, ``api``, ``migration``,
+# ``seed`` or, on an override only, ``operator``. ``seed`` marks a rate an offered-models surface copied from the
+# community dataset, an organization's on its own keys or the deployment's on
+# its hosted providers: the one origin a later refresh may move. Named because
 # three modules compare against it and a bare "seed" in any of them reads as a
 # different fact.
 SEED_ORIGIN = "seed"
@@ -36,6 +36,12 @@ SEED_ORIGIN = "seed"
 # refresh moving it. Named for the same reason: the two are written in different
 # modules from the one that reads them back.
 API_ORIGIN = "api"
+
+# What an organization override carries when the deployment operator set it,
+# rather than the organization's own owner or admin. Only such a rate prices a
+# request the deployment paid for: one the organization wrote itself would let a
+# tenant name the cost of the deployment's own upstream.
+OPERATOR_ORIGIN = "operator"
 
 # Which rung of the ladder answered for a rate a reader is shown, in the order
 # ``pricing_service.find_model_pricing`` walks. One vocabulary, because the
@@ -110,8 +116,9 @@ class ModelPricing(Base):
     # cannot tell which from the number, so the row says (``PRICING_UNITS``).
     unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
     # Which path wrote the row: ``config`` (the file's ``pricing:`` block),
-    # ``api`` (``POST /v1/pricing``), or ``migration``. NULL on a row written
-    # before origins were recorded, which is a real answer and not a default.
+    # ``api`` (``POST /v1/pricing``), ``migration``, or ``seed`` (a community
+    # default stored on a hosted model's behalf). NULL on a row written before
+    # origins were recorded, which is a real answer and not a default.
     origin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(

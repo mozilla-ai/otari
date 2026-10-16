@@ -93,6 +93,11 @@ class Mailer:
         """
         return self._config.ui_link(path)
 
+    @property
+    def asset_root(self) -> str | None:
+        """Where this deployment's dashboard serves its static files, or ``None`` if its address is unknown."""
+        return self._config.effective_ui_base_url.partition("?")[0].rstrip("/") or None
+
     async def send(self, *, to: str, message: MailMessage) -> MailDelivery:
         """Deliver one rendered message. Never raises.
 
@@ -125,7 +130,9 @@ class Mailer:
             return MailDelivery(delivered=False, transport=transport.name, reason=str(exc))
         return MailDelivery(delivered=True, transport=transport.name)
 
-    async def send_template(self, template: str, *, to: str, subject: str, values: dict[str, str]) -> MailDelivery:
+    async def send_template(
+        self, template: str, *, to: str, subject: str, values: dict[str, str], preheader: str = ""
+    ) -> MailDelivery:
         """Render a template and send it, the one call a simple message needs.
 
         A template that does not exist, or one whose placeholders the caller did
@@ -134,7 +141,10 @@ class Mailer:
         codebase, not a property of the deployment's mail configuration, and
         collapsing the two would hide it behind "mail didn't send".
         """
-        return await self.send(to=to, message=render_email(template, subject=subject, values=values))
+        message = render_email(
+            template, subject=subject, values=values, preheader=preheader, asset_root=self.asset_root
+        )
+        return await self.send(to=to, message=message)
 
 
 __all__ = ["Mailer"]

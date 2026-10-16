@@ -1,7 +1,7 @@
 """Data access for organization memberships."""
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from typing import Any
 
 from sqlalchemy import func, select
@@ -141,6 +141,32 @@ class OrganizationMemberRepository(
             statement = statement.with_for_update()
         result = await self.db.execute(statement)
         return result.scalars().first()
+
+    async def first_active_organization_ids(
+        self,
+        user_ids: Collection[uuid.UUID],
+        *,
+        excluding: uuid.UUID,
+    ) -> dict[uuid.UUID, uuid.UUID]:
+        """Map each identity to the organization of its oldest active membership outside ``excluding``.
+
+        Ordered as ``get_first_active_for_user`` is. An identity with no such membership is absent.
+        """
+        if not user_ids:
+            return {}
+        result = await self.db.execute(
+            select(col(OrganizationMember.user_id), col(OrganizationMember.organization_id))
+            .where(
+                col(OrganizationMember.user_id).in_(user_ids),
+                col(OrganizationMember.status) == "active",
+                col(OrganizationMember.organization_id) != excluding,
+            )
+            .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
+        )
+        first: dict[uuid.UUID, uuid.UUID] = {}
+        for user_id, organization_id in result.tuples():
+            first.setdefault(user_id, organization_id)
+        return first
 
     async def get_organization_id(self, organization_member_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization a membership belongs to, or None."""

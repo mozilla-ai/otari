@@ -580,7 +580,8 @@ async def list_catalog(
     the deployment's row, else the models.dev default. Aliases and routing
     policies are not models and are not listed; see Routing. A visitor, where
     the catalog is public, sees the configured instances and the hosted
-    models at the deployment's rates, and nothing that belongs to a tenant.
+    models every organization reaches, at the deployment's rates, and nothing
+    that belongs to a tenant.
     """
     merged = await _merged_for(db, config, caller, session_identity, model_provider)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)

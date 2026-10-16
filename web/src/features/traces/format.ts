@@ -11,13 +11,15 @@ export function formatTraceTimestamp(iso: string, withMs = false): string {
   return `${date} ${time}${withMs ? `.${pad(d.getMilliseconds(), 3)}` : ""}`
 }
 
-// `formatLatency` for under a minute; "2m 05s" from 60 s up.
 export function formatDuration(ms: number): string {
-  if (ms >= 60_000) {
-    const total = Math.round(ms / 1000)
-    return `${Math.floor(total / 60)}m ${pad(total % 60)}s`
+  if (ms < 60_000) return formatLatency(ms)
+  // The unit is picked on the rounded value, or 59m 59.6s would read "60m 00s".
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)}m ${pad(seconds % 60)}s`
   }
-  return formatLatency(ms)
+  const minutes = Math.round(seconds / 60)
+  return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`
 }
 
 // Log View's Start column: `m:ss`, or `m:ss.mmm`, relative to the trace start.

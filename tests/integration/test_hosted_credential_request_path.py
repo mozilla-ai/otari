@@ -108,7 +108,7 @@ def overlay_client(postgres_url: str, overlay_on_path: str) -> Generator[TestCli
 
 @pytest.fixture
 def plain_client(postgres_url: str) -> Generator[TestClient]:
-    """The same gateway with no bootstrap: the core adapter answers None for everything."""
+    """The same gateway with no bootstrap and no hosted provider: the core adapter answers None for everything."""
     yield from build_test_client(_config(postgres_url))
 
 

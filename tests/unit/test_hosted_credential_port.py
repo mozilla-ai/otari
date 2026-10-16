@@ -124,9 +124,10 @@ def _ctx(
     organization_id: uuid.UUID | None = ORGANIZATION_ID,
     workspace_id: uuid.UUID | None = WORKSPACE_ID,
     plan: Any = None,
+    config: GatewayConfig | None = None,
 ) -> pipeline.RequestContext:
     return pipeline.RequestContext(
-        config=GatewayConfig(),
+        config=config or GatewayConfig(),
         db=None,
         uow=None,
         log_writer=cast(Any, object()),
@@ -157,10 +158,11 @@ async def _dispatch(
     port: ModelProviderPort,
     *,
     selector: str = "openai:gpt-4o",
+    config: GatewayConfig | None = None,
 ) -> ResolvedProvider:
     return await pipeline.resolve_dispatch_provider(
         ctx,
-        GatewayConfig(),
+        config or GatewayConfig(),
         selector,
         adapter=chat._ADAPTER,
         model_provider=port,
@@ -263,21 +265,71 @@ async def test_provider_sdk_env_var_is_not_asked_about(monkeypatch: pytest.Monke
     ],
 )
 @pytest.mark.asyncio
-async def test_a_provider_needing_no_credential_is_not_asked_about(selector: str) -> None:
+async def test_a_provider_needing_no_credential_is_not_claimed_by_a_fleet(selector: str) -> None:
     """any-llm calls these without a key, so an empty kwargs is not a missing one.
 
     A bare ``ollama:llama3`` works today against a local backend, and a bare
-    ``bedrock:...`` works today off an EC2 instance profile. Reporting either as
-    unserved would hand a working request to a fleet that might answer it from
-    somewhere else, and self-hosting is a first-class path *upstream* of this
-    port (``ports/model_provider_port.py``).
+    ``bedrock:...`` works today off an EC2 instance profile. Handing either to a
+    fleet that answers it from somewhere else would move working traffic, and
+    self-hosting is a first-class path *upstream* of this port
+    (``ports/model_provider_port.py``). Only a hosted provider of the same name
+    may serve one, which the next test pins.
     """
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     resolved = resolve_provider_selector(GatewayConfig(), selector)
     assert set(resolved.kwargs) <= {"client_args"}
     result = await _dispatch(_ctx(resolved_provider=resolved), port, selector=selector)
     assert result is resolved
+
+
+@pytest.mark.asyncio
+async def test_a_keyless_provider_is_served_on_the_deployments_own_hosted_provider_of_that_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A keyless hosted provider carries what the bare call lacks, its endpoint, and takes the placeholder key."""
+    monkeypatch.delenv("VLLM_API_KEY", raising=False)
+    port = RecordingPort(
+        credential=HostedCredential(api_key=None, api_base="http://vllm.internal:8000/v1", response_provider="vllm")
+    )
+    resolved = resolve_provider_selector(GatewayConfig(), "vllm:my-model")
+
+    result = await _dispatch(_ctx(resolved_provider=resolved), port, selector="vllm:my-model")
+
+    assert result.deployment_paid is True
+    assert result.kwargs == {"api_key": "otari-no-key-required", "api_base": "http://vllm.internal:8000/v1"}
+
+
+@pytest.mark.asyncio
+async def test_a_configured_keyless_provider_keeps_its_own_connection_over_a_hosted_one() -> None:
+    """A region is not a credential, but it is the deployment's own configuration of the provider."""
+    config = GatewayConfig(providers={"bedrock": {"client_args": {"region_name": "eu-west-1"}}})
+    port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="bedrock"))
+    selector = "bedrock:anthropic.claude-3"
+    resolved = resolve_provider_selector(config, selector)
+
+    result = await _dispatch(_ctx(resolved_provider=resolved, config=config), port, selector=selector, config=config)
+
     assert port.calls == []
+    assert result.deployment_paid is False
+    assert result.kwargs["client_args"]["region_name"] == "eu-west-1"
+
+
+@pytest.mark.parametrize("error", [HostedAccessDeniedError("no"), RuntimeError("down at password=hunter2"), None])
+@pytest.mark.asyncio
+async def test_a_keyless_provider_is_left_as_it_was_when_the_port_refuses_or_fails(
+    error: Exception | None, gateway_logs: pytest.LogCaptureFixture
+) -> None:
+    """The request worked before the port was asked, so nothing the port does can break it.
+
+    ``None`` is a port that declines, as one does for a model its roster does not switch on.
+    """
+    port = RecordingPort(error=error)
+    resolved = resolve_provider_selector(GatewayConfig(), "ollama:llama3")
+
+    result = await _dispatch(_ctx(resolved_provider=resolved), port, selector="ollama:llama3")
+
+    assert result is resolved
+    assert "hunter2" not in gateway_logs.text
 
 
 @pytest.mark.parametrize(
@@ -535,6 +587,23 @@ async def test_an_adapter_failure_refunds_and_becomes_a_502(
     assert str(failure) not in str(exc_info.value.detail)
     assert len(released) == 1
     assert [row["status_code"] for row in rejections] == [502]
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_failure_is_logged_by_class_alone(
+    monkeypatch: pytest.MonkeyPatch, gateway_logs: pytest.LogCaptureFixture
+) -> None:
+    """An adapter's message can carry the row it was reading, so neither it nor the traceback is logged."""
+    _capture_settlement(monkeypatch)
+    port = RecordingPort(error=RuntimeError("credential row sk-live-do-not-log"))
+
+    with pytest.raises(HTTPException):
+        await _dispatch(_ctx(resolved_provider=_uncredentialed()), port)
+
+    [record] = [r for r in gateway_logs.records if "ModelProviderPort failed" in r.getMessage()]
+    assert record.getMessage().endswith(": RuntimeError")
+    assert record.exc_info is None
+    assert "sk-live-do-not-log" not in gateway_logs.text
 
 
 @pytest.mark.asyncio

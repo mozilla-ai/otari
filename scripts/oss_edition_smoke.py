@@ -18,7 +18,11 @@ self-hoster walks on day one:
 3. ``/api/v1/bootstrap`` answers with no credential and reports ``standalone``. It is
    the first request a browser makes, and a second statement of which edition
    booted.
-4. Create a user, then an API key for it (master-key admin surface).
+4. Create a budget that resets on the UTC calendar day, a user on it, then an
+   API key for it (master-key admin surface). The period puts a stored reset
+   time in front of the budget gate on every request, which SQLite reads back
+   without an offset; a gate that compared it to an aware clock refused every
+   request with a 500.
 5. Register a BYO provider credential at runtime, which is stored encrypted.
 6. Create a routing policy whose default candidate fails and whose ``on_failure``
    candidate is that BYO provider.
@@ -40,9 +44,17 @@ runtime-only environment (``uv sync --frozen --no-dev``), so an enterprise-only
 or dev-only import that reached an OSS code path fails here rather than passing
 on a developer machine that happens to have it installed.
 
+``--image`` runs the same walk against a built container instead of the source
+checkout, as ``scripts/hybrid_edition_smoke.py --image`` does: the image's own
+filesystem, entrypoint and baked environment. The container migrates on start,
+as a deployment's does, and keeps its database in a SQLite file of its own
+unless ``--database-url`` names one it can reach. The mock provider then binds
+every interface and the container reaches it through ``host.docker.internal``.
+
 Usage:
     uv run --frozen --no-dev python scripts/oss_edition_smoke.py
     uv run --frozen --no-dev python scripts/oss_edition_smoke.py --database-url postgresql://...
+    uv run --frozen --no-dev python scripts/oss_edition_smoke.py --image otari:pr-sha
 """
 
 from __future__ import annotations
@@ -98,7 +110,21 @@ SCRUBBED_ENV_PREFIXES = ("OTARI_",)
 SCRUBBED_ENV_VARS = frozenset({"DATABASE_URL"})
 
 HEALTH_TIMEOUT_SECONDS = 90
+# A bound on each docker call, so a daemon that stops answering cannot hang the smoke.
+DOCKER_TIMEOUT_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 60
+
+# Where the mock provider binds, and the host the gateway reaches it on. They
+# differ only for a container run, whose loopback is its own.
+LOOPBACK = "127.0.0.1"
+ALL_INTERFACES = ""
+CONTAINER_HOST_ALIAS = "host.docker.internal"
+# The image pins OTARI_HOST and OTARI_PORT as environment variables, which beat
+# a config file, so a container listens here whatever the mounted config says.
+CONTAINER_PORT = 8000
+CONTAINER_CONFIG_PATH = "/tmp/oss-edition.yml"
+# Inside the container's own filesystem, so the run needs no database service.
+CONTAINER_DATABASE_URL = "sqlite:////tmp/oss-edition.db"
 
 
 class SmokeFailure(Exception):
@@ -245,10 +271,16 @@ def _completion_payload() -> dict[str, Any]:
     }
 
 
+def peer_base_url(server: _MockProviderServer, bind_host: str) -> str:
+    """The URL the gateway dials to reach the mock provider bound on ``bind_host``."""
+    host = CONTAINER_HOST_ALIAS if bind_host == ALL_INTERFACES else LOOPBACK
+    return f"http://{host}:{server.server_address[1]}"
+
+
 @contextmanager
-def mock_provider(expected_api_key: str) -> Iterator[_MockProviderServer]:
+def mock_provider(expected_api_key: str, bind_host: str = LOOPBACK) -> Iterator[_MockProviderServer]:
     """Run the mock provider on a free port for the duration of the block."""
-    server = _MockProviderServer(("127.0.0.1", 0), expected_api_key)
+    server = _MockProviderServer((bind_host, 0), expected_api_key)
     thread = threading.Thread(target=server.serve_forever, name="mock-provider", daemon=True)
     thread.start()
     try:
@@ -285,16 +317,16 @@ def oss_edition_env(base_env: dict[str, str], secret_key: str, pepper: str) -> d
     return env
 
 
-def oss_edition_config(*, database_url: str, port: int, mock_base_url: str, names: Names) -> dict[str, Any]:
+def oss_edition_config(*, database_url: str, port: int | None, mock_base_url: str, names: Names) -> dict[str, Any]:
     """Return the config file contents for the OSS edition under smoke.
 
     No ``mode``, no ``platform`` block, and no provider anyone has to hold a key
-    for: this is the config a self-hoster could write on day one.
+    for: this is the config a self-hoster could write on day one. A ``port`` of
+    ``None`` leaves out ``host`` and ``port``, for a container whose environment
+    sets its listen address, as the published image does.
     """
-    return {
+    config: dict[str, Any] = {
         "database_url": database_url,
-        "host": "127.0.0.1",
-        "port": port,
         "master_key": MASTER_KEY,
         # The mock's model has no real rates, and pricing is fail-closed by
         # default (402 for an unpriced model), which would reject the completion
@@ -309,6 +341,10 @@ def oss_edition_config(*, database_url: str, port: int, mock_base_url: str, name
             }
         },
     }
+    if port is not None:
+        config["host"] = LOOPBACK
+        config["port"] = port
+    return config
 
 
 def write_config(path: Path, config: dict[str, Any]) -> None:
@@ -413,6 +449,96 @@ def gateway(config_path: Path, env: dict[str, str], base_url: str, log_path: Pat
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=20)
+
+
+@contextmanager
+def gateway_container(
+    image: str, config_path: Path, port: int, base_url: str, log_path: Path, secrets_env: dict[str, str]
+) -> Iterator[None]:
+    """Run the image as the OSS edition and wait for it to be healthy.
+
+    ``port`` is the host port published to :data:`CONTAINER_PORT`. The image's
+    own ``otari serve`` migrates on start (``auto_migrate``), which is the path a
+    deployment takes. ``host-gateway`` maps ``host.docker.internal`` on a Linux
+    runner as Docker Desktop already does. ``secrets_env`` is passed by name, so
+    its values never appear on the ``docker`` command line.
+    """
+    if shutil.which("docker") is None:
+        raise SmokeFailure("--image needs docker on PATH")
+    name = f"otari-oss-smoke-{secrets.token_hex(4)}"
+    log(f"Starting the OSS edition from {image}")
+    env_flags = [flag for variable in secrets_env for flag in ("--env", variable)]
+    started = _docker(
+        [
+            "run",
+            "--detach",
+            "--name",
+            name,
+            "--add-host",
+            f"{CONTAINER_HOST_ALIAS}:host-gateway",
+            "--publish",
+            f"127.0.0.1:{port}:{CONTAINER_PORT}",
+            *env_flags,
+            "--volume",
+            f"{config_path}:{CONTAINER_CONFIG_PATH}:ro",
+            image,
+            "otari",
+            "serve",
+            "--config",
+            CONTAINER_CONFIG_PATH,
+        ],
+        env={**os.environ, **secrets_env},
+    )
+    if started is None:
+        _docker(["rm", "--force", name])
+        raise SmokeFailure(f"'docker run' did not answer within {DOCKER_TIMEOUT_SECONDS}s")
+    if started.returncode != 0:
+        raise SmokeFailure(f"'docker run' exited {started.returncode}: {started.stderr.strip()}")
+    try:
+        _await_container_health(name, base_url)
+        yield
+    finally:
+        # No --rm on the run, so a container that exited early still has its log here.
+        logs = _docker(["logs", name])
+        log_path.write_text(
+            logs.stdout + logs.stderr if logs is not None else "'docker logs' timed out\n", encoding="utf-8"
+        )
+        _docker(["rm", "--force", name])
+
+
+def _docker(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str] | None:
+    """Run one docker command, or return ``None`` if it does not finish within the bound."""
+    try:
+        return subprocess.run(
+            ["docker", *args],
+            env=env,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=DOCKER_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def _container_is_running(name: str) -> bool:
+    probe = _docker(["inspect", "--format", "{{.State.Running}}", name])
+    return probe is not None and probe.returncode == 0 and probe.stdout.strip() == "true"
+
+
+def _await_container_health(name: str, base_url: str) -> None:
+    deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if not _container_is_running(name):
+            raise SmokeFailure("The OSS edition container exited before becoming healthy")
+        try:
+            status, _ = _request("GET", f"{base_url}{API_ROOT}/health")
+        except OSError:
+            status = 0
+        if status == 200:
+            return
+        time.sleep(0.5)
+    raise SmokeFailure(f"The OSS edition container did not answer {API_ROOT}/health within {HEALTH_TIMEOUT_SECONDS}s")
 
 
 def _await_health(process: subprocess.Popen[bytes], base_url: str) -> None:
@@ -532,12 +658,23 @@ def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> 
 
 
 def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
-    """Create a user and an API key for it, and return the raw key."""
+    """Create a calendar-day budget, a user on it and an API key for it, and return the raw key."""
+    status, body = _request(
+        "POST",
+        f"{base_url}{API_ROOT}/budgets",
+        headers=admin,
+        payload={"name": "OSS edition smoke", "max_budget": 100, "reset_alignment": "calendar_day"},
+    )
+    _expect(status, 200, f"POST {API_ROOT}/budgets", body)
+    budget_id = body.get("budget_id") if isinstance(body, dict) else None
+    if not isinstance(budget_id, str) or not budget_id:
+        raise SmokeFailure(f"POST {API_ROOT}/budgets returned no budget_id: {body!r}")
+
     status, body = _request(
         "POST",
         f"{base_url}{API_ROOT}/users",
         headers=admin,
-        payload={"user_id": names.user_id, "alias": "OSS edition smoke"},
+        payload={"user_id": names.user_id, "alias": "OSS edition smoke", "budget_id": budget_id},
     )
     _expect(status, 200, f"POST {API_ROOT}/users", body)
 
@@ -551,7 +688,7 @@ def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
     key = body.get("key") if isinstance(body, dict) else None
     if not isinstance(key, str) or not key:
         raise SmokeFailure(f"POST {API_ROOT}/keys returned no key: {body!r}")
-    log("Created a user and an API key")
+    log("Created a calendar-day budget, a user on it and an API key")
     return key
 
 
@@ -670,7 +807,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--database-url",
         default=None,
-        help="Database for the run (default: a throwaway SQLite file). CI points this at PostgreSQL.",
+        help="Database for the run (default: a throwaway SQLite file). CI points this at PostgreSQL. "
+        "With --image it must be reachable from inside the container.",
+    )
+    parser.add_argument(
+        "--image",
+        default=None,
+        help="Run this container image instead of the source checkout's CLI, as a deployment does.",
     )
     return parser.parse_args(argv)
 
@@ -682,7 +825,10 @@ def main(argv: list[str] | None = None) -> int:
         workdir = Path(workdir_name)
         config_path = workdir / "oss-edition.yml"
         log_path = workdir / "gateway.log"
-        database_url = args.database_url or f"sqlite:///{workdir / 'oss-edition.db'}"
+        default_database_url = CONTAINER_DATABASE_URL if args.image else f"sqlite:///{workdir / 'oss-edition.db'}"
+        database_url = args.database_url or default_database_url
+        # A container reaches the mock from its own namespace, so it cannot bind loopback.
+        bind_host = ALL_INTERFACES if args.image else LOOPBACK
         port = _free_port()
         base_url = f"http://127.0.0.1:{port}"
         names = Names.for_run(secrets.token_hex(4))
@@ -692,19 +838,27 @@ def main(argv: list[str] | None = None) -> int:
         pepper = secrets.token_urlsafe(32)
 
         try:
-            with mock_provider(names.byo_key) as provider:
-                mock_base_url = f"http://127.0.0.1:{provider.server_address[1]}"
+            with mock_provider(names.byo_key, bind_host) as provider:
+                mock_base_url = peer_base_url(provider, bind_host)
                 write_config(
                     config_path,
                     oss_edition_config(
                         database_url=database_url,
-                        port=port,
+                        port=None if args.image else port,
                         mock_base_url=mock_base_url,
                         names=names,
                     ),
                 )
-                env = oss_edition_env(dict(os.environ), secret_key, pepper)
-                with gateway(config_path, env, base_url, log_path):
+                if args.image:
+                    # World-readable: the container runs as its own user and has
+                    # to read the mount. The file holds this run's fixtures.
+                    config_path.chmod(0o644)
+                    secrets_env = {"OTARI_SECRET_KEY": secret_key, "OTARI_PROVIDER_ACCOUNT_PEPPER": pepper}
+                    run_gateway = gateway_container(args.image, config_path, port, base_url, log_path, secrets_env)
+                else:
+                    env = oss_edition_env(dict(os.environ), secret_key, pepper)
+                    run_gateway = gateway(config_path, env, base_url, log_path)
+                with run_gateway:
                     smoke(base_url, provider, mock_base_url, names)
         except SmokeFailure as failure:
             # Every failure prints the gateway's own log, not just the ones raised
@@ -716,7 +870,7 @@ def main(argv: list[str] | None = None) -> int:
             log(f"\nOSS-edition smoke FAILED: {type(error).__name__}: {error}\n\n{_tail(log_path)}")
             return 1
 
-    log("\nOSS-edition smoke passed.")
+    log("\nOSS-edition smoke passed" + (" in the container." if args.image else "."))
     return 0
 
 

@@ -104,17 +104,6 @@ class ApplicableBudget:
         return _SCOPE_SUBJECT.get(self.scope_type, "Budget")
 
 
-def _as_utc(value: datetime | None) -> datetime | None:
-    """Read a stored timestamp as UTC.
-
-    SQLite hands datetimes back naive, and comparing one to an aware ``now``
-    raises. A stored value is always the UTC it was written as, so say so.
-    """
-    if value is None or value.tzinfo is not None:
-        return value
-    return value.replace(tzinfo=UTC)
-
-
 def _identity_uuid(user_id: str) -> uuid.UUID | None:
     """The tenancy identity behind a billed user, when there is one.
 
@@ -204,7 +193,7 @@ async def roll_ended_windows(
     current window with fresh counters, not in each window it slept through.
     """
     for ceiling in ceilings:
-        if (period_end := _as_utc(ceiling.period_end)) is None or now < period_end:
+        if ceiling.period_end is None or now < ceiling.period_end:
             continue
         budget_id, alignment = ceiling.scoped_budget_id, ceiling.reset_alignment
         try:
@@ -228,7 +217,7 @@ async def roll_and_list_applicable(
 ) -> tuple[ApplicableBudget, ...]:
     """Return ``ceilings`` as the budgets a request must pass, in order, after rolling any window that has ended."""
     now = datetime.now(UTC)
-    if any((period_end := _as_utc(ceiling.period_end)) is not None and now >= period_end for ceiling in ceilings):
+    if any(ceiling.period_end is not None and now >= ceiling.period_end for ceiling in ceilings):
         await roll_ended_windows(ScopedBudgetRepository(db), ceilings, now)
         await db.commit()
     return tuple(to_applicable_budget(ceiling) for ceiling in ceilings)
@@ -404,7 +393,7 @@ def refused_axis(
             new_request=new_request,
         )
         if blocked is not None:
-            return replace(blocked, resets_at=_as_utc(usage.period_end))
+            return replace(blocked, resets_at=usage.period_end)
     return BlockedAxis("budget")
 
 

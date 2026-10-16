@@ -27,6 +27,8 @@ def test_the_surface_lists_are_spelled_out() -> None:
     assert sorted(STANDALONE_SURFACES) == [
         "admin",
         "budgets",
+        # The deployment's own upstream credentials, on either edition.
+        "hosted_providers",
         "keys",
         "models",
         # Keyed on the organization on either edition, so neither withholds it.
@@ -46,6 +48,7 @@ def test_the_surface_lists_are_spelled_out() -> None:
     assert sorted(HOSTED_SURFACES) == [
         "admin",
         "budgets",
+        "hosted_providers",
         "keys",
         "models",
         "organization_guardrails",

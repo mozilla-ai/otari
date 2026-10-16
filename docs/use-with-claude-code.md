@@ -74,8 +74,11 @@ Code's default Opus, Sonnet, and Haiku variables when its built-in aliases do no
 exist on your deployment.
 
 Non-Claude models may lose Anthropic-specific behavior such as extended thinking,
-prompt caching, or tool semantics. Test the actual agent workflow before making
-one a default.
+prompt caching, or tool semantics. Claude Code's beta flags and its
+`context_management` (server-side context editing) are dropped for a model with
+no Anthropic Messages API of its own, so Anthropic's server-side context editing
+never runs there; Claude Code's own compaction still does.
+Test the actual agent workflow before making one a default.
 
 ## Let Otari choose a subagent's model
 

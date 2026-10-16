@@ -15,6 +15,7 @@ def _render(**overrides: object) -> tuple[str, str, str]:
         **{  # type: ignore[arg-type]
             "verify_link": VERIFY_LINK,
             "expiry_hours": 48,
+            "asset_root": None,
             **overrides,
         }
     )

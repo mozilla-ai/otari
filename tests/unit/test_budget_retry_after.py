@@ -23,11 +23,6 @@ def test_seconds_until_is_never_less_than_one() -> None:
     assert seconds_until(NOW - timedelta(seconds=30), NOW) == 1
 
 
-def test_seconds_until_reads_a_naive_end_as_utc() -> None:
-    """SQLite hands a stored timestamp back naive."""
-    assert seconds_until((NOW + timedelta(seconds=60)).replace(tzinfo=None), NOW) == 60
-
-
 def test_calendar_windows_end_on_their_boundaries() -> None:
     day = period_window(NOW, duration=None, alignment="calendar_day")
     week = period_window(NOW, duration=None, alignment="calendar_week")

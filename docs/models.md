@@ -102,6 +102,11 @@ does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
+A [hosted provider](modes.md#hosted-providers-and-byo-credentials) lists its
+roster, the models switched on under it, rather than everything its upstream
+lists. The operator's `GET /api/v1/models/discoverable` and provider health
+dial it on its stored key beside the configured instances.
+
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
 caller's organization's own override, `configured` for the deployment's stored
@@ -364,6 +369,15 @@ signup is closed), and the dashboard reopens that model on their first sign-in.
 curl http://localhost:8000/api/v1/models \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
+
+On a deployment that hosts at least one provider, an organization API key is
+shown a priced model only where something would
+serve it from the key's workspace: a configured instance, the organization's own
+provider key, a hosted provider the deployment serves the organization, or the
+provider's own environment variable. A hosted provider the operator switched
+off or deleted leaves its rates on the price list, and its models leave this
+listing. The master key and an operator session still list the whole price
+list.
 
 ## HuggingFace provider routing
 

@@ -4,6 +4,7 @@ import {
   FiBarChart2,
   FiBox,
   FiCode,
+  FiCpu,
   FiDollarSign,
   FiGitBranch,
   FiGlobe,
@@ -441,6 +442,16 @@ const DEPLOYMENT_SECTIONS = [
         surface: "admin",
         operatorOnly: "unlisted",
         icon: FiUserCheck,
+      },
+      // The keys the deployment serves inference on for a request that brings
+      // none of its own. Unlisted like Accounts, because its API refuses a
+      // non-operator with the same 404.
+      {
+        to: "/admin/hosted-providers",
+        label: "Hosted providers",
+        surface: "hosted_providers",
+        operatorOnly: "unlisted",
+        icon: FiCpu,
       },
     ],
   },

@@ -16,7 +16,8 @@ from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
 from gateway.core.feature import CoreFeature
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
@@ -42,12 +43,19 @@ from gateway.repositories.files import FileRepositories
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
-from gateway.repositories.providers import OrgProviderKeyModelRepository, ProviderEndpointRepository
+from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
+from gateway.repositories.providers import (
+    HostedProviderModelRepository,
+    HostedProviderRepository,
+    OrgProviderKeyModelRepository,
+    ProviderEndpointRepository,
+)
 from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationGuardrailDefinitionRepository,
     OrganizationMemberRepository,
+    OrganizationRepository,
     OrgProviderKeyRepository,
     WorkspaceRepository,
     ids_in_organization,
@@ -71,12 +79,20 @@ from gateway.services.inference import InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.mail import Mailer
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.organizations import InvitationMailLimit
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import ForwardedToolOffer, LocalToolOffer, PlaygroundToolOffer
-from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
+from gateway.services.pricing import DeploymentPricingService
+from gateway.services.providers import (
+    HostedProviderService,
+    HostedSources,
+    OrgProviderModelService,
+    ProviderEndpointService,
+    refresh_provider_endpoint_cache,
+)
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import RoutingService, clear_router_backend_cache
 from gateway.services.tenancy import (
@@ -1066,6 +1082,25 @@ async def get_current_identity(
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
 
 
+async def require_deployment_operator_or_absent(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    identity: Annotated[TenancyUser, Depends(get_current_identity)],
+) -> None:
+    """Refuse a non-operator with the 404 ``/api/v1/admin`` answers, so the surface does not confirm it exists.
+
+    The same predicate as :func:`require_deployment_operator`, with the other
+    status: a deployment-wide surface that holds the deployment's own
+    credentials is one worth not confirming to a signed-in member, who gets
+    the answer an unentitled deployment gets. A header master key is the
+    deployment credential itself, resolved to the bootstrap operator, so it
+    passes. Declared on a router rather than per route, for the reason the 403
+    gate gives.
+    """
+    if not await DeploymentUserService(db).has_administration_access(identity):
+        record_auth_failure("not_deployment_operator")
+        raise DeploymentAdministrationUnavailableError
+
+
 # =============================================================================
 # Composition root
 # =============================================================================
@@ -1195,9 +1230,17 @@ def get_mcp_server_port(db: PortSessionDep, container: ContainerDep) -> McpServe
     return container.resolve(McpServerPort, db)
 
 
-def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> ModelProviderPort:
-    """Resolve the model-provider adapter this build bound at startup."""
-    return container.resolve(ModelProviderPort, db)
+def get_model_provider_port(
+    db: PortSessionDep,
+    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    container: ContainerDep,
+) -> ModelProviderPort:
+    """Resolve the model-provider adapter this build bound at startup.
+
+    On the request's session and Unit of Work, both ``None`` in hybrid mode:
+    the core adapter reads the hosted-providers store through a block on it.
+    """
+    return container.resolve(ModelProviderPort, db, uow=uow)
 
 
 # ``get_db`` rather than ``PortSessionDep``, for a route or builder whose own
@@ -1205,10 +1248,11 @@ def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> Mode
 # same one hands the adapter that session instead of opening a second one.
 def get_request_session_model_provider_port(
     db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     container: ContainerDep,
 ) -> ModelProviderPort:
-    """Resolve the model-provider adapter on the request's ``get_db`` session."""
-    return container.resolve(ModelProviderPort, db)
+    """Resolve the model-provider adapter on the request's ``get_db`` session and its Unit of Work."""
+    return container.resolve(ModelProviderPort, db, uow=uow)
 
 
 # Deliberately ``get_db`` and not ``PortSessionDep``: every surface that
@@ -1510,6 +1554,56 @@ def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> W
     )
 
 
+def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> HostedProviderService:
+    """Build the hosted-providers service on ``uow``.
+
+    The one assembly, used by the request dependency below and handed to the
+    composition root for the model provider adapter, the way the membership
+    listener's builder is. The deployment price list is reached through the
+    pricing domain's own service on the same unit of work, so a rate written
+    while offering a model lands in the same transaction as the offer.
+    """
+    providers = HostedProviderRepository(uow)
+    return HostedProviderService(
+        uow,
+        config=config,
+        providers=providers,
+        sources=HostedSources(config, providers),
+        models=HostedProviderModelRepository(uow),
+        endpoints=ProviderEndpointRepository(uow),
+        pricing=DeploymentPricingService(
+            uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
+        ),
+        live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
+        organization_exists=OrganizationRepository(uow).exists,
+    )
+
+
+def get_hosted_provider_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> HostedProviderService:
+    """Build the hosted-providers service on the request's unit of work."""
+    return build_hosted_provider_service(uow, config=config)
+
+
+HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
+
+
+def build_hosted_discovery(config: GatewayConfig) -> HostedDiscovery:
+    """Build the discovery worker's read of the hosted providers' dials.
+
+    Each call reads in a unit of work of its own, which closes before any dial
+    runs, so no session is held across an upstream call.
+    """
+
+    async def dials() -> dict[str, DiscoveryDial]:
+        async with create_unit_of_work() as uow:
+            return await build_hosted_provider_service(uow, config=config).discovery_dials()
+
+    return dials
+
+
 def get_rate_limit_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -1771,6 +1865,7 @@ __all__ = [
     "IdentityServiceDep",
     "McpServerPortDep",
     "ModelProviderPortDep",
+    "HostedProviderServiceDep",
     "OrgProviderModelServiceDep",
     "RateLimitServiceDep",
     "RequestSessionModelProviderPortDep",

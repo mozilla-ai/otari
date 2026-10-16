@@ -58,8 +58,23 @@ class OrganizationPricingManagedModelError(TenancyForbiddenError):
         )
 
 
+class OrganizationPricingOperatorRateError(TenancyForbiddenError):
+    """A change an organization manager asked for to a rate the deployment operator set.
+
+    The operator's rate is the one that prices the organization's requests on
+    the deployment's own credential, so editing or deleting it is a change to
+    what the deployment charges, which is the operator's alone to make.
+    """
+
+    def __init__(self, model_key: str):
+        super().__init__(
+            f"The rate for '{model_key}' was set by the deployment operator, so only the operator can change it."
+        )
+
+
 __all__ = [
     "OrganizationPricingManagedModelError",
     "OrganizationPricingNotFoundError",
+    "OrganizationPricingOperatorRateError",
     "OrganizationPricingOverlapError",
 ]

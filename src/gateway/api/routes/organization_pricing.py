@@ -309,7 +309,14 @@ async def list_organization_pricing(
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_403_FORBIDDEN: {"description": "The deployment holds the credential that serves the model."},
+        status.HTTP_409_CONFLICT: {"description": "The period overlaps one already stored for the model."},
+    },
+)
 async def create_organization_pricing(
     body: OrganizationModelPricingCreate,
     identity: CurrentIdentity,
@@ -343,7 +350,14 @@ async def create_organization_pricing(
     return response
 
 
-@router.put("/{pricing_id}")
+@router.put(
+    "/{pricing_id}",
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "The deployment serves the model, or the deployment operator set the rate."
+        }
+    },
+)
 async def replace_organization_pricing(
     pricing_id: uuid.UUID,
     body: OrganizationModelPricingUpdate,
@@ -359,7 +373,8 @@ async def replace_organization_pricing(
 
     Refused with a 403 on the same deployment-supplied-model rule the create path
     carries, so a row stored before that rule existed cannot be edited into a rate
-    nobody could create today.
+    nobody could create today, and with a 403 for a rate the deployment operator
+    set, which only the operator may change.
     """
     override = await service.replace_for_caller(identity, pricing_id, _to_input(body))
     response = OrganizationModelPricingPublic.from_model(override)
@@ -367,13 +382,21 @@ async def replace_organization_pricing(
     return response
 
 
-@router.delete("/{pricing_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{pricing_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_403_FORBIDDEN: {"description": "The deployment operator set the rate."}},
+)
 async def delete_organization_pricing(
     pricing_id: uuid.UUID,
     identity: CurrentIdentity,
     service: ServiceDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Remove an override, returning the model to the deployment price list."""
+    """Remove an override, returning the model to the deployment price list.
+
+    Refused with a 403 for a rate the deployment operator set, which only the
+    operator may remove.
+    """
     await service.delete_for_caller(identity, pricing_id)
     await _commit(db, "delete organization pricing")

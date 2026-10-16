@@ -78,8 +78,9 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 - The OSS-edition smoke gate (`scripts/oss_edition_smoke.py`, run by
   `otari-oss-edition.yml` on any PR touching the app, the migrations, or dependency
   resolution) boots the packaged CLI as a subprocess with no overlay
-  bootstrap and no platform token, then walks health, key creation, a stored BYO
-  provider credential, a fallback-routed completion against a mock provider, and
+  bootstrap and no platform token, then walks health, key creation for a user on a
+  calendar-day budget, a stored BYO provider credential, a fallback-routed
+  completion against a mock provider, and
   the usage row. Run it locally with
   `uv run --frozen --no-dev python scripts/oss_edition_smoke.py`; it defaults to a
   throwaway SQLite file, so it needs no Docker, and `--database-url` points it at
@@ -92,9 +93,10 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   provider, an MCP server, a search service and a code-execution sandbox, asserting on the requests the fakes recorded
   (resolve bodies, tokens, usage reports) as well as the responses. Same rules:
   standard library only, run under `--no-dev`, and no database, because a hybrid
-  gateway runs none. `--image <tag>` runs the same walk against the built
-  container instead of the source checkout, which `otari-docker-build.yml` does
-  after its liveness check: the image pins `OTARI_HOST`/`OTARI_PORT` as env, and
+  gateway runs none. Both smokes take `--image <tag>`, which runs the same walk
+  against the built container instead of the source checkout (the OSS one on a
+  SQLite file inside it), and `otari-docker-build.yml` runs both after its
+  liveness check: the image pins `OTARI_HOST`/`OTARI_PORT` as env, and
   env beats a mounted config file, so an image that boots but cannot serve a
   request fails only there. A streamed leg covers SSE end to end and the `ttft_ms`
   only a streamed attempt reports, and a streamed tool loop runs an MCP tool
