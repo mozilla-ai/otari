@@ -18,6 +18,15 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.model_discovery_service import ProviderDiscovery, get_model_cache
 from gateway.services.secret_box import generate_secret_key
 
+from .conftest import shared_test_config
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so nothing configured shadows a hosted one."""
+    return shared_test_config(postgres_url, {})
+
+
 KEY = "sk-live-hosted-1234"
 
 

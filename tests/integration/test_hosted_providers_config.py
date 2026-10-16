@@ -45,7 +45,14 @@ from gateway.services.pricing import DeploymentPricingService
 from gateway.services.providers import HostedProviderService, HostedSources
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import build_test_client
+from .conftest import build_test_client, shared_test_config
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so nothing configured shadows a hosted one."""
+    return shared_test_config(postgres_url, {})
+
 
 CONFIG_KEY = "sk-live-config-9876"
 STORED_KEY = "sk-live-stored-1234"
