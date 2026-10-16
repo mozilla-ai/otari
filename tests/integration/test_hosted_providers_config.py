@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.providers_exceptions import HostedProviderReadOnlyError
+from gateway.exceptions.providers_exceptions import HostedCatalogEmptyError, HostedProviderReadOnlyError
 from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import ModelPricing
 from gateway.models.providers import HostedProvider, HostedProviderModel
@@ -332,6 +332,28 @@ async def test_a_roster_outliving_its_entry_serves_nothing_and_the_sweep_removes
     assert "openai:o3" not in priced
     assert "anthropic:claude-x" in priced
     assert (await after.refresh_catalog(apply=False)).orphaned_rosters == []
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_removes_the_roster_of_the_only_provider_and_keeps_every_price(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing is offered once the sole entry goes, which is no reason to keep a roster nothing defines."""
+    _discovery(monkeypatch)
+    await _service(async_db, _configured()).add_model(
+        "openai", HostedModelCreateRequest(model="o3", input_price_per_million=2, output_price_per_million=8)
+    )
+    after = _service(async_db, GatewayConfig())
+
+    preview = await after.refresh_catalog(apply=False)
+    applied = await after.refresh_catalog(apply=True)
+
+    assert (preview.orphaned_rosters, preview.removed) == (["openai"], [])
+    assert (applied.orphaned_rosters, applied.removed_price_rows) == (["openai"], 0)
+    assert (await async_db.execute(select(HostedProviderModel))).scalars().all() == []
+    assert "openai:o3" in (await async_db.execute(select(ModelPricing.model_key))).scalars().all()
+    with pytest.raises(HostedCatalogEmptyError):
+        await after.refresh_catalog(apply=False)
 
 
 @pytest.mark.asyncio

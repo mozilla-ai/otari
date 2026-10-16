@@ -85,7 +85,8 @@ class HostedCatalogSweep:
 
         Raises:
             HostedCatalogEmptyError: no provider offers a model, so there is no
-                roster to reconcile against.
+                roster to reconcile against, and no orphaned roster is left to
+                remove.
         """
         async with self.uow:
             serving = [
@@ -132,7 +133,22 @@ class HostedCatalogSweep:
                 # What an apply would offer, folded in without writing it.
                 offered_keys |= {f"{answer.provider}:{model}" for answer in dialed for model in answer.added}
             if not offered_keys:
-                raise HostedCatalogEmptyError
+                if not orphaned:
+                    raise HostedCatalogEmptyError
+                # With nothing offered there is nothing to judge the price list
+                # against, so it is left whole; the orphaned rosters still go.
+                if apply:
+                    for provider in orphaned:
+                        await self.models.delete_for_provider(provider)
+                return HostedCatalogRefreshPublic(
+                    providers=dialed,
+                    removed=[],
+                    removed_count=0,
+                    removed_price_rows=0,
+                    removed_override_rows=0,
+                    kept=[],
+                    orphaned_rosters=orphaned,
+                )
 
             verdicts = classify_priced_keys(
                 await self.pricing.all_keys(),

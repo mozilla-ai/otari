@@ -104,7 +104,9 @@ async def refresh_catalog(service: HostedProviderServiceDep) -> HostedCatalogRef
     model on a tenant's Models page, and a price under a provider nothing here
     serves cannot be reached by a per-provider refresh. A model list whose
     provider nothing defines any more, such as a removed ``config.yml`` entry,
-    goes too, and is named in ``orphaned_rosters``. Declared before the
+    goes too, and is named in ``orphaned_rosters``. Where no provider offers a
+    model, only those lists go and every price stays; with none of them either,
+    the sweep answers 409. Declared before the
     ``/{provider}`` paths to read in the order the surface is used; no method
     collides in any case.
     """

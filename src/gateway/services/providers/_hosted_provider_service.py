@@ -429,7 +429,7 @@ class HostedProviderService:
         """Sweep the deployment price list against the roster, or preview the sweep.
 
         Raises:
-            HostedCatalogEmptyError: no provider offers a model.
+            HostedCatalogEmptyError: no provider offers a model, and no orphaned roster is left.
         """
         return await self.sweep.run(apply=apply)
 

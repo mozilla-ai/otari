@@ -524,7 +524,9 @@ serves the entry again on the same models. Taking an entry out of the
 configuration leaves its models in the database, serving nothing and offered
 in no catalog; they come back if the entry does, and the next catalog sweep on
 the Hosted providers page (`POST /api/v1/hosted-providers/refresh`) deletes
-them and their prices, naming the provider in `orphaned_rosters`. A hybrid
+them and their prices, naming the provider in `orphaned_rosters`. Where no
+hosted provider offers a model at all, the sweep deletes those models and leaves
+every price in place. A hybrid
 gateway ignores the block.
 
 ### Provider copies
