@@ -5448,8 +5448,8 @@ export interface paths {
          * @description Test a configured or stored instance with one search or one fetch.
          *
          *     Takes ``query`` for a search instance or ``url`` for a fetch instance, and
-         *     answers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test
-         *     yet, and answers a 400.
+         *     answers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in
+         *     fetcher, fetches as a fetch tool call does, with no domain policy.
          */
         post: operations["search-tools-test_search_tool"];
         delete?: never;

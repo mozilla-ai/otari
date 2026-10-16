@@ -87,7 +87,7 @@ class MessagesWebFetchRendering:
             call,
             WebFetchBlock(
                 type="web_fetch_result",
-                url=fetched.final_url.display_url,
+                url=fetch_display_url(fetched.final_url),
                 content=document,
                 retrieved_at=datetime.now(UTC).isoformat(),
             ),

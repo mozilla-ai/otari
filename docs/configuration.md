@@ -959,8 +959,8 @@ Rules for instances:
   (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
 - `options` are checked against the provider's options. A search instance may also
   set `max_results` and `time_range`, and a fetch instance `max_chars`, which every
-  provider of that tool takes. Not in effect yet: they apply once the instances
-  serve requests through the libraries.
+  provider of that tool takes. A fetch instance's `max_chars` cuts what each fetch
+  tool call returns; in-loop search does not read the search ones yet.
 - A `search_tools` entry that breaks the name rules, or whose `options` carry a key
   the provider does not know or a value it refuses, still loads, with a warning
   that names the entry and the problem. Fix it: a later release refuses it, and
@@ -978,7 +978,9 @@ wins over the configuration file until it is cleared.
 `POST /api/v1/search-tools/test` runs one search or one fetch on an instance before
 it is saved, and `POST /api/v1/search-tools/{name}/test` on one that exists. Each
 says whether the call worked, the error's tag when it did not, and how many hits or
-characters came back, never the content. `builtin_fetch` has no test yet.
+characters came back, never the content. `builtin_fetch` is tested as a fetch tool
+call runs it: through the built-in fetcher, with no domain policy and no private
+hosts.
 
 The defaults and the call limit are runtime settings, also set from Tools or
 `/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
@@ -1001,11 +1003,11 @@ A default that names no instance, set in the file or earlier at runtime, is trea
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
 In this release `web_search_default_tool` picks the tool for a direct
-`POST /api/v1/search` that names none, and no other request uses these settings
-yet. The rest take effect in later releases: `web_fetch_default_tool` when web
-fetch moves onto the fetch instances, and the in-loop parts of
-`web_search_default_tool` and `web_search_max_calls`, with a search instance's
-`fetch_tool`, when in-loop search does.
+`POST /api/v1/search` that names none, and `web_fetch_default_tool` the fetch
+instance every fetch tool call runs on. The rest take effect when in-loop search
+moves onto the search instances: the in-loop parts of `web_search_default_tool`
+and `web_search_max_calls`, and the fetch instance that enriches search results,
+a search instance's `fetch_tool` or else `web_fetch_default_tool`.
 
 After that, the old in-loop backend still serves some requests until it is
 removed. In that period `web_fetch_default_tool` governs every fetch tool call,

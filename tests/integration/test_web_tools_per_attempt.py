@@ -199,7 +199,7 @@ class _FakeWebBackend:
         return [{"url": "https://example.com", "title": "Example"}]
 
     def take_last_fetch(self) -> Any:
-        return SimpleNamespace(text="page text", final_url=SimpleNamespace(display_url="https://example.com"))
+        return SimpleNamespace(text="page text", final_url="https://example.com")
 
 
 @dataclass

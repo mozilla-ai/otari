@@ -40,6 +40,7 @@ from .test_require_pricing import strict_pricing_client as strict_pricing_client
 # $0.01 per call, in the per-million-requests convention ``flat_request_cost`` uses.
 _SEARCH_RATE_PER_MILLION = 10_000.0
 _SEARCH_UNIT_COST = 0.01
+_FAKE_FETCH = "fake-fetch"
 
 
 def _completion(
@@ -110,6 +111,13 @@ def _fetch_batch_completion(count: int) -> ChatCompletion:
         ],
         usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
     )
+
+
+def _serve_fetch_on_fake(monkeypatch: pytest.MonkeyPatch, config: GatewayConfig, **options: Any) -> None:
+    """Serve the fetch tool on a ``fake`` fetch instance, named in ``web_fetch_default_tool``, with these options."""
+    monkeypatch.setattr(config, "web_fetch_enabled", True)
+    monkeypatch.setattr(config, "fetch_tools", {_FAKE_FETCH: {"provider": "fake", "options": options}})
+    monkeypatch.setattr(config, "web_fetch_default_tool", _FAKE_FETCH)
 
 
 @pytest.fixture
@@ -408,7 +416,7 @@ async def test_fetch_call_is_metered_priced_and_spent(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    _serve_fetch_on_fake(monkeypatch, test_config)
     user_id = api_key_obj["user_id"]
     before = _spend(db_session_factory, user_id)
     responses = [
@@ -416,13 +424,7 @@ async def test_fetch_call_is_metered_priced_and_spent(
         _completion(tool_call=False),
     ]
 
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
-        patch(
-            "gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool",
-            new=AsyncMock(return_value="Source: https://example.com/\nContent-Type: text/html\n\ncontent"),
-        ),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)):
         response = client.post(
             f"{API_ROOT}/chat/completions",
             json={
@@ -456,18 +458,12 @@ async def test_failed_fetch_is_counted_but_not_billed(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    _serve_fetch_on_fake(monkeypatch, test_config, error="rate_limit", error_status=429)
     responses = [
         _completion(tool_call=True, tool_name="web_fetch", arguments='{"url":"https://example.com"}'),
         _completion(tool_call=False),
     ]
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
-        patch(
-            "gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool",
-            new=AsyncMock(return_value="[tool error] Web Fetch failed"),
-        ),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)):
         response = client.post(
             f"{API_ROOT}/chat/completions",
             json={
@@ -489,16 +485,14 @@ async def test_failed_fetch_is_counted_but_not_billed(
 async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
     client: TestClient,
     api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    _serve_fetch_on_fake(monkeypatch, test_config)
     provider = AsyncMock(return_value=_fetch_batch_completion(11))
-    fetch = AsyncMock(return_value="bounded content")
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=provider),
-        patch("gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool", new=fetch),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=provider):
         response = client.post(
             f"{API_ROOT}/chat/completions",
             json={
@@ -511,7 +505,9 @@ async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
 
     assert response.status_code == 422, response.text
     assert "10 calls per request" in response.json()["detail"]
-    assert fetch.await_count == 10
+    row = _latest_row(db_session_factory, api_key_obj["user_id"])
+    fetches = (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_fetch"]
+    assert (fetches["billed"], fetches["errors"]) == (10, 0), "the eleventh call never reached the fetch instance"
 
 
 @pytest.mark.asyncio
