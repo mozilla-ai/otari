@@ -56,9 +56,8 @@ def identifier_or_none(value: object) -> str | None:
 def client_tool_span_id(call_id: str, position: int) -> str:
     """The span id of a tool the client ran: derived from its call id, never the call id itself.
 
-    A call id is whatever the client sent, so it is hashed rather than used as
-    the id; the span keeps it only as ``tool_call_id``, and only when it is
-    identifier-shaped. The result's position in the input goes in too: the same call answered
+    A call id is whatever the client sent, so it is hashed into the span id.
+    The result's position in the input goes in too: the same call answered
     again (a retried request) still lands on one span, while a later call that
     reuses the id gets its own.
     """
