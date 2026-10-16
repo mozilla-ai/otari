@@ -142,8 +142,10 @@ class DeploymentPricingService:
         ``cache_rates`` holds only the cache fields the caller set: a field
         present with ``None`` clears the rate, and a field absent inherits the
         latest stored version's value. An omitted ``unit`` carries forward from
-        that version, as the tiers do, because the callers of this method do
-        not collect them.
+        that version, because the callers of this method do not collect it.
+        Tiers carry forward only from an operator's version: a tier's rates are
+        absolute, so a seed's tiers belong with the seed's base rates and new
+        base rates over a seed drop them.
         """
         unknown = set(cache_rates) - set(_CACHE_RATE_FIELDS)
         if unknown:
@@ -159,6 +161,7 @@ class DeploymentPricingService:
                 inherited: Decimal | None = getattr(latest, field) if latest is not None else None
                 return inherited
 
+            tiers = list(latest.pricing_tiers or []) if latest is not None and latest.origin != SEED_ORIGIN else []
             version = latest if latest is not None and latest.effective_at == effective_at else None
             if version is None:
                 version = self.pricing.add_version(
@@ -168,7 +171,7 @@ class DeploymentPricingService:
                     output_price_per_million=to_usd(output_price_per_million),
                     cache_read_price_per_million=cache_rate("cache_read_price_per_million"),
                     cache_write_price_per_million=cache_rate("cache_write_price_per_million"),
-                    pricing_tiers=latest.pricing_tiers or [] if latest is not None else [],
+                    pricing_tiers=tiers,
                     unit=unit or (latest.unit if latest is not None else "tokens"),
                     origin=API_ORIGIN,
                 )
@@ -177,6 +180,7 @@ class DeploymentPricingService:
                 version.output_price_per_million = to_usd(output_price_per_million)
                 version.cache_read_price_per_million = cache_rate("cache_read_price_per_million")
                 version.cache_write_price_per_million = cache_rate("cache_write_price_per_million")
+                version.pricing_tiers = tiers
                 if unit is not None:
                     version.unit = unit
                 version.origin = API_ORIGIN

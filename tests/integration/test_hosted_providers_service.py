@@ -611,6 +611,43 @@ async def test_repricing_keeps_the_cache_rates_it_does_not_name(
     )
 
 
+async def test_new_base_rates_drop_a_seeds_tiers_and_carry_an_operators(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tier's rates are absolute, so they stay with the base rates they were written beside."""
+    tier = {"min_input_tokens": 200_000, "input_price_per_million": 5.0, "output_price_per_million": 15.0}
+
+    def _tiered(provider: str | None, model: str, as_of: object) -> ModelPricing | None:
+        return ModelPricing(
+            model_key=f"{provider}:{model}",
+            input_price_per_million=Decimal("2.5"),
+            output_price_per_million=Decimal("10"),
+            pricing_tiers=[tier],
+            unit="tokens",
+        )
+
+    monkeypatch.setattr(DATASET, _tiered)
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gemini-pro")
+    [model] = (await service.list_models("openai")).data
+    [seed] = await _versions(async_db, "openai:gemini-pro")
+    assert (seed.origin, seed.pricing_tiers) == (SEED_ORIGIN, [tier])
+
+    await service.update_model(
+        "openai", model.id, HostedModelUpdateRequest(input_price_per_million=3, output_price_per_million=12)
+    )
+    _, repriced = await _versions(async_db, "openai:gemini-pro")
+    assert (repriced.origin, repriced.pricing_tiers) == (API_ORIGIN, [])
+
+    repriced.pricing_tiers = [tier]
+    await async_db.commit()
+    await service.update_model(
+        "openai", model.id, HostedModelUpdateRequest(input_price_per_million=4, output_price_per_million=16)
+    )
+    *_, latest = await _versions(async_db, "openai:gemini-pro")
+    assert (latest.input_price_per_million, latest.pricing_tiers) == (Decimal("4"), [tier])
+
+
 async def test_a_model_under_another_provider_is_not_found(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
