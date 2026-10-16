@@ -648,6 +648,11 @@ Optional cache fields reprice cached input when a provider reports it:
 - `cache_read_price_per_million`
 - `cache_write_price_per_million`
 
+A Claude model (one whose model name contains `claude`, on any provider) bills
+a cache write made with a one-hour TTL at twice the input rate, which is
+Anthropic's price for it, whenever its `cache_write_price_per_million` is set
+above zero. Every other cache write bills at `cache_write_price_per_million`.
+
 Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
 accepted shape.
