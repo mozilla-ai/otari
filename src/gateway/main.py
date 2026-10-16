@@ -955,7 +955,6 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
 
     A body field survives where a header does not (a proxy that drops it, an SDK
     that surfaces only the body), so a client can map the refusal from either.
-    An error keeps the ``Otari-Request-ID`` its request was given (``gateway.api.request_id``).
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
