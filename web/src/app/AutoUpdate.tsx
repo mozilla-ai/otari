@@ -1,5 +1,5 @@
 import { useRouter } from "@tanstack/react-router"
-import { useEffect, useRef } from "react"
+import { useEffect, useState } from "react"
 
 import { useDashboardBuild } from "@/shared/api/deployment"
 
@@ -15,16 +15,14 @@ const STALE_CHUNK_RELOAD_KEY = "otari:stale-chunk-reload"
 // current and must stay quiet.
 export function useUpdateAvailable(): boolean {
   const { data } = useDashboardBuild()
-  const loadedBuild = useRef<string | null>(null)
+  const [loadedBuild, setLoadedBuild] = useState<string | null>(null)
 
-  if (data && loadedBuild.current === null) {
-    loadedBuild.current = data.build
+  // Set once, during render, so the first build is never compared against
+  // itself; React re-renders with it before committing.
+  if (data && loadedBuild === null) {
+    setLoadedBuild(data.build)
   }
-  return (
-    data != null &&
-    loadedBuild.current != null &&
-    data.build !== loadedBuild.current
-  )
+  return data != null && loadedBuild != null && data.build !== loadedBuild
 }
 
 // Picks up a new build without asking: once one is out, the next move to another
