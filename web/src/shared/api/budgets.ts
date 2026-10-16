@@ -482,7 +482,12 @@ export function useMemberCeilingWriter(surface: "deployment" | "organization") {
         : await fetchAllPaged<OrganizationSpendCeiling>(
             "/organizations/me/spend-ceilings",
           )
-    return rows.filter((row) => row.scope_type === "workspace_member")
+    // The membership's own ceiling is the one naming no provider; a
+    // provider-scoped row on the same membership must not be edited in its place.
+    return rows.filter(
+      (row) =>
+        row.scope_type === "workspace_member" && row.provider_key_id === null,
+    )
   }
 
   return {

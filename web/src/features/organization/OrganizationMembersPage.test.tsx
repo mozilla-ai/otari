@@ -1313,6 +1313,17 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       organizationBudgets: [
         budget({ budget_id: "org-bud", name: "Team cap", max_budget: 40 }),
       ],
+      // A provider-scoped ceiling on the same membership, already on the budget
+      // being picked. Mistaken for the membership's own, it would skip the write.
+      scopedBudgets: [
+        scopedBudget({
+          id: "provider-ceiling",
+          scope_type: "workspace_member",
+          scope_id: "membership-1",
+          provider_key_id: "provider-key-1",
+          budget_id: "org-bud",
+        }),
+      ],
       context: organizationContext({ deployment_operator: false }),
     })
     const actor = userEvent.setup()
