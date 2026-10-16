@@ -139,7 +139,7 @@ _EFFORT_CHANGE = {"role": "system", "content": [], "output_config": {"effort": "
 def test_messages_a_prompt_under_trailing_system_messages_opens_a_turn(
     prompt: Any, trailing: list[dict[str, Any]]
 ) -> None:
-    """Claude Code follows the user's input with a mid-conversation system message, which is the operator's."""
+    """Claude Code follows the user's input with a mid-conversation system message, its own context."""
     assert read_turn("messages", [{"role": "user", "content": prompt}, *trailing]).opens_turn
 
 

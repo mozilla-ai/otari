@@ -94,7 +94,7 @@ def _chat(messages: list[Any]) -> TurnFacts:
 
 def _messages(messages: list[Any]) -> TurnFacts:
     items = _dicts(messages)
-    # Mid-conversation system messages are the operator's, so the input is the message under them.
+    # A mid-conversation system message is the harness's context, not the user's input, so the input is under it.
     last = len(items) - 1
     while last >= 0 and items[last].get("role") == "system":
         last -= 1
