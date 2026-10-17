@@ -16,7 +16,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import (
+    get_config,
+    get_db,
+    get_log_writer,
+    model_provider_port_on,
+    verify_api_key_or_master_key,
+)
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import (
     PROVIDER_CREDENTIALS_DETAIL,
@@ -57,11 +63,14 @@ from gateway.services.model_access import (
 )
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import (
+    MANAGED_SURFACE_BATCHES,
+    ManagedCredentialUnsupportedError,
     MissingCredential,
     get_provider_kwargs,
     require_declared_credential,
     resolve_provider_selector,
 )
+from gateway.services.providers import refuse_managed_only
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -445,6 +454,20 @@ async def create_batch(
     try:
         require_declared_credential(config, resolved.instance, provider, provider_kwargs)
     except MissingApiKeyError as exc:
+        # Managed credentials serve only the completion routes. Nothing is reserved yet.
+        try:
+            await refuse_managed_only(
+                config,
+                resolved,
+                hosted=lambda: model_provider_port_on(raw_request, db),
+                organization_id=await organization_for_workspace_id(db, workspace_id),
+                surface=MANAGED_SURFACE_BATCHES,
+            )
+        except ManagedCredentialUnsupportedError as managed_exc:
+            managed = MissingCredential.from_error(managed_exc)
+            raise HTTPException(
+                status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
+            ) from exc
         raise _not_configured(exc) from exc
 
     # A key flagged exclude_from_budget logs cost but is never reserved or folded

@@ -25,6 +25,7 @@ scaffolds record a rejection identically.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -40,7 +41,14 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import ContainerDep, extract_credential_token, get_config, get_db, get_log_writer
+from gateway.api.deps import (
+    ContainerDep,
+    extract_credential_token,
+    get_config,
+    get_db,
+    get_log_writer,
+    model_provider_port_on,
+)
 from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
@@ -125,12 +133,14 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import (
+    ManagedCredentialUnsupportedError,
+    MissingCredential,
     ResolvedProvider,
     missing_credential,
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import unpriced_model_refusal
+from gateway.services.providers import refuse_managed_only, unpriced_model_refusal
 from gateway.services.routing import refuse_local_policy
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
@@ -394,6 +404,36 @@ async def run_passthrough(
                 )
             raise
 
+    async def _refuse_managed_only(resolved: ResolvedProvider, reservation: ReservationHandle) -> None:
+        """Refuse a model only the deployment's managed credentials would serve, which this endpoint never asks.
+
+        Refunds ``reservation`` and records the rejection, and refunds it too when
+        the request is cancelled while the hosted models are listed.
+        """
+        try:
+            await refuse_managed_only(
+                config,
+                resolved,
+                hosted=lambda: model_provider_port_on(raw_request, db),
+                organization_id=organization_id,
+                surface=endpoint,
+            )
+        except asyncio.CancelledError:
+            await refund_reservation(db, reservation)
+            raise
+        except ManagedCredentialUnsupportedError as exc:
+            await refund_reservation(db, reservation)
+            managed = MissingCredential.from_error(exc)
+            await _log_rejection(
+                managed.detail,
+                row_model=resolved.model,
+                row_provider=resolved.instance,
+                status_code=managed.status_code,
+            )
+            raise HTTPException(
+                status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
+            ) from exc
+
     pricing: ModelPricing | None = None
     # ``pricing`` with where it came from, recorded on the row it prices.
     found_pricing: ResolvedPricing | None = None
@@ -477,6 +517,9 @@ async def run_passthrough(
                 pricing, meter=billing.meter, reports_tokens=billing.reports_tokens, legacy_unit_reading=True
             )
         ):
+            # A model only managed credentials would serve is refused for that,
+            # not for its price: pricing it would not make it servable here.
+            await _refuse_managed_only(resolved, reservation)
             await refund_reservation(db, reservation)
             # This path never asks the hosted port, so none is passed.
             unpriced = await unpriced_model_refusal(
@@ -541,6 +584,9 @@ async def run_passthrough(
                 detail=refusal.detail,
                 headers=error_headers(refusal.code),
             )
+
+    # Managed credentials serve only the completion routes.
+    await _refuse_managed_only(resolved, reservation)
 
     # Already resolved above (needed there for organization-scoped provider
     # credentials); reused here rather than re-derived, since it is fixed for

@@ -81,9 +81,11 @@ class RecordingPort:
         # ``asyncio.CancelledError``, which the call site must deliberately not
         # catch, and typing this narrowly would make that case unexpressible.
         error: BaseException | None = None,
+        roster: HostedModels | BaseException | None = None,
     ) -> None:
         self.credential = credential
         self.error = error
+        self.roster = roster
         self.calls: list[dict[str, Any]] = []
 
     async def resolve_hosted_credential(
@@ -107,7 +109,11 @@ class RecordingPort:
         return self.credential
 
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
-        raise AssertionError("dispatch must not ask for the hosted roster")
+        if isinstance(self.roster, BaseException):
+            raise self.roster
+        if self.roster is None:
+            raise AssertionError("dispatch must not ask for the hosted roster")
+        return self.roster
 
 
 def _plain_build_port() -> ModelProviderPort:
@@ -454,16 +460,37 @@ async def test_request_without_an_organization_is_not_asked_about(monkeypatch: p
 
 @pytest.mark.asyncio
 async def test_multi_candidate_plan_is_not_asked_about() -> None:
-    """A routed chain dispatches from the plan's own kwargs, so asking would not serve it."""
+    """A routed chain dispatches from the plan's own kwargs, so asking would not serve it.
+
+    Only the roster is read, so the walk can refuse a candidate it offers by name.
+    """
 
     class _Plan:
-        attempts = (object(), object())
+        attempts = (_uncredentialed(), _uncredentialed())
 
-    port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
+    port = RecordingPort(
+        credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"),
+        roster={"openai": None},
+    )
     ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
     result = await _dispatch(ctx, port)
     assert result.kwargs == {}
     assert port.calls == []
+    assert ctx.managed_only == {("openai", "gpt-4o")}
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_roster_read_releases_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    released, _ = _capture_settlement(monkeypatch)
+
+    class _Plan:
+        attempts = (_uncredentialed(), _uncredentialed())
+
+    port = RecordingPort(roster=asyncio.CancelledError())
+    ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
+    with pytest.raises(asyncio.CancelledError):
+        await _dispatch(ctx, port)
+    assert released == [ctx]
 
 
 # ---------------------------------------------------------------------------

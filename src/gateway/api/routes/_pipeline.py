@@ -300,7 +300,12 @@ from gateway.services.provider_kwargs import (
     resolve_provider_selector,
     with_failover_retries,
 )
-from gateway.services.providers import owned_endpoint_http_client, unpriced_model_refusal
+from gateway.services.providers import (
+    managed_only_candidates,
+    owned_endpoint_http_client,
+    refuse_managed_candidate,
+    unpriced_model_refusal,
+)
 from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
@@ -1328,6 +1333,10 @@ class RequestContext:
         # check; callers fall back to `resolve_provider_selector` themselves
         # in that case, same as before this field existed.
         self.resolved_provider = resolved_provider
+        # The ``(instance, model)`` candidates of a multi-candidate plan that only
+        # the deployment's managed credentials would serve, which the walk
+        # refuses by name; set in ``_prepare_for_dispatch``.
+        self.managed_only: frozenset[tuple[str, str]] = frozenset()
         # Standalone-only: the workspace's code-execution policy, read in the
         # preamble when the request declares code execution on a deployment with
         # a sandbox, so the staging decision and admission read one row once.
@@ -1533,6 +1542,14 @@ async def _prepare_for_dispatch(
     port: ModelProviderPort,
     billing: BillingPort,
 ) -> ResolvedProvider:
+    if ctx.plan is not None and len(ctx.plan.attempts) > 1:
+        try:
+            ctx.managed_only = await managed_only_candidates(
+                ctx.config, ctx.plan.attempts, hosted=lambda: port, organization_id=ctx.organization_id
+            )
+        except asyncio.CancelledError:
+            await release_reservation(ctx)
+            raise
     if resolved.owned_endpoint is not None:
         # The client re-checks and pins the endpoint's address on every request
         # and follows no redirect; see ``services/providers``.
@@ -5890,17 +5907,20 @@ def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
 
 
 def _failover_kwargs(
-    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, config: GatewayConfig
+    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, ctx: RequestContext
 ) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
     """Builds each candidate's kwargs for a plan that can fall over, from the request fields its tools need.
 
     Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
     so the walk skips it before admitting it, and any-llm's ``MissingApiKeyError`` for a
     candidate nothing declares a credential for, so the walk passes it over as it does
-    any candidate missing a key.
+    any candidate missing a key, or its ``ManagedCredentialUnsupportedError`` for one in
+    ``ctx.managed_only``, which the final answer names.
     """
+    config = ctx.config
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
+        refuse_managed_candidate(ctx.managed_only, attempt)
         require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
         fields = tool_ctx.request_fields_for(attempt.provider.value, base_request_fields)
         return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
@@ -6026,7 +6046,7 @@ async def run_single_attempt_stream(
                     run_attempt=_open_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx.config),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
@@ -6848,7 +6868,7 @@ async def run_standalone_non_stream(
                     run_attempt=_run_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx.config),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,

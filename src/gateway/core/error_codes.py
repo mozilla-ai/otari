@@ -42,6 +42,9 @@ INSUFFICIENT_FUNDS = "insufficient_funds"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
 PROVIDER_NOT_CONFIGURED = "provider_not_configured"
+# The deployment offers the model on its own (managed) credentials, which serve
+# only a single-model Chat Completions, Messages or Responses request.
+MANAGED_CREDENTIAL_UNSUPPORTED = "managed_credential_unsupported"
 # The provider refused the credential the gateway holds for it (an upstream 401 or 403).
 PROVIDER_CREDENTIAL_REJECTED = "provider_credential_rejected"
 # A request body or parameter that failed schema validation (a 422).
