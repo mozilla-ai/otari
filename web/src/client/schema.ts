@@ -14139,6 +14139,11 @@ export interface components {
             origin: string | null;
             /** Output Price Per Million */
             output_price_per_million: number;
+            /**
+             * Price Per Request
+             * @description USD for each request, for a rate in requests; null for any other unit.
+             */
+            price_per_request?: number | null;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
             /**
@@ -15703,6 +15708,11 @@ export interface components {
              * @description Price per 1M output tokens; unused by a rate in requests or images
              */
             output_price_per_million: number;
+            /**
+             * Price Per Request
+             * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.
+             */
+            price_per_request?: number | null;
             /**
              * Pricing Tiers
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
