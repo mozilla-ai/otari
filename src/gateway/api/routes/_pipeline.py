@@ -158,6 +158,7 @@ from gateway.core.usage import (
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
     provider_latency_ms_of,
+    provider_web_searches_of,
     reasoning_tokens_of,
 )
 from gateway.exceptions import TenancyError
@@ -4646,6 +4647,12 @@ async def record_usage(
         usage_log.pricing_source = None
         usage_log.pricing_reference = None
         usage_log.pricing_effective_at = None
+
+    # Searches the model's provider ran itself bill per search, like the gateway's own.
+    provider_searches = provider_web_searches_of(usage_data) if usage_data else 0
+    if provider_searches and provider:
+        tool_tally = tool_tally if tool_tally is not None else ToolUsageTally()
+        tool_tally.record_provider_searches(provider_type or provider_key(provider), provider_searches)
 
     # Gateway-run tool calls are a separate charge from the model's tokens, so they
     # are folded in last: after the token branch (which may not have run at all) and

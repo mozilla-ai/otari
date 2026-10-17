@@ -15,6 +15,7 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    provider_web_searches_of,
     reasoning_tokens_of,
 )
 from gateway.log_config import logger
@@ -141,6 +142,7 @@ def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> Com
         # "in prompt" never masks the Anthropic shape.
         cache_tokens_in_prompt=cache_tokens_in_prompt_of(update) and cache_tokens_in_prompt_of(current),
         reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
+        provider_web_searches=provider_web_searches_of(update) or provider_web_searches_of(current),
     )
 
 

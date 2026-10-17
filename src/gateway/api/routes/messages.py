@@ -574,6 +574,7 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
         cache_tokens_in_prompt=False,
         reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,
+        provider_web_searches=getattr(getattr(usage, "server_tool_use", None), "web_search_requests", None) or 0,
     )
 
 

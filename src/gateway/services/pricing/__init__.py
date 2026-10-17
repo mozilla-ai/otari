@@ -2,6 +2,7 @@
 
 from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
 from gateway.services.pricing._tool_pricing import (
+    PROVIDER_TOOL_LIST_PRICES,
     ToolCharges,
     ToolRate,
     ToolRateLookup,
@@ -58,6 +59,7 @@ __all__ = [
     "PriceGeneration",
     "PriceTier",
     "PriceTimeline",
+    "PROVIDER_TOOL_LIST_PRICES",
     "ToolCharges",
     "ToolRate",
     "ToolRateLookup",

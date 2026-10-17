@@ -32,7 +32,7 @@ from decimal import Decimal
 
 from gateway.core.metered_pricing import to_decimal
 from gateway.models.money import MAX_USD_COST
-from gateway.types.tool_charges import LabelCalls
+from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, provider_web_search_label
 
 # Every tool backend marks a recoverable failure by prefixing the string it hands
 # back to the model. The tool loop's own error path uses the same prefix, so this
@@ -122,6 +122,22 @@ class ToolUsageTally:
         else:
             totals.reported_cost += reported
         totals.enrichment_cost += _usable_cost(enrichment_cost) or Decimal(0)
+
+    def record_provider_searches(self, provider: str, searches: int) -> None:
+        """Record searches a model's provider ran itself and bills per search, as Anthropic's search does.
+
+        They are counted under ``web_search`` beside the gateway's own searches and
+        priced under the ``<provider>:web_search`` label, at an operator's rate or,
+        with default pricing, the provider's list price.
+        """
+        if searches <= 0:
+            return
+        key = self._key(PROVIDER_WEB_SEARCH_TOOL)
+        self._counts.setdefault(key, {"billed": 0, "errors": 0})["billed"] += searches
+        label = provider_web_search_label(provider)
+        totals = self._labels.setdefault((key, label, (label,)), _LabelTotals())
+        totals.calls += searches
+        totals.unreported_calls += searches
 
     def record_failure(self, tool: str) -> None:
         """Record a call that raised. Counted, never billed."""
