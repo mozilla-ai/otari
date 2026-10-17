@@ -3,14 +3,27 @@
 import json
 import time
 from collections.abc import AsyncIterator, Callable
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 from any_llm.exceptions import ContextLengthExceededError
 from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, CompletionUsage
+from any_llm.types.responses import Response, ResponseStreamEvent
 from fastapi.testclient import TestClient
+from openai.types.responses import (
+    ResponseCompletedEvent,
+    ResponseCreatedEvent,
+    ResponseFailedEvent,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionToolCall,
+    ResponseIncompleteEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseTextDeltaEvent,
+    ResponseUsage,
+)
+from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -508,3 +521,317 @@ def test_a_chat_stream_with_several_choices_is_complete_only_when_each_finishes(
         assert _error_event(response.text)["error"]["code"] == "provider_stream_interrupted"
     else:
         assert '"error"' not in response.text
+
+
+def _response_snapshot(status: str, usage: ResponseUsage | None = None) -> Response:
+    return Response(
+        id="resp_cut",
+        created_at=0.0,
+        model="gpt-4o-mini",
+        object="response",
+        status=cast(Any, status),
+        output=[],
+        parallel_tool_calls=False,
+        tool_choice="auto",
+        tools=[],
+        usage=usage,
+    )
+
+
+_RESPONSES_OPENING_EVENTS: list[ResponseStreamEvent] = [
+    ResponseCreatedEvent(type="response.created", response=_response_snapshot("in_progress"), sequence_number=0),
+    ResponseTextDeltaEvent(
+        type="response.output_text.delta",
+        item_id="msg_cut",
+        output_index=0,
+        content_index=0,
+        delta="Hel",
+        logprobs=[],
+        sequence_number=1,
+    ),
+]
+
+
+def _scripted_aresponses(*rounds: list[ResponseStreamEvent]) -> Callable[..., Any]:
+    """A provider that answers each call with the next round's events and then closes the stream."""
+    remaining = iter(rounds)
+
+    async def _aresponses(**_kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        events = next(remaining)
+
+        async def _stream() -> AsyncIterator[ResponseStreamEvent]:
+            for event in events:
+                yield event
+
+        return _stream()
+
+    return _aresponses
+
+
+def _post_responses_stream(client: TestClient, headers: dict[str, str], **fields: Any) -> Any:
+    created = client.post(f"{API_ROOT}/users", json={"user_id": _STREAM_USER}, headers=headers)
+    assert created.status_code == 200, created.text
+    return client.post(
+        f"{API_ROOT}/responses",
+        json={"model": "openai:gpt-4o-mini", "input": "hi", "user": _STREAM_USER, "stream": True, **fields},
+        headers=headers,
+    )
+
+
+def _stream_responses(client: TestClient, headers: dict[str, str], events: list[ResponseStreamEvent]) -> Any:
+    """Stream a Responses request whose provider sends ``events`` and then closes the stream."""
+    with patch("gateway.api.routes.responses.aresponses", new=_scripted_aresponses(events)):
+        return _post_responses_stream(client, headers)
+
+
+def test_a_responses_stream_the_provider_ends_before_its_terminal_event_is_an_interrupted_stream_error(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """``response.created`` and one text delta, then the stream closes: the client is told the text is truncated."""
+    response = _stream_responses(client, master_key_header, _RESPONSES_OPENING_EVENTS)
+
+    assert response.status_code == 200, response.text
+    assert _error_event(response.text)["error"] == {
+        "message": "The provider's stream ended before it finished",
+        "type": "server_error",
+        "code": "provider_stream_interrupted",
+    }
+    assert _usage_row(db_session_factory).status == "error"
+
+
+@pytest.mark.parametrize(
+    ("event_class", "status"),
+    [
+        (ResponseCompletedEvent, "completed"),
+        (ResponseIncompleteEvent, "incomplete"),
+        (ResponseFailedEvent, "failed"),
+    ],
+    ids=["completed", "incomplete", "failed"],
+)
+def test_a_responses_stream_that_reaches_its_terminal_event_ends_cleanly(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    event_class: type[ResponseCompletedEvent | ResponseIncompleteEvent | ResponseFailedEvent],
+    status: str,
+) -> None:
+    """Each event the Responses API ends a response with completes the stream, whatever the response's status."""
+    usage = ResponseUsage(
+        input_tokens=45,
+        input_tokens_details=InputTokensDetails(cached_tokens=0),
+        output_tokens=3,
+        output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
+        total_tokens=48,
+    )
+    terminal = event_class(
+        type=cast(Any, f"response.{status}"), response=_response_snapshot(status, usage), sequence_number=2
+    )
+
+    response = _stream_responses(client, master_key_header, [*_RESPONSES_OPENING_EVENTS, terminal])
+
+    assert response.status_code == 200, response.text
+    assert "event: error" not in response.text
+    assert response.text.rstrip().endswith("data: [DONE]")
+
+
+class _LookupPool:
+    """An MCP pool whose server owns ``lookup``, so the gateway runs that tool itself."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def __aenter__(self) -> "_LookupPool":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "lookup", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "lookup"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        self.calls.append((name, arguments))
+        return "found"
+
+
+def _lookup_call_started(arguments: str) -> list[ResponseStreamEvent]:
+    """A round's opening of a ``lookup`` call whose arguments have streamed as far as ``arguments``."""
+    lookup = ResponseFunctionToolCall(type="function_call", call_id="call_lookup", name="lookup", arguments="")
+    return [
+        ResponseOutputItemAddedEvent(type="response.output_item.added", item=lookup, output_index=0, sequence_number=0),
+        ResponseFunctionCallArgumentsDeltaEvent(
+            type="response.function_call_arguments.delta",
+            item_id="fc_lookup",
+            output_index=0,
+            delta=arguments,
+            sequence_number=1,
+        ),
+    ]
+
+
+_ANSWER_ROUND: list[ResponseStreamEvent] = [
+    _RESPONSES_OPENING_EVENTS[1],
+    ResponseCompletedEvent(type="response.completed", response=_response_snapshot("completed"), sequence_number=2),
+]
+
+
+def _stream_responses_with_lookup(
+    client: TestClient, headers: dict[str, str], pool: _LookupPool, *rounds: list[ResponseStreamEvent]
+) -> Any:
+    """Stream a Responses request through the gateway's tool loop, with an MCP server that owns ``lookup``."""
+    with (
+        patch("gateway.api.routes._pipeline.MCPClientPool", new=lambda *_args, **_kwargs: pool),
+        patch("gateway.services.mcp_loop_responses.aresponses", new=_scripted_aresponses(*rounds)),
+    ):
+        return _post_responses_stream(
+            client, headers, mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}]
+        )
+
+
+def _event_names(text: str) -> list[str]:
+    return [line.removeprefix("event: ") for line in text.splitlines() if line.startswith("event: ")]
+
+
+def test_a_responses_tool_loop_round_cut_after_the_gateway_ran_a_tool_is_an_interrupted_stream_error(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Round one asks for ``lookup`` and completes; the round after the gateway ran it is cut."""
+    pool = _LookupPool()
+    first_round = [
+        *_lookup_call_started('{"q": "docs"}'),
+        ResponseCompletedEvent(type="response.completed", response=_response_snapshot("completed"), sequence_number=2),
+    ]
+
+    response = _stream_responses_with_lookup(
+        client, master_key_header, pool, first_round, _RESPONSES_OPENING_EVENTS[1:]
+    )
+
+    assert response.status_code == 200, response.text
+    assert _error_event(response.text)["error"]["code"] == "provider_stream_interrupted"
+    assert _usage_row(db_session_factory).status == "error"
+    assert pool.calls == [("lookup", {"q": "docs"})]
+
+
+def test_a_responses_tool_loop_round_that_runs_out_of_output_mid_call_runs_no_tool_and_ends_incomplete(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The provider stops at its output limit partway through a call's arguments.
+
+    The arguments are not a call anyone asked for, so the gateway runs nothing and
+    the client gets the unfinished response as the stream's last event.
+    """
+    pool = _LookupPool()
+    unfinished_round = [
+        *_lookup_call_started('{"q": "do'),
+        ResponseIncompleteEvent(
+            type="response.incomplete", response=_response_snapshot("incomplete"), sequence_number=2
+        ),
+    ]
+
+    response = _stream_responses_with_lookup(client, master_key_header, pool, unfinished_round, _ANSWER_ROUND)
+
+    assert response.status_code == 200, response.text
+    assert "event: error" not in response.text
+    assert _event_names(response.text)[-1] == "response.incomplete", response.text
+    assert pool.calls == []
+
+
+def test_a_responses_tool_loop_round_cut_mid_call_runs_no_tool_and_is_an_interrupted_stream_error(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    pool = _LookupPool()
+
+    response = _stream_responses_with_lookup(
+        client, master_key_header, pool, _lookup_call_started('{"q": "do'), _ANSWER_ROUND
+    )
+
+    assert response.status_code == 200, response.text
+    assert _error_event(response.text)["error"]["code"] == "provider_stream_interrupted"
+    assert pool.calls == []
+
+
+class _WebSearchBackend:
+    """The gateway's web retrieval backend, answering every search from memory."""
+
+    def __init__(self, **_kwargs: Any) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def __aenter__(self) -> "_WebSearchBackend":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "web_search", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "web_search"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        self.calls.append((name, arguments))
+        return "[1] Result\nhttps://example.com"
+
+    def take_last_results(self) -> list[dict[str, Any]]:
+        return [{"url": "https://example.com", "title": "Example"}]
+
+
+def test_a_responses_tool_loop_round_that_ends_incomplete_runs_none_of_the_gateway_tools_it_asked_for(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One round asks for the gateway's search and the caller's own tool, then ends in ``response.incomplete``.
+
+    The search does not run, and the client is handed its own call and then the
+    unfinished response, last.
+    """
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    search = ResponseFunctionToolCall(
+        type="function_call", call_id="call_search", name="web_search", arguments='{"query": "otari"}'
+    )
+    caller_tool = ResponseFunctionToolCall(type="function_call", call_id="call_caller", name="lookup", arguments="{}")
+    mixed_round: list[ResponseStreamEvent] = [
+        ResponseOutputItemAddedEvent(type="response.output_item.added", item=search, output_index=0, sequence_number=0),
+        ResponseOutputItemAddedEvent(
+            type="response.output_item.added", item=caller_tool, output_index=1, sequence_number=1
+        ),
+        ResponseIncompleteEvent(
+            type="response.incomplete", response=_response_snapshot("incomplete"), sequence_number=2
+        ),
+    ]
+    backend = _WebSearchBackend()
+
+    with (
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=lambda **_kwargs: backend),
+        patch("gateway.services.mcp_loop_responses.aresponses", new=_scripted_aresponses(mixed_round)),
+    ):
+        response = _post_responses_stream(
+            client,
+            {**master_key_header, "Otari-Web-Search": "otari"},
+            tools=[
+                {"type": "web_search"},
+                {"type": "function", "name": "lookup", "parameters": {"type": "object", "properties": {}}},
+            ],
+        )
+
+    assert response.status_code == 200, response.text
+    assert "event: error" not in response.text
+    assert _event_names(response.text) == ["response.output_item.added", "response.incomplete"], response.text
+    assert backend.calls == []
