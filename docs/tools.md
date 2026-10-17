@@ -194,6 +194,21 @@ Instances do not serve the in-loop tools yet, and the in-loop tool runs
 organization keys on the older backend, so today's lines are labeled
 `otari:<tool>`.
 
+### Searches a provider runs itself
+
+A model's own search tool, such as Anthropic's `web_search_<date>` forwarded to
+an Anthropic model, is run and billed by the provider, per search. Otari reads
+the count the provider reports (Anthropic's
+`usage.server_tool_use.web_search_requests`) and adds those searches to the row
+as `web_search` calls labeled `<provider>:web_search`, so the row and the
+budget carry what the provider will charge. They are priced at the operator's
+`anthropic:web_search` row when there is one, otherwise, with `default_pricing`
+on, at the provider's list price: Anthropic's is $10 per 1,000 searches. With
+neither, the searches stay on the row at no cost. A search Otari runs in the
+model's place, under [interception](#web-search-interception) or the
+`Otari-Web-Search` header, is the provider's no longer, so it bills as
+`otari:web_search` instead and never twice.
+
 Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
 without a model tool loop. A search a workspace's

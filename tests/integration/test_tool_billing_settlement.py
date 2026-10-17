@@ -26,9 +26,11 @@ from sqlalchemy.orm import Session
 
 from gateway.api.routes.chat import log_usage
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.usage import GatewayUsage
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE, ToolUsageTally
 
 from .conftest import MODEL_NAME
@@ -584,3 +586,86 @@ async def test_unpriced_fetch_is_refused_before_the_provider_call(
     assert response.status_code == 402, response.text
     assert "otari:web_fetch" in response.json()["detail"]
     provider.assert_not_called()
+
+
+def _searched_usage(searches: int) -> GatewayUsage:
+    """What a Messages call reports when Anthropic ran its own web search ``searches`` times."""
+    return GatewayUsage(
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        cache_tokens_in_prompt=False,
+        provider_web_searches=searches,
+    )
+
+
+async def _settle_provider_searches(async_db: AsyncSession, searches: int) -> UsageLog:
+    writer = _Writer()
+    await log_usage(
+        db=async_db,
+        log_writer=writer,
+        api_key_id=None,
+        model="claude-haiku-4-5",
+        provider="anthropic",
+        provider_type="anthropic",
+        endpoint="/v1/messages",
+        usage_override=_searched_usage(searches),
+    )
+    [row] = writer.logs
+    return row
+
+
+def _search_line(row: UsageLog) -> dict[str, Any]:
+    [line] = [entry for entry in row.pricing_breakdown or [] if entry.get("label") == "anthropic:web_search"]
+    return line
+
+
+@pytest.mark.asyncio
+async def test_searches_the_provider_ran_are_billed_at_its_list_price(async_db: AsyncSession) -> None:
+    """Anthropic bills its own web search per search; default pricing prices it at the published $10 per 1,000."""
+    configure_default_pricing(True)
+
+    row = await _settle_provider_searches(async_db, 2)
+
+    assert _search_line(row) == {
+        "meter": "web_search_calls",
+        "label": "anthropic:web_search",
+        "units": 2,
+        "unit_rate": 0.01,
+        "cost": 0.02,
+    }
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 2
+    assert row.cost is not None
+    assert row.cost >= Decimal("0.02")
+
+
+@pytest.mark.asyncio
+async def test_an_operator_rate_wins_over_the_list_price(async_db: AsyncSession) -> None:
+    configure_default_pricing(True)
+    async_db.add(
+        ModelPricing(model_key="anthropic:web_search", input_price_per_million=5_000.0, output_price_per_million=0.0)
+    )
+    await async_db.commit()
+
+    row = await _settle_provider_searches(async_db, 3)
+
+    assert _search_line(row)["unit_rate"] == pytest.approx(0.005)
+    assert _search_line(row)["cost"] == pytest.approx(0.015)
+
+
+@pytest.mark.asyncio
+async def test_without_default_pricing_or_a_rate_the_searches_stay_on_the_row_unpriced(async_db: AsyncSession) -> None:
+    row = await _settle_provider_searches(async_db, 1)
+
+    assert _search_line(row)["cost"] == 0.0
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_call_with_no_provider_search_adds_no_tool_line(async_db: AsyncSession) -> None:
+    configure_default_pricing(True)
+
+    row = await _settle_provider_searches(async_db, 0)
+
+    assert TOOL_METER_NAMESPACE not in (row.billing_meters or {})
+    assert not any(entry.get("label") == "anthropic:web_search" for entry in row.pricing_breakdown or [])

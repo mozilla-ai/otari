@@ -24,6 +24,14 @@ from gateway.types.tool_charges import (
     gateway_tool_pricing_key,
 )
 
+# Published per-search prices of searches a provider runs itself, keyed by label.
+# Default pricing prices a provider-run search at its list price when the operator
+# set no rate, as models.dev prices a model. Anthropic: $10 per 1,000 searches
+# (https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool), read 2026-10-17.
+PROVIDER_TOOL_LIST_PRICES: Mapping[str, Decimal] = {
+    "anthropic:web_search": Decimal("0.01"),
+}
+
 
 class ToolRate(NamedTuple):
     """The rate a call with no reported cost is priced at, and where it was found."""
