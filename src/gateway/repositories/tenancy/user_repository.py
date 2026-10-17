@@ -1,6 +1,7 @@
 """Data access for the reconciled control plane's identities."""
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any, cast
 
@@ -308,6 +309,19 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         await self.db.flush()
         await self.db.refresh(user)
         return user
+
+    async def get_ids_by_active_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return the ID of every identity whose active organization is this one, member or not."""
+        result = await self.db.execute(select(col(User.id)).where(col(User.active_organization_id) == organization_id))
+        return list(result.scalars().all())
+
+    async def move_active_organization(self, user_ids: Collection[uuid.UUID], organization_id: uuid.UUID) -> None:
+        """Stage ``organization_id`` as the active organization of each of these identities."""
+        if not user_ids:
+            return
+        await self.db.execute(
+            update(User).where(col(User.id).in_(user_ids)).values(active_organization_id=organization_id)
+        )
 
 
 __all__ = ["UserRepository", "user_alphabetical_order"]

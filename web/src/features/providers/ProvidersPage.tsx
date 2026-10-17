@@ -226,10 +226,9 @@ function KnownProviderForm({
   // picker itself never imports every provider SDK (issue #365).
   const detail = useProviderDetail(providerId)
   const selected = detail.data?.id === providerId ? detail.data : undefined
-  const envKeyPresent = selected?.env_key_present ?? false
-  // The key is only mandatory when the provider needs one and its env var is not
-  // already set on the server; any-llm falls back to that env var otherwise.
-  const needsKey = (selected?.requires_api_key ?? true) && !envKeyPresent
+  // The key is mandatory whenever the provider needs one: a stored provider never
+  // reads the provider's environment variable, even one set on the server.
+  const needsKey = selected?.requires_api_key ?? true
   const isRenamed = name.trim() !== "" && name.trim() !== providerId
   const nameHasDelimiter = /[:/]/.test(name)
   // `isDirty` arrives as a prop rather than being computed here: this component
@@ -323,9 +322,7 @@ function KnownProviderForm({
           selected
             ? needsKey
               ? `${selected.name}'s endpoint is built in — just add your key.`
-              : envKeyPresent
-                ? `${selected.env_key} is set on the server, so a key is optional here. Paste one to override it.`
-                : `${selected.name} needs no API key.`
+              : `${selected.name} needs no API key.`
             : "Stored encrypted. Requires OTARI_SECRET_KEY on the server.",
           credentialSpec?.apiKeyHelpText,
         ]

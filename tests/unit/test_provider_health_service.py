@@ -17,7 +17,7 @@ from any_llm.types.model import Model
 
 from gateway.core.config import GatewayConfig
 from gateway.services import provider_health_service as phs
-from gateway.services.model_discovery_service import ProviderDiscovery, get_model_cache
+from gateway.services.model_discovery_service import DiscoveryDial, ProviderDiscovery, get_model_cache
 
 
 def _config(providers: dict[str, dict[str, str]] | None = None) -> GatewayConfig:
@@ -33,7 +33,9 @@ async def test_healthy_provider_reports_model_count_and_checked_at() -> None:
     get_model_cache().clear()
     config = _config({"openai": {"api_key": "x"}})
 
-    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+    async def discover(
+        cfg: GatewayConfig, instance: str, *, serve_stale: bool = False, dial: object = None
+    ) -> ProviderDiscovery:
         get_model_cache().set(instance, [_model("gpt-4o"), _model("gpt-4o-mini")])
         return ProviderDiscovery(provider=instance, models=[_model("gpt-4o"), _model("gpt-4o-mini")])
 
@@ -52,7 +54,9 @@ async def test_unreachable_provider_is_unhealthy_and_keeps_error() -> None:
     get_model_cache().clear()
     config = _config({"anthropic": {"api_key": "x"}})
 
-    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+    async def discover(
+        cfg: GatewayConfig, instance: str, *, serve_stale: bool = False, dial: object = None
+    ) -> ProviderDiscovery:
         return ProviderDiscovery(provider=instance, models=[], error="authentication failed")
 
     with patch.object(phs, "discover_provider_models", side_effect=discover):
@@ -70,7 +74,9 @@ async def test_provider_without_a_models_endpoint_is_flagged_not_just_unhealthy(
     get_model_cache().clear()
     config = _config({"otari": {"api_key": "x"}})
 
-    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+    async def discover(
+        cfg: GatewayConfig, instance: str, *, serve_stale: bool = False, dial: object = None
+    ) -> ProviderDiscovery:
         return ProviderDiscovery(
             provider=instance,
             models=[],
@@ -99,7 +105,9 @@ def _spy_on_clear() -> Iterator[list[str | None]]:
         yield cleared
 
 
-async def _noop_discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+async def _noop_discover(
+    cfg: GatewayConfig, instance: str, *, serve_stale: bool = False, dial: object = None
+) -> ProviderDiscovery:
     return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
 
 
@@ -159,13 +167,15 @@ async def test_check_all_fans_out_and_summarizes() -> None:
     get_model_cache().clear()
     config = _config({"openai": {"api_key": "x"}, "anthropic": {"api_key": "y"}})
 
-    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+    async def discover(
+        cfg: GatewayConfig, instance: str, *, serve_stale: bool = False, dial: object = None
+    ) -> ProviderDiscovery:
         if instance == "anthropic":
             return ProviderDiscovery(provider=instance, models=[], error="boom")
         return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
 
     with patch.object(phs, "discover_provider_models", side_effect=discover):
-        results = await phs.check_all_provider_health(config)
+        results = await phs.check_all_provider_health(config, hosted=None)
 
     by_instance = {item.instance: item for item in results}
     assert set(by_instance) == {"openai", "anthropic"}
@@ -180,13 +190,15 @@ async def test_check_all_surfaces_a_stray_exception_without_sinking_others() -> 
     get_model_cache().clear()
     config = _config({"good": {"api_key": "x"}, "bad": {"api_key": "y"}})
 
-    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+    async def discover(
+        cfg: GatewayConfig, instance: str, *, serve_stale: bool = False, dial: object = None
+    ) -> ProviderDiscovery:
         if instance == "bad":
             raise RuntimeError("unexpected")
         return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
 
     with patch.object(phs, "discover_provider_models", side_effect=discover):
-        results = await phs.check_all_provider_health(config)
+        results = await phs.check_all_provider_health(config, hosted=None)
 
     by_instance = {item.instance: item for item in results}
     assert by_instance["good"].ok is True
@@ -206,12 +218,14 @@ async def test_polled_health_serves_the_cache_instead_of_dialing() -> None:
     config = _config({"openai": {"api_key": "x"}})
     seen: list[bool] = []
 
-    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+    async def discover(
+        cfg: GatewayConfig, instance: str, *, serve_stale: bool = False, dial: object = None
+    ) -> ProviderDiscovery:
         seen.append(serve_stale)
         return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
 
     with patch.object(phs, "discover_provider_models", side_effect=discover):
-        await phs.check_all_provider_health(config, serve_stale=True)
+        await phs.check_all_provider_health(config, hosted=None, serve_stale=True)
 
     assert seen == [True]
 
@@ -223,12 +237,63 @@ async def test_explicit_recheck_still_dials() -> None:
     config = _config({"openai": {"api_key": "x"}})
     seen: list[bool] = []
 
-    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+    async def discover(
+        cfg: GatewayConfig, instance: str, *, serve_stale: bool = False, dial: object = None
+    ) -> ProviderDiscovery:
         seen.append(serve_stale)
         return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
 
     with patch.object(phs, "discover_provider_models", side_effect=discover):
-        await phs.check_all_provider_health(config, refresh=True, serve_stale=True)
+        await phs.check_all_provider_health(config, hosted=None, refresh=True, serve_stale=True)
 
     # refresh wins over serve_stale, or the button would return the cached verdict.
     assert seen == [False]
+
+
+@pytest.mark.asyncio
+async def test_check_all_dials_a_hosted_provider_on_its_own_dial() -> None:
+    """A hosted provider is checked beside the configured instances, on the dial the providers domain hands over."""
+    get_model_cache().clear()
+    config = _config({"openai": {"api_key": "x"}})
+    dialed: list[str] = []
+
+    async def mistral() -> ProviderDiscovery:
+        dialed.append("mistral")
+        return ProviderDiscovery(provider="mistral", models=[_model("mistral-large"), _model("mistral-small")])
+
+    async def hosted() -> dict[str, DiscoveryDial]:
+        return {"mistral": mistral}
+
+    async def configured(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+        return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
+
+    with patch("gateway.services.model_discovery_service._discover_uncached", side_effect=configured):
+        results = await phs.check_all_provider_health(config, hosted=hosted)
+
+    by_instance = {item.instance: item for item in results}
+    assert set(by_instance) == {"openai", "mistral"}
+    assert by_instance["mistral"].ok is True
+    assert by_instance["mistral"].model_count == 2
+    assert by_instance["mistral"].checked_at is not None
+    assert dialed == ["mistral"]
+
+
+@pytest.mark.asyncio
+async def test_a_configured_instance_shadows_the_hosted_provider_of_its_name() -> None:
+    """The instance serves every request naming it, so its health is the one to report."""
+    get_model_cache().clear()
+    config = _config({"openai": {"api_key": "x"}})
+
+    async def hosted_openai() -> ProviderDiscovery:
+        raise AssertionError("a shadowed hosted provider must not be dialed")
+
+    async def hosted() -> dict[str, DiscoveryDial]:
+        return {"openai": hosted_openai}
+
+    async def configured(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+        return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
+
+    with patch("gateway.services.model_discovery_service._discover_uncached", side_effect=configured):
+        results = await phs.check_all_provider_health(config, hosted=hosted)
+
+    assert [(item.instance, item.ok) for item in results] == [("openai", True)]

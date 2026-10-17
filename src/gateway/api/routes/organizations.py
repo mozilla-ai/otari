@@ -20,9 +20,9 @@ repository's, and so are the invariants a second organization needs (who
 becomes its owner, what its slug is, that it has a workspace to work in), so an
 overlay contributing no tables could only fork them. See mozilla-ai/otari#715.
 
-Deleting an organization is still not here, and that is a different question
-rather than an oversight: every historical attribution resolves through rows
-that hang off it.
+``DELETE /me`` removes an organization only while nothing has been recorded
+against it, because every historical attribution resolves through rows that
+hang off it.
 """
 
 import uuid
@@ -149,6 +149,41 @@ async def update_active_organization(
         user=current_identity,
         organization_name=body.name,
     )
+
+
+@router.delete(
+    "/me",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": OrganizationRefusal,
+            "description": "It is the deployment's default organization, or the only one the caller belongs to.",
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": OrganizationRefusal,
+            "description": "The caller is not an owner or admin of the organization.",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": OrganizationRefusal,
+            "description": "The organization still holds usage, API keys, aliases or routing policies.",
+        },
+    },
+)
+async def delete_active_organization(
+    service: MembershipOrganizationServiceDep,
+    current_identity: CurrentIdentity,
+) -> OrganizationMembershipContextPublic:
+    """Delete the caller's active organization, if it has no usage, and move the caller out of it.
+
+    Owners and admins only. Its workspaces, memberships, invitations and
+    organization-level settings go with it. Refused for the deployment's default
+    organization, for the only organization the caller belongs to, and for one
+    whose workspaces still hold usage, API keys, aliases or routing policies, so
+    a deletion never takes spend history with it.
+
+    Answers with the caller's context in the organization they are moved to,
+    their oldest other one.
+    """
+    return await service.delete_active_organization_for_user(user=current_identity)
 
 
 @router.get("/me/memberships")

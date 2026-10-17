@@ -650,6 +650,22 @@ class OrgProviderKeyService:
         await refresh_org_provider_cache(self.db)
         return await self._public_row(updated)
 
+    async def unset_org_default_for_user(self, *, user: User, key_id: uuid.UUID) -> OrgProviderKeyPublic:
+        """Stop a key being the organization's default for its provider. Organization owners and admins only."""
+        organization = await self.organizations.get_active_organization_for_user(user)
+        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
+
+        key = await self.keys.get_in_organization(key_id, organization.id)
+        if key is None:
+            raise OrgProviderKeyNotFoundError(key_id)
+        if not key.is_org_default:
+            return await self._public_row(key)
+
+        updated = await self.keys.update_key(key, {"is_org_default": False})
+        await self.db.commit()
+        await refresh_org_provider_cache(self.db)
+        return await self._public_row(updated)
+
     # ------------------------------------------------------------------
     # Workspace overrides
     # ------------------------------------------------------------------

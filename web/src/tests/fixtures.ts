@@ -148,6 +148,7 @@ export function pricingResponse(
 export const STANDALONE_SURFACES = [
   "admin",
   "budgets",
+  "hosted_providers",
   "keys",
   "models",
   "organization_guardrails",

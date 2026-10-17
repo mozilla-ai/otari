@@ -278,20 +278,11 @@ function mockApi(
       if (url.includes(`${API_ROOT}/users`)) {
         return jsonResponse(users)
       }
-      if (url.includes(`${API_ROOT}/models/discoverable`)) {
+      if (url.endsWith(`${API_ROOT}/models`)) {
         return jsonResponse({
-          providers: [
-            {
-              provider: "openai",
-              ok: true,
-              error: null,
-              models: [{ id: "gpt-4o", key: "openai:gpt-4o" }],
-            },
-          ],
+          object: "list",
+          data: [{ id: "openai:gpt-4o", object: "model", owned_by: "openai" }],
         })
-      }
-      if (url.includes(`${API_ROOT}/providers`)) {
-        return jsonResponse({ providers: [{ instance: "openai" }] })
       }
       if (url.includes(`${API_ROOT}/aliases`)) {
         return jsonResponse([])

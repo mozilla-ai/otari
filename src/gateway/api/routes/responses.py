@@ -58,15 +58,15 @@ from gateway.api.routes._platform import (
     attempt_provider,
     build_attempt_client_args,
 )
-from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
+from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, forwarded_metadata, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._settlement import SettledCost
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.schemas.inference import SettledCost
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
@@ -492,6 +492,7 @@ async def create_response(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
+    tags_header: RequestTagsHeader,
 ) -> dict[str, Any] | FastAPIResponse:
     """OpenAI-compatible Responses endpoint.
 
@@ -561,7 +562,7 @@ async def create_response(
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if bool(request_body.stream) else idempotency,
-            tags=request_tags(request_body.metadata),
+            tags=resolved_tags(tags_header, request_body.metadata),
             turn=read_turn("responses", request_body.input),
             session_label=request_body.session_label,
         )

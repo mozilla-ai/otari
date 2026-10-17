@@ -22,7 +22,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
+from gateway.api.deps import (
+    HostedProviderServiceDep,
+    get_config,
+    get_db,
+    require_deployment_operator,
+    verify_catalog_reader,
+)
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -168,10 +174,18 @@ class KnownProviderSchema(BaseModel):
     name: str = Field(description="Human-friendly display name.")
     env_key: str | None = Field(default=None, description="Env var the SDK reads this provider's key from.")
     default_api_base: str | None = Field(default=None, description="Built-in endpoint; blank means the SDK's default.")
-    requires_api_key: bool = Field(description="False for keyless local backends (Ollama, llama.cpp).")
+    requires_api_key: bool = Field(
+        description=(
+            "False for providers that need no key: keyless local backends (Ollama, llama.cpp) and ambient "
+            "cloud credentials (Bedrock, Vertex AI)."
+        )
+    )
     env_key_present: bool = Field(
         default=False,
-        description="True when env_key is already set on the server, so a pasted key is optional (env fallback).",
+        description=(
+            "True when env_key is set on the server. Informational: a stored provider never reads it, "
+            "so a key the provider requires must still be supplied."
+        ),
     )
 
 
@@ -279,9 +293,16 @@ def _to_health_schema(health: ProviderHealth) -> ProviderHealthSchema:
 @router.get("/providers/health")
 async def provider_health(
     config: Annotated[GatewayConfig, Depends(get_config)],
+    hosted: HostedProviderServiceDep,
     refresh: bool = False,
 ) -> ProviderHealthResponse:
     """Report every configured provider's reachability, with a last-checked time.
+
+    Covers the configured provider instances and every hosted provider switched
+    on, each hosted provider under its provider name. A hosted provider that a
+    configured instance of the same name shadows is not reported. One whose
+    stored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is
+    reported unreachable with that reason.
 
     Reuses the per-provider model-discovery test path, so a provider is healthy
     when its credentials can list models. Results are served from the discovery
@@ -296,6 +317,7 @@ async def provider_health(
     """
     results = await check_all_provider_health(
         config,
+        hosted=hosted.discovery_dials,
         refresh=refresh,
         serve_stale=background_discovery_enabled(config) and not refresh,
     )
@@ -516,6 +538,8 @@ async def test_provider_connection(
         api_key=request.api_key,
         api_base=request.api_base,
         client_args=request.client_args,
+        # What this form saves is a stored ``providers:`` entry.
+        declared=True,
         timeout=config.model_discovery_timeout_seconds,
     )
     return TestProviderResponse(

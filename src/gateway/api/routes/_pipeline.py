@@ -52,7 +52,13 @@ from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Proto
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
-from any_llm.exceptions import AnyLLMError, ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
+from any_llm.exceptions import (
+    AnyLLMError,
+    ContextLengthExceededError,
+    InvalidRequestError,
+    MissingApiKeyError,
+    UnsupportedParameterError,
+)
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -107,7 +113,6 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
-from gateway.api.routes._settlement import SettledCost
 from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
@@ -131,6 +136,7 @@ from gateway.core.error_codes import (
     PRICING_REQUIRED,
     PROVIDER_CREDENTIAL_REJECTED,
     PROVIDER_ERROR,
+    PROVIDER_NOT_CONFIGURED,
     PROVIDER_STREAM_INTERRUPTED,
     UNSUPPORTED_CONTENT,
     UPSTREAM_RATE_LIMITED,
@@ -206,6 +212,7 @@ from gateway.rate_limit import (
     admit_rate_limit_rules,
     check_rate_limit,
 )
+from gateway.schemas.inference import SettledCost
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
@@ -283,10 +290,13 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import (
+    MissingCredential,
     ResolvedProvider,
-    credential_ladder_exhausted,
+    hosted_lookup,
+    keyless_placeholder_api_key,
     missing_credential,
     provider_key,
+    require_declared_credential,
     resolve_provider_selector,
     with_failover_retries,
 )
@@ -1527,8 +1537,101 @@ async def _prepare_for_dispatch(
         client_args = {"http_client": owned_endpoint_http_client()}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
     served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
+    if served.deployment_paid:
+        await _hold_at_deployment_paid_rate(ctx, served, adapter=adapter)
     await _admit_or_refuse(ctx, served, adapter=adapter, billing=billing)
     return served
+
+
+def hosted_model_not_offered_detail(selector: str) -> str:
+    """Why a model a hosted provider serves the organization, with the model not switched on, is refused."""
+    return f"Model '{selector}' is not offered on this deployment."
+
+
+async def _refuse_if_hosted_model_switched_off(
+    ctx: RequestContext, resolved: ResolvedProvider, *, adapter: FormatAdapter[Any, Any], port: ModelProviderPort
+) -> None:
+    """Refuse a model the port declined although it serves the organization the provider.
+
+    That is a model the operator switched off or never put on the provider's
+    roster, and what dispatch would say instead names the provider's
+    environment variable, which no caller can set and which would not serve
+    the model either. A provider the port does not
+    serve the organization at all, restricted to another one included, keeps
+    the ordinary missing-credential answer, so nothing here says whether such a
+    provider exists.
+    """
+    if ctx.organization_id is None:
+        return
+    try:
+        served = await port.get_hosted_models(organization_id=ctx.organization_id)
+    except Exception:
+        # Best effort: the request then fails as it would have without this check.
+        logger.warning("Could not list hosted models for %s:%s", resolved.instance, resolved.model)
+        return
+    if resolved.instance not in served:
+        return
+    detail = hosted_model_not_offered_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=resolved.model,
+        provider=resolved.instance,
+        endpoint=adapter.endpoint,
+        detail=detail,
+        status_code=status.HTTP_424_FAILED_DEPENDENCY,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+    )
+    raise adapter.error(
+        status.HTTP_424_FAILED_DEPENDENCY,
+        detail,
+        ErrorKind.API,
+        headers=error_headers(PROVIDER_NOT_CONFIGURED),
+    )
+
+
+async def _hold_at_deployment_paid_rate(
+    ctx: RequestContext, served: ResolvedProvider, *, adapter: FormatAdapter[Any, Any]
+) -> None:
+    """Grow the hold to the rate a request on the deployment's credential settles at, else refuse it.
+
+    Admission priced the selector before the credential was known, so an
+    override the organization wrote itself may have priced it. Settlement
+    ignores such an override for a deployment-paid request, and a zero one
+    takes no hold at all, which would let the request past the budget gate and
+    ``require_pricing`` alike.
+    """
+    try:
+        await _grow_reservation(ctx, served.instance, served.model, deployment_paid=True, refused_detail=None)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=served.model,
+            provider=served.instance,
+            endpoint=adapter.endpoint,
+            detail=detail,
+            status_code=exc.status_code,
+            started_at=ctx.started_at,
+            request_id=ctx.request_id,
+            tags=ctx.tags,
+        )
+        kind = (
+            ErrorKind.INVALID_REQUEST
+            if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED
+            else error_kind_for_status(exc.status_code)
+        )
+        headers = dict(exc.headers) if exc.headers is not None else None
+        raise adapter.error(exc.status_code, detail, kind, headers=headers) from exc
 
 
 async def _admit_or_refuse(
@@ -1632,6 +1735,39 @@ async def _funding_unavailable(
     return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
 
 
+async def _provider_not_configured(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    exc: MissingApiKeyError,
+    *,
+    adapter: FormatAdapter[Any, Any],
+) -> HTTPException:
+    """Map the ``MissingApiKeyError`` the declaration check raised to its 424: release, record, respond."""
+    missing = MissingCredential.from_error(exc)
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=resolved.model,
+        provider=resolved.instance,
+        endpoint=adapter.endpoint,
+        detail=missing.detail,
+        status_code=missing.status_code,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+    )
+    public = missing.behind_alias(resolved.alias)
+    return adapter.error(
+        public.status_code,
+        public.detail,
+        error_kind_for_status(public.status_code),
+        headers=error_headers(public.code),
+    )
+
+
 async def _warn_if_hosted_upstream_is_unpriced(
     ctx: RequestContext,
     resolved: ResolvedProvider,
@@ -1660,6 +1796,7 @@ async def _warn_if_hosted_upstream_is_unpriced(
             upstream,
             resolved.model,
             organization_id=ctx.organization_id,
+            deployment_paid=True,
         )
     except SQLAlchemyError:
         logger.warning(
@@ -1693,31 +1830,42 @@ async def _serve_from_hosted_credential(
     own key, a stored provider instance and a ``config.yml`` entry are all
     resolved upstream of here (``services/provider_kwargs.py``), and a candidate
     any of them served comes back untouched, so BYO precedence is unchanged: the
-    port is asked when the ladder is exhausted and never before it. The core
-    adapter answers ``None`` for every candidate, which is what makes a build
-    with no overlay behave exactly as it did, rung for rung.
+    port is asked when the ladder found nothing and never before it. For a
+    provider that needs no key, only the deployment's own hosted provider of the
+    same name may answer. The core
+    adapter answers from the deployment's hosted providers, and ``None`` where
+    none serves the candidate.
 
     On a resolved credential the dispatch is re-keyed onto
     ``response_provider``, the upstream that usage and telemetry name (which the
     port documents as possibly differing from the public name the caller asked
     for), and carries that credential alone: the ladder produced nothing to
     merge with.
+
+    A candidate the port does not serve either answers the ``MissingApiKeyError``
+    :func:`require_declared_credential` raised for it, as a 424.
     """
-    if ctx.organization_id is None:
-        # The port keys its access decision on the organization alone, so a
-        # request with no organization (no workspace resolved for it) has
-        # nothing to ask about.
-        return resolved
     if ctx.plan is not None and len(ctx.plan.attempts) > 1:
         # A multi-candidate plan dispatches from ``ctx.plan.attempts``, whose
         # kwargs the routing compiler built; what this function returns is not
         # what those candidates are called with. Asking anyway would meter a
         # resolve that never serves, so a routed chain keeps the ladder's own
-        # answer for now. Reaching the port from the compiler is separate work:
+        # answer for now, and the walk refuses each candidate it leaves
+        # uncredentialed. Reaching the port from the compiler is separate work:
         # the compiler is synchronous and documented as doing no I/O.
         return resolved
-    if not credential_ladder_exhausted(resolved.provider, resolved.kwargs):
+    try:
+        require_declared_credential(ctx.config, resolved.instance, resolved.provider, resolved.kwargs)
+    except MissingApiKeyError as exc:
+        missing = exc
+    else:
         return resolved
+    lookup = hosted_lookup(resolved.provider)
+    if ctx.organization_id is None:
+        # The port keys its access decision on the organization alone, so a
+        # request with no organization (no workspace resolved for it) has
+        # nothing to ask about.
+        raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
 
     try:
         credential = await port.resolve_hosted_credential(
@@ -1812,11 +1960,10 @@ async def _serve_from_hosted_credential(
         # behind your request", and which internal step failed is not theirs.
         raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
 
-    if credential is None:
-        # This build has no hosted path for the candidate. The candidate is
-        # genuinely unserved, which is what it already was, so it goes to
-        # any-llm uncredentialed and fails there exactly as it does today.
-        return resolved
+    if credential is None and not lookup.own_name_only:
+        await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
+    if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
+        raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
 
     try:
         upstream = LLMProvider(credential.response_provider)
@@ -1863,9 +2010,17 @@ async def _serve_from_hosted_credential(
     # overlay binding this port owns that.
     await _warn_if_hosted_upstream_is_unpriced(ctx, resolved, credential.response_provider)
 
-    kwargs: dict[str, Any] = {"api_key": credential.api_key}
+    # A keyless backend's credential carries no key, so it takes the placeholder
+    # a keyless ``config.yml`` instance takes.
+    api_key = credential.api_key or keyless_placeholder_api_key(credential.api_base, None)
+    kwargs: dict[str, Any] = {} if api_key is None else {"api_key": api_key}
     if credential.api_base is not None:
         kwargs["api_base"] = credential.api_base
+    if credential.client_args:
+        # The same key a ``config.yml`` instance's extras travel under
+        # (``services/provider_kwargs``), so Bedrock's region reaches the SDK
+        # client exactly as it would from the file.
+        kwargs["client_args"] = dict(credential.client_args)
     return ResolvedProvider(
         instance=credential.response_provider,
         provider=upstream,
@@ -2046,10 +2201,27 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
     handler refunds the original hold. That is the honest failure. The alternative,
     proceeding on the cheaper hold, would quietly take spend past the cap.
     """
+    await _grow_reservation(
+        ctx,
+        attempt.instance,
+        attempt.model,
+        deployment_paid=False,
+        refused_detail=budget_exhausted_mid_failover_detail(),
+    )
+
+
+async def _grow_reservation(
+    ctx: RequestContext, instance: str, model: str, *, deployment_paid: bool, refused_detail: str | None
+) -> None:
+    """Grow the reservation to cover ``instance:model`` at the rate it settles at.
+
+    ``refused_detail`` replaces the detail of a budget refusal, which otherwise
+    propagates as the budget gate raised it.
+    """
     if ctx.db is None or ctx.reservation is None or ctx.estimate_inputs is None:
         return
     prices = ctx.prices if ctx.prices is not None else RequestPrices(ctx.organization_id)
-    resolved = await prices.resolve(ctx.db, attempt.instance, attempt.model)
+    resolved = await prices.resolve(ctx.db, instance, model, deployment_paid=deployment_paid)
     pricing = resolved.pricing if resolved is not None else None
     # `require_pricing` is a billing safety gate: it refuses a request the gateway
     # cannot price, because it then cannot debit it. The gate at admission prices
@@ -2061,13 +2233,13 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
         pricing, require_pricing=ctx.config.require_pricing
     ):
         logger.warning(
-            "Fallback candidate %s:%s has no pricing and require_pricing is on; stopping the chain",
-            attempt.instance,
-            attempt.model,
+            "Candidate %s:%s has no pricing and require_pricing is on; stopping the chain",
+            instance,
+            model,
         )
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=no_pricing_error_detail(f"{attempt.instance}:{attempt.model}"),
+            detail=no_pricing_error_detail(f"{instance}:{model}"),
             headers=error_headers(PRICING_REQUIRED),
         )
     repriced = estimate_cost(
@@ -2082,19 +2254,15 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
             ctx.db,
             ctx.reservation,
             estimate=repriced,
-            model=f"{attempt.instance}:{attempt.model}",
+            model=f"{instance}:{model}",
             model_is_free=is_free_pricing(pricing),
             strategy=ctx.config.budget_strategy,
         )
     except HTTPException as exc:
-        logger.warning(
-            "Reservation top-up refused for fallback candidate %s:%s; stopping the chain",
-            attempt.instance,
-            attempt.model,
-        )
-        raise HTTPException(
-            status_code=exc.status_code, detail=budget_exhausted_mid_failover_detail(), headers=exc.headers
-        ) from exc
+        logger.warning("Reservation top-up refused for candidate %s:%s; stopping the chain", instance, model)
+        if refused_detail is None:
+            raise
+        raise HTTPException(status_code=exc.status_code, detail=refused_detail, headers=exc.headers) from exc
 
 
 BUDGETS_UNAVAILABLE_DETAIL = "Budgets could not be checked for a fallback, so it was not sent."
@@ -2810,7 +2978,7 @@ async def resolve_request_context(
         if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
             await refund_reservation(db, reservation)
             refusal = await unpriced_model_refusal(
-                model, resolved_provider, plan=plan, hosted=model_provider, organization_id=organization_id
+                config, model, resolved_provider, plan=plan, hosted=model_provider, organization_id=organization_id
             )
             # Record the rejection after the refund, so an operator who flipped
             # require_pricing on can see that live traffic is being dropped.
@@ -4369,7 +4537,8 @@ async def record_usage(
             row a request writes is findable by the id the caller holds.
         tags: The caller's request tags (``RequestContext.tags``), stored as-is.
         deployment_paid: The request was admitted as deployment-paid
-            (``RequestContext.deployment_charge`` is set), stored as-is.
+            (``RequestContext.deployment_charge`` is set), stored as-is, and
+            priced from no override the organization wrote itself.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -4437,7 +4606,7 @@ async def record_usage(
         # so this is dictionary reads rather than queries after the first request
         # on a key.
         if prices is not None:
-            resolved = await prices.resolve(db, provider, model)
+            resolved = await prices.resolve(db, provider, model, deployment_paid=deployment_paid)
         else:
             resolved = await resolve_model_pricing(
                 db,
@@ -4445,6 +4614,7 @@ async def record_usage(
                 model,
                 as_of=usage_log.timestamp,
                 organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
+                deployment_paid=deployment_paid,
             )
         priced: tuple[Decimal, dict[str, int], list[ChargeLine]] | None = None
         if resolved is not None and priced_per_request(resolved.pricing):
@@ -4502,6 +4672,7 @@ async def bills_per_request(
     api_key_id: str | None,
     workspace_id: uuid.UUID | None,
     prices: RequestPrices | None = None,
+    deployment_paid: bool = False,
 ) -> bool:
     """Whether ``model`` is priced per request at the rate :func:`record_usage` will settle it at.
 
@@ -4510,7 +4681,7 @@ async def bills_per_request(
     asks this first.
     """
     if prices is not None:
-        resolved = await prices.resolve(db, provider, model)
+        resolved = await prices.resolve(db, provider, model, deployment_paid=deployment_paid)
     else:
         if workspace_id is None:
             workspace_id = await workspace_for_key_id(db, api_key_id)
@@ -4519,6 +4690,7 @@ async def bills_per_request(
             provider,
             model,
             organization_id=await organization_for_workspace_id(db, workspace_id),
+            deployment_paid=deployment_paid,
         )
     return resolved is not None and priced_per_request(resolved.pricing)
 
@@ -5368,7 +5540,13 @@ def build_streaming_response(
         # A model priced per request is billed by the request, not by the usage
         # it reports, so a completed stream without usage is an ordinary success.
         if await bills_per_request(
-            db, provider=provider, model=model, api_key_id=api_key_id, workspace_id=workspace_id, prices=prices
+            db,
+            provider=provider,
+            model=model,
+            api_key_id=api_key_id,
+            workspace_id=workspace_id,
+            prices=prices,
+            deployment_paid=deployment_paid,
         ):
             logged = await record_usage(
                 db=db,
@@ -5710,15 +5888,18 @@ def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
 
 
 def _failover_kwargs(
-    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext
+    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, config: GatewayConfig
 ) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
     """Builds each candidate's kwargs for a plan that can fall over, from the request fields its tools need.
 
     Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
-    so the walk skips it before admitting it.
+    so the walk skips it before admitting it, and any-llm's ``MissingApiKeyError`` for a
+    candidate nothing declares a credential for, so the walk passes it over as it does
+    any candidate missing a key.
     """
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
+        require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
         fields = tool_ctx.request_fields_for(attempt.provider.value, base_request_fields)
         return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
 
@@ -5843,7 +6024,7 @@ async def run_single_attempt_stream(
                     run_attempt=_open_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter, tool_ctx),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx.config),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
@@ -6665,7 +6846,7 @@ async def run_standalone_non_stream(
                     run_attempt=_run_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter, tool_ctx),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx.config),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
@@ -6716,6 +6897,7 @@ async def run_standalone_non_stream(
                     api_key_id=ctx.api_key_id,
                     workspace_id=ctx.workspace_id,
                     prices=ctx.prices,
+                    deployment_paid=ctx.deployment_charge is not None,
                 )
             ):
                 logged = await record_usage(

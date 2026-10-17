@@ -71,10 +71,10 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
     AnthropicRequestMetadata,
-    request_tags,
+    RequestTagsHeader,
+    resolved_tags,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._settlement import SettledCost
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -84,6 +84,7 @@ from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialErro
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.schemas.inference import SettledCost
 from gateway.services.code_execution import ContainerLease, check_container_on_credential, gateway_container_value
 from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
@@ -174,25 +175,36 @@ def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Take out the betas no provider should see, and say whether MCP's was among them.
+    """Take out the betas (and ``context_management``) no provider should see, and say whether MCP's was among them.
 
     Two never travel. The MCP client capability is the gateway's own, consumed
     here. And every beta is dropped for a model served with no Messages API of
     its own, where any-llm refuses the request outright: a beta names an Anthropic
     feature that model was never going to serve, so forwarding it would make
     a request stop working purely because its model changed, which is the swap
-    `auto` exists to keep invisible.
+    `auto` exists to keep invisible. ``context_management`` goes with them, for
+    the same reason: it configures Anthropic's server-side context editing, and
+    Claude Code sends it on every request.
     """
+    native = None
+    provider_kwargs = kwargs
+    if kwargs.get("context_management") is not None:
+        native = _dispatched_natively(kwargs)
+        if not native:
+            provider_kwargs = {key: value for key, value in kwargs.items() if key != "context_management"}
+
     betas = kwargs.get("betas")
     if not isinstance(betas, list) or not betas:
-        return kwargs, False
+        return provider_kwargs, False
 
+    if native is None:
+        native = _dispatched_natively(kwargs)
     saw_mcp_beta = MCP_CLIENT_BETA in betas
-    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA] if _dispatched_natively(kwargs) else []
+    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA] if native else []
     if provider_betas == betas:
-        return kwargs, False
+        return provider_kwargs, False
 
-    provider_kwargs = {**kwargs}
+    provider_kwargs = {**provider_kwargs}
     if provider_betas:
         provider_kwargs["betas"] = provider_betas
     else:
@@ -830,6 +842,7 @@ async def create_message(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
+    tags_header: RequestTagsHeader,
 ) -> dict[str, Any] | Response:
     """Anthropic Messages API-compatible endpoint.
 
@@ -923,7 +936,7 @@ async def create_message(
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
-            tags=request_tags(request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
+            tags=resolved_tags(tags_header, request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
             turn=read_turn("messages", request.messages),
             session_label=request.session_label,
         )

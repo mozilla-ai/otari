@@ -123,14 +123,17 @@ snapshots, and the rule that says what a rate bills: its unit chooses the meter
 it prices (`price_usage` in `services/pricing/`). Standalone settlement and a
 hybrid gateway's control plane both price through it.
 
-It also owns `models/pricing_schemas.py`, and `UNIT_METERS` in
-`models/pricing.py`, the meters a count is reported under.
+`services/pricing/` also holds the deployment price list's service, which is how
+another domain reads a current rate or stores one. It also owns
+`models/pricing_schemas.py`, and `UNIT_METERS` in `models/pricing.py`, the
+meters a count is reported under.
 
 ### providers
 
 Provider credentials: instances configured at runtime, organization-scoped
-provider keys, endpoints a workspace or a user owns, their health, and what a
-dispatch needs to reach a provider.
+provider keys, endpoints a workspace or a user owns, the hosted providers the
+deployment serves on its own credentials with the models it offers on them,
+their health, and what a dispatch needs to reach a provider.
 
 `tenancy/org_provider_key_service.py` has three divider sections (organization
 keys, workspace overrides, model restrictions) and splits along them.

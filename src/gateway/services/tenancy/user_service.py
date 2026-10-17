@@ -463,6 +463,7 @@ async def create_user_for_signup(
         message=render_verification_email(
             verify_link=mailer.link(f"/#/verify-email?token={token}"),
             expiry_hours=config.email_verification_expiry_hours,
+            asset_root=mailer.asset_root,
         ),
     )
     return identity
@@ -598,6 +599,7 @@ async def resend_verification_email(
         message=render_verification_email(
             verify_link=mailer.link(f"/#/verify-email?token={token}"),
             expiry_hours=config.email_verification_expiry_hours,
+            asset_root=mailer.asset_root,
         ),
     )
 
@@ -655,6 +657,7 @@ async def request_password_reset(
         message=render_password_reset_email(
             reset_link=mailer.link(f"/#/reset-password?token={token}"),
             expiry_hours=config.password_reset_expiry_hours,
+            asset_root=mailer.asset_root,
         ),
     )
 
@@ -765,6 +768,7 @@ def _schedule_account_exists_notice(
             sign_in_link=mailer.link("/"),
             has_password=identity.hashed_password is not None,
             provider=provider_label(identity.oauth_provider) if identity.oauth_provider else None,
+            asset_root=mailer.asset_root,
         ),
     )
 

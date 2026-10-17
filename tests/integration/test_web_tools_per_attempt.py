@@ -48,6 +48,8 @@ from gateway.services.tools import (
     ToolUseBudget,
 )
 
+from .conftest import declared_test_providers
+
 _CLAUDE = "claude-haiku-4-5"
 _SEARCH = {"type": "web_search_20250305", "name": "web_search"}
 _FETCH = {"type": "web_fetch_20250910", "name": "web_fetch"}
@@ -62,6 +64,7 @@ _RESULT_BLOCKS = {"search": "web_search_tool_result", "fetch": "web_fetch_tool_r
 @pytest.fixture(scope="module")
 def test_config(postgres_url: str) -> GatewayConfig:
     return GatewayConfig(
+        providers=declared_test_providers(),
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",

@@ -23,6 +23,7 @@ import {
   BUDGETS,
   ORGANIZATION_BUDGETS,
   ORGANIZATION_CONTEXT,
+  ORGANIZATION_MEMBERS,
   ORGANIZATION_SPEND_CEILINGS,
   SCOPED_BUDGETS,
 } from "@/shared/api/queryKeys"
@@ -408,4 +409,91 @@ export function useDeleteOrganizationSpendCeiling() {
       ),
     onSuccess: () => invalidateOrganizationSpend(queryClient),
   })
+}
+
+/** A workspace membership's ceiling, as either surface reports it. */
+export type MemberCeilingRow = Pick<
+  ScopedBudget | OrganizationSpendCeiling,
+  "id" | "budget_id" | "scope_id"
+>
+
+/**
+ * Reads and writes workspace members' ceilings on the surface the caller may
+ * use: the deployment's for an operator, the organization's for its owners and
+ * admins, who get 403 from `/scoped-budgets` (#821). The same rows either way;
+ * the organization's surface only accepts budgets the organization owns.
+ */
+export function useMemberCeilingWriter(surface: "deployment" | "organization") {
+  const queryClient = useQueryClient()
+  const onSuccess = () => {
+    if (surface === "deployment") {
+      void queryClient.invalidateQueries({ queryKey: [SCOPED_BUDGETS] })
+    } else {
+      invalidateOrganizationSpend(queryClient)
+    }
+    // The roster carries each placement's ceiling.
+    void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+  }
+  const base =
+    surface === "deployment"
+      ? "/scoped-budgets"
+      : "/organizations/me/spend-ceilings"
+  const at = (id: string) => `${base}/${encodeURIComponent(id)}`
+
+  const create = useMutation({
+    mutationFn: ({
+      scopeId,
+      budgetId,
+    }: {
+      scopeId: string
+      budgetId: string
+    }) =>
+      apiFetch<MemberCeilingRow>(base, {
+        method: "POST",
+        body: JSON.stringify({
+          scope_type: "workspace_member",
+          scope_id: scopeId,
+          budget_id: budgetId,
+        }),
+      }),
+    onSuccess,
+  })
+  const update = useMutation({
+    mutationFn: ({ id, budgetId }: { id: string; budgetId: string }) =>
+      apiFetch<MemberCeilingRow>(at(id), {
+        method: "PATCH",
+        body: JSON.stringify({ budget_id: budgetId }),
+      }),
+    onSuccess,
+  })
+  const remove = useMutation({
+    mutationFn: (id: string) => apiFetch<unknown>(at(id), { method: "DELETE" }),
+    onSuccess,
+  })
+
+  // Read fresh rather than from a cache: a save calls this after joining
+  // workspaces whose defaults materialize ceilings server-side.
+  const fetchAll = async (): Promise<MemberCeilingRow[]> => {
+    const rows =
+      surface === "deployment"
+        ? await fetchAllRows<ScopedBudget>("/scoped-budgets", {
+            scope_type: "workspace_member",
+          })
+        : await fetchAllPaged<OrganizationSpendCeiling>(
+            "/organizations/me/spend-ceilings",
+          )
+    // The membership's own ceiling is the one naming no provider; a
+    // provider-scoped row on the same membership must not be edited in its place.
+    return rows.filter(
+      (row) =>
+        row.scope_type === "workspace_member" && row.provider_key_id === null,
+    )
+  }
+
+  return {
+    fetchAll,
+    create: create.mutateAsync,
+    update: update.mutateAsync,
+    remove: remove.mutateAsync,
+  }
 }

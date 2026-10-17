@@ -28,7 +28,7 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.provider_keys import (
     OrgProviderKey,
     OrgProviderKeyModel,
@@ -39,7 +39,15 @@ from gateway.models.tenancy import DashboardSession, Organization, OrganizationM
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
+from .conftest import shared_test_config
 from .hosted_port_helpers import HostedModelProvider, bind_model_provider
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so a bare selector reaches the organization's key."""
+    return shared_test_config(postgres_url, {})
+
 
 # Priced but undiscovered models: phase 2 of the listing publishes them, so the
 # catalog is deterministic without dialing a provider.

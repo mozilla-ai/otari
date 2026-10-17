@@ -205,6 +205,7 @@ class IdentityService:
                 message=render_password_reset_email(
                     reset_link=self._mailer.link(_reset_path(token)),
                     expiry_hours=self._password_reset_expiry_hours,
+                    asset_root=self._mailer.asset_root,
                 ),
             )
             if delivery.delivered:

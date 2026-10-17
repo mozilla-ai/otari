@@ -250,9 +250,22 @@ budgets and dials them only through the pinned, no-redirect client in
 `_owned_endpoint_network.py`. Their `api_base` is a tenant's, so it is held to
 public addresses whatever `provider_allow_private_hosts` says.
 
-Provider resolution asks `ModelProviderPort` for a deployment-owned managed
-credential only after local and tenant BYO sources fail. Managed credentials
-must never move ahead of BYO or leave their trusted gateway.
+Provider resolution asks `ModelProviderPort` for a deployment-owned credential
+only after local and tenant BYO sources fail. The core adapter answers from the
+deployment's hosted providers (`services/providers`, the `hosted_providers`
+tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
+hosted credential must never move ahead of BYO or leave its trusted gateway.
+
+A provider's own SDK variable (`OPENAI_API_KEY`) is never a credential: a key
+reaches a call only from the kwargs `get_provider_kwargs` builds (an entry's
+`api_key`, `${VAR}` included, a stored key, an organization key, or the keyless
+placeholder). Every provider needs a declaration, keyless local backends and
+ambient cloud credentials included; those two skip only the key. When a call
+has neither and the port serves nothing, every dispatch path refuses it before
+any-llm is called (`require_declared_credential`, raising any-llm's
+`MissingApiKeyError` for the path to map), because any-llm would otherwise read
+the variable, or reach the deployment's local server or cloud role, for every
+tenant.
 
 ## Mail
 

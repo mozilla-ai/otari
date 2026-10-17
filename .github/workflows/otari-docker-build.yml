@@ -14,9 +14,9 @@ name: Otari Docker Build
 # Python source change cannot fail the build (nothing compiles it) and
 # otari-tests.yml already covers it, so including it would add a multi-minute
 # image build to nearly every PR for no signal. That stays true now the container
-# also serves a request below: what the hybrid smoke adds here is whether the
+# also serves a request below: what the two smokes add here is whether the
 # *image* can serve one (its layout, entrypoint and baked environment), and the
-# same walk against the source checkout runs per PR in otari-oss-edition.yml.
+# same walks against the source checkout run per PR in otari-oss-edition.yml.
 # cli/src/** is listed because the liveness check asserts what `otari --version`
 # reports inside the image. The two libraries' pyproject.toml and src/** are
 # listed as cli's are, since the image installs every workspace member from its
@@ -44,6 +44,7 @@ on:
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
       - 'scripts/hybrid_edition_smoke.py'
+      - 'scripts/oss_edition_smoke.py'
       - '.github/workflows/otari-docker-build.yml'
   workflow_dispatch:
 
@@ -97,4 +98,11 @@ jobs:
         run: |
           uv sync --frozen --no-dev
           uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py \
+            --image otari-pr:${{ github.sha }}
+
+      # The standalone walk against the same image, on a SQLite file inside the
+      # container: the image path under test is the same whatever the database.
+      - name: Smoke the container as the OSS edition
+        run: |
+          uv run --frozen --no-dev python scripts/oss_edition_smoke.py \
             --image otari-pr:${{ github.sha }}

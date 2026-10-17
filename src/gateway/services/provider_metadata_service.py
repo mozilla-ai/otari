@@ -20,9 +20,10 @@ from dataclasses import dataclass, field
 
 from any_llm import AnyLLM, LLMProvider
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import KEYLESS_SELF_HOSTED_PROVIDERS, GatewayConfig
 from gateway.log_config import logger
 from gateway.services.pricing import ModelsDevPrice, current_index
+from gateway.services.provider_kwargs import AMBIENT_CREDENTIAL_PROVIDERS
 
 
 @dataclass
@@ -211,6 +212,10 @@ def known_provider_detail(provider_id: str) -> KnownProvider | None:
         name=name,
         env_key=env_key,
         default_api_base=_clean(getattr(cls, "API_BASE", None)),
-        requires_api_key=env_key is not None,
+        # Whether dispatch needs a key, which is not whether any-llm names a variable:
+        # a keyless backend or an ambient-credential provider declares one it never insists on.
+        requires_api_key=env_key is not None
+        and pid not in KEYLESS_SELF_HOSTED_PROVIDERS
+        and pid not in AMBIENT_CREDENTIAL_PROVIDERS,
         env_key_present=env_key is not None and bool((os.getenv(env_key) or "").strip()),
     )

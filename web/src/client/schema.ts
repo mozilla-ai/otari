@@ -1094,7 +1094,8 @@ export interface paths {
          *     the deployment's row, else the models.dev default. Aliases and routing
          *     policies are not models and are not listed; see Routing. A visitor, where
          *     the catalog is public, sees the configured instances and the hosted
-         *     models at the deployment's rates, and nothing that belongs to a tenant.
+         *     models every organization reaches, at the deployment's rates, and nothing
+         *     that belongs to a tenant.
          */
         get: operations["catalog-list_catalog"];
         put?: never;
@@ -1552,6 +1553,221 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hosted-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Hosted Providers
+         * @description List the providers this deployment serves hosted inference on.
+         *
+         *     Stored providers and those defined in the configuration's
+         *     ``hosted_providers:`` block alike, each marked with its ``source``.
+         */
+        get: operations["hosted-providers-list_hosted_providers"];
+        put?: never;
+        /**
+         * Create Hosted Provider
+         * @description Configure a provider with the key this deployment will serve it on.
+         *
+         *     Everything the provider lists on that key is offered at once; a provider
+         *     that will not say yields a provider with no models, not an error. A
+         *     provider the configuration defines may be created too, and the stored one
+         *     then serves instead.
+         */
+        post: operations["hosted-providers-create_hosted_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Catalog
+         * @description Re-ask every enabled provider what it lists, then take the rest off the catalog.
+         *
+         *     The whole deployment rather than one provider: a stored price is what puts a
+         *     model on a tenant's Models page, and a price under a provider nothing here
+         *     serves cannot be reached by a per-provider refresh. A model list whose
+         *     provider nothing defines any more, such as a removed ``config.yml`` entry,
+         *     goes too, and is named in ``orphaned_rosters``. Where no provider offers a
+         *     model, only those lists go and every price stays; with none of them either,
+         *     the sweep answers 409. Declared before the
+         *     ``/{provider}`` paths to read in the order the surface is used; no method
+         *     collides in any case.
+         */
+        post: operations["hosted-providers-refresh_catalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/refresh/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Catalog Refresh
+         * @description What a catalog sweep would remove, without removing it.
+         *
+         *     A GET, and a truthful one: it writes nothing. It does dial every enabled
+         *     provider, as ``available-models`` does, because a model the provider still
+         *     lists would survive the sweep and previewing it as doomed would be a lie.
+         */
+        get: operations["hosted-providers-preview_catalog_refresh"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Hosted Provider
+         * @description Remove a provider and its roster, leaving the runtime with no hosted path for it.
+         *
+         *     A provider defined in configuration answers 409. A stored provider that
+         *     overrides a configured one keeps the roster, which the configured one
+         *     serves again.
+         */
+        delete: operations["hosted-providers-delete_hosted_provider"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Hosted Provider
+         * @description Rotate the key, repoint the base, or turn a provider off.
+         *
+         *     A provider defined in configuration answers 409: it is changed there.
+         */
+        patch: operations["hosted-providers-update_hosted_provider"];
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/available-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Available Models
+         * @description Ask the provider what it serves on its credential.
+         *
+         *     Dials the upstream on every call rather than caching: the caller is the
+         *     admin form's model picker, opened rarely and entitled to a current answer.
+         *     Failure comes back in the body, so the picker can fall back to a text box.
+         */
+        get: operations["hosted-providers-list_available_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Hosted Models
+         * @description List the models offered on one provider, with the price each currently serves at.
+         */
+        get: operations["hosted-providers-list_hosted_models"];
+        put?: never;
+        /**
+         * Add Hosted Model
+         * @description Offer a model on a provider, optionally at a custom price.
+         */
+        post: operations["hosted-providers-add_hosted_model"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/models/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Hosted Models
+         * @description Ask the provider again and offer whatever is newly listed.
+         *
+         *     Nothing already offered is removed, even when the provider no longer lists
+         *     it. New models follow the offer rule, seeded with the community default
+         *     price and off when nothing prices them. A seeded price nobody changed moves
+         *     with the default. An offered model whose stored price has since been
+         *     deleted is seeded again, or switched off where the default does not price
+         *     it, even one an operator switched on: a refresh never switches a model on.
+         */
+        post: operations["hosted-providers-refresh_hosted_models"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Hosted Model
+         * @description Stop offering a model on a provider. Its pricing history stays.
+         */
+        delete: operations["hosted-providers-remove_hosted_model"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Hosted Model
+         * @description Reprice one offered model, toggle whether it is served, or both.
+         */
+        patch: operations["hosted-providers-update_hosted_model"];
+        trace?: never;
+    };
     "/api/v1/images/generations": {
         parameters: {
             query?: never;
@@ -1962,6 +2178,10 @@ export interface paths {
          *     operator-gated because a provider error message describes the gateway's own
          *     configuration.
          *
+         *     Covers the configured provider instances and every hosted provider switched
+         *     on, whatever organization it is restricted to. A hosted provider that a
+         *     configured instance of the same name shadows is not listed.
+         *
          *     Answers from the discovery cache, which a background refresher keeps warm, so
          *     the call does not wait on a slow or unreachable provider. Each provider
          *     carries the ``checked_at`` its result was produced at; a null one has not been
@@ -2096,7 +2316,20 @@ export interface paths {
         get: operations["organizations-get_active_organization_context"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Active Organization
+         * @description Delete the caller's active organization, if it has no usage, and move the caller out of it.
+         *
+         *     Owners and admins only. Its workspaces, memberships, invitations and
+         *     organization-level settings go with it. Refused for the deployment's default
+         *     organization, for the only organization the caller belongs to, and for one
+         *     whose workspaces still hold usage, API keys, aliases or routing policies, so
+         *     a deletion never takes spend history with it.
+         *
+         *     Answers with the caller's context in the organization they are moved to,
+         *     their oldest other one.
+         */
+        delete: operations["organizations-delete_active_organization"];
         options?: never;
         head?: never;
         /**
@@ -2973,13 +3206,17 @@ export interface paths {
          *
          *     Refused with a 403 on the same deployment-supplied-model rule the create path
          *     carries, so a row stored before that rule existed cannot be edited into a rate
-         *     nobody could create today.
+         *     nobody could create today, and with a 403 for a rate the deployment operator
+         *     set, which only the operator may change.
          */
         put: operations["organization-pricing-replace_organization_pricing"];
         post?: never;
         /**
          * Delete Organization Pricing
          * @description Remove an override, returning the model to the deployment price list.
+         *
+         *     Refused with a 403 for a rate the deployment operator set, which only the
+         *     operator may remove.
          */
         delete: operations["organization-pricing-delete_organization_pricing"];
         options?: never;
@@ -3102,7 +3339,14 @@ export interface paths {
          * @description Make a key the organization's default for its provider. Organization owners and admins only.
          */
         post: operations["provider-keys-set_org_provider_key_default"];
-        delete?: never;
+        /**
+         * Unset Org Provider Key Default
+         * @description Stop a key being the organization's default for its provider. Organization owners and admins only.
+         *
+         *     Idempotent: a key that is not the default is returned unchanged. With no default, a request
+         *     that names no instance gets the provider's earliest-created key the workspace has not disabled.
+         */
+        delete: operations["provider-keys-unset_org_provider_key_default"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4053,6 +4297,9 @@ export interface paths {
         /**
          * List Pricing
          * @description List all model pricing.
+         *
+         *     A hosted provider restricted to another organization than the caller's is
+         *     left out, as it is from the catalog.
          */
         get: operations["pricing-list_pricing"];
         put?: never;
@@ -4087,7 +4334,8 @@ export interface paths {
          *     answers one row per key: the newest rate that has taken effect, or the
          *     earliest scheduled rate for a key that has none yet. ``count`` is the number
          *     of priced models, so a caller can page without reading the collection to
-         *     learn how long it is.
+         *     learn how long it is. A hosted provider restricted to another organization
+         *     than the caller's is left out of both.
          */
         get: operations["pricing-list_current_pricing"];
         put?: never;
@@ -4238,6 +4486,9 @@ export interface paths {
         /**
          * Get Pricing
          * @description Get pricing for a specific model as of a timestamp.
+         *
+         *     A 404 for a model of a hosted provider restricted to another organization
+         *     than the caller's.
          */
         get: operations["pricing-get_pricing"];
         put?: never;
@@ -4262,6 +4513,9 @@ export interface paths {
         /**
          * Get Pricing History
          * @description Return the full pricing history for a model.
+         *
+         *     A 404 for a model of a hosted provider restricted to another organization
+         *     than the caller's.
          */
         get: operations["pricing-get_pricing_history"];
         put?: never;
@@ -4537,6 +4791,12 @@ export interface paths {
         /**
          * Provider Health
          * @description Report every configured provider's reachability, with a last-checked time.
+         *
+         *     Covers the configured provider instances and every hosted provider switched
+         *     on, each hosted provider under its provider name. A hosted provider that a
+         *     configured instance of the same name shadows is not reported. One whose
+         *     stored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is
+         *     reported unreachable with that reason.
          *
          *     Reuses the per-provider model-discovery test path, so a provider is healthy
          *     when its credentials can list models. Results are served from the discovery
@@ -10112,6 +10372,355 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * HostedAvailableModelsPublic
+         * @description What the provider says it serves on the stored credential.
+         *
+         *     Failure is a field rather than a status: an unreachable upstream, or a
+         *     provider with no model listing, is an answer about the provider rather than
+         *     about this request, and the form still has to render a plain text box when
+         *     the list cannot be fetched.
+         */
+        HostedAvailableModelsPublic: {
+            /**
+             * Discovery Unsupported
+             * @default false
+             */
+            discovery_unsupported: boolean;
+            /** Error */
+            error?: string | null;
+            /** Models */
+            models?: string[];
+            /** Provider */
+            provider: string;
+        };
+        /**
+         * HostedCatalogKeptGroupPublic
+         * @description Priced models a sweep left in place, grouped by the reason it did.
+         */
+        HostedCatalogKeptGroupPublic: {
+            /** Count */
+            count: number;
+            /** Models */
+            models: string[];
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * HostedCatalogProviderRefreshPublic
+         * @description What one hosted provider newly lists, as a catalog sweep found it.
+         *
+         *     Per provider rather than one total, because a dial that failed is a fact
+         *     about that provider, and the operator has to be told which one went quiet
+         *     rather than read a smaller number than they expected.
+         */
+        HostedCatalogProviderRefreshPublic: {
+            /** Added */
+            added: string[];
+            /**
+             * Credential Unreadable
+             * @default false
+             */
+            credential_unreadable: boolean;
+            /**
+             * Discovery Unsupported
+             * @default false
+             */
+            discovery_unsupported: boolean;
+            /** Error */
+            error?: string | null;
+            /** Provider */
+            provider: string;
+            /** Repriced */
+            repriced?: string[];
+            /**
+             * Source
+             * @default database
+             * @enum {string}
+             */
+            source: "database" | "config";
+        };
+        /**
+         * HostedCatalogRefreshPublic
+         * @description What a catalog sweep did, or would do.
+         *
+         *     ``removed`` is a sample and ``removed_count`` the total, so a deployment
+         *     that has never been swept does not answer one button press with a few
+         *     thousand strings. ``orphaned_rosters`` names the providers that still have
+         *     a model list but nothing defining them, such as a removed ``config.yml``
+         *     entry: nothing serves them, and an apply deletes their model lists.
+         */
+        HostedCatalogRefreshPublic: {
+            /** Kept */
+            kept: components["schemas"]["HostedCatalogKeptGroupPublic"][];
+            /** Orphaned Rosters */
+            orphaned_rosters?: string[];
+            /** Providers */
+            providers: components["schemas"]["HostedCatalogProviderRefreshPublic"][];
+            /** Removed */
+            removed: string[];
+            /** Removed Count */
+            removed_count: number;
+            /** Removed Override Rows */
+            removed_override_rows: number;
+            /** Removed Price Rows */
+            removed_price_rows: number;
+        };
+        /**
+         * HostedModelCreateRequest
+         * @description Offer a model on a hosted provider, optionally at a custom price.
+         *
+         *     Omitting the rates means the deployment serves the model at whatever the
+         *     price ladder already answers: a stored deployment price, else the community
+         *     default, which the offer stores as the deployment's own rate. ``unit`` is
+         *     what the rates are per, as on ``POST /pricing``: a request or image rate is
+         *     still stored per million.
+         * @example {
+         *       "input_price_per_million": 2.5,
+         *       "model": "gpt-4o",
+         *       "output_price_per_million": 10
+         *     }
+         */
+        HostedModelCreateRequest: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Model */
+            model: string;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+            /** Unit */
+            unit?: ("tokens" | "requests" | "images") | null;
+        };
+        /**
+         * HostedModelPublic
+         * @description One offered model, with the price the deployment currently serves it at.
+         *
+         *     ``price_source`` says which rung of the deployment's ladder answered:
+         *     ``deployment`` for a rate an operator set, ``defaults`` for the
+         *     community-maintained rate, whether this surface stored it or the fallback
+         *     supplies it, and None when nothing prices the model yet. ``unit`` says what
+         *     the rates are per, so a per-request rate is not read as a per-token one.
+         *     ``enabled`` is the serving switch; a model offered without a discoverable
+         *     price starts off.
+         */
+        HostedModelPublic: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Model */
+            model: string;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+            /** Price Source */
+            price_source?: ("organization" | "deployment" | "defaults") | null;
+            /** Provider */
+            provider: string;
+            /** Unit */
+            unit?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * HostedModelUpdateRequest
+         * @description Reprice an offered model, toggle whether it is served, or both.
+         *
+         *     A price is the input/output pair or nothing: sending the pair writes a new
+         *     pricing version, and the cache rates then follow ``POST /pricing``'s own
+         *     semantics (a field the caller omits inherits the most recent stored value,
+         *     an explicit null clears it). An omitted ``unit`` carries the stored one
+         *     forward. ``enabled`` travels alone freely, so a toggle never re-sends rates
+         *     it did not change.
+         * @example {
+         *       "enabled": false
+         *     }
+         */
+        HostedModelUpdateRequest: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+            /** Unit */
+            unit?: ("tokens" | "requests" | "images") | null;
+        };
+        /**
+         * HostedModelsPublic
+         * @description A page of one hosted provider's offered models, and how many there are in total.
+         */
+        HostedModelsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["HostedModelPublic"][];
+        };
+        /**
+         * HostedModelsRefreshPublic
+         * @description What a refresh did: the models newly offered, the seeded rates it moved, and the list's new size.
+         *
+         *     Failure is a field rather than a status, for the reason
+         *     ``HostedAvailableModelsPublic`` gives: the list is still standing, and the
+         *     panel renders the reason beside it.
+         */
+        HostedModelsRefreshPublic: {
+            /** Added */
+            added: string[];
+            /** Count */
+            count: number;
+            /**
+             * Discovery Unsupported
+             * @default false
+             */
+            discovery_unsupported: boolean;
+            /** Error */
+            error?: string | null;
+            /** Repriced */
+            repriced: string[];
+        };
+        /**
+         * HostedProviderCreateRequest
+         * @description Configure a provider this deployment will serve hosted inference on.
+         *
+         *     ``client_args`` is whatever the provider's SDK client needs beyond the key
+         *     (Bedrock's region and IAM pair), the same shape an organization provider
+         *     key takes. Values under credential-shaped names come back masked.
+         *     ``restricted_to_organization_id`` keeps the provider to one organization;
+         *     every other one is served as if it were not configured.
+         * @example {
+         *       "api_key": "<your OpenAI API key>",
+         *       "provider": "openai"
+         *     }
+         */
+        HostedProviderCreateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key: string;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Provider */
+            provider: string;
+            /** Restricted To Organization Id */
+            restricted_to_organization_id?: string | null;
+        };
+        /**
+         * HostedProviderPublic
+         * @description One hosted provider, named by its provider and the tail of its key.
+         *
+         *     No shape in this section carries key material: a stored credential is
+         *     known by its last four characters and nothing else, ``client_args`` goes
+         *     out with credential-shaped values masked, and ``api_base`` with the
+         *     password in its userinfo and its query values masked.
+         *
+         *     ``source`` says where the provider is defined. A ``config`` provider comes
+         *     from the ``hosted_providers:`` block, has no row and so no ``id`` or
+         *     timestamps, and is changed by editing the configuration rather than through
+         *     this API; its models are administered as a stored provider's are.
+         *     ``shadows_config`` marks a stored provider that wins over a configuration
+         *     entry of the same provider, which serves again once the row is deleted.
+         */
+        HostedProviderPublic: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key Last4 */
+            api_key_last4?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id?: string | null;
+            /** Provider */
+            provider: string;
+            /** Restricted To Organization Id */
+            restricted_to_organization_id?: string | null;
+            /**
+             * Shadows Config
+             * @default false
+             */
+            shadows_config: boolean;
+            /**
+             * Source
+             * @default database
+             * @enum {string}
+             */
+            source: "database" | "config";
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * HostedProviderUpdateRequest
+         * @description Rotate the key, repoint the base, or turn a provider off.
+         *
+         *     ``provider`` is immutable: changing it is a delete plus a create, because
+         *     the key belongs to the provider it was issued by. Omitting ``api_key``
+         *     leaves the stored credential untouched, so a toggle never re-sends a secret
+         *     the caller does not have. ``client_args`` omitted is left alone; an explicit
+         *     null clears it, and an entry echoed back as the mask keeps the stored value.
+         *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
+         *     restriction, null lifts it.
+         * @example {
+         *       "enabled": false
+         *     }
+         */
+        HostedProviderUpdateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Restricted To Organization Id */
+            restricted_to_organization_id?: string | null;
+        };
+        /**
+         * HostedProvidersPublic
+         * @description A page of hosted providers, and how many there are in total.
+         */
+        HostedProvidersPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["HostedProviderPublic"][];
+        };
+        /**
          * Icon
          * @description An icon for display in user interfaces.
          */
@@ -10411,7 +11020,7 @@ export interface components {
             env_key?: string | null;
             /**
              * Env Key Present
-             * @description True when env_key is already set on the server, so a pasted key is optional (env fallback).
+             * @description True when env_key is set on the server. Informational: a stored provider never reads it, so a key the provider requires must still be supplied.
              * @default false
              */
             env_key_present: boolean;
@@ -10427,7 +11036,7 @@ export interface components {
             name: string;
             /**
              * Requires Api Key
-             * @description False for keyless local backends (Ollama, llama.cpp).
+             * @description False for providers that need no key: keyless local backends (Ollama, llama.cpp) and ambient cloud credentials (Bedrock, Vertex AI).
              */
             requires_api_key: boolean;
         };
@@ -18752,6 +19361,8 @@ export interface operations {
             header?: {
                 /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
+                /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
+                "Otari-Tags"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -19419,6 +20030,376 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-list_hosted_providers": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProvidersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-create_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedProviderCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-refresh_catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
+                };
+            };
+        };
+    };
+    "hosted-providers-preview_catalog_refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
+                };
+            };
+        };
+    };
+    "hosted-providers-delete_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedProviderUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-list_available_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedAvailableModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-list_hosted_models": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-add_hosted_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedModelCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedModelPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-refresh_hosted_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedModelsRefreshPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-remove_hosted_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_hosted_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedModelUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedModelPublic"];
                 };
             };
             /** @description Validation Error */
@@ -20217,6 +21198,8 @@ export interface operations {
             header?: {
                 /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
+                /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
+                "Otari-Tags"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -20492,6 +21475,53 @@ export interface operations {
             };
             /** @description The caller is an active member of no organization. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+        };
+    };
+    "organizations-delete_active_organization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
+                };
+            };
+            /** @description It is the deployment's default organization, or the only one the caller belongs to. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+            /** @description The caller is not an owner or admin of the organization. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+            /** @description The organization still holds usage, API keys, aliases or routing policies. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21885,6 +22915,20 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationModelPricingPublic"];
                 };
             };
+            /** @description The deployment holds the credential that serves the model. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The period overlaps one already stored for the model. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -21920,6 +22964,13 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationModelPricingPublic"];
                 };
             };
+            /** @description The deployment serves the model, or the deployment operator set the rate. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -21944,6 +22995,13 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The deployment operator set the rate. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -22158,6 +23216,37 @@ export interface operations {
         };
     };
     "provider-keys-set_org_provider_key_default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-unset_org_provider_key_default": {
         parameters: {
             query?: never;
             header?: never;
@@ -24215,6 +25304,13 @@ export interface operations {
                     "application/json": components["schemas"]["PricingResponse"];
                 };
             };
+            /** @description Nothing prices the model, or its hosted provider is restricted to another organization. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -24277,6 +25373,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PricingResponse"][];
                 };
+            };
+            /** @description Nothing prices the model, or its hosted provider is restricted to another organization. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -24914,6 +26017,8 @@ export interface operations {
             header?: {
                 /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
+                /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
+                "Otari-Tags"?: string | null;
             };
             path?: never;
             cookie?: never;

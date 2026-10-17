@@ -46,8 +46,9 @@ export OTARI_DEFAULT_PRICING=true
 
 Provider credentials come from the environment through `${VAR}` references
 in the `providers` map (see [Provider configuration](#provider-configuration)).
-Setting a provider's native variable, such as `OPENAI_API_KEY`, without
-declaring the provider is deprecated; see [Models](models.md#configuring-a-provider).
+A provider's native variable, such as `OPENAI_API_KEY`, is never read on its
+own: name it in the entry (`api_key: ${OPENAI_API_KEY}`); see
+[Models](models.md#configuring-a-provider).
 
 Booleans accept `true`, `false`, `1`, `0`, `yes`, `no`, `on`, and
 `off`, without regard to case.
@@ -68,7 +69,10 @@ providers:
 ```
 
 Precedence from lowest to highest is the config file, structured environment
-config, then scalar `OTARI_<FIELD>` values. Stored runtime settings override
+config, then `OTARI_<FIELD>` values: the scalar fields, and
+`OTARI_HOSTED_PROVIDERS` as JSON. A top-level key of the structured config, and
+`OTARI_HOSTED_PROVIDERS`, replace the lower layer's value whole rather than
+merging into it. Stored runtime settings override
 the corresponding startup value after the database is available.
 
 ## Common settings
@@ -360,13 +364,23 @@ deployment that declares a key does not mint and print one.
 
 ## Provider configuration
 
-The `providers` map is keyed by provider instance. A standard provider needs
-only its credential:
+The `providers` map is keyed by provider instance. Only a provider it declares
+(or the Providers page, or an organization's key) serves requests. A standard
+provider needs only its credential, which the entry names:
 
 ```yaml
 providers:
   anthropic:
     api_key: ${ANTHROPIC_API_KEY}
+```
+
+A keyless local backend or a provider authenticating from ambient cloud
+credentials is declared with a bare entry:
+
+```yaml
+providers:
+  ollama:
+  bedrock:
 ```
 
 A custom or self-hosted endpoint can use a named instance:
@@ -448,6 +462,84 @@ run the provider and search-tool re-encryption endpoints, then remove the old
 key. Losing every configured encryption key makes stored credentials
 unrecoverable.
 
+### Hosted providers in config.yml
+
+A hosted provider is a credential the deployment serves requests on when
+nothing else credentials them (see [Modes](modes.md#hosted-providers-and-byo-credentials)).
+Besides the Hosted providers page, a standalone or hosted deployment can declare
+them in a `hosted_providers:` block, keyed by any-llm implementation, with the
+fields the `/api/v1/hosted-providers` body takes:
+
+```yaml
+hosted_providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    restricted_to_organization_id: 4f1c2a7e-0b9d-4c55-9a0e-2d6f8b3c1e90
+  vllm:
+    api_base: http://vllm.internal:8000/v1
+    models: [qwen3-32b]
+```
+
+| Field | Meaning |
+|---|---|
+| `api_key` | The key the provider is served on. Required unless the provider needs none (listed below). |
+| `api_base` | An endpoint other than the provider's default. |
+| `client_args` | What the provider's SDK client needs beyond the key, such as Bedrock's region. |
+| `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
+| `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
+| `models` | Model ids a refresh offers when the provider cannot list its own. |
+
+A key may be left out for these providers only: the self-hosted backends
+`vllm`, `ollama`, `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`,
+which are called with a placeholder key when they have an `api_base`, and
+`vertexai` and `vertexaianthropic`, which authenticate through the Google Cloud
+credentials in the gateway's own environment. Every other provider, Bedrock
+included, needs `api_key`. As for any hosted provider, a request is served on one
+only when no organization key, `providers:` instance or provider environment
+variable (such as `VLLM_API_KEY`) answers for it first.
+
+Reference the key as `${VAR}` rather than writing it into the file: it is
+resolved from the environment as every `${VAR}` in the file is, so the key stays
+in your secret store. The whole block can instead be set as JSON through
+`OTARI_HOSTED_PROVIDERS`, where `${VAR}` resolves the same way:
+
+```bash
+OTARI_HOSTED_PROVIDERS='{"openai": {"api_key": "${OPENAI_API_KEY}"}}'
+```
+
+When it is set, it replaces the `hosted_providers:` block of the file (and of
+`OTARI_CONFIG_YAML`) whole: a provider only the file names is not served, and
+the two are never merged per provider. An empty value leaves the file's block
+in place.
+
+The block is validated at load: an unknown implementation, a `provider_type`
+key (a named instance belongs in `providers:`), an unknown field, or a missing
+`api_key` for a provider that needs one fails the start. With
+`OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`, an `api_base` that resolves to a
+private address fails it too, as it is refused for a provider stored through the
+page; that check runs at boot, because it resolves the host. The block is never
+shown by `/api/v1/settings`.
+
+A configured entry is never written to the database or encrypted. The Hosted
+providers page lists it with a `config.yml` badge and the API marks it
+`source: "config"` with no `id`; changing or deleting it through the API answers
+`409`, so change it in the configuration and restart. Its models, their serving
+switches and their prices are managed on the page as any hosted provider's are.
+An entry starts with no models and serves only the ones switched on under it,
+so refresh its models or add them before it serves a request.
+A provider stored through the page or the API under the same name wins over the
+entry, and the start logs each entry it shadows; deleting the stored provider
+serves the entry again on the same models. Taking an entry out of the
+configuration leaves its models in the database, serving nothing and offered
+in no catalog; they come back if the entry does, and the next catalog sweep on
+the Hosted providers page (`POST /api/v1/hosted-providers/refresh`) deletes
+them and their prices, naming the provider in `orphaned_rosters`. Where no
+hosted provider offers a model at all, the sweep deletes those models and leaves
+every price in place. A hybrid
+gateway ignores the block.
+
 ### Provider copies
 
 A request that asks a provider's own code execution to run over an attached file
@@ -486,7 +578,7 @@ signed-in member's.
 | OpenAI, Azure OpenAI | `user` on chat completions, `safety_identifier` on Responses |
 | Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
 | Anthropic, including Azure and Vertex AI | `metadata.user_id` |
-| Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model |
+| Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model that sets no `output_format` |
 | Gemini API | the `safety_identifier` label, cut to the 63 characters a label value allows, on chat completions and Messages |
 | Meta | `safety_identifier` on chat completions |
 | Any other provider with a native Messages API, on Messages | `metadata.user_id` |
@@ -610,8 +702,9 @@ every restart is distinguishable from one set in the dashboard.
 `public_catalog: true` serves `GET /api/v1/catalog/models` and the dashboard's
 Models page to a visitor with no credential, so a deployment can show what it
 serves before anyone signs up. A visitor sees the configured `providers:`
-instances and any hosted models the deployment serves, priced at the
-deployment's rates, and never an organization's
+instances and any hosted models the deployment serves to every organization,
+priced at the deployment's rates, and never a hosted provider restricted to one
+organization, an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
 served as that caller, valid or not. The setting is off by default, off in
 hybrid mode, and can be changed at runtime.
@@ -782,9 +875,9 @@ instance inherits from `web_search_url`. Provider options and request filters
 are covered in [Built-in tools](tools.md).
 
 An instance takes its key only from its own `api_key`, such as
-`"${EXA_API_KEY}"` above. Unlike an LLM provider, it never falls back to the
-provider's environment variable, so an entry for a provider that needs a key and
-carries none stops startup. A tool carrying an `api_key` must use an HTTPS
+`"${EXA_API_KEY}"` above, as an LLM provider's `providers:` entry does. An entry
+for a search provider that needs a key and carries none stops startup, where an
+LLM provider's entry is ignored with a warning. A tool carrying an `api_key` must use an HTTPS
 `api_base`; a keyless local SearXNG endpoint may use HTTP.
 
 Rules for instances:

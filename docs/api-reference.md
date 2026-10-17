@@ -242,6 +242,26 @@ wins over a flat one of the same name. The limits are OpenAI's: up to 16 string
 pairs, keys up to 64 characters and values up to 512. A null value is ignored,
 and anything else is refused with a 422.
 
+A client that can add a header but not a body field, such as Claude Code (see
+[Use with Claude Code](use-with-claude-code.md#tag-claude-code-traffic)), sends
+the same tags in an `Otari-Tags` header, on the same three surfaces:
+
+```
+Otari-Tags: agent=bug-fix,run=1234
+```
+
+The value is comma-separated `key=value` pairs. Whitespace around a pair is
+ignored, everything after a pair's first `=` is its value, and keys and values
+are percent-decoded, so `note=a%2Cb` records `a,b`. A non-ASCII character must
+be percent-encoded as UTF-8 (`caf%C3%A9`), and a header sent more than once is
+read as one comma-joined list. Header tags are the base and the body's tags
+override them on the same key; the bounds apply to the merged set. A raw
+non-ASCII character, a pair without `=`, a `%` that does not start a two-digit
+hex escape, a key given twice, a value that does not decode to UTF-8, or tags
+past the bounds are refused with a 422 whose `detail` locates the error at
+`["header", "Otari-Tags"]`, as a malformed `metadata` is refused. The header is
+never forwarded to the provider.
+
 What reaches the provider depends on the surface. Chat Completions and Messages
 never forward the caller's `metadata`. On Messages, `metadata.user_id` names the
 billed user, as it always has, and is not a tag; the provider gets an
@@ -350,7 +370,7 @@ fails the next retry runs in its place.
   billed user), so two callers never see each other's responses.
 - A retry has to be the same request: the same body, and the same
   `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`,
-  `Otari-Router-Task`, `Otari-Conversation-Id` and `anthropic-beta` headers,
+  `Otari-Router-Task`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers,
   since those change what the request does. The same key with a different body
   or different values for those headers is refused with 422, so send a new key
   for a new request. Key order and whitespace in the JSON body do not count as a
@@ -661,7 +681,7 @@ reworded.
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price. An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
-| `provider_not_configured` | 424 | The gateway holds no credential for the model's provider, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the credential in `config.yml`, through the dashboard, or in the environment variable the detail names | |
+| `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: declare the provider in `config.yml` with an `api_key` reading the environment variable the detail names (a keyless or ambient-credential provider needs only the entry), store it through the dashboard, or add an organization provider key. The variable alone serves nothing | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |

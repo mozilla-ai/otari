@@ -24,7 +24,6 @@ from pydantic import BaseModel, Field, ValidationError
 
 from gateway.api.routes._attempt_metrics import record_abandoned_attempt
 from gateway.api.routes._helpers import with_retry_hint
-from gateway.api.routes._settlement import _PRICING_SOURCE_PATTERN, _SETTLED_COST_PATTERN, SettledCost
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.error_codes import (
     ALL_CANDIDATES_REJECTED,
@@ -41,6 +40,7 @@ from gateway.core.usage import (
 )
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.log_config import logger
+from gateway.schemas.inference import PRICING_SOURCE_PATTERN, SETTLED_COST_PATTERN, SettledCost
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.control_plane import ResolveEndpoint, resolve, transport
 from gateway.services.inference import (
@@ -108,14 +108,14 @@ class ResolvedAttempt(BaseModel):
 
 
 class _UsagePricing(BaseModel):
-    source: str | None = Field(pattern=_PRICING_SOURCE_PATTERN)
+    source: str | None = Field(pattern=PRICING_SOURCE_PATTERN)
 
 
 class _CompletedUsageSettlement(BaseModel):
     correlation_id: str
     status: Literal["completed"]
     outcome: Literal["success"]
-    cost_usd: str = Field(pattern=_SETTLED_COST_PATTERN)
+    cost_usd: str = Field(pattern=SETTLED_COST_PATTERN)
     currency: Literal["USD"]
     usage_status: Literal["reported", "unavailable"]
     pricing: _UsagePricing

@@ -67,6 +67,12 @@ function mockApi(opts: {
   // The editor picks a budget rather than typing an amount, so the list has to
   // be served for the picker to have anything in it.
   budgets?: Budget[]
+  // What GET /models serves the caller, which is where the model-access picker
+  // looks: the organization's own providers and the deployment's managed models.
+  models?: string[]
+  // What a tenant's picker offers instead: the organization's own budgets. Its
+  // ceilings are `scopedBudgets`, read through the organization's surface.
+  organizationBudgets?: Budget[]
 }) {
   const context = opts.context ?? organizationContext()
   const members = opts.members ?? [organizationMember()]
@@ -75,6 +81,12 @@ function mockApi(opts: {
   const workspaceMembers = opts.workspaceMembers ?? {}
   const scopedBudgets = opts.scopedBudgets ?? []
   const budgetList = opts.budgets ?? []
+  const catalogModels = (opts.models ?? []).map((id) => ({
+    id,
+    object: "model",
+    owned_by: id.split(":")[0],
+  }))
+  const organizationBudgets = opts.organizationBudgets ?? []
   const requests: Request[] = []
 
   // The join the gateway does now (otari#1381), so a test still describes the
@@ -140,11 +152,8 @@ function mockApi(opts: {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
 
-    if (url.includes(`${API_ROOT}/providers`)) {
-      return jsonResponse({ providers: [] })
-    }
-    if (url.includes(`${API_ROOT}/models/discoverable`)) {
-      return jsonResponse({ models: [] })
+    if (url.endsWith(`${API_ROOT}/models`)) {
+      return jsonResponse({ object: "list", data: catalogModels })
     }
     if (url.includes(`${API_ROOT}/aliases`)) {
       return jsonResponse([])
@@ -195,6 +204,21 @@ function mockApi(opts: {
         )
       }
       return jsonResponse({ message: "Invitation revoked" })
+    }
+    if (url.includes(`${API_ROOT}/organizations/me/budgets`)) {
+      return jsonResponse({
+        data: organizationBudgets,
+        count: organizationBudgets.length,
+      })
+    }
+    if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
+      if (method === "GET") {
+        return jsonResponse({
+          data: scopedBudgets,
+          count: scopedBudgets.length,
+        })
+      }
+      return jsonResponse(scopedBudgets[0] ?? {}, method === "POST" ? 201 : 200)
     }
     if (url.includes(`${API_ROOT}/organizations/me/members`)) {
       if (method === "GET") {
@@ -1275,14 +1299,36 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     ).not.toBeInTheDocument()
   })
 
-  it("saves a workspace placement without asking for scoped budgets", async () => {
-    // The gate cannot live on the query alone: `refetch()` runs the query
-    // function even when `enabled` is false, so the editor's ceilings pass would
-    // still ask /api/v1/scoped-budgets, be refused, and put the operator refusal
-    // back on a page this branch just cleared of it (otari#838).
+  it("sets a member's ceiling on the organization's surface (otari-ai#2394)", async () => {
+    // The Spend & budgets page sends an owner here to cap a member, so the
+    // Budget column is theirs too, written through the organization's own
+    // ceilings rather than /api/v1/scoped-budgets, which refuses them (#821).
     const requests = mockApi({
       members: [OWNER, ANALYST],
       workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+      workspaceMembers: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceMember({
+            id: "membership-1",
+            user_id: ANALYST.user_id as string,
+            role: "member",
+          }),
+        ],
+      },
+      organizationBudgets: [
+        budget({ budget_id: "org-bud", name: "Team cap", max_budget: 40 }),
+      ],
+      // A provider-scoped ceiling on the same membership, already on the budget
+      // being picked. Mistaken for the membership's own, it would skip the write.
+      scopedBudgets: [
+        scopedBudget({
+          id: "provider-ceiling",
+          scope_type: "workspace_member",
+          scope_id: "membership-1",
+          provider_key_id: "provider-key-1",
+          budget_id: "org-bud",
+        }),
+      ],
       context: organizationContext({ deployment_operator: false }),
     })
     const actor = userEvent.setup()
@@ -1293,16 +1339,63 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
     )
     await screen.findByText("Workspace access")
-    // No Budget column for this caller, so the only thing to save is placement.
-    expect(
-      screen.queryByLabelText("Budget in Default Workspace"),
-    ).not.toBeInTheDocument()
+    await pickOption(actor, "Budget in Default Workspace", "Team cap")
     await actor.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
       expect(
-        requests.some((r) => r.url.includes(`${API_ROOT}/scoped-budgets`)),
-      ).toBe(false),
+        requests.find(
+          (r) =>
+            r.method === "POST" &&
+            r.url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+        )?.body,
+      ).toEqual({
+        scope_type: "workspace_member",
+        scope_id: "membership-1",
+        budget_id: "org-bud",
+      }),
+    )
+    expect(
+      requests.some((r) => r.url.includes(`${API_ROOT}/scoped-budgets`)),
+    ).toBe(false)
+  })
+
+  it("keeps a deployment-set ceiling visible to an organization owner", async () => {
+    // A ceiling on a budget the organization does not own is enforcing, so the
+    // picker names it rather than showing "No ceiling" over it.
+    mockApi({
+      members: [OWNER, ANALYST],
+      workspaces: [workspace()],
+      workspaceMembers: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceMember({
+            id: "membership-1",
+            user_id: ANALYST.user_id as string,
+            role: "member",
+          }),
+        ],
+      },
+      scopedBudgets: [
+        scopedBudget({
+          id: "ceiling-1",
+          scope_type: "workspace_member",
+          scope_id: "membership-1",
+          budget_id: "deployment-bud",
+          max_budget: 50,
+        }),
+      ],
+      context: organizationContext({ deployment_operator: false }),
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+    expect(selectTrigger("Budget in Default Workspace")).toHaveTextContent(
+      "Set by the deployment",
     )
   })
 
@@ -1327,10 +1420,6 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
 
     expect(screen.queryByText(/Model access/)).not.toBeInTheDocument()
     expect(screen.queryByText(/No spend row yet/)).not.toBeInTheDocument()
-    // And the guidance that names the Budget column this caller is not shown.
-    expect(
-      screen.queryByText(/pick a different budget here/),
-    ).not.toBeInTheDocument()
   })
 
   it("shows an operator both, so the case above is not vacuous", async () => {

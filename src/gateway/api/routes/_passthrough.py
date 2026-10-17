@@ -124,7 +124,12 @@ from gateway.services.pricing_service import (
     pricing_required_but_missing,
     resolve_model_pricing,
 )
-from gateway.services.provider_kwargs import ResolvedProvider, missing_credential, resolve_provider_selector
+from gateway.services.provider_kwargs import (
+    ResolvedProvider,
+    missing_credential,
+    require_declared_credential,
+    resolve_provider_selector,
+)
 from gateway.services.providers import unpriced_model_refusal
 from gateway.services.routing import refuse_local_policy
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
@@ -475,7 +480,7 @@ async def run_passthrough(
             await refund_reservation(db, reservation)
             # This path never asks the hosted port, so none is passed.
             unpriced = await unpriced_model_refusal(
-                model, resolved, plan=None, hosted=None, organization_id=organization_id
+                config, model, resolved, plan=None, hosted=None, organization_id=organization_id
             )
             # Record the rejection so dropped traffic is visible in the activity
             # log and countable as an error, rather than only reaching the
@@ -590,6 +595,7 @@ async def run_passthrough(
     )
 
     try:
+        require_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs)
         result = await call_provider(resolved)
 
         reported = billing.report(result)
@@ -639,8 +645,9 @@ async def run_passthrough(
         missing = missing_credential(e)
         if missing is not None:
             logger.warning("No credential configured for %s:%s", resolved.provider, resolved.model)
+            public = missing.behind_alias(resolved.alias)
             raise HTTPException(
-                status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code)
+                status_code=public.status_code, detail=public.detail, headers=error_headers(public.code)
             ) from e
 
         mapped = map_provider_error(e) if map_provider_error else None

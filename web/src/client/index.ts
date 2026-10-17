@@ -360,6 +360,28 @@ export type CreateOrganizationDomainRequest =
 export type UpdateOrganizationDomainRequest =
   Schemas["OrganizationDomainUpdateRequest"]
 
+// The providers this deployment serves on its own keys, for a request that
+// brings no credential of its own. Deployment-wide and operator-only, and keyed
+// on the provider (one row each), so every path names the provider rather than
+// a row id. A stored key is known by its last four characters and nothing else.
+// `enabled` defaults to true on a create, so the dashboard may omit it.
+export type HostedProvider = Schemas["HostedProviderPublic"]
+export type HostedProviders = Schemas["HostedProvidersPublic"]
+export type CreateHostedProviderRequest = Defaulted<
+  Schemas["HostedProviderCreateRequest"],
+  "enabled"
+>
+export type UpdateHostedProviderRequest = Schemas["HostedProviderUpdateRequest"]
+export type HostedModel = Schemas["HostedModelPublic"]
+export type HostedModels = Schemas["HostedModelsPublic"]
+export type CreateHostedModelRequest = Schemas["HostedModelCreateRequest"]
+export type UpdateHostedModelRequest = Schemas["HostedModelUpdateRequest"]
+export type HostedModelsRefresh = Schemas["HostedModelsRefreshPublic"]
+export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
+export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
+export type HostedCatalogProviderRefresh =
+  Schemas["HostedCatalogProviderRefreshPublic"]
+
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------

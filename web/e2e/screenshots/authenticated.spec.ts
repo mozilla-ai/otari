@@ -111,7 +111,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },
-  // The deployment's own two pages, reached from the account menu rather than
+  // The deployment's own pages, reached from the account menu rather than
   // from a rail, and covered here all the same for the reason /account below
   // is: this matrix is about how a page renders, not about which control opens
   // it. Accounts is not the members roster above, which stops at this
@@ -121,6 +121,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     route: "/admin/accounts",
     name: "admin-accounts",
     heading: /accounts/i,
+  },
+  {
+    route: "/admin/hosted-providers",
+    name: "admin-hosted-providers",
+    heading: /hosted providers/i,
   },
   // Reached from the account menu rather than the rail, and covered here all
   // the same: what this matrix is for is how a page renders on a phone and in

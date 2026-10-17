@@ -26,10 +26,10 @@ from gateway.api.routes._platform import (
     default_attempt_kwargs,
     run_platform_attempts,
 )
-from gateway.api.routes._settlement import SettledCost
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, error_code_of
 from gateway.metrics import REGISTRY
+from gateway.schemas.inference import SettledCost
 from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError

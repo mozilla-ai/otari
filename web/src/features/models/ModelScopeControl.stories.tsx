@@ -10,55 +10,20 @@ import { accessLabel, ModelScopeControl } from "./ModelScopeControl"
  * which is why the copy is configurable and the value is `string[] | null`, where
  * `null` means "any" rather than "none".
  *
- * It reads three queries (providers, discoverable models, aliases) to suggest
- * targets, so these stories declare all three. `onChange` reports validity
+ * It reads two queries (the caller's model catalog and aliases) to suggest
+ * targets, so these stories declare both. `onChange` reports validity
  * alongside the value, so the page can hold its submit while an entry is
  * incomplete.
  */
-// A `DiscoverableModel` is `{ id, key }`, not a string: `id` is the bare model
-// id the provider reports and `key` is the `instance:model` selector. Same
-// correction ModelComboBox's stories needed, and for the same reason: a plain
-// string here reaches `model.key.toLowerCase()` as undefined.
-const DISCOVERABLE = {
-  providers: [
-    {
-      provider: "openai",
-      models: ["gpt-4o", "gpt-4o-mini", "o3-mini"].map((id) => ({
-        id,
-        key: `openai:${id}`,
-      })),
-      ok: true,
-      discovery_unsupported: false,
-      checked_at: "2026-08-25T12:00:00Z",
-    },
-    {
-      provider: "anthropic",
-      models: ["claude-opus-4", "claude-haiku-4-5"].map((id) => ({
-        id,
-        key: `anthropic:${id}`,
-      })),
-      ok: true,
-      discovery_unsupported: false,
-      checked_at: "2026-08-25T12:00:00Z",
-    },
-  ],
-}
-
-const PROVIDERS = {
-  providers: [
-    {
-      provider_type: "openai",
-      instance: "openai",
-      name: "OpenAI",
-      capabilities: ["chat"],
-    },
-    {
-      provider_type: "anthropic",
-      instance: "anthropic",
-      name: "Anthropic",
-      capabilities: ["chat"],
-    },
-  ],
+const MODELS = {
+  object: "list",
+  data: [
+    "openai:gpt-4o",
+    "openai:gpt-4o-mini",
+    "openai:o3-mini",
+    "anthropic:claude-opus-4",
+    "anthropic:claude-haiku-4-5",
+  ].map((id) => ({ id, object: "model", owned_by: id.split(":")[0] })),
 }
 
 const ALIASES = [
@@ -67,8 +32,7 @@ const ALIASES = [
 ]
 
 const API = {
-  [`${API_ROOT}/models/discoverable`]: DISCOVERABLE,
-  [`${API_ROOT}/providers`]: PROVIDERS,
+  [`${API_ROOT}/models`]: MODELS,
   [`${API_ROOT}/aliases`]: ALIASES,
 }
 

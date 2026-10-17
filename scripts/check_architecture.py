@@ -765,7 +765,7 @@ MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_
 MODE_FUNCTION = "deployment_for"
 # The services that still read the deployment's mode.
 # An entry that stops reading it fails the check until it is removed, so the list only shrinks.
-SERVICE_MODE_READ_BASELINE = ("gateway/services/provider_kwargs.py",)
+SERVICE_MODE_READ_BASELINE: tuple[str, ...] = ()
 
 
 def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:
@@ -1545,7 +1545,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": ("gateway/services/playground_service.py",),
     },
     "gateway.models.pricing.ModelPricing": {
-        "repository": None,
+        "repository": "gateway/repositories/pricing/model_pricing_repository.py",
         "baseline": (
             "gateway/api/routes/models.py",
             "gateway/api/routes/pricing.py",
@@ -1591,6 +1591,14 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.provider_keys.WorkspaceProviderModelRestriction": {
         "repository": "gateway/repositories/tenancy/org_provider_key_repository.py",
         "baseline": ("gateway/services/tenancy/org_provider_key_service.py",),
+    },
+    "gateway.models.providers.HostedProvider": {
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.providers.HostedProviderModel": {
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
     },
     "gateway.models.providers.ModelAlias": {
         "repository": None,

@@ -386,7 +386,10 @@ def compile_catalog_plan(
     if not attempts:
         return None
     # NOTE: Only the plain path asks the hosted-credential port, so an offering that needs it leaves the plan.
-    if any(credential_ladder_exhausted(attempt.provider, attempt.kwargs) for attempt in attempts):
+    if any(
+        credential_ladder_exhausted(attempt.provider, attempt.kwargs, declared=attempt.instance in config.providers)
+        for attempt in attempts
+    ):
         return None
     # The first offering that survives the filters is the catalog's choice, and the rest follow it.
     attempts = [attempts[0], *(replace(attempt, selection_reason="on_failure") for attempt in attempts[1:])]
