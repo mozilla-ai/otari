@@ -20,6 +20,7 @@ Otari never guesses that two requests belong together from their content.
 | The `session_label` request field | `"session_label": "chat-42"` | `client` |
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | The agent harness's own session id | Claude Code's `x-claude-code-session-id`, sent on every request | `harness` |
+| The agent harness's own session id | Codex's `thread-id`, or `session-id` without one, on a request whose `originator` or `User-Agent` starts with `codex` | `harness` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
 
@@ -31,8 +32,8 @@ same label get two sessions, and a session id never reaches another workspace.
 
 ## Sessions from your own agent
 
-Claude Code is recognized on its own. An agent or harness of your own needs two
-things on its requests to read well as a trace.
+Claude Code and Codex are recognized on their own. An agent or harness of your own
+needs two things on its requests to read well as a trace.
 
 **Send one session id on every request of a run.** The `Otari-Conversation-Id`
 header is the one to use: it works the same on every completion endpoint, and it
