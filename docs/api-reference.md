@@ -530,6 +530,8 @@ never a body, a URL or the query:
 On a search the workspace's organization key serves, they name the key's
 provider. A 502 for a failure that is not the provider's, such as an organization
 key this gateway cannot call, carries none of them.
+The completion routes send the same headers when a provider fails a completion;
+see [Provider failures](#provider-failures).
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
@@ -696,6 +698,25 @@ cost of $Y`); see [Budgets](access-control.md#budgets). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
 [Refusals and `Retry-After`](access-control.md#refusals-and-retry-after).
 
+### Provider failures
+
+When the provider itself fails a completion (Chat Completions, Messages or
+Responses), by timing out, dropping the connection or answering with a 5xx, the
+`5xx` Otari answers with carries what is safe to show of it, the same headers a
+[direct search](#search)'s `502` carries, and never a body or a URL:
+
+| Header | Value |
+|---|---|
+| `Otari-Error-Provider` | The provider that failed, as config names it, such as `exa`. |
+| `Otari-Error-Status` | The provider's own HTTP status; absent for a timeout or a lost connection. |
+| `Otari-Error-Tag` | `timeout`, `network`, `http_error`, or the provider's own code when its error body names one, such as Exa's `SERVICE_OVERLOADED`. |
+| `Otari-Error-Retryable` | `true`: each of these may succeed on a retry. |
+
+When a routing policy tried several candidates, they describe the last one tried.
+A `4xx` from the provider carries none of them: a billing, quota or credential
+failure describes the gateway's own provider account, and a provider's `429`
+already carries `upstream_rate_limited`.
+
 A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request
 would get unstreamed: a `400` for a parameter the provider does not accept, a
@@ -715,6 +736,11 @@ place the failure is named. It carries the code from the table above when one
 applies (`upstream_rate_limited`, `context_length_exceeded`),
 `provider_stream_interrupted` when the provider's stream ended before it
 finished, otherwise `provider_error` when the provider failed the stream. On
+Chat Completions and Responses, a failure on the provider's own side also
+carries the [provider failure](#provider-failures)'s fields as
+`error.provider_failure`: `{"provider": "exa", "status": 503, "tag":
+"SERVICE_OVERLOADED", "retryable": true}`, with `status` `null` when the provider
+gave none. On
 Chat Completions a stream is finished once a choice reports its
 `finish_reason`; one that closes without any, even after sending content, ends
 in this error event rather than in a bare `data: [DONE]`. Its message is the `detail` the same failure would carry as an HTTP

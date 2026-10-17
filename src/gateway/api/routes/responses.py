@@ -71,6 +71,7 @@ from gateway.services.files import StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
     call_responses,
+    provider_failure,
     responses_user_fields,
     serves_responses,
     strip_gateway_minted_items,
@@ -300,8 +301,14 @@ class _ResponsesAdapter:
         # event whatever the upstream sent, so it cannot tell a cut stream here.
         return None
 
-    def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
+        failure = provider_failure(exc, provider)
+        return openai_error_event(
+            self.stream_format,
+            stream_error_code(exc),
+            stream_error_message(exc),
+            failure.as_dict() if failure is not None else None,
+        )
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
