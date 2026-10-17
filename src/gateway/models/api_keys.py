@@ -113,6 +113,10 @@ class APIKey(Base):
     # as a list rather than a join table because it is read only when a request
     # names a budget; deleting a budget removes it from every list.
     end_user_budget_ids: Mapped[list[str] | None] = mapped_column(JSON)
+    # Whether a chat completion on this key may carry ``mock_response``, which
+    # Otari answers itself without calling the provider, still metered and billed.
+    # For load tests; off on every key unless an operator turns it on.
+    allow_mock_response: Mapped[bool] = mapped_column(default=False, server_default=false())
 
     # Set only on a key this deployment mints for itself and has to present
     # again later, which today is the one the hosted Playground forwards with
@@ -156,6 +160,7 @@ class APIKey(Base):
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
             "end_user_budget_ids": self.assignable_end_user_budgets(),
+            "allow_mock_response": self.allow_mock_response,
             "config_name": self.config_name,
             "metadata": self.metadata_,
         }

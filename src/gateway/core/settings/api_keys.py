@@ -64,6 +64,10 @@ class ApiKeyConfig(BaseModel):
         max_length=MAX_END_USER_BUDGETS,
         description="Budgets a request may start a new end user on with Otari-End-User-Budget.",
     )
+    allow_mock_response: bool = Field(
+        default=False,
+        description="Let a chat completion on this key carry mock_response, answered without the provider. Load tests.",
+    )
     ceiling: str | None = Field(
         default=None,
         description=(

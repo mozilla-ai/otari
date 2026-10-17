@@ -3808,6 +3808,18 @@
             "description": "Tags for cost attribution, recorded on the request's usage rows and filterable in the usage API: up to 16 string pairs, keys up to 64 characters and values up to 512. A null value is ignored. LiteLLM's nested `spend_logs_metadata` object is also read, and wins over a flat key of the same name; it is never forwarded to the provider.",
             "title": "Metadata"
           },
+          "mock_response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Answer with this text instead of calling the provider, for load tests. Allowed only on an API key with allow_mock_response, and refused with 403 on any other. The request is admitted, metered and billed as usual, with usage estimated from the text at four characters a token.",
+            "title": "Mock Response"
+          },
           "model": {
             "title": "Model",
             "type": "string"
@@ -4655,6 +4667,12 @@
       "CreateKeyRequest": {
         "description": "Request model for creating a new API key.",
         "properties": {
+          "allow_mock_response": {
+            "default": false,
+            "description": "When true, a chat completion on this key may carry mock_response: Otari answers with that text without calling the provider, and meters and bills the request as usual. For load tests.",
+            "title": "Allow Mock Response",
+            "type": "boolean"
+          },
           "allowed_models": {
             "anyOf": [
               {
@@ -4797,6 +4815,10 @@
       "CreateKeyResponse": {
         "description": "Response model for creating a new API key.",
         "properties": {
+          "allow_mock_response": {
+            "title": "Allow Mock Response",
+            "type": "boolean"
+          },
           "allowed_models": {
             "anyOf": [
               {
@@ -4953,6 +4975,7 @@
           "is_service_key",
           "end_user_budget_id",
           "end_user_budget_ids",
+          "allow_mock_response",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -9070,6 +9093,11 @@
       "KeyInfo": {
         "description": "Response model for key information.",
         "properties": {
+          "allow_mock_response": {
+            "default": false,
+            "title": "Allow Mock Response",
+            "type": "boolean"
+          },
           "allowed_models": {
             "anyOf": [
               {
@@ -19883,6 +19911,17 @@
       "UpdateKeyRequest": {
         "description": "Request model for updating a key.",
         "properties": {
+          "allow_mock_response": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Mock Response"
+          },
           "allowed_models": {
             "anyOf": [
               {
