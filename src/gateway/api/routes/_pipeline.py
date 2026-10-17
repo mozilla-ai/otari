@@ -78,7 +78,7 @@ from gateway.api.deps import (
     get_budget_service,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._attempt_metrics import record_abandoned_attempt
+from gateway.api.routes._attempt_metrics import record_abandoned_attempt, record_attempt
 from gateway.api.routes._attempts import (
     AdmitAttempt,
     CandidateCannotServe,
@@ -4661,6 +4661,16 @@ async def record_usage(
     if usage_log.cost is not None:
         # The metrics registry speaks float; the row keeps the exact amount.
         record_cost(str(provider or ""), model, float(usage_log.cost))
+
+    record_attempt(
+        str(provider or ""),
+        model,
+        failed=error is not None,
+        status_code=status_code,
+        fallback=attribution is not None and attribution.position > 1,
+        latency_ms=latency_ms,
+        ttft_ms=ttft_ms,
+    )
 
     await log_writer.put(usage_log)
     return LoggedUsage(usage_log.cost, pricing_source)
