@@ -6,7 +6,7 @@ subject or an email; the check constraint keeps an issuer and audience match
 alone from ever being enough. Rules go with their key.
 
 Revision ID: 557fc0f5bfda
-Revises: e4410dfaf0db
+Revises: a3c5e7f9b1d4
 Create Date: 2026-10-15 00:00:00.000000
 
 """
@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "557fc0f5bfda"
-down_revision: str | Sequence[str] | None = "e4410dfaf0db"
+down_revision: str | Sequence[str] | None = "a3c5e7f9b1d4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
