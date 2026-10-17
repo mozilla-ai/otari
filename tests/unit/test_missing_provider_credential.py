@@ -24,8 +24,16 @@ from gateway.services.provider_kwargs import (
     ManagedCredentialUnsupportedError,
     ResolvedProvider,
     missing_credential,
+    shared_managed_refusal,
 )
-from gateway.services.providers import managed_only_candidates, missing_provider_credential, unpriced_model_refusal
+from gateway.services.providers import (
+    managed_only_candidates,
+    missing_provider_credential,
+    refuse_managed_candidate,
+    refuse_managed_only,
+    unpriced_model_refusal,
+)
+from gateway.types.attempt import Attempt
 
 _ORG = uuid.uuid4()
 # Declares no provider, so cohere is undeclared unless a test says otherwise.
@@ -159,7 +167,9 @@ async def test_an_unresolved_selector_keeps_the_pricing_refusal() -> None:
 
 @pytest.mark.asyncio
 async def test_a_managed_model_nothing_declares_is_managed_only() -> None:
-    managed = await managed_only_candidates(_CONFIG, [_cohere({})], hosted=_hosted("cohere"), organization_id=_ORG)
+    managed = await managed_only_candidates(
+        _CONFIG, [_cohere({})], hosted=lambda: _hosted("cohere"), organization_id=_ORG
+    )
     assert managed == {("cohere", "rerank-v3.5")}
 
 
@@ -172,35 +182,37 @@ async def test_a_managed_model_nothing_declares_is_managed_only() -> None:
 async def test_a_model_the_deployment_does_not_offer_is_not_managed_only(offered: dict[str, Any]) -> None:
     port = AsyncMock()
     port.get_hosted_models.return_value = offered
-    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=port, organization_id=_ORG)
+    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=lambda: port, organization_id=_ORG)
 
 
 @pytest.mark.asyncio
 async def test_an_advertised_model_set_names_the_model() -> None:
     port = AsyncMock()
     port.get_hosted_models.return_value = {"cohere": frozenset({"rerank-v3.5"})}
-    assert await managed_only_candidates(_CONFIG, [_cohere({})], hosted=port, organization_id=_ORG)
+    assert await managed_only_candidates(_CONFIG, [_cohere({})], hosted=lambda: port, organization_id=_ORG)
 
 
 @pytest.mark.asyncio
 async def test_the_port_is_not_asked_for_a_credentialed_candidate_or_no_organization() -> None:
     port = _hosted("cohere")
-    assert not await managed_only_candidates(_CONFIG, [_cohere({"api_key": "k"})], hosted=port, organization_id=_ORG)
-    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=port, organization_id=None)
+    assert not await managed_only_candidates(
+        _CONFIG, [_cohere({"api_key": "k"})], hosted=lambda: port, organization_id=_ORG
+    )
+    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=lambda: port, organization_id=None)
     port.get_hosted_models.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_the_core_adapter_with_nothing_hosted_changes_nothing() -> None:
     hosted = HostedProviderModelProviderAdapter(None)
-    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=hosted, organization_id=_ORG)
+    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=lambda: hosted, organization_id=_ORG)
 
 
 @pytest.mark.asyncio
 async def test_a_port_that_cannot_list_leaves_the_ordinary_refusal() -> None:
     port = AsyncMock()
     port.get_hosted_models.side_effect = RuntimeError("store down")
-    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=port, organization_id=_ORG)
+    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=lambda: port, organization_id=_ORG)
 
 
 def test_a_managed_refusal_reads_as_its_own_missing_credential() -> None:
@@ -219,12 +231,59 @@ def test_a_plan_that_skipped_a_managed_candidate_names_it() -> None:
     managed = ManagedCredentialUnsupportedError(
         "cohere", selector="cohere:rerank-v3.5", surface=MANAGED_SURFACE_ROUTING_POLICY
     )
-    rejection = get_shared_rejection([managed, MissingApiKeyError("openai", "OPENAI_API_KEY")])
+    other = ManagedCredentialUnsupportedError(
+        "cohere", selector="cohere:rerank-v3.5", surface=MANAGED_SURFACE_ROUTING_POLICY
+    )
+    rejection = get_shared_rejection([managed, other, MissingApiKeyError("openai", "OPENAI_API_KEY")])
     assert rejection is not None
     assert rejection.status_code == 424
     assert (rejection.headers or {})[ERROR_CODE_HEADER] == MANAGED_CREDENTIAL_UNSUPPORTED
+    # The name the caller wrote is named once, however many of its candidates were managed.
     assert str(rejection.detail).startswith("'cohere:rerank-v3.5' is offered on this deployment's managed")
 
     plain = get_shared_rejection([MissingApiKeyError("openai", "OPENAI_API_KEY")] * 2)
     assert plain is not None
     assert (plain.headers or {})[ERROR_CODE_HEADER] == PROVIDER_NOT_CONFIGURED
+
+
+def test_shared_managed_refusal_names_each_selector_once_and_ignores_plain_misses() -> None:
+    def managed(selector: str) -> ManagedCredentialUnsupported:
+        return ManagedCredentialUnsupported(
+            provider="x", env_var=None, selectors=(selector,), surface=MANAGED_SURFACE_ROUTING_POLICY
+        )
+
+    plain = missing_credential(MissingApiKeyError("openai", "OPENAI_API_KEY"))
+    assert plain is not None
+    assert shared_managed_refusal([plain]) is None
+    shared = shared_managed_refusal([managed("fast"), plain, managed("fast")])
+    assert shared is not None
+    assert shared.selectors == ("fast",)
+    assert shared.detail.startswith("'fast' is offered")
+
+
+def test_a_policy_candidate_is_named_by_what_the_caller_wrote() -> None:
+    attempt = Attempt(
+        position=1, instance="cohere", provider=LLMProvider.COHERE, model="rerank-v3.5", display_model="fast"
+    )
+    refuse_managed_candidate(frozenset(), attempt)
+    with pytest.raises(ManagedCredentialUnsupportedError) as raised:
+        refuse_managed_candidate(frozenset({("cohere", "rerank-v3.5")}), attempt)
+    assert raised.value.selector == "fast"
+    refused = missing_credential(raised.value)
+    assert refused is not None
+    assert "cohere" not in refused.detail
+
+
+@pytest.mark.asyncio
+async def test_a_single_candidate_is_named_by_its_alias() -> None:
+    resolved = ResolvedProvider(
+        instance="cohere", provider=LLMProvider.COHERE, model="rerank-v3.5", kwargs={}, alias="house-reranker"
+    )
+    with pytest.raises(ManagedCredentialUnsupportedError) as raised:
+        await refuse_managed_only(
+            _CONFIG, resolved, hosted=lambda: _hosted("cohere"), organization_id=_ORG, surface="/v1/rerank"
+        )
+    assert raised.value.selector == "house-reranker"
+    await refuse_managed_only(
+        _CONFIG, resolved, hosted=lambda: _hosted("openai"), organization_id=_ORG, surface="/v1/rerank"
+    )

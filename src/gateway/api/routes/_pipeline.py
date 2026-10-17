@@ -290,8 +290,6 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import (
-    MANAGED_SURFACE_ROUTING_POLICY,
-    ManagedCredentialUnsupportedError,
     MissingCredential,
     ResolvedProvider,
     hosted_lookup,
@@ -302,7 +300,12 @@ from gateway.services.provider_kwargs import (
     resolve_provider_selector,
     with_failover_retries,
 )
-from gateway.services.providers import managed_only_candidates, owned_endpoint_http_client, unpriced_model_refusal
+from gateway.services.providers import (
+    managed_only_candidates,
+    owned_endpoint_http_client,
+    refuse_managed_candidate,
+    unpriced_model_refusal,
+)
 from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
@@ -1538,9 +1541,13 @@ async def _prepare_for_dispatch(
     billing: BillingPort,
 ) -> ResolvedProvider:
     if ctx.plan is not None and len(ctx.plan.attempts) > 1:
-        ctx.managed_only = await managed_only_candidates(
-            ctx.config, ctx.plan.attempts, hosted=port, organization_id=ctx.organization_id
-        )
+        try:
+            ctx.managed_only = await managed_only_candidates(
+                ctx.config, ctx.plan.attempts, hosted=lambda: port, organization_id=ctx.organization_id
+            )
+        except asyncio.CancelledError:
+            await release_reservation(ctx)
+            raise
     if resolved.owned_endpoint is not None:
         # The client re-checks and pins the endpoint's address on every request
         # and follows no redirect; see ``services/providers``.
@@ -5905,18 +5912,13 @@ def _failover_kwargs(
     Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
     so the walk skips it before admitting it, and any-llm's ``MissingApiKeyError`` for a
     candidate nothing declares a credential for, so the walk passes it over as it does
-    any candidate missing a key. A candidate in ``ctx.managed_only`` raises it as
-    :class:`ManagedCredentialUnsupportedError`, which the final answer names.
+    any candidate missing a key, or its ``ManagedCredentialUnsupportedError`` for one in
+    ``ctx.managed_only``, which the final answer names.
     """
     config = ctx.config
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
-        if (attempt.instance, attempt.model) in ctx.managed_only:
-            raise ManagedCredentialUnsupportedError(
-                attempt.instance,
-                selector=f"{attempt.instance}:{attempt.model}",
-                surface=MANAGED_SURFACE_ROUTING_POLICY,
-            )
+        refuse_managed_candidate(ctx.managed_only, attempt)
         require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
         fields = tool_ctx.request_fields_for(attempt.provider.value, base_request_fields)
         return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))

@@ -18,6 +18,8 @@ from gateway.services.providers._hosted_sources import HostedSources, refuse_uns
 from gateway.services.providers._missing_credential import (
     managed_only_candidates,
     missing_provider_credential,
+    refuse_managed_candidate,
+    refuse_managed_only,
     unpriced_model_refusal,
 )
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
@@ -56,6 +58,8 @@ __all__ = [
     "missing_provider_credential",
     "owned_endpoint_http_client",
     "provider_for",
+    "refuse_managed_candidate",
+    "refuse_managed_only",
     "refresh_provider_endpoint_cache",
     "refuse_unsafe_configured_endpoints",
     "reset_provider_endpoint_cache",

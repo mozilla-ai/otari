@@ -947,7 +947,7 @@ class MissingCredential:
     def from_error(cls, exc: MissingApiKeyError) -> "MissingCredential":
         if isinstance(exc, ManagedCredentialUnsupportedError):
             return ManagedCredentialUnsupported(
-                provider=exc.provider_name or "unknown", env_var=None, selector=exc.selector, surface=exc.surface
+                provider=exc.provider_name or "unknown", env_var=None, selectors=(exc.selector,), surface=exc.surface
             )
         return cls(provider=exc.provider_name or "unknown", env_var=exc.env_var_name or None)
 
@@ -996,7 +996,7 @@ class ManagedCredentialUnsupportedError(MissingApiKeyError):
     A ``MissingApiKeyError``, so every path that skips or refuses a candidate
     missing a key treats this one alike, while :func:`missing_credential` reads
     it as :class:`ManagedCredentialUnsupported`. ``selector`` is the name the
-    caller may be told, an alias rather than its target.
+    caller wrote (an alias or a policy), never the target behind it.
     """
 
     def __init__(self, provider_name: str, *, selector: str, surface: str) -> None:
@@ -1012,13 +1012,27 @@ class ManagedCredentialUnsupportedError(MissingApiKeyError):
 class ManagedCredentialUnsupported(MissingCredential):
     """A missing credential the deployment would have supplied, on a path its managed credentials do not serve."""
 
-    selector: str = ""
+    selectors: tuple[str, ...] = ()
     surface: str = ""
     code: ClassVar[str] = MANAGED_CREDENTIAL_UNSUPPORTED
 
     @property
     def detail(self) -> str:
-        return managed_credential_unsupported_detail([self.selector], self.surface)
+        return managed_credential_unsupported_detail(self.selectors, self.surface)
+
+
+def shared_managed_refusal(missing: Sequence[MissingCredential]) -> ManagedCredentialUnsupported | None:
+    """The refusal for candidates that all lacked a credential, when any was offered only on managed credentials.
+
+    Named ahead of the others, because declaring a provider the deployment serves
+    on its own credentials is not the remedy for those. Each name the caller
+    wrote is named once, however many of its candidates were managed.
+    """
+    managed = [entry for entry in missing if isinstance(entry, ManagedCredentialUnsupported)]
+    if not managed:
+        return None
+    selectors = tuple(sorted({selector for entry in managed for selector in entry.selectors}))
+    return replace(managed[0], selectors=selectors)
 
 
 def missing_credential(exc: BaseException) -> MissingCredential | None:

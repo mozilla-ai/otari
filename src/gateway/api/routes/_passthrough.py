@@ -25,6 +25,7 @@ scaffolds record a rejection identically.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -132,14 +133,14 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import (
-    ManagedCredentialUnsupported,
+    ManagedCredentialUnsupportedError,
+    MissingCredential,
     ResolvedProvider,
     missing_credential,
-    missing_declared_credential,
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import managed_only_candidates, unpriced_model_refusal
+from gateway.services.providers import refuse_managed_only, unpriced_model_refusal
 from gateway.services.routing import refuse_local_policy
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
@@ -403,6 +404,36 @@ async def run_passthrough(
                 )
             raise
 
+    async def _refuse_managed_only(resolved: ResolvedProvider, reservation: ReservationHandle) -> None:
+        """Refuse a model only the deployment's managed credentials would serve, which this endpoint never asks.
+
+        Refunds ``reservation`` and records the rejection, and refunds it too when
+        the request is cancelled while the hosted models are listed.
+        """
+        try:
+            await refuse_managed_only(
+                config,
+                resolved,
+                hosted=lambda: model_provider_port_on(raw_request, db),
+                organization_id=organization_id,
+                surface=endpoint,
+            )
+        except asyncio.CancelledError:
+            await refund_reservation(db, reservation)
+            raise
+        except ManagedCredentialUnsupportedError as exc:
+            await refund_reservation(db, reservation)
+            managed = MissingCredential.from_error(exc)
+            await _log_rejection(
+                managed.detail,
+                row_model=resolved.model,
+                row_provider=resolved.instance,
+                status_code=managed.status_code,
+            )
+            raise HTTPException(
+                status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
+            ) from exc
+
     pricing: ModelPricing | None = None
     # ``pricing`` with where it came from, recorded on the row it prices.
     found_pricing: ResolvedPricing | None = None
@@ -486,6 +517,9 @@ async def run_passthrough(
                 pricing, meter=billing.meter, reports_tokens=billing.reports_tokens, legacy_unit_reading=True
             )
         ):
+            # A model only managed credentials would serve is refused for that,
+            # not for its price: pricing it would not make it servable here.
+            await _refuse_managed_only(resolved, reservation)
             await refund_reservation(db, reservation)
             # This path never asks the hosted port, so none is passed.
             unpriced = await unpriced_model_refusal(
@@ -551,30 +585,8 @@ async def run_passthrough(
                 headers=error_headers(refusal.code),
             )
 
-    # Managed credentials serve only the completion routes, so a model offered
-    # only on them is refused by name rather than as a provider nobody declared.
-    # The port is resolved only for a request that would otherwise be refused.
-    if (
-        organization_id is not None
-        and missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs) is not None
-        and await managed_only_candidates(
-            config, [resolved], hosted=model_provider_port_on(raw_request, db), organization_id=organization_id
-        )
-    ):
-        await refund_reservation(db, reservation)
-        managed = ManagedCredentialUnsupported(
-            provider=resolved.instance,
-            env_var=None,
-            selector=resolved.alias or f"{resolved.instance}:{resolved.model}",
-            surface=endpoint,
-        )
-        await _log_rejection(
-            managed.detail,
-            row_model=resolved.model,
-            row_provider=resolved.instance,
-            status_code=managed.status_code,
-        )
-        raise HTTPException(status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code))
+    # Managed credentials serve only the completion routes.
+    await _refuse_managed_only(resolved, reservation)
 
     # Already resolved above (needed there for organization-scoped provider
     # credentials); reused here rather than re-derived, since it is fixed for

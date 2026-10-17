@@ -64,13 +64,13 @@ from gateway.services.model_access import (
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import (
     MANAGED_SURFACE_BATCHES,
-    ManagedCredentialUnsupported,
+    ManagedCredentialUnsupportedError,
     MissingCredential,
     get_provider_kwargs,
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import managed_only_candidates
+from gateway.services.providers import refuse_managed_only
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -454,20 +454,17 @@ async def create_batch(
     try:
         require_declared_credential(config, resolved.instance, provider, provider_kwargs)
     except MissingApiKeyError as exc:
-        # Managed credentials serve only the completion routes, so a model
-        # offered only on them is refused by name. Nothing is reserved yet.
-        if await managed_only_candidates(
-            config,
-            [resolved],
-            hosted=model_provider_port_on(raw_request, db),
-            organization_id=await organization_for_workspace_id(db, workspace_id),
-        ):
-            managed = ManagedCredentialUnsupported(
-                provider=resolved.instance,
-                env_var=None,
-                selector=resolved.alias or f"{resolved.instance}:{model}",
+        # Managed credentials serve only the completion routes. Nothing is reserved yet.
+        try:
+            await refuse_managed_only(
+                config,
+                resolved,
+                hosted=lambda: model_provider_port_on(raw_request, db),
+                organization_id=await organization_for_workspace_id(db, workspace_id),
                 surface=MANAGED_SURFACE_BATCHES,
             )
+        except ManagedCredentialUnsupportedError as managed_exc:
+            managed = MissingCredential.from_error(managed_exc)
             raise HTTPException(
                 status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
             ) from exc

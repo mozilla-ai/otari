@@ -81,7 +81,7 @@ class RecordingPort:
         # ``asyncio.CancelledError``, which the call site must deliberately not
         # catch, and typing this narrowly would make that case unexpressible.
         error: BaseException | None = None,
-        roster: HostedModels | None = None,
+        roster: HostedModels | BaseException | None = None,
     ) -> None:
         self.credential = credential
         self.error = error
@@ -109,6 +109,8 @@ class RecordingPort:
         return self.credential
 
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
+        if isinstance(self.roster, BaseException):
+            raise self.roster
         if self.roster is None:
             raise AssertionError("dispatch must not ask for the hosted roster")
         return self.roster
@@ -475,6 +477,20 @@ async def test_multi_candidate_plan_is_not_asked_about() -> None:
     assert result.kwargs == {}
     assert port.calls == []
     assert ctx.managed_only == {("openai", "gpt-4o")}
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_roster_read_releases_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    released, _ = _capture_settlement(monkeypatch)
+
+    class _Plan:
+        attempts = (_uncredentialed(), _uncredentialed())
+
+    port = RecordingPort(roster=asyncio.CancelledError())
+    ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
+    with pytest.raises(asyncio.CancelledError):
+        await _dispatch(ctx, port)
+    assert released == [ctx]
 
 
 # ---------------------------------------------------------------------------

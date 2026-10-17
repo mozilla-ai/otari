@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Protocol
 
 from any_llm import LLMProvider
@@ -12,13 +12,19 @@ from gateway.core.error_codes import PRICING_REQUIRED
 from gateway.log_config import logger
 from gateway.services.model_access import ModelRefusal
 from gateway.services.pricing_service import no_pricing_error_detail
-from gateway.services.provider_kwargs import MissingCredential, missing_declared_credential
+from gateway.services.provider_kwargs import (
+    MANAGED_SURFACE_ROUTING_POLICY,
+    ManagedCredentialUnsupportedError,
+    MissingCredential,
+    missing_declared_credential,
+)
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
     from gateway.ports.model_provider_port import ModelProviderPort
     from gateway.services.provider_kwargs import ResolvedProvider
     from gateway.services.routing import CompiledPlan
+    from gateway.types.attempt import Attempt
 
 
 async def missing_provider_credential(
@@ -65,18 +71,18 @@ async def managed_only_candidates(
     config: GatewayConfig,
     candidates: Iterable[Candidate],
     *,
-    hosted: ModelProviderPort,
+    hosted: Callable[[], ModelProviderPort],
     organization_id: uuid.UUID | None,
 ) -> frozenset[tuple[str, str]]:
     """The ``(instance, model)`` pairs among ``candidates`` only the deployment's managed credentials would serve.
 
-    For a path that never asks ``hosted`` to serve: a candidate nothing declared
-    serves, whose model ``hosted`` advertises to the organization, is refused
-    there by name rather than as a provider nobody configured. ``hosted`` is
-    asked only when some candidate lacks a declared credential, and its
-    listing, never ``resolve_hosted_credential``, which may meter a credential
-    that would not serve. A failure to list answers nothing, leaving the
-    ordinary refusal.
+    For a path that never asks the port to serve: a candidate nothing declared
+    serves, whose model the port advertises to the organization, is refused
+    there by name rather than as a provider nobody configured. ``hosted`` builds
+    the port, and is called only when some candidate lacks a declared
+    credential; only its listing is read, never ``resolve_hosted_credential``,
+    which may meter a credential that would not serve. A failure to list
+    answers nothing, leaving the ordinary refusal.
     """
     if organization_id is None:
         return frozenset()
@@ -88,7 +94,7 @@ async def managed_only_candidates(
     if not uncredentialed:
         return frozenset()
     try:
-        offered = await hosted.get_hosted_models(organization_id=organization_id)
+        offered = await hosted().get_hosted_models(organization_id=organization_id)
     except Exception:
         logger.warning("Could not list hosted models to classify uncredentialed candidates")
         return frozenset()
@@ -100,6 +106,46 @@ async def managed_only_candidates(
         if models is None or candidate.model in models:
             managed.add((candidate.instance, candidate.model))
     return frozenset(managed)
+
+
+async def refuse_managed_only(
+    config: GatewayConfig,
+    resolved: ResolvedProvider,
+    *,
+    hosted: Callable[[], ModelProviderPort],
+    organization_id: uuid.UUID | None,
+    surface: str,
+) -> None:
+    """Refuse a single candidate only the deployment's managed credentials would serve, on a ``surface`` they do not.
+
+    Raises:
+        ManagedCredentialUnsupportedError: naming the selector the caller wrote,
+            the alias rather than its target.
+    """
+    if await managed_only_candidates(config, [resolved], hosted=hosted, organization_id=organization_id):
+        raise ManagedCredentialUnsupportedError(
+            resolved.instance,
+            selector=resolved.alias or f"{resolved.instance}:{resolved.model}",
+            surface=surface,
+        )
+
+
+def refuse_managed_candidate(
+    managed_only: frozenset[tuple[str, str]], attempt: Attempt, *, surface: str = MANAGED_SURFACE_ROUTING_POLICY
+) -> None:
+    """Refuse a plan's candidate that :func:`managed_only_candidates` found, naming what the caller wrote.
+
+    A policy's targets are not the caller's to see, so the candidate is named by
+    its ``display_model`` (the policy or alias), never its ``instance:model``.
+
+    Raises:
+        ManagedCredentialUnsupportedError: ``attempt`` is in ``managed_only``.
+    """
+    if (attempt.instance, attempt.model) not in managed_only:
+        return
+    raise ManagedCredentialUnsupportedError(
+        attempt.instance, selector=attempt.display_model or f"{attempt.instance}:{attempt.model}", surface=surface
+    )
 
 
 async def unpriced_model_refusal(
