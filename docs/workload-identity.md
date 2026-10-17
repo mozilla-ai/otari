@@ -33,7 +33,8 @@ shaped like a signed JWT is checked as an identity token:
    shorter than 2048 bits is refused.
 3. It must carry `iss`, `sub`, `aud`, `exp` and `iat`. It must not be expired,
    and neither `iat` nor `nbf` may be in the future, each with 60 seconds of
-   allowed clock skew.
+   allowed clock skew. Its `exp` may be at most 24 hours away: platform identity
+   tokens last an hour, and one that lasts days is a static secret in effect.
 4. It must match a federation rule: the rule's issuer, an `aud` value equal to
    the rule's audience, and each of the rule's `subject` and `email` that is
    set. An email matches only when the token's `email_verified` is `true`.
@@ -128,7 +129,8 @@ token matching both authenticates as neither.
 key's rules and `DELETE /api/v1/keys/{key_id}/federation-rules/{rule_id}`
 removes one, effective with the next request. Deleting the key deletes its
 rules. These routes need the deployment operator's standing, like the rest of
-`/api/v1/keys`.
+`/api/v1/keys`, so on a hosted gateway the operator manages rules on a
+tenant's behalf; a tenant's own admins cannot yet.
 
 Once the rule is in place, the key's secret is not needed by the backend.
 Keep it out of the backend's environment entirely.
@@ -233,8 +235,9 @@ The access token lasts `federation_access_token_ttl_sec` seconds (600 by
 default, between 60 and 3600), and never past the identity token it was
 exchanged for; the SDKs refresh it before then. It authenticates exactly as the
 rule's key, the same way an identity token presented directly does, and it is
-checked again on every request: deleting the rule, deactivating the key, or the
-key expiring cuts it off at once. It is never the master key.
+checked again on every request: deleting the rule, deactivating the key, the
+key expiring, or removing the rule's issuer from `federation_issuers` cuts it
+off at once. It is never the master key.
 
 The access token is stateless. Otari signs it with HMAC-SHA256 under a key
 HKDF derives from `OTARI_SECRET_KEY`, and stores nothing, so every replica that

@@ -51,6 +51,8 @@ class FederationRuleRepository(BaseRepository[APIKeyFederationRule, Never, Never
 
         That is a rule on any key with the same issuer, audience, subject and email, or a rule on another key with
         the same issuer and audience that shares a subject or an email with this one and contradicts it in neither.
+        The search spans every organization, which suits rules only the deployment operator manages; letting tenants
+        manage their own would make a 409 reveal another tenant's identity, and needs proof of possession instead.
         """
         rule = APIKeyFederationRule
         same_subject = rule.subject.is_(None) if subject is None else rule.subject == subject
