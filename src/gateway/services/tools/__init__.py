@@ -18,7 +18,8 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``run_connection_test`` tests an instance with one search or fetch.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
 and ``builtin_fetch_resolved`` answers ``builtin_fetch``'s without a config. ``WebFetchBackend`` runs the fetch
-tool on the instance ``resolve_fetch`` chose, and ``register_builtin_fetcher`` makes otari's own fetcher
+tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds one for a request, and
+``register_builtin_fetcher`` makes otari's own fetcher
 any-fetch's ``builtin`` provider, once, at startup.
 ``pick_direct_search_instance``, ``resolve_direct_search`` and ``run_direct_search`` hold the direct
 search endpoint's rules and run its call, and ``SearchQuery`` with the helpers beside it map LiteLLM's
@@ -104,7 +105,7 @@ from gateway.services.tools._web_declarations import (
     web_search_declaration_forms,
     web_search_intercept_enabled,
 )
-from gateway.services.tools._web_fetch import WebFetchBackend, register_builtin_fetcher
+from gateway.services.tools._web_fetch import WebFetchBackend, build_web_fetch_backend, register_builtin_fetcher
 from gateway.services.tools._web_names import (
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
@@ -220,6 +221,7 @@ __all__ = [
     "ResolvedFetch",
     "ResolvedSearch",
     "WebFetchBackend",
+    "build_web_fetch_backend",
     "builtin_fetch_resolved",
     "register_builtin_fetcher",
     "resolve_fetch",

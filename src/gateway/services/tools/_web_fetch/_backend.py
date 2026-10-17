@@ -52,6 +52,7 @@ from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     web_fetch_tool_definition,
 )
+from gateway.services.tools._web_search import ResolvedFetch, builtin_fetch_resolved, resolve_fetch
 from gateway.services.tools._web_tool_failure import WebToolFailure
 from gateway.services.web_retrieval_network import blocked_address_reason, truncate_utf8
 from gateway.services.web_retrieval_policy import (
@@ -68,8 +69,8 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from gateway.core.settings.tools import ToolSettings
     from gateway.services.tool_usage import ToolUsageTally
-    from gateway.services.tools._web_search import ResolvedFetch
     from gateway.services.traces import RequestTrace
 
 _PURPOSE_HINT = (
@@ -98,6 +99,32 @@ _BUILTIN_FAILED_TEXT = "[tool error] Web Fetch failed"
 MISSING_CREDENTIAL_TAG = "missing_credential"
 UNSUPPORTED_OPTION_TAG = "unsupported_option"
 INTERNAL_ERROR_TAG = "internal_error"
+
+
+def build_web_fetch_backend(
+    config: ToolSettings | None,
+    *,
+    policy: DomainPolicy | None,
+    trust_env_proxy: bool,
+    web_provider_client: httpx.AsyncClient | None = None,
+    tally: ToolUsageTally | None = None,
+    trace: RequestTrace | None = None,
+) -> WebFetchBackend:
+    """One request's fetch tool, on the fetch instance the resolver chooses, or on ``builtin_fetch`` without a config.
+
+    No workspace policy is passed to the resolver yet, so no fetch credential serves the call.
+    """
+    resolved = (
+        resolve_fetch(config, None, requested=None, for_search=None) if config is not None else builtin_fetch_resolved()
+    )
+    return WebFetchBackend(
+        resolved,
+        policy=policy,
+        trust_env_proxy=trust_env_proxy,
+        web_provider_client=web_provider_client,
+        tally=tally,
+        trace=trace,
+    )
 
 
 class WebFetchBackend:
