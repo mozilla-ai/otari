@@ -96,6 +96,8 @@ MODEL_HEADER = "Otari-Model"
 ATTEMPT_COUNT_HEADER = "Otari-Attempt-Count"
 FALLBACK_HEADER = "Otari-Fallback"
 RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"
+# The same duration split into the gateway's own time and the provider's (W3C Server Timing).
+SERVER_TIMING_HEADER = "Server-Timing"
 # Request header naming the budget a service key's new end user starts on, and
 # response header naming the budget that end user is on.
 END_USER_BUDGET_HEADER = "Otari-End-User-Budget"

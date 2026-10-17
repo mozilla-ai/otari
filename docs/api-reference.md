@@ -118,7 +118,8 @@ header, streaming or not. In hybrid mode it is the platform's id for the
 request; a standalone gateway mints its own. A standalone gateway also names the
 provider instance and model that served the request, whether a fallback did, and
 how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
-`Otari-Fallback` and `Otari-Response-Duration-Ms`; see
+`Otari-Fallback` and `Otari-Response-Duration-Ms`, and splits that duration into
+its own time and the provider's in `Server-Timing`; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
@@ -362,7 +363,7 @@ request to make that retry safe. The value is any unique string of 1 to 255
 printable ASCII characters; a UUID is the usual choice. A retry with the same key
 and the same body then gets the original response, with its original
 `Otari-Request-ID`, serving headers and `usage.cost_usd`, and an `Otari-Idempotent-Replayed: true`
-header (but no `Otari-Response-Duration-Ms`, which described the original), without calling the provider or billing again. While the original is
+header (but no `Otari-Response-Duration-Ms` or `Server-Timing`, which described the original), without calling the provider or billing again. While the original is
 still running, a retry is answered 409 with `Retry-After`, and if the original
 fails the next retry runs in its place.
 
