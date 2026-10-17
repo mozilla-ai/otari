@@ -18,6 +18,7 @@
 * [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
 * [OpenAI provider guide](providers/openai.md)
+* [Gemini provider guide](providers/gemini.md)
 
 ## For integrators
 
