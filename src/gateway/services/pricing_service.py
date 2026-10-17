@@ -14,7 +14,6 @@ from gateway.core.metered_pricing import priced_per_request
 from gateway.log_config import logger
 from gateway.models.pricing import OPERATOR_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
-from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing import (
     ModelsDevPrice,
     ToolCharges,
@@ -848,8 +847,28 @@ async def _tool_rates(
     overrides = (
         await load_organization_override_index(db, organization_id, forms) if organization_id is not None else {}
     )
-    deployment = await OrganizationModelPricingRepository(db).deployment_rows(forms, lookup_time)
+    deployment = await _deployment_rates(db, forms, lookup_time)
     return {lookup: _first_tool_rate(lookup, overrides, deployment, lookup_time) for lookup in lookups}
+
+
+async def _deployment_rates(db: AsyncSession, model_keys: Collection[str], as_of: datetime) -> dict[str, ModelPricing]:
+    """The deployment price list's version in force at ``as_of`` for each stored key that has one.
+
+    Chunked over the key list, as :func:`load_organization_override_index` is.
+    """
+    keys = sorted(set(model_keys))
+    found: dict[str, ModelPricing] = {}
+    for start in range(0, len(keys), _KEY_CHUNK):
+        chunk = keys[start : start + _KEY_CHUNK]
+        stmt = (
+            select(ModelPricing)
+            .where(ModelPricing.model_key.in_(chunk), ModelPricing.effective_at <= as_of)
+            # Oldest first, so the last row kept for a key is its newest version.
+            .order_by(ModelPricing.effective_at)
+        )
+        for row in (await db.execute(stmt)).scalars():
+            found[row.model_key] = row
+    return found
 
 
 def _first_tool_rate(
