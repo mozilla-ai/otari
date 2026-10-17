@@ -36,7 +36,7 @@ dependencies = [
     # this edition follows, so the two do not keep separate copies of a protocol
     # neither of us owns. What stays ours is which providers are configured,
     # which scopes are asked for, and how a fetched identity maps onto a user.
-    "apron-auth>=0.16.0,<0.17.0",
+    "apron-auth>=0.18.0,<0.19.0",
     "asyncpg>=0.32.0",
     # Password hashing for the dashboard sign-in (docs/access-control.md).
     # The library directly rather than passlib, which the platform wraps it in:

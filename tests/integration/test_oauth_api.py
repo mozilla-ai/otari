@@ -11,6 +11,7 @@ the request shape apron-auth actually sends is one Google and GitHub accept, and
 nothing here can stand in for it.
 """
 
+import json
 import logging
 import re
 import uuid
@@ -1770,17 +1771,40 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]
     where ``code_verifier`` shows up.
     """
     posted: list[dict[str, str]] = []
+    # The nonce of the state each exchange claimed, so the token endpoint can
+    # answer with the ID token an OpenID provider would, and apron-auth's own
+    # nonce check runs against what the store gave back.
+    claimed_nonces: list[str | None] = []
+    consume = oauth_service._DatabaseStateStore.consume
+
+    async def _consume(self: Any, state_key: str) -> Any:
+        pending = await consume(self, state_key)
+        claimed_nonces.append(pending.nonce if pending is not None else None)
+        return pending
 
     async def _token_request(self: Any, data: dict[str, str]) -> dict[str, Any]:
         posted.append(data)
-        return {"access_token": "an-access-token", "token_type": "Bearer"}
+        response: dict[str, Any] = {"access_token": "an-access-token", "token_type": "Bearer"}
+        if claimed_nonces[-1] is not None:
+            response["id_token"] = _unsigned_id_token(nonce=claimed_nonces[-1])
+        return response
 
     async def _fetch_identity(self: Any, _tokens: Any) -> Any:
         return SimpleNamespace(subject="ada-subject", email="ada@example.com", name="Ada Lovelace", email_verified=True)
 
+    monkeypatch.setattr(oauth_service._DatabaseStateStore, "consume", _consume)
     monkeypatch.setattr(OAuthClient, "_token_request", _token_request)
     monkeypatch.setattr(OAuthClient, "fetch_identity", _fetch_identity)
     return posted
+
+
+def _unsigned_id_token(**claims: Any) -> str:
+    """An ID token for the nonce check, which reads claims only; ``fetch_identity`` is stubbed above."""
+
+    def segment(value: dict[str, Any]) -> str:
+        return urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+
+    return f"{segment({'alg': 'RS256'})}.{segment({'sub': 'ada-subject', **claims})}.signature"
 
 
 def test_a_code_with_no_authorize_behind_it_is_refused(
@@ -1871,6 +1895,38 @@ def test_the_exchange_sends_the_verifier_the_authorize_call_minted(
     expected = urlsafe_b64encode(sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     assert query["code_challenge"] == [expected]
     assert query["code_challenge_method"] == ["S256"]
+
+
+def test_the_exchange_checks_the_nonce_the_authorize_call_sent(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The nonce on the consent URL survives the round trip through the pending-state row.
+
+    apron-auth refuses a Google callback whose stored state has lost its nonce,
+    and an ID token carrying another one, so a row without the column would
+    refuse every Google sign-in.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    started = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()
+    (nonce,) = parse_qs(urlsplit(started["authorization_url"]).query)["nonce"]
+    stored = oauth_service._DatabaseStateStore.consume
+    returned: list[str | None] = []
+
+    async def _consume(self: Any, state_key: str) -> Any:
+        pending = await stored(self, state_key)
+        returned.append(pending.nonce if pending is not None else None)
+        return pending
+
+    monkeypatch.setattr(oauth_service._DatabaseStateStore, "consume", _consume)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": started["state"]})
+
+    assert response.status_code == 200, response.text
+    assert returned == [nonce]
 
 
 def test_a_refused_exchange_leaves_the_state_spendable_for_the_retry(

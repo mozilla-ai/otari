@@ -217,6 +217,7 @@ class _DatabaseStateStore:
                 provider=self._provider,
                 flow_hash=self._flow_hash,
                 code_verifier=state.code_verifier,
+                nonce=state.nonce,
                 redirect_uri=state.redirect_uri,
                 expires_at=now + timedelta(seconds=OAUTH_STATE_TTL_SECONDS),
             )
@@ -249,6 +250,7 @@ class _DatabaseStateStore:
                     col(OAuthPendingState.provider),
                     col(OAuthPendingState.flow_hash),
                     col(OAuthPendingState.code_verifier),
+                    col(OAuthPendingState.nonce),
                     col(OAuthPendingState.redirect_uri),
                     col(OAuthPendingState.created_at),
                     col(OAuthPendingState.expires_at),
@@ -257,7 +259,7 @@ class _DatabaseStateStore:
         ).first()
         if row is None:
             return None
-        provider, flow_hash, code_verifier, redirect_uri, created_at, expires_at = row
+        provider, flow_hash, code_verifier, nonce, redirect_uri, created_at, expires_at = row
         if provider != self._provider:
             logger.warning("OAuth state minted for %s was returned to %s", provider, self._provider)
             return None
@@ -270,6 +272,7 @@ class _DatabaseStateStore:
             state=state_key,
             redirect_uri=redirect_uri,
             code_verifier=code_verifier,
+            nonce=nonce,
             created_at=created_at.timestamp(),
         )
 

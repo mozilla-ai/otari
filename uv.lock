@@ -341,16 +341,17 @@ wheels = [
 
 [[package]]
 name = "apron-auth"
-version = "0.16.0"
+version = "0.18.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "authlib" },
     { name = "httpx" },
+    { name = "joserfc" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/11/83/edd2172122803f884884303c95f6ad7127b6187fb3adf63ada0e35c13f64/apron_auth-0.16.0.tar.gz", hash = "sha256:608283c68e059e8ea45a8889cac357a9d660ad7d45f5cd90c3db38c191ab29be", size = 183513, upload-time = "2026-10-12T13:41:47.154Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/ff/bed57028de7005b586e3afac28cb927d11125ef75e00b7d1db5bbfb608b1/apron_auth-0.18.0.tar.gz", hash = "sha256:96e64f65c2bdfd392ae5924cd2ad050a4c5c3ec9cb2292b3a5791260101dd315", size = 277991, upload-time = "2026-10-17T07:54:15.64Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/48/78e6d2a8265f94d4b7470f68294384c27c83aea2ee28a6741d10bfb0cb3f/apron_auth-0.16.0-py3-none-any.whl", hash = "sha256:11bf6ead86c279dfc17c3ee096387145ab19da8665f7e7ccfae8316acf11feee", size = 93309, upload-time = "2026-10-12T13:41:45.638Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/bb/879ed76f0ec954f235bbafd3e907a579676a9407a2f47f1c2b0d86a343fa/apron_auth-0.18.0-py3-none-any.whl", hash = "sha256:4b49fa63c698d506c83e83cdcde19de3961e2a6156013ffcd4b1aca8f03b5c64", size = 135722, upload-time = "2026-10-17T07:54:14.052Z" },
 ]
 
 [[package]]
@@ -1366,7 +1367,7 @@ requires-dist = [
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
     { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.36.0" },
     { name = "any-search", editable = "any-search" },
-    { name = "apron-auth", specifier = ">=0.16.0,<0.17.0" },
+    { name = "apron-auth", specifier = ">=0.18.0,<0.19.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.42.0" },
