@@ -49,7 +49,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
 from apron_auth import OAuthClient, ProviderConfig
-from apron_auth.errors import INVALID_GRANT, StateError, TokenExchangeError
+from apron_auth.errors import INVALID_GRANT, NonceValidationError, StateError, TokenExchangeError
 from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
@@ -268,6 +268,12 @@ class _DatabaseStateStore:
             return None
         if expires_at <= datetime.now(UTC):
             return None
+        if nonce is None and "openid" in _PROVIDERS[provider].scopes:
+            # Minted before the column existed. apron-auth would refuse it as a
+            # nonce failure; as a state no longer pending, the person is told to
+            # start again.
+            logger.warning("OAuth %s state carried no nonce for an OpenID sign-in", provider)
+            return None
         return PendingState(
             state=state_key,
             redirect_uri=redirect_uri,
@@ -372,8 +378,8 @@ async def exchange_code(
             credentials for ``provider``, or does not know its own address.
         OAuthStateError: If ``state`` names no authorization this deployment is
             still waiting on, for ``provider``, from this browser.
-        OAuthExchangeError: If the provider says the code is invalid, expired or spent, or the identity does not
-            fit the link table.
+        OAuthExchangeError: If the provider says the code is invalid, expired or spent, the ID token does not
+            carry the nonce the authorization request sent, or the identity does not fit the link table.
         OAuthProviderUnavailableError: If the provider fails or cannot be reached during the exchange or the
             identity fetch.
             The provider's own words stay on the traceback and out of the response, as that error's docstring says.
@@ -392,6 +398,11 @@ async def exchange_code(
         # operator looking at a provider that was never contacted.
         logger.warning("Refused a %s callback whose state matched no pending sign-in", provider)
         raise OAuthStateError from error
+    except NonceValidationError as error:
+        # Also ahead of the catch-all: a token response that does not answer the
+        # request this deployment made is a refused sign-in, not an outage.
+        logger.warning("Refused a %s token response whose ID token did not carry the request's nonce", provider)
+        raise OAuthExchangeError(provider_label(provider)) from error
     except Exception as error:
         # Logged with the exception so an operator can see the provider's own
         # error and description, which the response deliberately does not carry.
@@ -460,7 +471,7 @@ def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret:
     identity_handler = (
         apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
     )
-    provider_config, _revocation_handler = preset(
+    provider_config, revocation_handler = preset(
         client_id=client_id,
         client_secret=client_secret,
         scopes=list(_PROVIDERS[provider].scopes),
@@ -470,6 +481,8 @@ def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret:
         _as_configured_here(provider_config, provider),
         state_store=_DatabaseStateStore(db, provider, _flow_hash(flow_secret)),
         identity_handler=identity_handler,
+        # Used when apron-auth revokes the tokens of a response it refused.
+        revocation_handler=revocation_handler,
     )
 
 
