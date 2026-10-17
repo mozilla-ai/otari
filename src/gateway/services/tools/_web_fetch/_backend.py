@@ -6,7 +6,8 @@ policy (contract G2) and never reaches a private host. For a provider instance
 it sends through the app's web provider client. The provider follows redirects
 on its own side, so the backend checks the requested URL before the call, and
 the URL the provider reports finding the page at after it: the host must pass
-the policy and, when it is an IP address, be a public one.
+the policy, and must not name an address the built-in fetcher refuses, as an IP
+address in any form or as ``localhost``. A hostname is the provider's to resolve.
 
 What the model reads is contract G1's: the page under its source and content
 type, or one fixed ``[tool error]`` text per kind of failure. A provider
@@ -24,6 +25,8 @@ may help. Beside the providers' own tags, a call fails with
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
@@ -50,10 +53,12 @@ from gateway.services.tools._web_names import (
     web_fetch_tool_definition,
 )
 from gateway.services.tools._web_tool_failure import WebToolFailure
-from gateway.services.web_retrieval_network import truncate_utf8
+from gateway.services.web_retrieval_network import blocked_address_reason, truncate_utf8
 from gateway.services.web_retrieval_policy import (
+    CanonicalHost,
     CanonicalWebURL,
     DomainPolicy,
+    IPAddress,
     WebURLValidationError,
     canonicalize_web_url,
 )
@@ -221,8 +226,12 @@ class WebFetchBackend:
             return self._failed(self._raised(exc, INTERNAL_ERROR_TAG), None)
         if (error := page.error) is not None:
             return self._failed(WebToolFailure.of(resolved.provider, error.status, error.tag), error.status)
-        if not self._builtin and (found := fetched_url(page.final_url)) is not None:
-            if (refusal := self._refusal(found)) is not None:
+        if not self._builtin:
+            # Where the provider found the page is checked as the URL asked for was, and a
+            # URL it cannot be checked by is refused rather than trusted.
+            found = fetched_url(page.final_url)
+            refusal = self._refused(URL_INVALID_TAG, _URL_INVALID_TEXT) if found is None else self._refusal(found)
+            if refusal is not None:
                 return refusal
         self._last_page = page
         return _page_text(page)
@@ -251,8 +260,10 @@ class WebFetchBackend:
         host = url.origin.host
         if not self._policy.permits(host):
             return self._refused(DOMAIN_POLICY_TAG, _DOMAIN_POLICY_TEXT)
-        # The built-in fetcher's rule for an address: neither multicast nor any range short of global.
-        if host.ip is not None and (host.ip.is_multicast or not host.ip.is_global):
+        # The provider resolves a hostname itself, so only an address the URL names, and
+        # localhost, can be checked here, by the built-in fetcher's rule for an address.
+        address = _named_address(host)
+        if _is_localhost(host) or (address is not None and blocked_address_reason(address) is not None):
             return self._refused(URL_INVALID_TAG, _URL_INVALID_TEXT)
         return None
 
@@ -273,6 +284,21 @@ class WebFetchBackend:
         if failure.tag == HTTP_STATUS_TAG and status is not None:
             return f"[tool error] destination returned HTTP {status}"
         return _BUILTIN_TEXTS.get(failure.tag, _BUILTIN_FAILED_TEXT)
+
+
+def _named_address(host: CanonicalHost) -> IPAddress | None:
+    """The address a host names: an IP literal, or an IPv4 shorthand a resolver reads too, such as ``127.1``."""
+    if host.ip is not None:
+        return host.ip
+    try:
+        return ipaddress.ip_address(socket.inet_aton(host.value))
+    except OSError:
+        return None
+
+
+def _is_localhost(host: CanonicalHost) -> bool:
+    """``localhost`` or a name under it, which resolves to loopback (RFC 6761)."""
+    return host.value == "localhost" or host.value.endswith(".localhost")
 
 
 def _page_text(page: FetchedPage) -> str:
