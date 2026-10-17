@@ -402,17 +402,19 @@ async def _verify_federated_token(request: Request, db: AsyncSession, token: str
     return await _admit_api_key(api_key)
 
 
-async def _verify_access_token(db: AsyncSession, token: str) -> APIKey:
+async def _verify_access_token(db: AsyncSession, token: str, config: GatewayConfig) -> APIKey:
     """Authenticate an access token from ``POST /oauth/token`` as the key of the rule it names.
 
-    The rule and the key are reloaded on every request, so deleting the rule or deactivating the key ends the
-    token at once. Refusals answer the same 401 as an unknown key.
+    The rule and the key are reloaded on every request, so deleting the rule, deactivating the key or dropping the
+    rule's issuer from ``federation_issuers`` ends the token at once. Refusals answer the same 401 as an unknown key.
     """
     try:
         claims = read_access_token(token, configured_secret_keys(), now=time.time())
         rule = await FederationRuleRepository(db).get(claims.rule_id)
         if rule is None or rule.api_key_id != claims.api_key_id:
             raise FederationRefusedError("federation_rule_gone")
+        if all(entry.issuer != rule.issuer for entry in config.federation_issuers):
+            raise FederationRefusedError("federation_unknown_issuer")
         api_key = await ApiKeyRepository(db).get(claims.api_key_id)
     except FederationRefusedError as exc:
         record_auth_failure(exc.reason)
@@ -437,7 +439,7 @@ async def _verify_credential(request: Request, db: AsyncSession, token: str, con
     """
     if config.federation_issuers:
         if is_access_token(token):
-            return await _verify_access_token(db, token)
+            return await _verify_access_token(db, token, config)
         if unverified_issuer(token) is not None:
             return await _verify_federated_token(request, db, token, config)
     return await _verify_and_update_api_key(db, token, _api_key_format(request, db))

@@ -403,6 +403,22 @@ def test_the_access_token_stops_working_when_the_key_is_deactivated(
     assert refused.json()["detail"] == "API key is inactive"
 
 
+def test_the_access_token_stops_working_when_its_issuer_is_no_longer_trusted(
+    client: TestClient, federated: _Federated, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = _token(client, federated)
+    state = client.app.state  # type: ignore[attr-defined]
+    other = [FederationIssuer(issuer="https://other-issuer.example.com")]
+    monkeypatch.setattr(state, "config", state.config.model_copy(update={"federation_issuers": other}))
+    before = _failures("federation_unknown_issuer")
+
+    refused = _chat(client, _bearer(token))
+
+    assert refused.status_code == 401
+    assert refused.json()["detail"] == "Invalid API key"
+    assert _failures("federation_unknown_issuer") == before + 1
+
+
 def test_the_access_token_stops_working_when_it_expires(client: TestClient, federated: _Federated) -> None:
     token = _token(client, federated)
     later = time.time() + 601
