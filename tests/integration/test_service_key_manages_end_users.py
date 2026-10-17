@@ -348,3 +348,90 @@ def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
     read = client.get(url, headers=mlpa)
     assert read.json()["blocked"] is True
     assert read.json()["budget_id"] == "eu-ai"
+
+
+def test_a_service_key_deletes_its_end_user_and_a_request_revives_it(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    assert _chat(client, mlpa, "guest1:ai").status_code == 200
+    spent = client.get(f"{END_USERS}/guest1:ai", headers=mlpa).json()["current_requests"]
+
+    deleted = client.delete(f"{END_USERS}/guest1:ai", headers=mlpa)
+    listed = client.get(END_USERS, headers=mlpa)
+    read = client.get(f"{END_USERS}/guest1:ai", headers=mlpa)
+    again = client.delete(f"{END_USERS}/guest1:ai", headers=mlpa)
+
+    assert deleted.status_code == 204, deleted.text
+    assert listed.json() == []
+    assert read.status_code == 404
+    assert again.status_code == 404
+    # Named again, it comes back with what it had used, so a delete cannot reset a budget.
+    assert _chat(client, mlpa, "guest1:ai").status_code == 200
+    assert client.get(f"{END_USERS}/guest1:ai", headers=mlpa).json()["current_requests"] == spent + 1
+
+
+def test_the_query_form_deletes_any_id(client: TestClient, master_key_header: dict[str, str]) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    external_id = "ios/key+id=="
+    client.put(END_USERS, params={"external_id": external_id}, json={"budget_id": "eu-ai"}, headers=mlpa)
+
+    deleted = client.delete(END_USERS, params={"external_id": external_id}, headers=mlpa)
+
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json() == {"deleted": 1}
+    assert client.get(END_USERS, params={"external_id": external_id}, headers=mlpa).json() == []
+
+
+def test_end_users_created_before_a_time_are_deleted_a_page_at_a_time(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    other = _service_key(client, master_key_header, "other-svc")
+    for external_id in ("old1", "old2", "old3", "new"):
+        client.put(f"{END_USERS}/{external_id}", json={"budget_id": "eu-ai"}, headers=mlpa)
+    client.put(f"{END_USERS}/theirs-old", json={"budget_id": "eu-ai"}, headers=other)
+    week_ago = datetime(2026, 1, 1, tzinfo=UTC)
+    for user in db_session.query(User).filter(User.external_id.in_(["old1", "old2", "old3", "theirs-old"])):
+        user.created_at = week_ago
+    db_session.commit()
+    cutoff = "2026-01-02T00:00:00Z"
+
+    first = client.delete(END_USERS, params={"created_before": cutoff, "limit": 2}, headers=mlpa)
+    second = client.delete(END_USERS, params={"created_before": cutoff, "limit": 2}, headers=mlpa)
+    done = client.delete(END_USERS, params={"created_before": cutoff, "limit": 2}, headers=mlpa)
+
+    assert first.json() == {"deleted": 2}
+    assert second.json() == {"deleted": 1}
+    assert done.json() == {"deleted": 0}
+    assert [user["external_id"] for user in client.get(END_USERS, headers=mlpa).json()] == ["new"]
+    # Another owner's end users are out of reach, however old.
+    assert [user["external_id"] for user in client.get(END_USERS, headers=other).json()] == ["theirs-old"]
+
+
+def test_a_delete_names_exactly_one_of_an_id_and_a_time(client: TestClient, master_key_header: dict[str, str]) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+
+    neither = client.delete(END_USERS, headers=mlpa)
+    both = client.delete(END_USERS, params={"external_id": "a", "created_before": "2026-01-01T00:00:00Z"}, headers=mlpa)
+
+    assert neither.status_code == 400
+    assert both.status_code == 400
+
+
+def test_a_service_key_cannot_delete_another_users_end_user(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    other = _service_key(client, master_key_header, "other-svc")
+    client.put(f"{END_USERS}/theirs", json={"budget_id": "eu-ai"}, headers=other)
+
+    refused = client.delete(f"{END_USERS}/theirs", headers=mlpa)
+
+    assert refused.status_code == 404
+    assert [user["external_id"] for user in client.get(END_USERS, headers=other).json()] == ["theirs"]

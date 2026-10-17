@@ -1289,7 +1289,18 @@ export interface paths {
          */
         put: operations["end-users-put_end_user_by_query"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete End Users
+         * @description Delete one end user of the calling service key, or a page of those created before a time.
+         *
+         *     Requires a service key, and exactly one of ``external_id`` and ``created_before``. ``external_id`` deletes that
+         *     end user, any id, one containing '/' included, and answers 404 when it has none. ``created_before`` deletes up
+         *     to ``limit`` of the oldest end users created before then; call again until ``deleted`` is 0. An end user's
+         *     telemetry and agent traces are erased with it. The end user's row and spend are kept: a request naming it again
+         *     revives it with what it had spent, so deleting one cannot clear its budget. A deleted end user is neither listed
+         *     nor counted.
+         */
+        delete: operations["end-users-delete_end_users"];
         options?: never;
         head?: never;
         /**
@@ -1327,7 +1338,15 @@ export interface paths {
          */
         put: operations["end-users-put_end_user"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete End User
+         * @description Delete an end user of the calling service key by the id the service names it by.
+         *
+         *     Requires a service key. An id no live end user of the key's user goes by answers 404. The end user's telemetry
+         *     and agent traces are erased; its row and spend are kept, so a request naming it again revives it with what it had
+         *     spent. An id with a '.' or '..' segment is refused with 400; ``DELETE /end-users?external_id=`` takes any id.
+         */
+        delete: operations["end-users-delete_end_user"];
         options?: never;
         head?: never;
         /**
@@ -9991,6 +10010,17 @@ export interface components {
              * @description A budget on the key's end_user_budget_ids to move the end user to
              */
             budget_id?: string | null;
+        };
+        /**
+         * EndUsersDeleted
+         * @description How many end users a delete removed.
+         */
+        EndUsersDeleted: {
+            /**
+             * Deleted
+             * @description End users deleted by this call. A page as full as the limit may leave more.
+             */
+            deleted: number;
         };
         /**
          * ExecutionState
@@ -19775,6 +19805,42 @@ export interface operations {
             };
         };
     };
+    "end-users-delete_end_users": {
+        parameters: {
+            query?: {
+                /** @description Delete the end user the service names with this `user` value. */
+                external_id?: string | null;
+                /** @description Delete the end users created before this time, oldest first, up to `limit` of them. */
+                created_before?: string | null;
+                /** @description The most end users one call deletes with `created_before`. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUsersDeleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "end-users-update_end_user_by_query": {
         parameters: {
             query: {
@@ -19876,6 +19942,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EndUserPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-delete_end_user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The id the service names the end user by in a request's user field */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
