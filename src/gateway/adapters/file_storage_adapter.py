@@ -180,6 +180,7 @@ def _translate_s3_errors(storage_ref: str) -> Iterator[None]:
     maps to ``FileNotFoundError`` to mirror the local backend; every other S3
     failure maps to ``OSError``.
     """
+    from boto3.exceptions import S3UploadFailedError
     from botocore.exceptions import BotoCoreError, ClientError
 
     try:
@@ -190,9 +191,19 @@ def _translate_s3_errors(storage_ref: str) -> Iterator[None]:
             raise FileNotFoundError(storage_ref) from exc
         msg = f"S3 operation failed for {storage_ref!r}: {exc}"
         raise OSError(msg) from exc
-    except BotoCoreError as exc:
+    except (BotoCoreError, S3UploadFailedError) as exc:
+        # S3UploadFailedError (from upload_fileobj) is neither a ClientError nor a BotoCoreError.
         msg = f"S3 operation failed for {storage_ref!r}: {exc}"
         raise OSError(msg) from exc
+
+
+async def _settle(task: asyncio.Future[Any]) -> None:
+    """Wait for ``task`` to finish however often this coroutine is cancelled."""
+    while not task.done():
+        try:
+            await asyncio.wait({task})
+        except asyncio.CancelledError:
+            pass
 
 
 class S3FileStore(FileStoragePort):
@@ -231,7 +242,8 @@ class S3FileStore(FileStoragePort):
         # this isn't a new memory regression (put_stream is the streaming
         # path for both). Not a priority to stream, since files_max_bytes
         # already bounds the worst case the same way it does for local.
-        await asyncio.to_thread(self._client.put_object, Bucket=self._bucket, Key=storage_ref, Body=data)
+        with _translate_s3_errors(storage_ref):
+            await asyncio.to_thread(self._client.put_object, Bucket=self._bucket, Key=storage_ref, Body=data)
 
     async def get(self, storage_ref: str) -> bytes:
         # Same intentional symmetry with LocalDirFileStore.get: full-buffer by
@@ -271,31 +283,11 @@ class S3FileStore(FileStoragePort):
                 # including aborting an incomplete multipart upload if it
                 # fails partway, so no manual abort_multipart_upload is
                 # needed here.
-                await asyncio.shield(upload_task)
+                with _translate_s3_errors(storage_ref):
+                    await asyncio.shield(upload_task)
             except BaseException:
                 if upload_task is not None:
-                    try:
-                        # Our await above may have been cancelled while the
-                        # upload was still running in its thread; shield
-                        # keeps upload_task itself uncancelled, so wait for
-                        # it to actually settle and see how it really
-                        # turned out.
-                        await asyncio.shield(upload_task)
-                    except Exception:
-                        pass  # the upload itself failed; s3transfer already aborts multipart on its own failure
-                    else:
-                        # It finished successfully despite the cancellation:
-                        # the object really landed in S3 with nothing that
-                        # will ever reference or clean it up, so remove it
-                        # ourselves.
-                        try:
-                            await asyncio.shield(
-                                asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=storage_ref)
-                            )
-                        except Exception as cleanup_exc:
-                            logger.warning(
-                                "put_stream: failed to remove orphaned upload %s: %s", storage_ref, cleanup_exc
-                            )
+                    await self._discard_orphaned_upload(upload_task, storage_ref)
                 raise
         finally:
             # Shielded like _open_handle: this runs during unwind on a
@@ -307,12 +299,36 @@ class S3FileStore(FileStoragePort):
                 logger.warning("put_stream: failed to close spool file for %s: %s", storage_ref, cleanup_exc)
         return total
 
+    async def _discard_orphaned_upload(self, upload_task: asyncio.Task[None], storage_ref: str) -> None:
+        """Remove the object ``upload_task`` left behind, if it finished uploading.
+
+        Our await on the upload may have been cancelled while its thread was
+        still running (shield keeps the task itself alive), so wait for it to
+        settle. If it succeeded, the object landed in S3 with nothing that
+        will ever reference it, so delete it. A failed upload needs nothing:
+        s3transfer already aborts its multipart upload. Both waits ride out
+        repeated cancellation so the delete is never skipped.
+        """
+        await _settle(upload_task)
+        if upload_task.cancelled() or upload_task.exception() is not None:
+            return
+        delete_task = asyncio.ensure_future(
+            asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=storage_ref)
+        )
+        await _settle(delete_task)
+        if delete_task.exception() is not None:
+            logger.warning("put_stream: failed to remove orphaned upload %s: %s", storage_ref, delete_task.exception())
+
     async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
         with _translate_s3_errors(storage_ref):
             response = await asyncio.to_thread(self._client.get_object, Bucket=self._bucket, Key=storage_ref)
         body = response["Body"]
         try:
-            while chunk := await asyncio.to_thread(body.read, _STREAM_CHUNK_BYTES):
+            while True:
+                with _translate_s3_errors(storage_ref):
+                    chunk = await asyncio.to_thread(body.read, _STREAM_CHUNK_BYTES)
+                if not chunk:
+                    break
                 yield chunk
         finally:
             try:

@@ -217,6 +217,125 @@ async def test_put_stream_removes_orphaned_upload_when_cancelled_after_success(
     assert listing.get("KeyCount", 0) == 0
 
 
+def _client_error(operation: str) -> Exception:
+    from botocore.exceptions import ClientError
+
+    return ClientError({"Error": {"Code": "AccessDenied", "Message": "nope"}}, operation)
+
+
+@pytest.mark.asyncio
+async def test_put_failure_raises_oserror(s3_store: S3FileStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(**kwargs: object) -> object:
+        raise _client_error("PutObject")
+
+    monkeypatch.setattr(s3_store._client, "put_object", _boom)  # noqa: SLF001 - inject a backend failure
+    ref = await s3_store.allocate("file-putfail01")
+    with pytest.raises(OSError):  # noqa: PT011 - translated botocore error, message not asserted
+        await s3_store.put(ref, b"data")
+
+
+@pytest.mark.asyncio
+async def test_put_stream_upload_failure_raises_oserror(s3_store: S3FileStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from boto3.exceptions import S3UploadFailedError
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        msg = "Failed to upload"
+        raise S3UploadFailedError(msg)
+
+    monkeypatch.setattr(s3_store._client, "upload_fileobj", _boom)  # noqa: SLF001 - inject a backend failure
+    ref = await s3_store.allocate("file-uploadfail01")
+    with pytest.raises(OSError):  # noqa: PT011 - translated boto3 error, message not asserted
+        await s3_store.put_stream(ref, _iter([b"data"]))
+
+
+@pytest.mark.asyncio
+async def test_get_stream_read_failure_raises_oserror(s3_store: S3FileStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from botocore.exceptions import ResponseStreamingError
+
+    ref = await s3_store.allocate("file-readfail01")
+    await s3_store.put(ref, b"data")
+
+    class _BrokenBody:
+        def read(self, amt: int | None = None) -> bytes:
+            raise ResponseStreamingError(error="connection reset")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(s3_store._client, "get_object", lambda **kw: {"Body": _BrokenBody()})  # noqa: SLF001
+    with pytest.raises(OSError):  # noqa: PT011 - translated botocore error, message not asserted
+        async for _ in s3_store.get_stream(ref):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_put_stream_cleanup_survives_a_second_cancellation(
+    s3_store: S3FileStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second cancel while put_stream waits for the in-flight upload must not skip the compensating delete."""
+    client = s3_store._client  # noqa: SLF001 - need the raw client to patch upload_fileobj
+    original_upload_fileobj = client.upload_fileobj
+    upload_started = threading.Event()
+    release_upload = threading.Event()
+    upload_done = threading.Event()
+
+    def _gated_upload_fileobj(fileobj: IO[bytes], bucket: str, key: str) -> None:
+        upload_started.set()
+        release_upload.wait(timeout=5)
+        original_upload_fileobj(fileobj, bucket, key)
+        upload_done.set()
+
+    monkeypatch.setattr(client, "upload_fileobj", _gated_upload_fileobj)
+
+    ref = await s3_store.allocate("file-twocancel01")
+    task = asyncio.ensure_future(s3_store.put_stream(ref, _iter([b"data"])))
+    assert await asyncio.to_thread(upload_started.wait, 5), "upload thread never started"
+    task.cancel()
+    await asyncio.sleep(0)  # let put_stream enter its cleanup wait
+    task.cancel()  # the second cancellation, while cleanup waits on the upload
+    release_upload.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Without the fix the task ends before the upload lands; list only once it has.
+    assert await asyncio.to_thread(upload_done.wait, 5), "upload never finished"
+    listing = await asyncio.to_thread(client.list_objects_v2, Bucket=_BUCKET, Prefix="tw/")
+    assert listing.get("KeyCount", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_put_stream_logs_when_removing_the_orphan_fails(
+    s3_store: S3FileStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = s3_store._client  # noqa: SLF001 - need the raw client to patch upload_fileobj
+    original_upload_fileobj = client.upload_fileobj
+    upload_started = threading.Event()
+    release_upload = threading.Event()
+
+    def _gated_upload_fileobj(fileobj: IO[bytes], bucket: str, key: str) -> None:
+        upload_started.set()
+        release_upload.wait(timeout=5)
+        original_upload_fileobj(fileobj, bucket, key)
+
+    def _boom(**kwargs: object) -> object:
+        raise _client_error("DeleteObject")
+
+    monkeypatch.setattr(client, "upload_fileobj", _gated_upload_fileobj)
+    monkeypatch.setattr(client, "delete_object", _boom)
+
+    ref = await s3_store.allocate("file-deletefail01")
+    task = asyncio.ensure_future(s3_store.put_stream(ref, _iter([b"data"])))
+    assert await asyncio.to_thread(upload_started.wait, 5), "upload thread never started"
+    task.cancel()
+    release_upload.set()
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert "failed to remove orphaned upload" in caplog.text
+
+
 def test_missing_boto3_names_the_extra_to_install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "boto3", None)
 
