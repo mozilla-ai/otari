@@ -1400,6 +1400,16 @@ def get_web_provider_client(request: Request) -> httpx.AsyncClient:
     return client
 
 
+def get_optional_web_provider_client(request: Request) -> httpx.AsyncClient | None:
+    """The app's web provider client, or ``None`` outside the app's lifespan, where a provider opens its own.
+
+    For ``ToolPorts``, which every completion route takes, so a request that runs
+    no web tool never depends on the client.
+    """
+    client: httpx.AsyncClient | None = getattr(request.app.state, "web_provider_client", None)
+    return client
+
+
 def get_overview_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
@@ -1821,16 +1831,22 @@ RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
 
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
 WebProviderClientDep = Annotated[httpx.AsyncClient, Depends(get_web_provider_client)]
+OptionalWebProviderClientDep = Annotated[httpx.AsyncClient | None, Depends(get_optional_web_provider_client)]
 
 
 @dataclass(frozen=True, kw_only=True)
 class ToolPorts:
-    """The ports a request's tools reach."""
+    """The ports a request's tools reach, and the client their web providers are called through.
+
+    ``web_provider_client`` is the app's; ``None`` outside its lifespan, or where
+    a test builds this by hand, and a provider then opens its own for the call.
+    """
 
     code_execution: CodeExecutionPort | None
     code_execution_policy: CodeExecutionPolicyPort
     mcp_server: McpServerPort
     web_search_policy: WebSearchPolicyPort
+    web_provider_client: httpx.AsyncClient | None = None
 
 
 def get_tool_ports(
@@ -1838,6 +1854,7 @@ def get_tool_ports(
     code_execution_policy: CodeExecutionPolicyPortDep,
     mcp_server: McpServerPortDep,
     web_search_policy: WebSearchPolicyPortDep,
+    web_provider_client: OptionalWebProviderClientDep,
 ) -> ToolPorts:
     """Resolve the ports a request's tools reach."""
     return ToolPorts(
@@ -1845,6 +1862,7 @@ def get_tool_ports(
         code_execution_policy=code_execution_policy,
         mcp_server=mcp_server,
         web_search_policy=web_search_policy,
+        web_provider_client=web_provider_client,
     )
 
 

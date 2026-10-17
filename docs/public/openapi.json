@@ -42028,7 +42028,7 @@
     },
     "/api/v1/search-tools/{name}/test": {
       "post": {
-        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test\nyet, and answers a 400.",
+        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in\nfetcher, fetches as a fetch tool call does, with no domain policy.",
         "operationId": "search-tools-test_search_tool",
         "parameters": [
           {

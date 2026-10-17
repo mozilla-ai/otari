@@ -162,7 +162,9 @@ The dashboard accepts dollars per call. The pricing API stores the value in
 `input_price_per_million`, so one cent per call is `10000`.
 
 With `require_pricing: true`, an unpriced gateway-run tool is refused before the
-model call. A failed tool invocation is recorded but not charged. Charges settle
+model call. For web fetch that check still reads only the `otari:web_fetch` row,
+whichever fetch instance serves the calls. A failed tool invocation is recorded
+but not charged. Charges settle
 on the final usage row alongside model tokens.
 
 The usage row's pricing breakdown has one line per tool and label, and the
@@ -187,12 +189,13 @@ over its calls.
 An organization's pricing override applies to its calls as to its models, with
 one limit: a call the deployment pays for, which an instance or the built-in
 fetcher served, takes only an override the deployment operator set, as a
-request on a hosted provider does. The limit applies once instances serve the
-in-loop tools; a call labeled `otari:<tool>` takes any override.
+request on a hosted provider does. A call labeled `otari:<tool>` takes any
+override.
 
-Instances do not serve the in-loop tools yet, and the in-loop tool runs
-organization keys on the older backend, so today's lines are labeled
-`otari:<tool>`.
+Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
+when `web_fetch_default_tool` names none. Search instances do not serve the
+in-loop tool yet, and it runs organization keys on the older backend, so today's
+search lines are labeled `otari:web_search`.
 
 Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
@@ -522,12 +525,15 @@ model-facing function accepts exactly one field:
 Otari retrieves one public HTTP or HTTPS URL, validates every redirect, and
 extracts HTML, textual formats (including Markdown, JSON, XML, and JavaScript),
 or text-bearing PDF content. Private, loopback, link-local, and otherwise unsafe
-destinations are rejected. Anthropic's own fetch keyword is passed through
+destinations are rejected. This is the built-in fetcher, `builtin_fetch`, which
+serves the tool unless `web_fetch_default_tool` names a fetch instance of a
+[fetch provider](#fetch-providers). Anthropic's own fetch keyword is passed through
 unchanged unless the request [asks Otari to run it](#anthropics-web-fetch).
 
-The tool result contains the display-safe source URL, the content type, an
-optional requested URL when redirects changed the destination, extracted
-content, and a warning that fetched content is untrusted. URL query strings and
+The tool result contains the display-safe source URL, the content type (left out
+when a fetch provider does not report one), an optional requested URL when
+redirects changed the destination, extracted content, and a warning that fetched
+content is untrusted. URL query strings and
 fragments are omitted from the displayed metadata. The complete result is
 limited to 50 KiB of valid UTF-8; the downloaded body is limited to 5 MiB and
 PDF extraction is also bounded by page, time, memory, and intermediate-output
@@ -540,8 +546,10 @@ a `[tool error]` for the model to recover from. Non-streaming requests return
 HTTP `422`; a response that is already streaming emits an error event and ends
 without a completed answer.
 
-Successful Fetch calls are billed under `otari:web_fetch`; ordinary Fetch
-failures return sanitized tool errors, are counted as errors, and are not billed.
+Successful Fetch calls are billed as [Pricing a gateway-run
+tool](#pricing-a-gateway-run-tool) says: under the fetch instance that served
+them, then `otari:web_fetch`. Ordinary Fetch failures return sanitized tool
+errors, are counted as errors, and are not billed.
 
 Declaring Fetch authorizes the model to make arbitrary public GET requests
 within the workspace domain policy. Fetched content can contain prompt
@@ -553,14 +561,28 @@ is unacceptable.
 ### Fetch providers
 
 A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
-names a provider for `otari_web_fetch` and for enriching search results. Neither
-runs on fetch instances yet, so the built-in fetcher above still does both;
-`POST /api/v1/search-tools/{name}/test` with a `url` tries one.
+names a provider for `otari_web_fetch` and for enriching search results.
+`web_fetch_default_tool` names the instance the fetch tool runs on. Enrichment
+does not run on fetch instances yet, so the built-in fetcher above still enriches
+search results. `POST /api/v1/search-tools/{name}/test` with a `url` tries an
+instance.
+
+On a fetch instance, the provider fetches the page and follows its redirects on
+its own side. Otari checks the requested URL before the call, and the URL the
+provider reports finding the page at after it. Its host must pass the domain
+policy, and may not be `localhost` or an IP address, in any of its forms, that is
+not public. Other hostnames are the provider's to resolve, so Otari does not check
+where they lead, as the built-in fetcher does. A provider's failure reaches the
+model as
+`[tool error] <provider> fetch failed (<tag>)`, with the HTTP status when there is
+one, and never with the provider's own message.
 
 - **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
   reports what each fetch costs (`costDollars.total`).
 - **Tabstack** (`tabstack`) needs an API key, read from the instance's
-  `api_key`, such as `${TABSTACK_API_KEY}`, and reports no cost. Tabstack's
+  `api_key`, such as `${TABSTACK_API_KEY}`. It reports no cost, so a fetch is
+  billed at the instance's rate, `tabstack:<fetch-tool-name>`, else
+  `otari:web_fetch`. Tabstack's
   [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
   page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
   whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.

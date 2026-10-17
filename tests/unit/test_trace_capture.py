@@ -11,7 +11,7 @@ from collections.abc import MutableMapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -524,8 +524,7 @@ async def test_a_response_that_breaks_off_is_an_incomplete_step() -> None:
 
 @pytest.mark.asyncio
 async def test_a_web_fetch_records_a_timed_tool_span() -> None:
-    service = AsyncMock(spec=WebFetchService)
-    service.fetch.return_value = WebFetchResult(
+    page = WebFetchResult(
         text="Hello",
         content_type="text/html",
         content_kind="html",
@@ -534,11 +533,11 @@ async def test_a_web_fetch_records_a_timed_tool_span() -> None:
         redirect_count=0,
     )
     trace = _trace()
-    backend = WebRetrievalBackend(
-        enable_search=False, enable_fetch=True, retrieval_service=service, fetch_policy=DomainPolicy(), trace=trace
-    )
-    async with backend:
-        await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com"})
+    # The old backend hands the fetch to the fetch backend, which records the span; it records none itself.
+    backend = WebRetrievalBackend(enable_search=False, enable_fetch=True, fetch_policy=DomainPolicy(), trace=trace)
+    with patch.object(WebFetchService, "fetch", new=AsyncMock(return_value=page)):
+        async with backend:
+            await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com"})
 
     [span] = trace.spans
     assert (span.kind, span.tool_name, span.tool_type, span.outcome) == (

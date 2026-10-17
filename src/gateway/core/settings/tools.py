@@ -313,6 +313,12 @@ class ToolInstance:
     fetch_tool: str | None = None
 
 
+# The fetch instance that always exists, on otari's own fetcher.
+BUILTIN_FETCH_INSTANCE = ToolInstance(
+    name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, library_backed=True
+)
+
+
 @dataclass(frozen=True)
 class SynthesizedSearchInstance:
     """The in-loop search backend the legacy settings describe.
@@ -481,7 +487,7 @@ class ToolSettings(BaseModel):
         description=(
             "The fetch instance for the otari_web_fetch tool and for enriching search results, "
             "unless a search instance names its own fetch_tool. When unset: builtin_fetch, the "
-            "built-in fetcher. Not in effect yet: see docs/configuration.md."
+            "built-in fetcher. Not in effect yet for enrichment: see docs/configuration.md."
         ),
     )
     web_search_max_calls: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -710,11 +716,7 @@ def effective_fetch_instances(settings: ToolSettings) -> dict[str, ToolInstance]
     So is one that breaks the name rules, which only a stored row can, since a
     configured one stops startup.
     """
-    instances = {
-        BUILTIN_FETCH: ToolInstance(
-            name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, library_backed=True
-        ),
-    }
+    instances = {BUILTIN_FETCH: BUILTIN_FETCH_INSTANCE}
     for name, entry in settings.fetch_tools.items():
         if isinstance(entry, dict) and name not in settings.search_tools and not instance_name_problems(name):
             instances[name] = _instance("fetch", name, entry, library_backed=True)

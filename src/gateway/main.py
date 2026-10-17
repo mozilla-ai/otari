@@ -140,7 +140,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
-from gateway.services.tools import build_web_provider_client
+from gateway.services.tools import build_web_provider_client, register_builtin_fetcher
 from gateway.services.traces import RequestTraces, TraceWriter, stored_by
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.version import __version__
@@ -1059,6 +1059,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # Before any route can make a provider call.
     any_search.install_log_filter()
     any_fetch.install_log_filter()
+    # any-fetch's builtin provider is otari's own fetcher, registered here rather than on import.
+    register_builtin_fetcher()
 
     app = FastAPI(
         title="otari",
