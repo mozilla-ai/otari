@@ -917,7 +917,9 @@ def provider_failure(exc: BaseException, provider: str | None) -> WebToolFailure
     if kind == "timeout":
         return WebToolFailure.of(provider, None, "timeout")
     if kind == "conn_err":
-        return WebToolFailure.of(provider, None, "network")
+        # A search's ``network`` stays non-retryable; a completion's lost
+        # connection is one the fallback walk already retries.
+        return replace(WebToolFailure.of(provider, None, "network"), retryable=True)
     if status_code is not None and status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
         return WebToolFailure.of(provider, status_code, upstream_error_tag(exc) or "http_error")
     return None
@@ -6076,6 +6078,9 @@ async def run_single_attempt_stream(
                 await log_exhausted_plan(
                     ctx, adapter, exhausted, stopped_on[0] if stopped_on else None, tool_tally=tool_ctx.tally
                 )
+                # The walk raises from the failure that ended it, on the candidate it stopped on.
+                if exhausted.__cause__ is not None and stopped_on:
+                    with_provider_failure(exhausted, exhausted.__cause__, stopped_on[0].instance)
                 raise
             finally:
                 await _absorbed_rows_written(absorbed_rows)
@@ -6315,9 +6320,11 @@ async def run_streaming_with_fallback(
     # all-failed path below.
     pending_error_reports: list[_PendingUsageReport] = []
     attempt_errors: list[BaseException] = []
+    failed_attempts: list[ResolvedAttempt] = []
 
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
         attempt_errors.append(failure.exception)
+        failed_attempts.append(attempt)
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -6380,7 +6387,8 @@ async def run_streaming_with_fallback(
             kind = error_kind_for_status(rejection.status_code)
             shared = adapter.error(rejection.status_code, str(rejection.detail), kind, dict(rejection.headers or {}))
             raise with_attempt_id(shared, last_attempt_id) from exc
-        raise_all_streaming_attempts_failed(adapter, exc, route, last_attempt_id)
+        last_provider = failed_attempts[-1].provider if failed_attempts else None
+        raise_all_streaming_attempts_failed(adapter, exc, route, last_attempt_id, last_provider)
 
     tool_mode = _tools_for(chosen).use_tool_loop
     if tool_mode:
@@ -6452,11 +6460,13 @@ def raise_all_streaming_attempts_failed(
     exc: Exception,
     route: ResolvedRoute,
     last_attempt_id: str | None = None,
+    last_provider: str | None = None,
 ) -> NoReturn:
     """Map pre-stream failures, preserving sandbox retry hints and provider status.
 
     ``last_attempt_id`` names the attempt that failed last, which the hybrid
-    protocol owes the caller on total failure.
+    protocol owes the caller on total failure, and ``last_provider`` is the
+    provider :func:`with_provider_failure` names.
     """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
@@ -6465,8 +6475,6 @@ def raise_all_streaming_attempts_failed(
         logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
-    # ``exc`` is the last attempt's failure, so its provider is the one named.
-    last_provider = route.attempts[-1].provider if route.attempts else None
     if len(route.attempts) <= 1:
         raise with_attempt_id(
             with_provider_failure(adapter.provider_error(exc), exc, last_provider), last_attempt_id
@@ -6536,6 +6544,7 @@ async def run_platform_non_stream(
     # so they can be flushed inline if the request ends in an exception.
     pending_error_reports: list[_PendingUsageReport] = []
     successful_report: tuple[ResolvedAttempt, Any] | None = None
+    last_failed: ResolvedAttempt | None = None
 
     def _report_attempt_outcome(
         attempt: ResolvedAttempt,
@@ -6544,10 +6553,11 @@ async def run_platform_non_stream(
         error_class: str | None,
         is_final_attempt: bool,
     ) -> None:
-        nonlocal successful_report
+        nonlocal successful_report, last_failed
         if outcome == "success":
             successful_report = (attempt, usage)
             return
+        last_failed = attempt
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -6596,7 +6606,7 @@ async def run_platform_non_stream(
         logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
         await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
-    except HTTPException:
+    except HTTPException as exhausted:
         # An error response drops the queued BackgroundTasks, so send the
         # per-attempt error reports inline before propagating. The background
         # copies never run on this path, so there is no double-report. This
@@ -6604,6 +6614,8 @@ async def run_platform_non_stream(
         # all-failed path); a CancelledError propagates without doing reporting
         # I/O during teardown.
         await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
+        if exhausted.__cause__ is not None and last_failed is not None:
+            with_provider_failure(exhausted, exhausted.__cause__, last_failed.provider)
         raise
 
     if successful_report is None:
@@ -6904,6 +6916,9 @@ async def run_standalone_non_stream(
                 await log_exhausted_plan(
                     ctx, adapter, exhausted, stopped_on[0] if stopped_on else None, tool_tally=tool_ctx.tally
                 )
+                # The walk raises from the failure that ended it, on the candidate it stopped on.
+                if exhausted.__cause__ is not None and stopped_on:
+                    with_provider_failure(exhausted, exhausted.__cause__, stopped_on[0].instance)
                 raise
             finally:
                 await _absorbed_rows_written(absorbed_rows)
