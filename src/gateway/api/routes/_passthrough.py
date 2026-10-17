@@ -40,7 +40,14 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import ContainerDep, extract_credential_token, get_config, get_db, get_log_writer
+from gateway.api.deps import (
+    ContainerDep,
+    extract_credential_token,
+    get_config,
+    get_db,
+    get_log_writer,
+    model_provider_port_on,
+)
 from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
@@ -125,12 +132,14 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import (
+    ManagedCredentialUnsupported,
     ResolvedProvider,
     missing_credential,
+    missing_declared_credential,
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import unpriced_model_refusal
+from gateway.services.providers import managed_only_candidates, unpriced_model_refusal
 from gateway.services.routing import refuse_local_policy
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
@@ -541,6 +550,31 @@ async def run_passthrough(
                 detail=refusal.detail,
                 headers=error_headers(refusal.code),
             )
+
+    # Managed credentials serve only the completion routes, so a model offered
+    # only on them is refused by name rather than as a provider nobody declared.
+    # The port is resolved only for a request that would otherwise be refused.
+    if (
+        organization_id is not None
+        and missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs) is not None
+        and await managed_only_candidates(
+            config, [resolved], hosted=model_provider_port_on(raw_request, db), organization_id=organization_id
+        )
+    ):
+        await refund_reservation(db, reservation)
+        managed = ManagedCredentialUnsupported(
+            provider=resolved.instance,
+            env_var=None,
+            selector=resolved.alias or f"{resolved.instance}:{resolved.model}",
+            surface=endpoint,
+        )
+        await _log_rejection(
+            managed.detail,
+            row_model=resolved.model,
+            row_provider=resolved.instance,
+            status_code=managed.status_code,
+        )
+        raise HTTPException(status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code))
 
     # Already resolved above (needed there for organization-scoped provider
     # credentials); reused here rather than re-derived, since it is fixed for

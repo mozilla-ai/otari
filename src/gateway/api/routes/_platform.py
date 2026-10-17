@@ -50,7 +50,13 @@ from gateway.services.inference import (
     upstream_exception_shape,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.provider_kwargs import missing_credential, no_candidate_configured_detail, split_selector
+from gateway.services.provider_kwargs import (
+    ManagedCredentialUnsupported,
+    managed_credential_unsupported_detail,
+    missing_credential,
+    no_candidate_configured_detail,
+    split_selector,
+)
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 
@@ -328,6 +334,15 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
         return None
     missing = [entry for entry in map(missing_credential, errors) if entry is not None]
     if len(missing) == len(errors):
+        managed = [entry for entry in missing if isinstance(entry, ManagedCredentialUnsupported)]
+        if managed:
+            # Named ahead of the others: declaring a provider the deployment
+            # serves on its own credentials is not the remedy for those.
+            return HTTPException(
+                status_code=managed[0].status_code,
+                detail=managed_credential_unsupported_detail([entry.selector for entry in managed], managed[0].surface),
+                headers=error_headers(managed[0].code),
+            )
         return HTTPException(
             status_code=missing[0].status_code,
             detail=no_candidate_configured_detail(missing),

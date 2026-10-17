@@ -1255,6 +1255,11 @@ def get_request_session_model_provider_port(
     return container.resolve(ModelProviderPort, db, uow=uow)
 
 
+def model_provider_port_on(request: Request, db: AsyncSession) -> ModelProviderPort:
+    """Resolve the model-provider adapter on ``db``, for a path that asks it only to explain a refusal."""
+    return get_container(request).resolve(ModelProviderPort, db, uow=get_unit_of_work(db))
+
+
 # Deliberately ``get_db`` and not ``PortSessionDep``: every surface that
 # resolves this port (the OTLP receiver, the telemetry read and purge
 # endpoints, user deletion) is standalone-only and already holds a session from
@@ -1888,6 +1893,7 @@ __all__ = [
     "get_file_store",
     "get_log_writer",
     "is_valid_master_key",
+    "model_provider_port_on",
     "require_capability",
     "extract_credential_token",
     "verify_api_key",
