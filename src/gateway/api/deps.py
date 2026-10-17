@@ -324,7 +324,7 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: A
 
 
 async def _admit_api_key(api_key: APIKey) -> APIKey:
-    """Refuse an inactive or expired key, and record its use."""
+    """The checks a key passes once found, shared so a secret, an identity token and an access token admit alike."""
     now = datetime.now(UTC)
     refusal = key_refusal(api_key, now)
     if refusal is not None:
