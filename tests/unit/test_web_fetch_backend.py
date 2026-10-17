@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -79,6 +80,7 @@ from gateway.services.web_retrieval_policy import (
     canonicalize_domain_rules,
     canonicalize_web_url,
 )
+from gateway.types.tool_charges import LabelCalls
 
 _URL = "https://example.com/start"
 _FAKE = "fake-fetch"
@@ -290,6 +292,45 @@ async def test_a_fetched_page_is_billed_and_a_failed_one_is_not(fetcher: AsyncMo
 
     assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 1, "errors": 1}}
     assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: 1}
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_is_recorded_under_its_instances_label_rate_keys_and_reported_cost() -> None:
+    tally = ToolUsageTally()
+    await _call(WebFetchBackend(_fake(cost=0.004), tally=tally))
+    await _call(WebFetchBackend(_fake(cost=0), tally=tally))
+    await _call(WebFetchBackend(_fake(error="timeout", cost=0.004), tally=tally))
+
+    assert tally.label_calls() == [
+        LabelCalls(
+            tool=WEB_FETCH_TOOL_NAME,
+            label=f"fake:{_FAKE}",
+            rate_keys=(f"fake:{_FAKE}", "otari:web_fetch"),
+            calls=2,
+            unreported_calls=0,
+            reported_cost=Decimal("0.004"),
+            enrichment_cost=Decimal(0),
+        )
+    ], "a reported zero is a free call, and a failed call is never billed"
+    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 2, "errors": 1}}
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_fetch_is_recorded_under_builtin_fetch_for_its_rate(fetcher: AsyncMock) -> None:
+    tally = ToolUsageTally()
+    await _call(WebFetchBackend(builtin_fetch_resolved(), tally=tally))
+
+    assert tally.label_calls() == [
+        LabelCalls(
+            tool=WEB_FETCH_TOOL_NAME,
+            label="builtin:builtin_fetch",
+            rate_keys=("builtin:builtin_fetch", "otari:web_fetch"),
+            calls=1,
+            unreported_calls=1,
+            reported_cost=Decimal(0),
+            enrichment_cost=Decimal(0),
+        )
+    ]
 
 
 @pytest.mark.asyncio
