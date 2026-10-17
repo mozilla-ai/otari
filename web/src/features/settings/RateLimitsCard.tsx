@@ -32,6 +32,8 @@ const SCOPE_LABEL: Record<Scope, string> = {
   user: "per user",
   deployment: "deployment",
   model: "per model",
+  // Set through the API or config.yml, which pick the budgets; listed here.
+  budget: "per budget",
 }
 
 // The pattern the gateway holds a name to, since it is part of the counter's key.
@@ -164,6 +166,8 @@ function RuleDialog({
       lease_sec: maxConcurrent === "" ? DEFAULT_LEASE_SEC : leaseSec,
       // Not offered in the form yet, so an edit keeps what the rule has.
       tpm_admission: rule?.tpm_admission ?? "used",
+      mode: rule?.mode ?? "enforce",
+      budgets: draft.per === "budget" ? (rule?.budgets ?? null) : null,
     }
     if (rule) {
       update.mutate({ name: rule.name, body: limits }, { onSuccess: onClose })

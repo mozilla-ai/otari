@@ -37,6 +37,7 @@ _EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
     ("gateway_inline_cost_settlements", "counter", ("outcome",)),
     ("gateway_rate_limit_hits", "counter", ()),
     ("gateway_rate_limit_model_full", "counter", ("rule", "model")),
+    ("gateway_rate_limit_reported", "counter", ("rule",)),
     ("gateway_request_cost_dollars", "histogram", ("provider", "model")),
     ("gateway_request_duration_seconds", "histogram", ("method", "endpoint", "api_version")),
     ("gateway_requests", "counter", ("method", "endpoint", "api_version", "status")),

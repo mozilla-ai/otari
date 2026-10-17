@@ -187,6 +187,11 @@ rate_limits:
     per: model
     models: ["vertex:gemini-2.5-flash"]
     rpm: 100
+  - name: feature       # every user on one budget together, each budget listed on its own
+    per: budget
+    budgets: [end-user-budget-ai, end-user-budget-memories]
+    rpm: 600
+    mode: report        # served anyway, and named in Otari-Rate-Limit-Exceeded
 ```
 
 - `rpm`: requests per minute.
@@ -229,11 +234,29 @@ keeps its request counted, since the provider was sent it.
 A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`),
 the name its pricing uses.
 
+`per: budget` keeps one count for every user on the same budget, such as all of
+a service key's end users on one feature's budget, so it limits a feature as a
+whole where `per: user` limits each user in it. `budgets` narrows it to the
+budgets listed, each still counted on its own; unset, it counts every budget. A
+user on no budget is not counted by it. Like `per: deployment`, it is counted
+after the rules that count the caller alone, so a request over its own limit
+takes no place in a count other users share.
+
+`mode: report` counts a rule the same way and refuses nothing: a request over it
+is served, routing still picks the same candidate, and the response carries
+`Otari-Rate-Limit-Exceeded` naming every report rule it was over (comma-separated).
+The gateway also logs it and counts it in `gateway_rate_limit_reported_total`
+by rule. A reported request is not counted in the window it was over, as a
+refused one is not, so the count is the one the rule would keep if it were
+enforced. Use it to watch a limit before enforcing it, or to see when traffic
+borrows beyond a share without refusing anyone; `mode: enforce` is the default.
+
 Rules can also be added, changed and removed from the dashboard (Settings, Rate
 limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
 replica that served it and on every other replica within 30 seconds; a changed
 rule keeps the requests it already counted. Choose "Each model" to add a
-`per: model` rule and pick its models. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
+`per: model` rule and pick its models. `per: budget`, `budgets` and `mode` are
+set through the API. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
 whose name config.yml later declares is skipped with a warning at startup and
 left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it. A
 hosted control plane serves no inference, so its dashboard does not offer the
