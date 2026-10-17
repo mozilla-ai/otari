@@ -30,6 +30,9 @@ from gateway.models.api_keys import APIKeyFederationRule
 from gateway.services.url_safety import UnsafeURLError, validate_federation_url
 
 MAX_TOKEN_BYTES = 16 * 1024
+# A token with longer than this left before its ``exp`` is refused: platform identity tokens last an hour, so a
+# far-off expiry means an issuer minting what is in effect a static secret.
+MAX_TOKEN_LIFETIME_SECONDS = 24 * 3600
 
 
 class FederationRefusedError(Exception):
@@ -167,6 +170,8 @@ class FederatedTokenVerifier:
             raise FederationRefusedError("federation_invalid_token") from exc
         except IdentityFetchError as exc:
             raise FederationUnavailableError from exc
+        if identity.expires_at - time.time() > MAX_TOKEN_LIFETIME_SECONDS:
+            raise FederationRefusedError("federation_lifetime_too_long")
         email = identity.email.strip().lower() if identity.email and identity.email.strip() else None
         return FederatedIdentity(
             issuer=identity.issuer,

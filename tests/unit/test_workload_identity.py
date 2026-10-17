@@ -189,6 +189,15 @@ async def test_an_expired_token_is_refused() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_token_expiring_more_than_a_day_out_is_refused() -> None:
+    verifier = _verifier(_Issuer([_jwk(SIGNING_KEY, "k1")]))
+    now = int(time.time())
+
+    assert await _refusal(verifier, _token(exp=now + 24 * 3600 + 120)) == "federation_lifetime_too_long"
+    assert (await verifier.verify(_token(exp=now + 24 * 3600 - 120))).subject == SUBJECT
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("verified", [False, "true", None])
 async def test_an_email_not_marked_verified_is_dropped(verified: object) -> None:
     verifier = _verifier(_Issuer([_jwk(SIGNING_KEY, "k1")]))
