@@ -21,6 +21,7 @@ const FROM_FILE: RateLimitRule = {
   max_concurrent: 200,
   lease_sec: 900,
   tpm_admission: "estimate",
+  mode: "enforce",
   source: "config",
 }
 
@@ -32,6 +33,7 @@ const STORED: RateLimitRule = {
   max_concurrent: null,
   lease_sec: 900,
   tpm_admission: "estimate",
+  mode: "enforce",
   source: "dashboard",
   updated_at: "2026-10-03T12:00:00Z",
 }
@@ -105,6 +107,7 @@ describe("RateLimitsCard", () => {
         max_concurrent: null,
         lease_sec: 900,
         tpm_admission: "estimate",
+        mode: "enforce",
         source: "config",
       },
     ])
@@ -282,6 +285,7 @@ describe("RateLimitsCard", () => {
             max_concurrent: null,
             lease_sec: 900,
             tpm_admission: "estimate",
+            mode: "enforce",
           },
         },
       ]),

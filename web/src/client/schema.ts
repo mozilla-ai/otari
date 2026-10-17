@@ -14465,6 +14465,11 @@ export interface components {
          */
         RateLimitRuleCreate: {
             /**
+             * Budgets
+             * @description The budgets a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -14475,6 +14480,13 @@ export interface components {
              * @description Requests in flight at once.
              */
             max_concurrent?: number | null;
+            /**
+             * Mode
+             * @description 'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "report";
             /**
              * Models
              * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
@@ -14490,7 +14502,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user" | "model";
+            per: "deployment" | "key" | "user" | "model" | "budget";
             /**
              * Rpm
              * @description Requests per minute.
@@ -14515,6 +14527,11 @@ export interface components {
          */
         RateLimitRulePublic: {
             /**
+             * Budgets
+             * @description The budgets a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -14525,6 +14542,13 @@ export interface components {
              * @description Requests in flight at once.
              */
             max_concurrent?: number | null;
+            /**
+             * Mode
+             * @description 'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "report";
             /**
              * Models
              * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
@@ -14540,7 +14564,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user" | "model";
+            per: "deployment" | "key" | "user" | "model" | "budget";
             /**
              * Rpm
              * @description Requests per minute.
@@ -14581,6 +14605,11 @@ export interface components {
          */
         RateLimitRuleUpdate: {
             /**
+             * Budgets
+             * @description The budgets a per: budget rule counts; null for every budget, and on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most.
              */
@@ -14591,6 +14620,11 @@ export interface components {
              */
             max_concurrent?: number | null;
             /**
+             * Mode
+             * @description 'enforce' refuses a request over the rule; 'report' serves it and names the rule.
+             */
+            mode?: ("enforce" | "report") | null;
+            /**
              * Models
              * @description The instance:model names a per: model rule limits; null for any other rule.
              */
@@ -14599,7 +14633,7 @@ export interface components {
              * Per
              * @description What one count is shared by.
              */
-            per?: ("deployment" | "key" | "user" | "model") | null;
+            per?: ("deployment" | "key" | "user" | "model" | "budget") | null;
             /**
              * Rpm
              * @description Requests per minute.

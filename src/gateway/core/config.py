@@ -353,6 +353,14 @@ class RateLimitRule(BaseModel):
     call the model rather than at admission, so a routing policy skips a full
     model and tries its next candidate; a request with no candidate left is
     refused.
+
+    ``per: budget`` is one count for every user on the same budget, such as all
+    of a service key's end users on one feature's budget; ``budgets`` narrows it
+    to those budgets.
+
+    ``mode: report`` counts the same way and never refuses: a request over the
+    limit is served, and the response names the rule in
+    ``Otari-Rate-Limit-Exceeded``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -361,13 +369,28 @@ class RateLimitRule(BaseModel):
         pattern=r"^[A-Za-z0-9_.-]+$",
         description="Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
     )
-    per: Literal["deployment", "key", "user", "model"] = Field(description="What one count is shared by.")
+    per: Literal["deployment", "key", "user", "model", "budget"] = Field(description="What one count is shared by.")
     models: list[str] | None = Field(
         default=None,
         description=(
             "The models a `per: model` rule limits, each as instance:model (the provider instance the "
             "model is called through, then the model), each counted on its own. Required there and "
             "refused on any other rule."
+        ),
+    )
+    budgets: list[str] | None = Field(
+        default=None,
+        description=(
+            "The budgets a `per: budget` rule counts, each on its own; unset counts every budget. "
+            "Refused on any other rule."
+        ),
+    )
+    mode: Literal["enforce", "report"] = Field(
+        default="enforce",
+        description=(
+            "'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way "
+            "but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a "
+            "limit can be watched before it is enforced."
         ),
     )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
@@ -403,6 +426,13 @@ class RateLimitRule(BaseModel):
     def _requires_a_limit(self) -> "RateLimitRule":
         if self.rpm is None and self.tpm is None and self.max_concurrent is None:
             msg = f"rate limit rule '{self.name}' sets none of rpm, tpm or max_concurrent"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _budgets_belong_to_per_budget(self) -> "RateLimitRule":
+        if self.budgets is not None and self.per != "budget":
+            msg = f"rate limit rule '{self.name}' sets budgets, which only a per: budget rule reads"
             raise ValueError(msg)
         return self
 
