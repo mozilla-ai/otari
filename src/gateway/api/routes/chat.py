@@ -39,7 +39,6 @@ from gateway.api.routes._pipeline import (
     log_usage,
     prepare_gateway_tools,
     provider_error_headers,
-    provider_failure,
     provider_failure_detail,
     raise_all_streaming_attempts_failed,
     rate_limit_headers,
@@ -73,6 +72,7 @@ from gateway.services.inference import (
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
+    provider_failure,
     require_choices,
     with_upstream_user,
 )

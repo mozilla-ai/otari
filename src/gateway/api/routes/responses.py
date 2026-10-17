@@ -39,7 +39,6 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     prepare_gateway_tools,
     provider_error_headers,
-    provider_failure,
     provider_failure_detail,
     raise_all_streaming_attempts_failed,
     release_reservation,
@@ -72,6 +71,7 @@ from gateway.services.files import StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
     call_responses,
+    provider_failure,
     responses_user_fields,
     serves_responses,
     strip_gateway_minted_items,

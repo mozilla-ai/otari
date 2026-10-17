@@ -49,7 +49,6 @@ from gateway.api.routes._pipeline import (
     failure_error_message,
     failure_status_code,
     provider_error_headers,
-    provider_failure,
     provider_failure_detail,
     refusal_code,
     stream_error_code,
@@ -66,6 +65,7 @@ from gateway.services.inference import (
     is_provider_credential_rejection,
     is_retry_futile,
     is_upstream_request_fault,
+    provider_failure,
     upstream_retry_after,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded

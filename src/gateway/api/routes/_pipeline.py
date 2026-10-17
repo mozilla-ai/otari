@@ -253,9 +253,9 @@ from gateway.services.inference import (
     is_upstream_connect_failure,
     is_upstream_request_fault,
     is_upstream_stream_interrupted,
+    provider_failure,
     upstream_body_messages,
     upstream_error_message,
-    upstream_error_tag,
     upstream_exception_chain,
     upstream_exception_shape,
     upstream_retry_after,
@@ -345,7 +345,6 @@ from gateway.services.tools import (
     ProviderToolDeclaration,
     ToolUseBudget,
     WebClaims,
-    WebToolFailure,
     admit_mcp_servers,
     admit_web_access,
     decide_candidate_tools,
@@ -898,31 +897,6 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     if retry_after is not None:
         headers["Retry-After"] = retry_after
     return headers
-
-
-def provider_failure(exc: BaseException, provider: str | None) -> WebToolFailure | None:
-    """What a failure on the provider's own side may show the caller, or ``None``.
-
-    The same four fields a direct search's 502 carries (decision 67): the
-    provider, its HTTP status, a tag and whether a retry may help. Only for a
-    failure the provider itself caused: a timeout, a lost connection or a 5xx,
-    where the tag is the provider's own code when its error body names one
-    (Exa's ``SERVICE_OVERLOADED``). A 4xx keeps its fixed answer: billing, quota
-    and a rejected credential describe the gateway's own account, and a 429
-    already carries ``upstream_rate_limited``.
-    """
-    if provider is None:
-        return None
-    kind, status_code = upstream_exception_shape(exc)
-    if kind == "timeout":
-        return WebToolFailure.of(provider, None, "timeout")
-    if kind == "conn_err":
-        # A search's ``network`` stays non-retryable; a completion's lost
-        # connection is one the fallback walk already retries.
-        return replace(WebToolFailure.of(provider, None, "network"), retryable=True)
-    if status_code is not None and status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
-        return WebToolFailure.of(provider, status_code, upstream_error_tag(exc) or "http_error")
-    return None
 
 
 def with_provider_failure(error: HTTPException, exc: BaseException, provider: str | None) -> HTTPException:

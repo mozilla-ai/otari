@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from typing import Literal, TypeVar
 
 import httpx
@@ -16,6 +17,7 @@ from openai import APITimeoutError as _OpenAIAPITimeoutError
 
 from gateway.core.retry_after import bounded_retry_after
 from gateway.services.provider_kwargs import missing_credential
+from gateway.services.tools import WebToolFailure
 from gateway.streaming import IncompleteStreamError
 
 # Statuses on which the billing-message probe runs. A 402 is payment required by
@@ -314,6 +316,34 @@ def upstream_error_tag(exc: BaseException) -> str | None:
             value = _body_error_field(body, name)
             if value is not None and _ERROR_TAG.match(value):
                 return value
+    return None
+
+
+_SERVER_ERROR = 500
+
+
+def provider_failure(exc: BaseException, provider: str | None) -> WebToolFailure | None:
+    """What a failure on the provider's own side may show the caller, or ``None``.
+
+    The same four fields a direct search's 502 carries (decision 67): the
+    provider, its HTTP status, a tag and whether a retry may help. Only for a
+    failure the provider itself caused: a timeout, a lost connection or a 5xx,
+    where the tag is the provider's own code when its error body names one
+    (Exa's ``SERVICE_OVERLOADED``). A 4xx keeps its fixed answer: billing, quota
+    and a rejected credential describe the gateway's own account, and a 429
+    already carries ``upstream_rate_limited``.
+    """
+    if provider is None:
+        return None
+    kind, status_code = upstream_exception_shape(exc)
+    if kind == "timeout":
+        return WebToolFailure.of(provider, None, "timeout")
+    if kind == "conn_err":
+        # A search's ``network`` stays non-retryable; a completion's lost
+        # connection is one the fallback walk already retries.
+        return replace(WebToolFailure.of(provider, None, "network"), retryable=True)
+    if status_code is not None and status_code >= _SERVER_ERROR:
+        return WebToolFailure.of(provider, status_code, upstream_error_tag(exc) or "http_error")
     return None
 
 
