@@ -36,6 +36,7 @@ import type {
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
   WorkspaceMember,
   WorkspaceProviderKeyOverride,
   WorkspaceWebSearchConfig,
@@ -866,14 +867,30 @@ export function workspaceMcpServer(
     url: "https://mcp.example.com/github",
     purpose_hint: null,
     // Null is how "no allow-list" is stored, which is the neutral state a
-    // builder wants. Not interchangeable with `[]` as a stored value, even
-    // though `mcp_client` happens to read both as "expose everything".
+    // builder wants. Not interchangeable with `[]`, which admits no tool.
     allowed_tools: null,
     enabled: true,
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
+    // Never checked, which is how a row stored before checks existed reads.
+    health: null,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function workspaceMcpServerHealth(
+  overrides: Partial<WorkspaceMcpServerHealth> = {},
+): WorkspaceMcpServerHealth {
+  return {
+    status: "healthy",
+    checked_at: "2026-08-01T00:00:00+00:00",
+    error: null,
+    http_status: null,
+    tool_count: 2,
+    missing_allowed_tools: [],
+    tools: ["list_issues", "get_issue"],
     ...overrides,
   }
 }
