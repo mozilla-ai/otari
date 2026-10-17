@@ -8,7 +8,14 @@ domains share it without importing each other.
 from dataclasses import dataclass
 from decimal import Decimal
 
-__all__ = ["LabelCalls"]
+__all__ = ["ORGANIZATION_KEY_LABEL_PREFIX", "LabelCalls"]
+
+# The label of a call a workspace's organization key served starts with this,
+# then names the provider (``org:tavily``). It is never a pricing row: the
+# resolver writes it, and pricing reads it only to tell a call on the
+# organization's own key from one the deployment pays for, so both take it from
+# here.
+ORGANIZATION_KEY_LABEL_PREFIX = "org:"
 
 
 @dataclass(frozen=True, slots=True)

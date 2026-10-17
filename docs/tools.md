@@ -184,6 +184,11 @@ since the deployment cannot price the organization's own account. A search also
 adds what its enrichment fetches reported. The line's `unit_rate` is its cost
 over its calls.
 
+An organization's pricing override applies to its calls as to its models, with
+one limit: a call the deployment pays for, which an instance or the built-in
+fetcher served, takes only an override the deployment operator set, as a
+request on a hosted provider does.
+
 Instances do not serve the in-loop tools yet, and the in-loop tool runs
 organization keys on the older backend, so today's lines are labeled
 `otari:<tool>`.

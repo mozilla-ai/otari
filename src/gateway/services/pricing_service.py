@@ -10,19 +10,26 @@ from sqlalchemy import ColumnElement, case, distinct, func, inspect, not_, or_, 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
-from gateway.core.metered_pricing import priced_per_request, quantize_cost
+from gateway.core.metered_pricing import priced_per_request
 from gateway.log_config import logger
 from gateway.models.pricing import OPERATOR_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
+from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing import (
     GATEWAY_TOOL_PRICING_PROVIDER as GATEWAY_TOOL_PRICING_PROVIDER,
 )
 from gateway.services.pricing import (
     ModelsDevPrice,
+    ToolCharges,
+    ToolRate,
+    ToolRateLookup,
     active_timeline,
     billed_search_units,
+    charge_tool_calls,
+    paid_by_the_deployment,
     request_rate,
     resolve_as_of,
+    tool_rate_lookup,
 )
 from gateway.services.pricing import (
     gateway_tool_pricing_key as gateway_tool_pricing_key,
@@ -775,65 +782,6 @@ class RequestPrices:
         return self._resolved[key]
 
 
-class ToolRate(NamedTuple):
-    """The pricing row that prices a gateway-run tool call, and the rate key it was found under."""
-
-    rate_key: str
-    pricing: ModelPricing
-
-
-class UnpricedToolLabel(NamedTuple):
-    """A label whose calls reported no cost and whose rate keys found no pricing row."""
-
-    tool: str
-    label: str
-    #: The row an operator would add: the label's first rate key.
-    rate_key: str
-    #: The calls that went unpriced: those that reported no cost.
-    calls: int
-
-
-class ToolCharges(NamedTuple):
-    """What a request's successful gateway-run tool calls cost.
-
-    ``lines`` holds one charge line per tool and label, ``unit_rates`` each
-    tool's cost over its calls, and ``unpriced`` the labels that ran calls no
-    row could price. A tool served under several labels has one unit rate, so
-    its calls times that rate is still its spend.
-    """
-
-    total: Decimal
-    lines: list[dict[str, float | int | str]]
-    unit_rates: dict[str, Decimal]
-    unpriced: list[UnpricedToolLabel]
-
-
-async def resolve_tool_rate(
-    db: AsyncSession,
-    rate_keys: Sequence[str],
-    *,
-    as_of: datetime | None = None,
-    organization_id: uuid.UUID | None = None,
-) -> ToolRate | None:
-    """The first of one call's rate keys that has a pricing row, with that row.
-
-    The lookup :func:`price_tool_calls` prices a label with, for a caller that
-    holds one resolved call: in key order, first match winning, each key
-    resolved through the organization's overrides first and in both spellings,
-    and never through the models.dev fallback.
-    """
-    rates = await _tool_rates(db, rate_keys, as_of=as_of, organization_id=organization_id)
-    return _first_tool_rate(rate_keys, rates)
-
-
-def _first_tool_rate(rate_keys: Sequence[str], rates: Mapping[str, ModelPricing]) -> ToolRate | None:
-    for rate_key in rate_keys:
-        pricing = rates.get(rate_key)
-        if pricing is not None:
-            return ToolRate(rate_key, pricing)
-    return None
-
-
 async def price_tool_calls(
     db: AsyncSession,
     calls: Sequence[LabelCalls],
@@ -843,172 +791,80 @@ async def price_tool_calls(
 ) -> ToolCharges:
     """Price a request's successful gateway-run tool calls, per tool and label.
 
-    A label costs the costs its calls reported, plus its first rate key's rate
-    for each call that reported none, plus what its enrichment fetches
-    reported. A label or rate keys of ``None`` mean the tool's own
-    ``otari:<tool>`` row; an empty tuple of rate keys prices nothing, so only
-    reported costs count.
-
-    Charge lines use the shape ``calculate_metered_cost`` produces so both
-    kinds share ``UsageLog.pricing_breakdown`` and the dashboard's renderer,
-    except that a tool line carries ``unit_rate`` (USD per call, the label's
-    cost over its calls) where a token line carries ``rate_per_million``. That
-    key is what tells a reader, and the UI, which unit convention applies. A
-    tool line also names its ``label``.
-
-    A label with no reported cost and no pricing row still gets a line, at a
-    zero rate, so the work stays on the row and in the audit trail even when
-    the operator has not priced it. Lookups skip the models.dev fallback: MCP
-    tool names come from a caller-supplied server, and the fallback matches on
-    a bare name, so a tool named after a real model would otherwise be billed
-    at that model's per-million-token rate divided by a million.
+    The charge rule is :func:`gateway.services.pricing.charge_tool_calls`; this
+    looks up the rates it needs, only for the labels with a call that reported
+    no cost.
     """
-    priced = [(entry, _tool_label(entry), _tool_rate_keys(entry)) for entry in calls if entry.calls > 0]
-    if not priced:
-        return ToolCharges(Decimal(0), [], {}, [])
-    rates = await _tool_rates(
-        db, {key for _entry, _label, keys in priced for key in keys}, as_of=as_of, organization_id=organization_id
-    )
-
-    # Keyed by tool and label, so two records of one label with different rate
-    # keys still settle as one line.
-    by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
-    by_tool: dict[str, tuple[int, Decimal]] = {}
-    unpriced: dict[tuple[str, str, str], UnpricedToolLabel] = {}
-    for entry, label, keys in priced:
-        rate = _first_tool_rate(keys, rates)
-        cost = (
-            entry.reported_cost
-            + entry.unreported_calls * flat_request_cost(rate.pricing if rate is not None else None)
-            + entry.enrichment_cost
-        )
-        units, label_cost = by_label.get((entry.tool, label), (0, Decimal(0)))
-        by_label[(entry.tool, label)] = (units + entry.calls, label_cost + cost)
-        tool_calls, tool_cost = by_tool.get(entry.tool, (0, Decimal(0)))
-        by_tool[entry.tool] = (tool_calls + entry.calls, tool_cost + cost)
-        if rate is None and keys and entry.unreported_calls:
-            previous = unpriced.get((entry.tool, label, keys[0]))
-            unpriced[(entry.tool, label, keys[0])] = UnpricedToolLabel(
-                entry.tool, label, keys[0], entry.unreported_calls + (previous.calls if previous else 0)
-            )
-
-    # ``float`` for the JSON charge line; the returned total that settles the
-    # row stays Decimal.
-    lines: list[dict[str, float | int | str]] = [
-        {
-            "meter": f"{tool}_calls",
-            "label": label,
-            "units": units,
-            "unit_rate": float(cost / units),
-            "cost": float(cost),
-        }
-        for (tool, label), (units, cost) in sorted(by_label.items())
-    ]
-    total = quantize_cost(sum((cost for _calls, cost in by_tool.values()), Decimal(0)))
-    unit_rates = {tool: cost / calls for tool, (calls, cost) in by_tool.items()}
-    return ToolCharges(total, lines, unit_rates, list(unpriced.values()))
+    lookups = {lookup for entry in calls if (lookup := tool_rate_lookup(entry)) is not None}
+    rates = await _tool_rates(db, lookups, as_of=as_of, organization_id=organization_id)
+    return charge_tool_calls(calls, rates)
 
 
-def _tool_label(entry: LabelCalls) -> str:
-    return entry.label if entry.label is not None else gateway_tool_pricing_key(entry.tool)
+async def resolve_tool_rate(
+    db: AsyncSession,
+    rate_keys: Sequence[str],
+    *,
+    label: str | None = None,
+    as_of: datetime | None = None,
+    organization_id: uuid.UUID | None = None,
+) -> ToolRate | None:
+    """The rate one call's rate keys resolve to, or ``None`` when none has a pricing row.
 
-
-def _tool_rate_keys(entry: LabelCalls) -> tuple[str, ...]:
-    return entry.rate_keys if entry.rate_keys is not None else (gateway_tool_pricing_key(entry.tool),)
+    The lookup :func:`price_tool_calls` prices each label with, for a caller that
+    holds one resolved call, such as a pricing gate. ``label`` decides whose
+    overrides count, as it does at settlement.
+    """
+    lookup = ToolRateLookup(tuple(rate_keys), paid_by_the_deployment(label))
+    return (await _tool_rates(db, {lookup}, as_of=as_of, organization_id=organization_id))[lookup]
 
 
 async def _tool_rates(
     db: AsyncSession,
-    rate_keys: Iterable[str],
+    lookups: Collection[ToolRateLookup],
     *,
     as_of: datetime | None,
-    organization_id: uuid.UUID | None = None,
-) -> dict[str, ModelPricing]:
-    """Latest-as-of pricing for several tool rate keys, in one query per table.
+    organization_id: uuid.UUID | None,
+) -> dict[ToolRateLookup, ToolRate | None]:
+    """The rate each lookup resolves to: its first rate key with a pricing row.
 
-    One statement rather than a lookup per key: an MCP pool can put up to
-    ``MAX_TOOL_NAMES`` distinct names on a single request, and this runs on the
-    settlement path. Results are assigned into a dict keyed on the rate key, so
-    the last row for a key is the one that wins, and each ``ORDER BY`` below is
-    arranged to make that the right row: least-preferred key spelling first
-    where both are in play, then oldest period first, so the survivor is the
-    canonical spelling's newest applicable row. That is the same precedence
-    :func:`find_model_pricing` applies one key at a time. The models.dev
-    fallback is deliberately not consulted (see the note in
-    :func:`price_tool_calls`).
+    Each key resolves as :func:`resolve_model_pricing` resolves one: the
+    organization's override first, through :func:`resolve_organization_override`,
+    the in-memory statement of the same rule, then the deployment price list in
+    both spellings, canonical first. The models.dev fallback is not consulted:
+    MCP tool names come from a caller-supplied server, and the fallback matches
+    on a bare name, so a tool named after a real model would otherwise be billed
+    at that model's per-million-token rate divided by a million.
+
+    Every key of every lookup is read in one batch per table, because an MCP
+    pool can put up to ``MAX_TOOL_NAMES`` names on one request, and this runs on
+    the settlement path.
     """
-    lookup_time = normalize_effective_at(as_of)
-    canonical_keys = set(rate_keys)
-    if not canonical_keys:
+    if not lookups:
         return {}
-    # Both spellings, mapped back to the rate key, because the gate that admits the
-    # request resolves through ``find_model_pricing`` and that tries the canonical
-    # ``otari:tool`` *and* the legacy ``otari/tool``. Matching only the canonical
-    # one here made the gate and the settlement disagree: a tool priced under the
-    # slash spelling passed the require-pricing check and then settled at zero.
-    # Writes normalize now, which stops new rows landing in the legacy form, but
-    # ``normalize_pricing_key`` returns a key unchanged when its prefix is an
-    # unconfigured instance, so the read side closes the gap rather than trusting
-    # that it never happens.
-    keys = {form: rate_key for rate_key in canonical_keys for form in pricing_key_forms(rate_key)[1:]}
-    # Last, so a rate key that is also another key's legacy spelling maps to itself.
-    keys.update({rate_key: rate_key for rate_key in canonical_keys})
-    stmt = (
-        select(ModelPricing)
-        .where(ModelPricing.model_key.in_(keys), ModelPricing.effective_at <= lookup_time)
-        # Same last-write-wins dict assignment as the override statement below, so
-        # it needs the same key preference. Ordering on time alone let the legacy
-        # spelling win whenever it carried the later ``effective_at``, while
-        # ``find_model_pricing`` gated on the canonical row: the tool was admitted
-        # at one rate and settled at another. This is the likelier half of the two,
-        # because ``model_pricing`` is the table an operator re-imports and it
-        # predates key normalization.
-        .order_by(
-            case((ModelPricing.model_key.in_(canonical_keys), 1), else_=0),
-            ModelPricing.effective_at,
-        )
+    lookup_time = normalize_effective_at(as_of)
+    forms = {form for lookup in lookups for key in lookup.rate_keys for form in pricing_key_forms(key)}
+    overrides = (
+        await load_organization_override_index(db, organization_id, forms) if organization_id is not None else {}
     )
-    found: dict[str, ModelPricing] = {}
-    for row in (await db.execute(stmt)).scalars():
-        found[keys[row.model_key]] = row
+    deployment = await OrganizationModelPricingRepository(db).deployment_rows(forms, lookup_time)
+    return {lookup: _first_tool_rate(lookup, overrides, deployment, lookup_time) for lookup in lookups}
 
-    if organization_id is not None:
-        # Overrides win, resolved in a second batched statement for the same
-        # reason the first one is batched. This has to happen even though the
-        # gate in ``_pipeline`` already consulted overrides: the gate decides
-        # whether a tool *has* a rate and this decides what it *is*, so a tool
-        # priced only by an override would otherwise pass the gate and then be
-        # charged at zero.
-        override_stmt = (
-            select(OrganizationModelPricing)
-            .where(
-                OrganizationModelPricing.organization_id == organization_id,
-                OrganizationModelPricing.model_key.in_(keys),
-                OrganizationModelPricing.effective_from <= lookup_time,
-                or_(
-                    OrganizationModelPricing.effective_to.is_(None),
-                    OrganizationModelPricing.effective_to > lookup_time,
-                ),
-            )
-            # Least-preferred key first, then oldest period first, so the last
-            # write into ``found`` is the canonical spelling's newest applicable
-            # row. Without the key term the winner would be whichever spelling
-            # happened to have the later period, and the same tool could resolve
-            # to a different rate here than through ``find_model_pricing``, which
-            # applies this preference one key at a time.
-            .order_by(
-                # Legacy spelling first, canonical last, so the canonical row is
-                # the one that survives the dict assignment below. Expressed as a
-                # membership test rather than a rank map so it does not depend on
-                # the insertion order of ``keys``.
-                case((OrganizationModelPricing.model_key.in_(canonical_keys), 1), else_=0),
-                OrganizationModelPricing.effective_from,
-            )
-        )
-        for override in (await db.execute(override_stmt)).scalars():
-            found[keys[override.model_key]] = override_as_model_pricing(override)
 
-    return found
+def _first_tool_rate(
+    lookup: ToolRateLookup,
+    overrides: dict[str, list[OverridePeriod]],
+    deployment: Mapping[str, ModelPricing],
+    as_of: datetime,
+) -> ToolRate | None:
+    for rate_key in lookup.rate_keys:
+        forms = pricing_key_forms(rate_key)
+        override = resolve_organization_override(overrides, forms, as_of, deployment_paid=lookup.operator_set_only)
+        if override is not None:
+            return ToolRate(rate_key, flat_request_cost(override), "organization")
+        stored = next((deployment[form] for form in forms if form in deployment), None)
+        if stored is not None:
+            return ToolRate(rate_key, flat_request_cost(stored), "deployment")
+    return None
 
 
 def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricing: bool) -> bool:

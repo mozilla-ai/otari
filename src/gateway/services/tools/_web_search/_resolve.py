@@ -79,6 +79,7 @@ from gateway.models.tools import (
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
+from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX
 
 # What runs a resolved call: one of the libraries, or the old code, which in
 # the loop is the old backend and on the direct endpoint the old SearXNG client
@@ -96,8 +97,6 @@ IN_LOOP_TIMEOUT_S = 15.0
 # since the pricing modules import this package.
 _SEARCH_FALLBACK_RATE = f"otari:{WEB_SEARCH_TOOL_NAME}"
 _FETCH_FALLBACK_RATE = f"otari:{WEB_FETCH_TOOL_NAME}"
-# The label of a call an organization key serves, before the provider: never a pricing row.
-_ORG_LABEL_PREFIX = "org"
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
 
 
@@ -463,7 +462,7 @@ def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[s
     """
     if credential.source == WebToolCredentialSource.HYBRID:
         return None, ()
-    return f"{_ORG_LABEL_PREFIX}:{credential.provider}", (fallback,)
+    return f"{ORGANIZATION_KEY_LABEL_PREFIX}{credential.provider}", (fallback,)
 
 
 def _layered(

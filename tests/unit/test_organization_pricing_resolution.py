@@ -27,7 +27,7 @@ import gateway.models  # noqa: F401  (registers every table on the shared metada
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.pricing_exceptions import OrganizationPricingOverlapError
-from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, SEED_ORIGIN, ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization
 from gateway.ports.model_provider_port import HostedCredential, HostedModels, ModelProviderPort
 from gateway.services.external_usage_service import _load_pricing_index, _resolve_pricing
@@ -35,9 +35,8 @@ from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     validate_period,
 )
+from gateway.services.pricing import ToolRate, UnpricedToolLabel
 from gateway.services.pricing_service import (
-    ToolRate,
-    UnpricedToolLabel,
     find_model_pricing,
     load_organization_override_index,
     price_tool_calls,
@@ -655,7 +654,7 @@ def test_both_lookup_paths_pick_the_canonical_row_when_both_spellings_exist() ->
 
 
 def test_the_deployment_price_list_also_prefers_the_canonical_tool_key() -> None:
-    """``_tool_rates`` resolves two tables, and both need the same preference.
+    """The tool rate lookup resolves two tables, and both need the same preference.
 
     The override statement got it first; this covers the ``model_pricing`` half,
     which is the likelier one in practice because that table is what an operator
@@ -940,7 +939,7 @@ def test_an_override_prices_its_rate_key_ahead_of_the_deployment_row() -> None:
     async def scenario(session: AsyncSession) -> None:
         organization_id = await _organization(session)
         await _tool_price(session, _EXA, 20_000.0)
-        await _override(session, organization_id, rate=5_000.0, model_key=_EXA)
+        await _override(session, organization_id, rate=5_000.0, model_key=_EXA, origin=OPERATOR_ORIGIN)
 
         charges = await price_tool_calls(
             session,
@@ -950,6 +949,93 @@ def test_an_override_prices_its_rate_key_ahead_of_the_deployment_row() -> None:
         )
 
         assert charges.total == Decimal("0.005")
+
+    _run(scenario)
+
+
+@pytest.mark.parametrize(
+    ("label", "rate_keys", "origin", "expected"),
+    [
+        # A call the deployment pays for: the organization's own $0 does not price it.
+        (_EXA, (_EXA, "otari:web_search"), API_ORIGIN, Decimal("0.02")),
+        ("builtin:builtin_fetch", ("builtin:builtin_fetch", "otari:web_fetch"), API_ORIGIN, Decimal("0.02")),
+        # An override the operator set prices it, as for a deployment-paid model.
+        (_EXA, (_EXA, "otari:web_search"), OPERATOR_ORIGIN, Decimal(0)),
+        # The organization's own key, and calls whose label cannot say who paid, keep every override.
+        ("org:tavily", (_EXA,), API_ORIGIN, Decimal(0)),
+        (None, (_EXA,), API_ORIGIN, Decimal(0)),
+        ("otari:web_search", (_EXA,), API_ORIGIN, Decimal(0)),
+    ],
+)
+def test_only_the_operator_prices_a_call_the_deployment_pays_for(
+    label: str | None, rate_keys: tuple[str, ...], origin: str, expected: Decimal
+) -> None:
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        for key in rate_keys:
+            await _tool_price(session, key, 20_000.0)
+        for key in rate_keys:
+            await _override(session, organization_id, rate=0.0, model_key=key, origin=origin)
+
+        charges = await price_tool_calls(
+            session, [_calls(label=label, rate_keys=rate_keys)], as_of=_NOW, organization_id=organization_id
+        )
+        rate = await resolve_tool_rate(session, rate_keys, label=label, as_of=_NOW, organization_id=organization_id)
+
+        assert charges.total == expected
+        assert rate is not None
+        assert rate.unit_rate == expected
+
+    _run(scenario)
+
+
+# Every origin an override can carry other than the operator's, an unrecorded one
+# included: rows stored before origins were recorded carry none.
+_NOT_THE_OPERATORS = [None, "config", API_ORIGIN, "migration", SEED_ORIGIN]
+_PAID_BY_THE_DEPLOYMENT = [("web_search", _EXA), ("web_fetch", "builtin:builtin_fetch")]
+
+
+@pytest.mark.parametrize("origin", _NOT_THE_OPERATORS)
+@pytest.mark.parametrize(("tool", "label"), _PAID_BY_THE_DEPLOYMENT)
+def test_an_override_the_operator_did_not_set_leaves_a_deployment_paid_call_unpriced(
+    tool: str, label: str, origin: str | None
+) -> None:
+    """With no deployment row, the organization's own override does not make the call priced.
+
+    So a pricing gate reading ``resolve_rate`` refuses it, and settlement charges
+    it nothing and warns, rather than charging the organization's own rate.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _override(session, organization_id, rate=5_000.0, model_key=label, origin=origin)
+
+        rate = await resolve_tool_rate(session, (label,), label=label, as_of=_NOW, organization_id=organization_id)
+        charges = await price_tool_calls(
+            session, [_calls(tool=tool, label=label, rate_keys=(label,))], as_of=_NOW, organization_id=organization_id
+        )
+
+        assert rate is None
+        assert charges.total == 0
+        assert charges.unpriced == [UnpricedToolLabel(tool, label, label, 1)]
+
+    _run(scenario)
+
+
+@pytest.mark.parametrize(("tool", "label"), _PAID_BY_THE_DEPLOYMENT)
+def test_the_operators_override_alone_prices_a_deployment_paid_call(tool: str, label: str) -> None:
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _override(session, organization_id, rate=5_000.0, model_key=label, origin=OPERATOR_ORIGIN)
+
+        rate = await resolve_tool_rate(session, (label,), label=label, as_of=_NOW, organization_id=organization_id)
+        charges = await price_tool_calls(
+            session, [_calls(tool=tool, label=label, rate_keys=(label,))], as_of=_NOW, organization_id=organization_id
+        )
+
+        assert rate == ToolRate(label, Decimal("0.005"), "organization")
+        assert charges.total == Decimal("0.005")
+        assert charges.unpriced == []
 
     _run(scenario)
 
@@ -973,7 +1059,7 @@ def test_one_calls_rate_keys_resolve_through_the_same_lookup() -> None:
         assert fallback.rate_key == "otari:web_search"
         assert overridden is not None
         assert overridden.rate_key == _EXA
-        assert overridden.pricing.input_price_per_million == 30_000.0
+        assert (overridden.unit_rate, overridden.source) == (Decimal("0.03"), "organization")
         assert unpriced is None
         assert nothing is None
 

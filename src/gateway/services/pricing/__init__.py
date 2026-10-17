@@ -3,7 +3,14 @@
 from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
 from gateway.services.pricing._tool_pricing import (
     GATEWAY_TOOL_PRICING_PROVIDER,
+    ToolCharges,
+    ToolRate,
+    ToolRateLookup,
+    UnpricedToolLabel,
+    charge_tool_calls,
     gateway_tool_pricing_key,
+    paid_by_the_deployment,
+    tool_rate_lookup,
 )
 from gateway.services.pricing._usage_pricing import (
     UsageCharge,
@@ -54,6 +61,10 @@ __all__ = [
     "PriceGeneration",
     "PriceTier",
     "PriceTimeline",
+    "ToolCharges",
+    "ToolRate",
+    "ToolRateLookup",
+    "UnpricedToolLabel",
     "UsageCharge",
     "active_generations",
     "active_timeline",
@@ -61,10 +72,12 @@ __all__ = [
     "billed_search_units",
     "bundled_generation",
     "can_price",
+    "charge_tool_calls",
     "current_index",
     "gateway_tool_pricing_key",
     "invalid_rate_count",
     "load_bundled_index",
+    "paid_by_the_deployment",
     "parse_rate",
     "price_usage",
     "request_rate",
@@ -72,6 +85,7 @@ __all__ = [
     "resolve_as_of",
     "select_generation",
     "set_accepted_generations",
+    "tool_rate_lookup",
     "trim_catalog",
     "validated_units",
 ]
