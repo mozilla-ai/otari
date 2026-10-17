@@ -34,10 +34,12 @@ from any_llm.types.messages import (
     ContentBlockStartEvent,
     ContentBlockStopEvent,
     MessageDeltaEvent,
+    MessageDeltaUsage,
     MessageResponse,
     MessageStartEvent,
     MessageStopEvent,
     MessageStreamEvent,
+    MessageUsage,
 )
 from pydantic import BaseModel
 
@@ -149,7 +151,7 @@ async def call_messages(native: Callable[..., Awaitable[Any]], kwargs: dict[str,
             if conversation_key and not kwargs.get("prompt_cache_key"):
                 kwargs["prompt_cache_key"] = conversation_key
             return await amessages_via_responses(**kwargs)
-        if provider not in _warned_unsupported:
+        if str(provider) not in _warned_unsupported:
             _warned_unsupported.add(str(provider))
             logger.warning(
                 "messages_api: responses is set for a %s instance, which has no Responses API; "
@@ -518,9 +520,30 @@ def _stop_reason(response: dict[str, Any], *, tool_called: bool, refused: bool) 
     return "tool_use" if tool_called else "end_turn"
 
 
-def _usage(usage: Any) -> dict[str, Any]:
-    """Responses usage in Messages terms: cached input is reported apart, as Anthropic does."""
-    usage = usage if isinstance(usage, dict) else {}
+class UnreportedUsage(MessageUsage):
+    """Zero usage on the wire for a response whose provider reported none; see :func:`usage_unreported`."""
+
+
+class UnreportedDeltaUsage(MessageDeltaUsage):
+    """The streamed counterpart of :class:`UnreportedUsage`."""
+
+
+def usage_unreported(usage: Any) -> bool:
+    """Whether ``usage`` stands for counts the provider never sent, so metering must treat it as missing.
+
+    A tool loop folds earlier turns' tokens into the last turn's usage object; once it
+    holds any, those are real counts and are billed.
+    """
+    return isinstance(usage, UnreportedUsage | UnreportedDeltaUsage) and not (usage.output_tokens or usage.input_tokens)
+
+
+def _usage(usage: Any) -> dict[str, Any] | None:
+    """Responses usage in Messages terms: cached input is reported apart, as Anthropic does.
+
+    ``None`` when the provider reported none, which is not the same as zero tokens.
+    """
+    if not isinstance(usage, dict):
+        return None
     input_tokens = int(usage.get("input_tokens") or 0)
     cached = int((usage.get("input_tokens_details") or {}).get("cached_tokens") or 0)
     reasoning = int((usage.get("output_tokens_details") or {}).get("reasoning_tokens") or 0)
@@ -575,7 +598,8 @@ def message_from_response(response: dict[str, Any]) -> MessageResponse:
             "content": content,
             "stop_reason": _stop_reason(response, tool_called=tool_called, refused=refused),
             "stop_sequence": None,
-            "usage": _usage(response.get("usage")),
+            "usage": _usage(response.get("usage"))
+            or UnreportedUsage(input_tokens=0, output_tokens=0, cache_read_input_tokens=0),
         }
     )
 
@@ -735,7 +759,8 @@ class _StreamTranslator:
                 {
                     "type": "message_delta",
                     "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                    "usage": _usage(response.get("usage")),
+                    "usage": _usage(response.get("usage"))
+                    or UnreportedDeltaUsage(output_tokens=0, input_tokens=0, cache_read_input_tokens=0),
                 }
             )
         )

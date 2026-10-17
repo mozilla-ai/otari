@@ -32,6 +32,7 @@ from gateway.services.inference._messages_responses_bridge import (
     CONVERSATION_CACHE_KEY_FIELD,
     REASONING_SIGNATURE_PREFIX,
     call_messages,
+    usage_unreported,
     with_messages_api,
 )
 from gateway.services.inference._passthrough_usage import (
@@ -144,6 +145,7 @@ __all__ = [
     "serves_responses",
     "strip_gateway_minted_items",
     "upstream_user_identifier",
+    "usage_unreported",
     "transcription_usage",
     "uses_chat_completions_bridge",
     "with_messages_api",

@@ -95,6 +95,7 @@ from gateway.services.inference import (
     messages_user_fields,
     upstream_exception_chain,
     upstream_exception_shape,
+    usage_unreported,
     with_messages_api,
     with_upstream_user,
 )
@@ -577,7 +578,7 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
 
 def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
     if isinstance(event, MessageDeltaEvent):
-        return _billable_messages_usage(event.usage)
+        return None if usage_unreported(event.usage) else _billable_messages_usage(event.usage)
     if isinstance(event, MessageStartEvent):
         usage = event.message.usage
         input_tokens = usage.input_tokens or 0
@@ -703,7 +704,7 @@ class _MessagesAdapter:
         return _messages_stream_usage(chunk)
 
     def extract_usage(self, result: MessageResponse) -> CompletionUsage | None:
-        if not result.usage:
+        if not result.usage or usage_unreported(result.usage):
             return None
         return _billable_messages_usage(result.usage)
 

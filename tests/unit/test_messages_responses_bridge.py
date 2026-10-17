@@ -10,8 +10,9 @@ import pytest
 from any_llm.exceptions import UnsupportedParameterError
 from any_llm.types.messages import MessageResponse
 
+from gateway.api.routes.messages import _ADAPTER, _messages_stream_usage
 from gateway.core.config import GatewayConfig
-from gateway.services.inference import REASONING_SIGNATURE_PREFIX, call_messages, with_messages_api
+from gateway.services.inference import REASONING_SIGNATURE_PREFIX, call_messages, usage_unreported, with_messages_api
 from gateway.services.inference._messages_responses_bridge import (
     CONVERSATION_CACHE_KEY_FIELD,
     MESSAGES_API_FIELD,
@@ -615,3 +616,36 @@ async def test_conversation_cache_key_never_reaches_a_native_call() -> None:
     await call_messages(native, {"model": "anthropic:claude", "messages": [], CONVERSATION_CACHE_KEY_FIELD: "conv"})
     assert CONVERSATION_CACHE_KEY_FIELD not in sent
     assert "prompt_cache_key" not in sent
+
+
+# ---------- missing usage ----------
+
+
+@pytest.mark.asyncio
+async def test_usage_the_provider_did_not_report_is_missing_to_metering_not_zero() -> None:
+    response = _response([_message("ok")])
+    del response["usage"]
+    result = await _via_responses(response)
+    assert result.usage.output_tokens == 0
+    assert usage_unreported(result.usage)
+    assert _ADAPTER.extract_usage(result) is None
+
+    done = {"type": "response.completed", "response": response}
+    stream = await _via_responses(_aiter([{"type": "response.created", "response": response}, done]), stream=True)
+    events = [event async for event in stream]
+    delta = next(event for event in events if event.type == "message_delta")
+    assert usage_unreported(delta.usage)
+    assert _messages_stream_usage(delta) is None
+
+    # A tool loop that folds earlier turns' tokens in bills them.
+    folded = result.usage.model_copy(update={"output_tokens": 7})
+    assert not usage_unreported(folded)
+
+
+@pytest.mark.asyncio
+async def test_reported_zero_usage_is_still_metered() -> None:
+    response = _response([_message("")])
+    response["usage"] = {"input_tokens": 0, "output_tokens": 0}
+    result = await _via_responses(response)
+    assert not usage_unreported(result.usage)
+    assert _ADAPTER.extract_usage(result) is not None
