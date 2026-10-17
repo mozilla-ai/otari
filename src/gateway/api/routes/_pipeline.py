@@ -4765,8 +4765,7 @@ async def _apply_tool_charges(
         meters[TOOL_METER_NAMESPACE] = tool_meters
         usage_log.billing_meters = meters
 
-    billable = tally.billable_calls()
-    if not billable:
+    if not tally.billable_calls():
         commit_meters()
         return
     try:

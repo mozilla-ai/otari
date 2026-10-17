@@ -27,7 +27,7 @@ def gateway_tool_pricing_key(tool: str) -> str:
 
     ``model_key`` is a free-form ``provider:model`` string, so a tool the gateway
     runs itself is priced as ``otari:<tool>`` (for example ``otari:web_search``).
-    ``POST /v1/search`` prices a search on a configured tool under that tool's
+    A direct search on a configured tool is priced under that tool's
     ``<search-provider>:<tool>`` instead, and under this key only a search a
     workspace's organization key served, whose provider the deployment cannot price.
     """

@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from gateway.core.metered_pricing import to_decimal
+from gateway.models.money import MAX_USD_COST
 from gateway.types.tool_charges import LabelCalls
 
 # Every tool backend marks a recoverable failure by prefixing the string it hands
@@ -59,6 +60,11 @@ OVERFLOW_TOOL_NAME = "_other"
 def is_tool_error(result: str) -> bool:
     """True when a tool's return value is the recoverable-failure sentinel."""
     return result.startswith(TOOL_ERROR_SENTINEL)
+
+
+def _usable_cost(value: Decimal | None) -> Decimal | None:
+    cost = to_decimal(value)
+    return cost if cost is not None and cost <= MAX_USD_COST else None
 
 
 @dataclass(slots=True)
@@ -100,10 +106,9 @@ class ToolUsageTally:
         :class:`~gateway.types.tool_charges.LabelCalls`), and with the cost its
         provider reported, where ``None`` means it reported none and a rate
         prices the call. A failed call's costs are dropped, since it is never
-        billed. A negative or non-finite cost is unusable, as
-        :func:`~gateway.core.metered_pricing.to_decimal` judges one: the call
-        reads as unreported, and an enrichment cost as none, rather than
-        crediting the payer.
+        billed. A cost that is negative, not finite, or more than a cost column
+        holds is unusable: the call reads as unreported, and an enrichment cost
+        as none, rather than crediting the payer or losing the usage row.
         """
         failed = is_tool_error(text)
         key = self._record(tool, failed=failed)
@@ -111,12 +116,12 @@ class ToolUsageTally:
             return
         totals = self._labels.setdefault((key, label, rate_keys), _LabelTotals())
         totals.calls += 1
-        reported = to_decimal(cost)
+        reported = _usable_cost(cost)
         if reported is None:
             totals.unreported_calls += 1
         else:
             totals.reported_cost += reported
-        totals.enrichment_cost += to_decimal(enrichment_cost) or Decimal(0)
+        totals.enrichment_cost += _usable_cost(enrichment_cost) or Decimal(0)
 
     def record_failure(self, tool: str) -> None:
         """Record a call that raised. Counted, never billed."""

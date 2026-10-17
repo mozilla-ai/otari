@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from gateway.models.money import MAX_USD_COST
 from gateway.services.tool_usage import MAX_TOOL_NAMES, OVERFLOW_TOOL_NAME, ToolUsageTally
 from gateway.types.tool_charges import LabelCalls
 
@@ -77,7 +78,9 @@ def test_enrichment_costs_add_up_beside_the_calls_own() -> None:
     assert entry.unreported_calls == 1
 
 
-@pytest.mark.parametrize("unusable", [Decimal("-0.02"), Decimal("NaN"), Decimal("Infinity")])
+@pytest.mark.parametrize(
+    "unusable", [Decimal("-0.02"), Decimal("NaN"), Decimal("Infinity"), MAX_USD_COST + Decimal("0.000001")]
+)
 def test_an_unusable_reported_cost_reads_as_unreported_and_never_credits(unusable: Decimal) -> None:
     tally = ToolUsageTally()
     tally.record_result("web_search", _HITS, label=_EXA, rate_keys=_EXA_KEYS, cost=unusable, enrichment_cost=unusable)
