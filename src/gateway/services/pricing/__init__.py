@@ -1,6 +1,10 @@
 """The pricing domain: which meter a rate prices, what an attempt costs at it, and the models.dev default prices."""
 
 from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
+from gateway.services.pricing._tool_pricing import (
+    GATEWAY_TOOL_PRICING_PROVIDER,
+    gateway_tool_pricing_key,
+)
 from gateway.services.pricing._usage_pricing import (
     UsageCharge,
     billed_search_units,
@@ -42,6 +46,7 @@ from gateway.services.pricing.models_dev_index import (
 __all__ = [
     "BUNDLED_SNAPSHOT_NAME",
     "DeploymentPricingService",
+    "GATEWAY_TOOL_PRICING_PROVIDER",
     "MAX_RATE_PER_MILLION",
     "MAX_RESIDENT_GENERATIONS",
     "ModelsDevPrice",
@@ -57,6 +62,7 @@ __all__ = [
     "bundled_generation",
     "can_price",
     "current_index",
+    "gateway_tool_pricing_key",
     "invalid_rate_count",
     "load_bundled_index",
     "parse_rate",

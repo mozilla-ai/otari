@@ -15,11 +15,17 @@ from gateway.log_config import logger
 from gateway.models.pricing import OPERATOR_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.services.pricing import (
+    GATEWAY_TOOL_PRICING_PROVIDER as GATEWAY_TOOL_PRICING_PROVIDER,
+)
+from gateway.services.pricing import (
     ModelsDevPrice,
     active_timeline,
     billed_search_units,
     request_rate,
     resolve_as_of,
+)
+from gateway.services.pricing import (
+    gateway_tool_pricing_key as gateway_tool_pricing_key,
 )
 from gateway.types.tool_charges import LabelCalls
 
@@ -730,21 +736,6 @@ def metered_search_units(pricing: ModelPricing | None, billed_units: Mapping[str
     if not priced_per_request(pricing):
         return None
     return billed_search_units(billed_units)
-
-
-GATEWAY_TOOL_PRICING_PROVIDER = "otari"
-
-
-def gateway_tool_pricing_key(tool: str) -> str:
-    """The ``ModelPricing.model_key`` an operator prices a gateway-run tool under.
-
-    ``model_key`` is a free-form ``provider:model`` string, so a tool the gateway
-    runs itself is priced as ``otari:<tool>`` (for example ``otari:web_search``).
-    ``POST /v1/search`` prices a search on a configured tool under that tool's
-    ``<search-provider>:<tool>`` instead, and under this key only a search a
-    workspace's organization key served, whose provider the deployment cannot price.
-    """
-    return f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}"
 
 
 def _detach(row: object) -> None:
