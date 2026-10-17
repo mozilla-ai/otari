@@ -10,7 +10,15 @@ from typing import Any
 
 import pytest
 
-from gateway.services.traces import AnsweredCall, RequestTrace, SessionRef, TurnFacts, harness_of, read_turn
+from gateway.services.traces import (
+    AnsweredCall,
+    RequestTrace,
+    SessionRef,
+    TurnFacts,
+    harness_of,
+    is_subagent,
+    read_turn,
+)
 from gateway.services.traces import resolve_session as resolve
 from gateway.services.traces._collector import client_tool_span_id
 
@@ -73,6 +81,12 @@ def test_the_harness_comes_from_the_user_agents_product_name(headers: dict[str, 
     assert harness_of(headers) == expected
 
 
+def test_a_claude_code_subagent_is_marked_by_its_agent_header() -> None:
+    assert is_subagent(_CLAUDE_CODE | {"x-claude-code-agent-id": "a1b2c3"})
+    assert not is_subagent(_CLAUDE_CODE)
+    assert not is_subagent(_CLAUDE_CODE | {"x-claude-code-agent-id": " "})
+
+
 # ---------------------------------------------------------------------------
 # Turns, per dialect
 # ---------------------------------------------------------------------------
@@ -108,6 +122,49 @@ def test_messages_tool_results_answer_the_calls_the_history_named() -> None:
             AnsweredCall(call_id="toolu_2", name="Read", is_error=True, position=2),
         ),
     )
+
+
+_OPERATOR_NOTE = {"role": "system", "content": [{"type": "text", "text": "x"}]}
+_EFFORT_CHANGE = {"role": "system", "content": [], "output_config": {"effort": "low"}}
+
+
+@pytest.mark.parametrize(
+    ("prompt", "trailing"),
+    [
+        ([{"type": "text", "text": "x"}] * 3, [_OPERATOR_NOTE]),
+        ("x", [_OPERATOR_NOTE]),
+        ("x", [_OPERATOR_NOTE, _EFFORT_CHANGE]),
+    ],
+)
+def test_messages_a_prompt_under_trailing_system_messages_opens_a_turn(
+    prompt: Any, trailing: list[dict[str, Any]]
+) -> None:
+    """Claude Code follows the user's input with a mid-conversation system message, its own context."""
+    assert read_turn("messages", [{"role": "user", "content": prompt}, *trailing]).opens_turn
+
+
+def test_messages_tool_results_under_a_trailing_system_message_answer_their_calls() -> None:
+    history = [
+        {"role": "user", "content": [{"type": "text", "text": "x"}]},
+        _OPERATOR_NOTE,
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "x"}]},
+        _OPERATOR_NOTE,
+    ]
+
+    assert read_turn("messages", history) == TurnFacts(
+        opens_turn=False, answered=(AnsweredCall(call_id="toolu_1", name="Bash", is_error=False, position=3),)
+    )
+
+
+def test_messages_a_system_message_after_a_server_tool_use_opens_no_turn() -> None:
+    history = [
+        {"role": "user", "content": "x"},
+        {"role": "assistant", "content": [{"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search"}]},
+        _OPERATOR_NOTE,
+    ]
+
+    assert read_turn("messages", history) == TurnFacts(opens_turn=False)
 
 
 def test_chat_trailing_tool_messages_answer_the_assistants_calls() -> None:
@@ -146,7 +203,7 @@ def test_an_empty_or_unexpected_input_says_nothing(dialect: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _trace(*, session: SessionRef | None, turn: TurnFacts | None) -> RequestTrace:
+def _trace(*, session: SessionRef | None, turn: TurnFacts | None, subagent: bool = False) -> RequestTrace:
     return RequestTrace(
         request_id="req-2",
         workspace_id=_WORKSPACE,
@@ -158,6 +215,7 @@ def _trace(*, session: SessionRef | None, turn: TurnFacts | None) -> RequestTrac
         session=session,
         harness="claude-code",
         turn=turn,
+        subagent=subagent,
     )
 
 
@@ -169,6 +227,20 @@ def test_a_request_in_a_session_writes_into_the_sessions_trace() -> None:
     assert write.trace_id == session.trace_id(_WORKSPACE, "alice")
     assert (write.session_source, write.harness) == ("harness", "claude-code")
     assert write.spans[0].opens_turn is True
+
+
+def test_a_subagents_request_opens_no_turn_but_records_the_tools_it_answers() -> None:
+    answered = (AnsweredCall(call_id="toolu_1", name="Bash", is_error=False),)
+
+    prompt = _trace(session=None, turn=TurnFacts(opens_turn=True), subagent=True).finish(
+        status_code=200, completed=True
+    )
+    results = _trace(session=None, turn=TurnFacts(opens_turn=False, answered=answered), subagent=True).finish(
+        status_code=200, completed=True
+    )
+
+    assert prompt.spans[0].opens_turn is False
+    assert [span.tool_name for span in results.spans if span.kind == "tool"] == ["Bash"]
 
 
 def test_answered_calls_become_client_tool_spans_ending_when_this_request_arrived() -> None:
