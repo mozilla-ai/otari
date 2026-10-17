@@ -331,21 +331,30 @@ its usual prefix and last four characters.
 
 ### What config.yml owns
 
-Config is the source of truth for what it declares, and every start writes it
-back:
+Config is the source of truth for what it declares, and a start writes an
+entry back whenever the entry changed:
 
-- A missing budget or key is created. An existing one gets the declared values,
-  so a change made through the API or the dashboard lasts until the next start.
-  Fields a key does not declare (expiry, allowed models, metadata) are left as
-  they are, and a key that was deactivated is active again.
-- Changing a key's secret in config changes its secret at the next start, and
-  the old one stops working.
-- `end_user_budget_ids`, `end_user_budget_id` and `ceiling` are reconciled the
-  same way. End users already created keep the budget they started on, as they
+- A missing budget or key is created. An existing one gets the declared values
+  when its entry in config.yml differs from the one a start last wrote over it,
+  so a change made through the API or the dashboard, such as lowering a budget
+  or deactivating a key in an emergency, lasts across restarts and new replicas
+  until config.yml changes that entry. Changing any field of the entry writes
+  the whole entry back: a key that was deactivated is active again. Fields a
+  key does not declare (expiry, allowed models, metadata) are left as they are.
+- Changing a key's secret in config, including through the environment
+  variable it reads, changes its secret at the next start, and the old one
+  stops working.
+- `end_user_budget_ids`, `end_user_budget_id` and `ceiling` are part of the
+  key's entry and are reconciled with it. End users already created keep the budget they started on, as they
   do when the key is changed through the API. A ceiling moved to another budget
   restarts its period and keeps the spend it has recorded; a ceiling already on
   the declared budget keeps its period, so a restart does not reset it. A key
-  with no `ceiling` keeps any ceiling it has.
+  with no `ceiling` keeps any ceiling it has, and an unchanged entry leaves a
+  ceiling changed or removed through the API as it is.
+- Otari keeps a digest of each entry it wrote beside the budget or key, never
+  the secret itself (the secret enters as its hash), to tell whether the entry
+  changed. The first start of a version that keeps it writes every entry once,
+  as every start used to.
 - Nothing is deleted. A budget or key removed from config stays as it is and
   stops being marked as declared, so it can then be changed or deleted through
   the API. A key deleted through the API while config still declares it is
