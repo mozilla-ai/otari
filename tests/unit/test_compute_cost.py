@@ -302,7 +302,25 @@ def test_context_pricing_tier_is_a_whole_request_cliff() -> None:
     assert cost == _usd(150_000, "60.0") + _usd(1_000, "120.0") + _usd(100_000, "10.0")
 
 
-def test_anthropic_1h_cache_write_bills_at_the_cache_write_rate() -> None:
+def test_anthropic_1h_cache_write_bills_at_twice_the_input_rate() -> None:
+    """Haiku 5.5's catalog rates: $0.10/M input, $0.125/M for a 5m write. Anthropic bills a 1h write at 2x input."""
+    pricing = _pricing(input_price_per_million=0.10, output_price_per_million=0.50, cache_write_price_per_million=0.125)
+    pricing.model_key = "anthropic:claude-haiku-5-5"
+    usage = GatewayUsage(
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=4_000,
+        cache_write_tokens=4_000,
+        cache_write_1h_tokens=4_000,
+        cache_tokens_in_prompt=False,
+    )
+
+    cost = _compute_cost(pricing, usage)
+
+    assert cost == _usd(4_000, "0.20")
+
+
+def test_a_1h_cache_write_on_a_model_that_is_not_claude_bills_at_the_cache_write_rate() -> None:
     pricing = _pricing(cache_write_price_per_million=3.75)
     usage = GatewayUsage(
         prompt_tokens=1_000,
@@ -320,6 +338,7 @@ def test_anthropic_1h_cache_write_bills_at_the_cache_write_rate() -> None:
 
 def test_anthropic_1h_cache_write_follows_a_free_cache_write_rate() -> None:
     pricing = _pricing(cache_write_price_per_million=0)
+    pricing.model_key = "anthropic:claude-haiku-5-5"
     usage = GatewayUsage(
         prompt_tokens=1_000,
         completion_tokens=0,
