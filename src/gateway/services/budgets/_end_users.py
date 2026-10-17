@@ -9,6 +9,7 @@ from gateway.exceptions.budget_exceptions import (
     EndUserBudgetNotFoundError,
     EndUserDefaultNotListedError,
     EndUserIdInvalidError,
+    EndUserLimitReachedError,
     EndUserNotFoundError,
     EndUserOwnerUnavailableError,
     EndUserPathInvalidError,
@@ -58,7 +59,8 @@ class _EndUsers:
         its counters kept so that deleting an end user cannot clear what they
         spent. An existing end user keeps its budget whatever a request names, so
         a request cannot undo an operator's move; a budget the key may not assign
-        is refused either way.
+        is refused either way. Creating or reviving one is refused once the key
+        has its ``max_end_users``.
         """
         _check_external_id(external_id)
         requested = await self._listed_budget(api_key, requested_budget_id) if requested_budget_id else None
@@ -66,8 +68,10 @@ class _EndUsers:
         existing = await self._repositories.end_users.find(owner_user_id, external_id)
         if existing is not None:
             if existing.deleted_at is not None:
+                await self._admit(api_key, owner_user_id)
                 existing.deleted_at = None
             return ResolvedEndUser(existing.user_id, existing.budget_id)
+        await self._admit(api_key, owner_user_id)
 
         budget = requested
         if budget is None and api_key.end_user_budget_id:
@@ -92,6 +96,8 @@ class _EndUsers:
         budget = await self._listed_budget(api_key, budget_id)
         owner_user_id = await self._available_owner(api_key)
         user = await self._repositories.end_users.find(owner_user_id, external_id)
+        if user is None or user.deleted_at is not None:
+            await self._admit(api_key, owner_user_id)
         if user is None:
             user = _new_end_user(owner_user_id, external_id, budget)
             if await self._repositories.end_users.add(user):
@@ -160,6 +166,21 @@ class _EndUsers:
         """Refuse a service key whose own user is blocked or deleted."""
         _require_service_key(api_key)
         await self._available_owner(api_key)
+
+    async def _admit(self, api_key: APIKey, owner_user_id: str) -> None:
+        """Refuse one more live end user when the key already has its ``max_end_users``.
+
+        Counted on the budgets the key assigns, so two keys of one owner, each
+        with budgets of its own, keep separate caps over end users they share
+        an owner for. The owner's row is locked first, so replicas admitting at
+        once cannot overshoot; an existing end user's requests never get here.
+        """
+        if api_key.max_end_users is None:
+            return
+        await self._repositories.end_users.lock_owner(owner_user_id)
+        budgets = api_key.assignable_end_user_budgets() or None
+        if await self._repositories.end_users.count_live_on_budgets(owner_user_id, budgets) >= api_key.max_end_users:
+            raise EndUserLimitReachedError()
 
     async def _available_owner(self, api_key: APIKey) -> str:
         """The key's user, refused when it is blocked or deleted, since its end users bill through it."""

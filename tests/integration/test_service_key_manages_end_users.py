@@ -348,3 +348,91 @@ def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
     read = client.get(url, headers=mlpa)
     assert read.json()["blocked"] is True
     assert read.json()["budget_id"] == "eu-ai"
+
+
+def test_a_key_with_a_cap_refuses_one_end_user_more(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _key(
+        client,
+        master_key_header,
+        "mlpa",
+        is_service_key=True,
+        end_user_budget_ids=["eu-ai"],
+        end_user_budget_id="eu-ai",
+        max_end_users=2,
+    )
+
+    first = _chat(client, mlpa, "a")
+    second = client.put(f"{END_USERS}/b", json={"budget_id": "eu-ai"}, headers=mlpa)
+    by_request = _chat(client, mlpa, "c")
+    by_put = client.put(f"{END_USERS}/c", json={"budget_id": "eu-ai"}, headers=mlpa)
+    existing = _chat(client, mlpa, "a")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 201, second.text
+    assert by_request.status_code == 403
+    assert by_request.headers["Otari-Error-Code"] == "end_user_limit_reached"
+    assert by_put.status_code == 403
+    assert by_put.json()["code"] == "end_user_limit_reached"
+    # An end user the key already has keeps working when the cap is full.
+    assert existing.status_code == 200, existing.text
+
+    # A deleted end user frees its place, and reviving it takes one again.
+    gone = db_session.query(User).filter(User.external_id == "b").one()
+    gone.deleted_at = datetime.now(UTC)
+    db_session.commit()
+    assert _chat(client, mlpa, "c").status_code == 200
+    assert _chat(client, mlpa, "b").status_code == 403
+
+
+def test_two_keys_of_one_owner_count_their_own_budgets(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A guest key and a signed-in key of one owner keep separate caps, each over the budgets it assigns."""
+    _budgets(client, master_key_header)
+    signed_in = _key(
+        client,
+        master_key_header,
+        "mlpa",
+        is_service_key=True,
+        end_user_budget_ids=["eu-ai"],
+        end_user_budget_id="eu-ai",
+        max_end_users=1,
+    )
+    guests = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "mlpa-guest",
+            "user_id": "mlpa",
+            "is_service_key": True,
+            "end_user_budget_ids": ["eu-memories"],
+            "end_user_budget_id": "eu-memories",
+            "max_end_users": 1,
+        },
+        headers=master_key_header,
+    ).json()
+    guest = {API_KEY_HEADER: f"Bearer {guests['key']}"}
+
+    assert _chat(client, signed_in, "fxa1:ai").status_code == 200
+    assert _chat(client, guest, "guest1:ai-guest").status_code == 200
+    assert _chat(client, signed_in, "fxa2:ai").status_code == 403
+    assert _chat(client, guest, "guest2:ai-guest").status_code == 403
+
+
+def test_the_cap_is_read_and_changed_through_the_keys_api(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _budgets(client, master_key_header)
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "mlpa", "user_id": "mlpa", "is_service_key": True, "max_end_users": 10},
+        headers=master_key_header,
+    ).json()
+    raised = client.patch(f"{API_ROOT}/keys/{created['id']}", json={"max_end_users": 20}, headers=master_key_header)
+    cleared = client.patch(f"{API_ROOT}/keys/{created['id']}", json={"max_end_users": None}, headers=master_key_header)
+    negative = client.patch(f"{API_ROOT}/keys/{created['id']}", json={"max_end_users": -1}, headers=master_key_header)
+
+    assert created["max_end_users"] == 10
+    assert raised.json()["max_end_users"] == 20
+    assert cleared.json()["max_end_users"] is None
+    assert negative.status_code == 422

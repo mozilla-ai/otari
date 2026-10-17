@@ -4747,6 +4747,19 @@
             "description": "Optional name for the key",
             "title": "Key Name"
           },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most live end users this key may have on the budgets it assigns (all of its owner's end users when it assigns none). A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is no cap.",
+            "title": "Max End Users"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Optional metadata",
@@ -4908,6 +4921,17 @@
             ],
             "title": "Key Suffix"
           },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max End Users"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -4953,6 +4977,7 @@
           "is_service_key",
           "end_user_budget_id",
           "end_user_budget_ids",
+          "max_end_users",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -9198,6 +9223,17 @@
               }
             ],
             "title": "Last Used At"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max End Users"
           },
           "metadata": {
             "additionalProperties": true,
@@ -19989,6 +20025,18 @@
               }
             ],
             "title": "Key Name"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max End Users"
           },
           "metadata": {
             "anyOf": [

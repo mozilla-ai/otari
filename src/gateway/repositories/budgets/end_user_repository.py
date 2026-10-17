@@ -66,6 +66,23 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
         )
         return {str(budget_id): (int(total), int(blocked)) for budget_id, total, blocked in result.all()}
 
+    async def lock_owner(self, owner_user_id: str) -> None:
+        """Hold the owner's row until the Unit of Work ends, so one end user is admitted at a time.
+
+        Serializes admissions under a cap across replicas: each counts with no
+        other one between its count and its insert. A no-op on SQLite, which
+        has one writer anyway.
+        """
+        await self.db.execute(select(User.user_id).where(User.user_id == owner_user_id).with_for_update())
+
+    async def count_live_on_budgets(self, owner_user_id: str, budget_ids: list[str] | None) -> int:
+        """Count the owner's live end users on these budgets, or on any budget when ``budget_ids`` is None."""
+        conditions = _live_end_users(owner_user_id, external_id=None, budget_id=None, blocked=None)
+        if budget_ids is not None:
+            conditions.append(User.budget_id.in_(budget_ids))
+        result = await self.db.execute(select(func.count()).select_from(User).where(*conditions))
+        return int(result.scalar_one())
+
     async def add(self, user: User) -> bool:
         """Stage a new end user, returning False when a concurrent request created it first.
 
