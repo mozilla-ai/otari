@@ -418,6 +418,12 @@ async def test_a_provider_instance_is_never_asked_for_a_host_the_policy_refuses(
         "http://169.254.169.254/latest/meta-data/",
         "http://[::1]/",
         "http://224.0.0.1/",
+        # The shorthand forms a resolver reads as an IPv4 address, and localhost.
+        "http://127.1/",
+        "http://2130706433/",
+        "http://0x7f000001/",
+        "http://localhost:8080/",
+        "http://admin.localhost/",
     ],
 )
 @pytest.mark.asyncio
@@ -444,6 +450,13 @@ async def test_a_provider_instance_may_be_asked_for_a_public_address() -> None:
             "domain_policy",
         ),
         ("http://10.0.0.1/landing", "[tool error] URL invalid or disallowed by gateway safety policy", "url_invalid"),
+        # A URL the check cannot read is refused rather than trusted.
+        (
+            "http://user@example.com/landing",
+            "[tool error] URL invalid or disallowed by gateway safety policy",
+            "url_invalid",
+        ),
+        ("ftp://example.com/landing", "[tool error] URL invalid or disallowed by gateway safety policy", "url_invalid"),
     ],
 )
 @pytest.mark.asyncio

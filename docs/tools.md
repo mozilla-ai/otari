@@ -569,9 +569,11 @@ instance.
 
 On a fetch instance, the provider fetches the page and follows its redirects on
 its own side. Otari checks the requested URL before the call, and the URL the
-provider reports finding the page at after it: its host must pass the domain
-policy and, when it is an IP address, be a public one, as with the built-in
-fetcher. A provider's failure reaches the model as
+provider reports finding the page at after it. Its host must pass the domain
+policy, and may not be `localhost` or an IP address, in any of its forms, that is
+not public. Other hostnames are the provider's to resolve, so Otari does not check
+where they lead, as the built-in fetcher does. A provider's failure reaches the
+model as
 `[tool error] <provider> fetch failed (<tag>)`, with the HTTP status when there is
 one, and never with the provider's own message.
 
