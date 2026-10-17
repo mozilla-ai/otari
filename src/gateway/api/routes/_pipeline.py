@@ -255,6 +255,7 @@ from gateway.services.inference import (
     is_upstream_stream_interrupted,
     upstream_body_messages,
     upstream_error_message,
+    upstream_error_tag,
     upstream_exception_chain,
     upstream_exception_shape,
     upstream_retry_after,
@@ -344,6 +345,7 @@ from gateway.services.tools import (
     ProviderToolDeclaration,
     ToolUseBudget,
     WebClaims,
+    WebToolFailure,
     admit_mcp_servers,
     admit_web_access,
     decide_candidate_tools,
@@ -898,6 +900,42 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     return headers
 
 
+def provider_failure(exc: BaseException, provider: str | None) -> WebToolFailure | None:
+    """What a failure on the provider's own side may show the caller, or ``None``.
+
+    The same four fields a direct search's 502 carries (decision 67): the
+    provider, its HTTP status, a tag and whether a retry may help. Only for a
+    failure the provider itself caused: a timeout, a lost connection or a 5xx,
+    where the tag is the provider's own code when its error body names one
+    (Exa's ``SERVICE_OVERLOADED``). A 4xx keeps its fixed answer: billing, quota
+    and a rejected credential describe the gateway's own account, and a 429
+    already carries ``upstream_rate_limited``.
+    """
+    if provider is None:
+        return None
+    kind, status_code = upstream_exception_shape(exc)
+    if kind == "timeout":
+        return WebToolFailure.of(provider, None, "timeout")
+    if kind == "conn_err":
+        return WebToolFailure.of(provider, None, "network")
+    if status_code is not None and status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        return WebToolFailure.of(provider, status_code, upstream_error_tag(exc) or "http_error")
+    return None
+
+
+def with_provider_failure(error: HTTPException, exc: BaseException, provider: str | None) -> HTTPException:
+    """Add :func:`provider_failure`'s headers to the 5xx ``exc`` ended a request with.
+
+    Stamps ``error`` in place and returns it, so it can wrap a raise. A refusal
+    of the gateway's own, or a 4xx, is left as it is.
+    """
+    failure = provider_failure(exc, provider)
+    if failure is None or error.status_code < status.HTTP_500_INTERNAL_SERVER_ERROR:
+        return error
+    error.headers = {**(error.headers or {}), **failure.as_headers()}
+    return error
+
+
 def _is_context_length_error(exc: BaseException) -> bool:
     """Whether any-llm classified the failure as a prompt too long for the model."""
     return any(isinstance(current, ContextLengthExceededError) for current in upstream_exception_chain(exc))
@@ -1102,8 +1140,11 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """
         ...
 
-    def stream_error_payload(self, exc: BaseException) -> str:
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         """Render the SSE error event for a failure after the stream committed.
+
+        ``provider`` is the provider the stream came from, for a format whose
+        event carries :func:`provider_failure`'s fields.
 
         The status line is already on the wire by then, so this event is the only
         place the caller learns what kind of failure ended the stream.
@@ -5780,7 +5821,7 @@ def build_streaming_response(
             is_cost_carrier=adapter.is_stream_cost_carrier if settles_inline else None,
             attach_settlement=_attach_inline_cost if settles_inline else None,
             on_first_chunk=_on_first_chunk,
-            error_payload=adapter.stream_error_payload,
+            error_payload=lambda exc: adapter.stream_error_payload(exc, provider),
             completes_stream=adapter.stream_completion(),
         ),
         media_type="text/event-stream",
@@ -6075,7 +6116,9 @@ async def run_single_attempt_stream(
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
-        raise adapter.provider_error(exc, _model_as_named(provider, model, display_model)) from exc
+        raise with_provider_failure(
+            adapter.provider_error(exc, _model_as_named(provider, model, display_model)), exc, provider
+        ) from exc
 
     files_bridge = tool_ctx.sandbox_files
     if files_bridge is not None:
@@ -6422,12 +6465,16 @@ def raise_all_streaming_attempts_failed(
         logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
+    # ``exc`` is the last attempt's failure, so its provider is the one named.
+    last_provider = route.attempts[-1].provider if route.attempts else None
     if len(route.attempts) <= 1:
-        raise with_attempt_id(adapter.provider_error(exc), last_attempt_id) from exc
+        raise with_attempt_id(
+            with_provider_failure(adapter.provider_error(exc), exc, last_provider), last_attempt_id
+        ) from exc
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         timed_out = adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API)
-        raise with_attempt_id(timed_out, last_attempt_id) from exc
+        raise with_attempt_id(with_provider_failure(timed_out, exc, last_provider), last_attempt_id) from exc
     if status_code == 429:
         rate_limited = adapter.error(
             429,
@@ -6437,7 +6484,7 @@ def raise_all_streaming_attempts_failed(
         )
         raise with_attempt_id(rate_limited, last_attempt_id) from exc
     all_failed = adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API)
-    raise with_attempt_id(all_failed, last_attempt_id) from exc
+    raise with_attempt_id(with_provider_failure(all_failed, exc, last_provider), last_attempt_id) from exc
 
 
 async def run_platform_non_stream(
@@ -6980,4 +7027,6 @@ async def run_standalone_non_stream(
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
-        raise adapter.provider_error(e, _model_as_named(provider, model, display_model)) from e
+        raise with_provider_failure(
+            adapter.provider_error(e, _model_as_named(provider, model, display_model)), e, provider
+        ) from e

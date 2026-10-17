@@ -674,7 +674,7 @@ class _MessagesAdapter:
         # same way after ``message_start`` went out.
         return _reached_message_stop()
 
-    def stream_error_payload(self, exc: BaseException) -> str:
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         if isinstance(exc, IncompleteStreamError):
             error_type, message = _ERR_API, _INCOMPLETE_STREAM_MESSAGE
         else:

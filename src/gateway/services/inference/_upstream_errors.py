@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Iterator, Mapping
 from typing import Literal, TypeVar
 
@@ -290,6 +291,29 @@ def _body_error_field(body: Mapping[str, object], name: str) -> str | None:
     for candidate in (error.get(name) if isinstance(error, Mapping) else None, body.get(name)):
         if isinstance(candidate, str) and candidate:
             return candidate
+    return None
+
+
+# A provider's own error code, as safe to repeat in a header: letters, digits and
+# a few separators, short. Anything else in a body is the provider's text.
+_ERROR_TAG = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+
+
+def upstream_error_tag(exc: BaseException) -> str | None:
+    """The provider's own code for a failure, from the error body an SDK attached, or ``None``.
+
+    Exa names its errors in a top-level ``tag`` (``SERVICE_OVERLOADED``); most
+    others in ``error.code`` or ``code``. Only a short identifier is returned,
+    never a message, so it is safe to show the caller.
+    """
+    for current in upstream_exception_chain(exc):
+        body = _parsed_body(current)
+        if body is None:
+            continue
+        for name in ("tag", "code"):
+            value = _body_error_field(body, name)
+            if value is not None and _ERROR_TAG.match(value):
+                return value
     return None
 
 
