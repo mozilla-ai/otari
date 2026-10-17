@@ -145,6 +145,15 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         except IntegrityError:
             raise BudgetStillReferencedError(budget_id) from None
 
+    async def set_declared_digest(self, budget_id: str, digest: str) -> None:
+        """Record the digest of the config.yml entry just written over this budget."""
+        await self.db.execute(
+            update(Budget)
+            .where(Budget.budget_id == budget_id)
+            .values(declared_digest=digest)
+            .execution_options(synchronize_session=False)
+        )
+
     async def mark_declared(self, budget_ids: Collection[str]) -> None:
         """Mark these budgets as declared in config.yml, and clear the mark from every other budget.
 

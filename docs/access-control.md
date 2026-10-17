@@ -134,10 +134,10 @@ may also define:
 The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
 A key can also be declared in config.yml with a secret you choose, in which
-case config.yml owns it and writes it back at every start; see
+case config.yml owns it and writes it back whenever its entry changes; see
 [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
-Rotating a declared key through the API lasts only until the next start, which
-restores the secret config.yml declares.
+Rotating a declared key through the API lasts until config.yml changes the
+key's entry or its secret, which restores the secret config.yml declares.
 
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
@@ -265,8 +265,9 @@ api_keys:
 `ceiling` is the key's own ceiling, the scoped budget on the API key that pools
 every end user. The service reads the same `MLPA_SERVICE_KEY` and presents it as
 its API key, so nothing has to hand a freshly minted secret from one to the
-other, and a restart or a second replica does not change it. Every start writes
-the declared settings back over changes made through the API; see
+other, and a restart or a second replica does not change it. A start writes
+the declared settings back over changes made through the API only when the
+key's entry in config.yml changed; see
 [What config.yml owns](configuration.md#what-configyml-owns).
 
 ### Managing end users
