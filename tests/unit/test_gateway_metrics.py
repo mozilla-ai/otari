@@ -28,6 +28,7 @@ def _sample(name: str, labels: dict[str, str] | None = None) -> float:
 _EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
     ("gateway_abandoned_attempts", "counter", ("provider", "model", "reason", "position")),
     ("gateway_active_requests", "gauge", ()),
+    ("gateway_attempt_duration_seconds", "histogram", ("provider", "model", "outcome")),
     ("gateway_auth_failures", "counter", ("reason",)),
     ("gateway_budget_exceeded", "counter", ()),
     ("gateway_db_pool_capacity", "gauge", ("pool",)),
@@ -37,13 +38,16 @@ _EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
     ("gateway_inline_cost_settlements", "counter", ("outcome",)),
     ("gateway_rate_limit_hits", "counter", ()),
     ("gateway_rate_limit_model_full", "counter", ("rule", "model")),
+    ("gateway_refusals", "counter", ("code", "budget_scope")),
     ("gateway_request_cost_dollars", "histogram", ("provider", "model")),
     ("gateway_request_duration_seconds", "histogram", ("method", "endpoint", "api_version")),
     ("gateway_requests", "counter", ("method", "endpoint", "api_version", "status")),
+    ("gateway_time_to_first_token_seconds", "histogram", ("provider", "model")),
     ("gateway_tokens", "counter", ("provider", "model", "type")),
     ("gateway_trace_queue_spans", "gauge", ()),
     ("gateway_trace_spans_dropped", "counter", ("reason",)),
     ("gateway_trace_spans_written", "counter", ("result",)),
+    ("gateway_upstream_attempts", "counter", ("provider", "model", "outcome", "status_code", "fallback")),
     ("gateway_usage_log_batch_size", "histogram", ("writer",)),
     ("gateway_usage_log_flush_duration_seconds", "histogram", ("writer", "result")),
     ("gateway_usage_log_queue_depth", "gauge", ()),
@@ -92,6 +96,14 @@ def _make_test_app(*, enable_metrics: bool = True) -> FastAPI:
     @app.get("/error")
     async def error() -> None:
         raise HTTPException(status_code=503, detail="boom")
+
+    @app.get("/refused")
+    async def refused() -> None:
+        raise HTTPException(
+            status_code=403,
+            detail="over budget",
+            headers={"Otari-Error-Code": "budget_exceeded", "Otari-Budget-Scope": "api_token"},
+        )
 
     if enable_metrics:
         app.add_middleware(MetricsMiddleware)
@@ -312,3 +324,15 @@ def test_metrics_expose_process_memory() -> None:
 
     assert "process_resident_memory_bytes" in body
     assert _sample("process_resident_memory_bytes") > 0
+
+
+def test_middleware_counts_a_coded_refusal_by_code_and_scope() -> None:
+    client = TestClient(_make_test_app(), raise_server_exceptions=False)
+    refused = {"code": "budget_exceeded", "budget_scope": "api_token"}
+    before = _sample("gateway_refusals_total", refused)
+
+    client.get("/refused")
+    client.get("/ok")
+    client.get("/error")
+
+    assert _sample("gateway_refusals_total", refused) - before == 1.0
