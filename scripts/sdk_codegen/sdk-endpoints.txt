@@ -200,9 +200,11 @@ DELETE /api/v1/keys/{key_id}/federation-rules/{rule_id}  # not yet wrapped
 GET /api/v1/end-users                               # not yet wrapped
 PUT /api/v1/end-users                               # not yet wrapped
 PATCH /api/v1/end-users                             # not yet wrapped
+DELETE /api/v1/end-users                            # not yet wrapped
 GET /api/v1/end-users/{external_id}                 # not yet wrapped
 PUT /api/v1/end-users/{external_id}                 # not yet wrapped
 PATCH /api/v1/end-users/{external_id}               # not yet wrapped
+DELETE /api/v1/end-users/{external_id}              # not yet wrapped
 GET /api/v1/end-user-budgets                        # not yet wrapped
 
 # --- Second wave of gateway endpoints (added after the initial manifest) ---

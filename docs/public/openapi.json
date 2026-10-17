@@ -6872,6 +6872,21 @@
         "title": "EndUserUpdate",
         "type": "object"
       },
+      "EndUsersDeleted": {
+        "description": "How many end users a delete removed.",
+        "properties": {
+          "deleted": {
+            "description": "End users deleted by this call. A page as full as the limit may leave more.",
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "EndUsersDeleted",
+        "type": "object"
+      },
       "ExecutionState": {
         "description": "Whether the remote tool may have run.\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
         "enum": [
@@ -27966,6 +27981,98 @@
       }
     },
     "/api/v1/end-users": {
+      "delete": {
+        "description": "Delete one end user of the calling service key, or a page of those created before a time.\n\nRequires a service key, and exactly one of ``external_id`` and ``created_before``. ``external_id`` deletes that\nend user, any id, one containing '/' included, and answers 404 when it has none. ``created_before`` deletes up\nto ``limit`` of the oldest end users created before then; call again until ``deleted`` is 0. An end user's\ntelemetry and agent traces are erased with it. The end user's row and spend are kept: a request naming it again\nrevives it with what it had spent, so deleting one cannot clear its budget. A deleted end user is neither listed\nnor counted.",
+        "operationId": "end-users-delete_end_users",
+        "parameters": [
+          {
+            "description": "Delete the end user the service names with this `user` value.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the end user the service names with this `user` value.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Delete the end users created before this time, oldest first, up to `limit` of them.",
+            "in": "query",
+            "name": "created_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the end users created before this time, oldest first, up to `limit` of them.",
+              "title": "Created Before"
+            }
+          },
+          {
+            "description": "The most end users one call deletes with `created_before`.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "The most end users one call deletes with `created_before`.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUsersDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete End Users",
+        "tags": [
+          "end-users"
+        ]
+      },
       "get": {
         "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed. ``external_id`` reads one end user by any id, one containing '/'\nincluded, as a list of zero or one.",
         "operationId": "end-users-list_end_users",
@@ -28236,6 +28343,50 @@
       }
     },
     "/api/v1/end-users/{external_id}": {
+      "delete": {
+        "description": "Delete an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no live end user of the key's user goes by answers 404. The end user's telemetry\nand agent traces are erased; its row and spend are kept, so a request naming it again revives it with what it had\nspent. An id with a '.' or '..' segment is refused with 400; ``DELETE /end-users?external_id=`` takes any id.",
+        "operationId": "end-users-delete_end_user",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete End User",
+        "tags": [
+          "end-users"
+        ]
+      },
       "get": {
         "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404. An id with a '.' or '..'\nsegment is refused with 400; ``GET /end-users?external_id=`` reads any end user.",
         "operationId": "end-users-get_end_user",

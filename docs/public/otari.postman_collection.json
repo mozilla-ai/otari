@@ -2235,6 +2235,45 @@
           }
         },
         {
+          "name": "Delete End Users",
+          "request": {
+            "description": "Delete one end user of the calling service key, or a page of those created before a time.\n\nRequires a service key, and exactly one of ``external_id`` and ``created_before``. ``external_id`` deletes that\nend user, any id, one containing '/' included, and answers 404 when it has none. ``created_before`` deletes up\nto ``limit`` of the oldest end users created before then; call again until ``deleted`` is 0. An end user's\ntelemetry and agent traces are erased with it. The end user's row and spend are kept: a request naming it again\nrevives it with what it had spent, so deleting one cannot clear its budget. A deleted end user is neither listed\nnor counted.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-users"
+              ],
+              "query": [
+                {
+                  "description": "Delete the end user the service names with this `user` value.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Delete the end users created before this time, oldest first, up to `limit` of them.",
+                  "disabled": true,
+                  "key": "created_before",
+                  "value": ""
+                },
+                {
+                  "description": "The most end users one call deletes with `created_before`.",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-users?external_id=&created_before=&limit="
+            }
+          }
+        },
+        {
           "name": "Get End User",
           "request": {
             "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404. An id with a '.' or '..'\nsegment is refused with 400; ``GET /end-users?external_id=`` reads any end user.",
@@ -2322,6 +2361,33 @@
               }
             ],
             "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-users",
+                ":external_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-users/:external_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "external_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete End User",
+          "request": {
+            "description": "Delete an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no live end user of the key's user goes by answers 404. The end user's telemetry\nand agent traces are erased; its row and spend are kept, so a request naming it again revives it with what it had\nspent. An id with a '.' or '..' segment is refused with 400; ``DELETE /end-users?external_id=`` takes any id.",
+            "header": [],
+            "method": "DELETE",
             "url": {
               "host": [
                 "{{baseUrl}}"

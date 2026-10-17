@@ -178,6 +178,12 @@ class UpdateBudgetRequest(BaseModel):
     reset_alignment: ResetAlignment | None = Field(default=None)
 
 
+class EndUsersDeleted(BaseModel):
+    """How many end users a delete removed."""
+
+    deleted: int = Field(description="End users deleted by this call. A page as full as the limit may leave more.")
+
+
 class EndUserPublic(BaseModel):
     """An end user of a service key, addressed by the id the service named it by."""
 
