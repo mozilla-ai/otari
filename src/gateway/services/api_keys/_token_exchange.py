@@ -9,7 +9,6 @@ from http import HTTPStatus
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
-from gateway.models.api_keys import APIKey
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.services.api_keys._access_tokens import (
     JWT_BEARER_GRANT,
@@ -19,6 +18,7 @@ from gateway.services.api_keys._access_tokens import (
     grant_names_key,
     mint_access_token,
 )
+from gateway.services.api_keys._admission import key_refusal
 from gateway.services.api_keys._federation import (
     FederatedTokenVerifier,
     FederationRefusedError,
@@ -30,21 +30,6 @@ from gateway.services.api_keys._federation import (
 OrganizationOfWorkspace = Callable[[uuid.UUID], Awaitable[uuid.UUID | None]]
 
 _INVALID_GRANT = "The identity token does not match the federation rule."
-
-
-def key_refusal(api_key: APIKey, now: datetime) -> tuple[str, str] | None:
-    """Why ``api_key`` may not authenticate now, as a metric reason and a public detail, or None.
-
-    A naive ``expires_at``, as SQLite returns one, is read as UTC, which is what is written.
-    """
-    if not api_key.is_active:
-        return "inactive_key", "API key is inactive"
-    expires_at = api_key.expires_at
-    if expires_at is not None and expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=UTC)
-    if expires_at is not None and expires_at < now:
-        return "expired_key", "API key has expired"
-    return None
 
 
 def _invalid_grant(reason: str) -> FederationGrantError:

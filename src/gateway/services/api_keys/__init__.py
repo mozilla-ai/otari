@@ -10,6 +10,7 @@ from gateway.services.api_keys._access_tokens import (
     mint_access_token,
     read_access_token,
 )
+from gateway.services.api_keys._admission import key_refusal
 from gateway.services.api_keys._federation import (
     FederatedIdentity,
     FederatedTokenVerifier,
@@ -22,7 +23,7 @@ from gateway.services.api_keys._federation import (
 )
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
 from gateway.services.api_keys._service import ApiKeyService
-from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace, key_refusal
+from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace
 
 __all__ = [
     "JWT_BEARER_GRANT",
