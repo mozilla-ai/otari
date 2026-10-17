@@ -9062,6 +9062,11 @@ export interface components {
              */
             key_name?: string | null;
             /**
+             * Max End Users
+             * @description Most live end users this key may have on the budgets it assigns (all of its owner's end users when it assigns none). A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is no cap.
+             */
+            max_end_users?: number | null;
+            /**
              * Metadata
              * @description Optional metadata
              */
@@ -9117,6 +9122,8 @@ export interface components {
             key_prefix: string | null;
             /** Key Suffix */
             key_suffix: string | null;
+            /** Max End Users */
+            max_end_users: number | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -11187,6 +11194,8 @@ export interface components {
             key_suffix: string | null;
             /** Last Used At */
             last_used_at: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -16364,6 +16373,8 @@ export interface components {
             is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;

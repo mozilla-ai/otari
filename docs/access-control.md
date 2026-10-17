@@ -190,12 +190,33 @@ A request that names nobody, or the key's own user, bills the key's user as it
 would on any other key. Blocking the key's user stops its end users too.
 
 Each distinct `user` value creates an end user, whether or not the request is
-then admitted, and nothing else caps how many a key can create. Set a rate
-limit on a deployment that issues service keys, and send a stable id per end
-user rather than a per-session or per-request value. An id is at most 256
+then admitted. Unless the key sets `max_end_users` (see
+[Capping a key's end users](#capping-a-keys-end-users)), nothing caps how many
+it can create. Set a rate limit on a deployment that issues service keys, and
+send a stable id per end user rather than a per-session or per-request value. An id is at most 256
 characters and may otherwise be any string, `/` included, such as a base64 key
 id. The routes below name every end user with the `external_id` query
 parameter, which carries any id intact.
+
+### Capping a key's end users
+
+`max_end_users` on a service key (in `POST` or `PATCH /api/v1/keys`, or in
+config.yml) caps how many live end users it may have. A request that would
+create one more, or revive one that was deleted, is refused with 403 and the
+code `end_user_limit_reached`, and nothing is created; the end users the key
+already has keep working. Deleting end users makes room again. `null`, the
+default, is no cap, and `0` admits no new end user at all.
+
+The cap counts the end users of the key's user that are on a budget the key may
+assign (its `end_user_budget_ids`, or its default alone), or every end user of
+that user when the key assigns none. So two service keys of one user, each with
+budgets of its own, such as one for signed-in users and one for guests, keep
+separate caps. An end user moved to a budget outside the key's list stops
+counting toward it.
+
+Replicas admitting end users at once cannot exceed the cap: each new end user
+is counted and created while the key's user is locked. Requests from end users
+that already exist never take that lock.
 
 ### Several budgets on one key
 
