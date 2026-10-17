@@ -48,11 +48,10 @@ import type { ReactNode } from "react"
  *
  * **A replacement owns the telemetry identity and the connectivity feedback
  * while its step is up.** The three app-level components that have no place in
- * the layout (`TelemetryIdentity`, `UpdatePrompt`, `ConnectionStatus`) live
+ * the layout (`TelemetryIdentity`, `AutoUpdate`, `ConnectionStatus`) live
  * inside `AppShellChrome`, so a replacement rendering a step *instead of* its
- * children unmounts all three. Only `TelemetryIdentity` renders nothing
- * unconditionally; the other two render on a condition, a reload pill and a
- * `role="alert"` toast, and both of those conditions can hold while a step is up.
+ * children unmounts all three. Only `ConnectionStatus` renders anything, a
+ * `role="alert"` toast, and its condition can hold while a step is up.
  *
  * Two of the three cost something. `TelemetryIdentity`'s own docstring stops
  * being true for as long as it is unmounted: it is no longer mounted exactly
@@ -61,8 +60,8 @@ import type { ReactNode } from "react"
  * named. And `ConnectionStatus` is the app-level "the gateway is not answering",
  * which is precisely what someone posting a step's answers needs to be told, so
  * a replacement owns its own submit-failure feedback for as long as the toast is
- * unmounted. `UpdatePrompt` is the one that can wait: a step is short and the
- * stale tab keeps working, which is what that pill already says.
+ * unmounted. `AutoUpdate` is the one that can wait: a step is short, the stale
+ * tab keeps working, and the next page change after it picks the build up.
  *
  * Hoisting `TelemetryIdentity` above this seam is deliberately not the fix: it
  * reads `GET /v1/organizations/me`, and the account answering a signup's first
