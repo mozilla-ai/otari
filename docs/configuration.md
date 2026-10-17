@@ -303,6 +303,7 @@ the next start. It takes:
 | `user_id` | The user the key bills to, created when missing. Unset uses the shared `default` user. |
 | `is_service_key` | Lets requests name end users. See [Service keys and end users](access-control.md#service-keys-and-end-users). |
 | `end_user_budget_ids` | Budgets a request may start a new end user on with `Otari-End-User-Budget`. |
+| `allow_mock_response` | Lets a chat completion on the key carry `mock_response`, answered without calling the provider. For load tests; see [Load testing with mock responses](api-reference.md#load-testing-with-mock-responses). |
 | `end_user_budget_id` | Budget a new end user starts on when the request names none. Must be on `end_user_budget_ids` when both are set. |
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |

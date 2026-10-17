@@ -467,6 +467,8 @@ PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
 
 
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
+MOCK_RESPONSE_NOT_ALLOWED_DETAIL = "mock_response is allowed only on an API key with allow_mock_response"
+MOCK_RESPONSE_WITH_TOOLS_DETAIL = "mock_response cannot be combined with tools the gateway runs"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this request"
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
@@ -2536,8 +2538,13 @@ async def resolve_request_context(
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
     session_label: str | None = None,
+    mock_response_requested: bool = False,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
+
+    ``mock_response_requested`` refuses the request with 403 unless it came on an
+    API key that allows ``mock_response`` (``allow_mock_response``), before any
+    budget, rate limit or provider is touched.
 
     Hybrid mode: extract the caller's bearer token and resolve the routing
     plan against the platform; no local DB state is touched.
@@ -2599,6 +2606,10 @@ async def resolve_request_context(
     upstream_user: str | None = None
     request_id: str
 
+    if mock_response_requested and hybrid_mode:
+        # A hybrid gateway's keys are the platform's, and none of them allows a mock.
+        raise adapter.error(status.HTTP_403_FORBIDDEN, MOCK_RESPONSE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
+
     if hybrid_mode:
         # Refuse a policy name before the resolve call rather than after. Hybrid
         # mode sends the caller's selector straight upstream (config aliases are
@@ -2651,11 +2662,15 @@ async def resolve_request_context(
         is_master_key = False
         names_end_user = False
         if session_principal is not None:
+            if mock_response_requested:
+                raise adapter.error(status.HTTP_403_FORBIDDEN, MOCK_RESPONSE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
             workspace_id = session_principal.workspace_id
             user_id = session_principal.user_id
             key_allowlist = session_principal.allowed_models
         else:
             api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
+            if mock_response_requested and not (api_key is not None and api_key.allow_mock_response):
+                raise adapter.error(status.HTTP_403_FORBIDDEN, MOCK_RESPONSE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
             api_key_id = api_key.id if api_key else None
             # Zero I/O for a keyed request: `api_key.workspace_id` is already an
             # in-memory attribute on the row just loaded. Only a master-key request
@@ -5136,6 +5151,16 @@ async def _open_tool_backends(
     return _OpenedTools(pool=backends[0] if len(backends) == 1 else CombinedToolBackend(backends), sandbox=sandbox)
 
 
+def _refuse_mock_in_tool_loop(adapter: FormatAdapter[Any, Any], kwargs: Mapping[str, Any]) -> None:
+    """Refuse ``mock_response`` on a request whose gateway-run tools would call the provider directly.
+
+    The tool loop calls the provider for each round itself, so a mock there
+    would reach the provider instead of standing in for it.
+    """
+    if kwargs.get("mock_response") is not None:
+        raise adapter.error(status.HTTP_400_BAD_REQUEST, MOCK_RESPONSE_WITH_TOOLS_DETAIL, ErrorKind.INVALID_REQUEST)
+
+
 async def dispatch_non_stream(
     *,
     adapter: FormatAdapter[ResultT, Any],
@@ -5149,6 +5174,7 @@ async def dispatch_non_stream(
     """
     if not tool_ctx.use_tool_loop:
         return await adapter.call_provider(call_kwargs)
+    _refuse_mock_in_tool_loop(adapter, call_kwargs)
 
     async with AsyncExitStack() as stack:
         opened = await _open_tool_backends(adapter, tool_ctx, stack)
@@ -5284,6 +5310,7 @@ async def open_stream(
 
     if not tool_ctx.use_tool_loop:
         return await hold_for_first_chunk(await adapter.open_provider_stream(kwargs), tool_ctx.config)
+    _refuse_mock_in_tool_loop(adapter, kwargs)
 
     if tool_ctx.mcp_server_configs and not tool_ctx.reserved_tool_names:
         return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)

@@ -303,6 +303,29 @@ To tag a request with a free-form end-user ID, put it in `metadata`
 {"model": "openai:gpt-4o", "messages": [...], "metadata": {"end_user": "customer-42"}}
 ```
 
+### Load testing with mock responses
+
+A load test can exercise everything Otari does with a request, except the
+provider call, by sending `mock_response` on a chat completion:
+
+```json
+{"model": "openai:gpt-5-mini", "messages": [...], "mock_response": "A canned answer."}
+```
+
+Otari answers with that text, streamed or not, without calling the provider. The
+request is still authenticated, rate limited, held against its budgets, priced
+at the model's rate and settled, with usage estimated at four characters a
+token, so budgets and the usage log move as they would in production. The model
+still has to resolve and be priced, as for any request.
+
+Only an API key with `allow_mock_response` (`POST` or `PATCH /api/v1/keys`, or
+config.yml) may send it. On any other key, the master key, a dashboard session
+or a hybrid gateway the request is refused with 403 before anything is held or
+billed. A mocked request that also runs tools in the gateway (MCP servers, code
+execution, web search or fetch) is refused with 400, since those call the
+provider themselves. Give load tests a key of their own and leave the flag off
+on every other.
+
 ### Cost of a failed or interrupted request
 
 A stream that fails mid-response ends in an error event, and one the client

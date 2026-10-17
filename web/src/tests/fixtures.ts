@@ -516,6 +516,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     is_service_key: false,
     end_user_budget_id: null,
     end_user_budget_ids: [],
+    allow_mock_response: false,
     metadata: {},
     ...overrides,
   }

@@ -8712,6 +8712,11 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Mock Response
+             * @description Answer with this text instead of calling the provider, for load tests. Allowed only on an API key with allow_mock_response, and refused with 403 on any other. The request is admitted, metered and billed as usual, with usage estimated from the text at four characters a token.
+             */
+            mock_response?: string | null;
             /** Model */
             model: string;
             /** N */
@@ -9020,6 +9025,12 @@ export interface components {
          */
         CreateKeyRequest: {
             /**
+             * Allow Mock Response
+             * @description When true, a chat completion on this key may carry mock_response: Otari answers with that text without calling the provider, and meters and bills the request as usual. For load tests.
+             * @default false
+             */
+            allow_mock_response: boolean;
+            /**
              * Allowed Models
              * @description Model allow-list: null = any model, [] = deny all, or canonical instance:model entries (with instance:* / instance:prefix* wildcards).
              */
@@ -9089,6 +9100,8 @@ export interface components {
          * @description Response model for creating a new API key.
          */
         CreateKeyResponse: {
+            /** Allow Mock Response */
+            allow_mock_response: boolean;
             /** Allowed Models */
             allowed_models: string[] | null;
             /** Capture Agent Telemetry */
@@ -11157,6 +11170,11 @@ export interface components {
          * @description Response model for key information.
          */
         KeyInfo: {
+            /**
+             * Allow Mock Response
+             * @default false
+             */
+            allow_mock_response: boolean;
             /** Allowed Models */
             allowed_models: string[] | null;
             /** Capture Agent Telemetry */
@@ -16384,6 +16402,8 @@ export interface components {
          * @description Request model for updating a key.
          */
         UpdateKeyRequest: {
+            /** Allow Mock Response */
+            allow_mock_response?: boolean | null;
             /** Allowed Models */
             allowed_models?: string[] | null;
             /** Capture Agent Telemetry */
