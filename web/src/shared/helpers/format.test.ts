@@ -293,11 +293,10 @@ describe("formatters are locale-pinned", () => {
       )
     })
     expect([...new Set(offenders)].sort()).toEqual([
-      // The two date call sites this sweep does not decide. Both render a
+      // The date call site this sweep does not decide. It renders a
       // timestamp, where the open question is US versus the reader's own, and
-      // both are a `new Date(...)` rather than a number.
+      // it is a `new Date(...)` rather than a number.
       "features/keys/KeysPage.tsx",
-      "features/overview/OverviewPage.tsx",
       "shared/helpers/format.ts",
     ])
   })

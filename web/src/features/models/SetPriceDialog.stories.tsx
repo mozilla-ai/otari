@@ -46,15 +46,8 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** Pricing one model, reached from its row in the catalog. */
-export const SingleModel: Story = {
-  args: { targetCount: 1 },
-}
-
-/** Pricing a bulk selection: the copy is a function of the count. */
-export const BulkSelection: Story = {
-  args: { targetCount: 23 },
-}
+/** The rate fields alone. */
+export const Default: Story = {}
 
 /**
  * `collectModelKey` adds the model-key field, for pricing a model that is not in
@@ -69,13 +62,12 @@ export const WithInitialModelKey: Story = {
   args: { collectModelKey: true, initialModelKey: "openai:gpt-4o-mini" },
 }
 
-/** Custom heading and copy, which the org-level override flow passes. */
+/** A heading and copy of the caller's, as "Price this model" passes. */
 export const CustomCopy: Story = {
   args: {
-    targetCount: 4,
-    title: "Override rates",
-    description: (count) =>
-      `These rates replace the catalog's for ${count} model${count === 1 ? "" : "s"}, for this organization only.`,
+    title: "Price this model",
+    description:
+      "Set what this model costs. Requests from now on are costed at these rates.",
   },
 }
 
