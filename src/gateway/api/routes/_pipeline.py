@@ -377,6 +377,7 @@ from gateway.streaming import (
     IncompleteStreamError,
     StreamFormat,
     StreamingAttemptFailure,
+    close_stream_quietly,
     hold_for_first_chunk,
     iterate_streaming_attempts,
     merge_stream_usage,
@@ -6383,6 +6384,7 @@ async def _stream_with_stack_cleanup(
         async for chunk in stream:
             yield chunk
     except BaseException as exc:
+        await close_stream_quietly(stream)
         await _close_tool_backend(backend_stack.__aexit__(type(exc), exc, exc.__traceback__), kind)
         raise
     await _close_tool_backend(backend_stack.aclose(), kind)
