@@ -452,9 +452,25 @@ This reaches models OpenAI serves only on the Responses API (the codex and pro
 variants), and it keeps a reasoning model's reasoning across turns: each
 reasoning item comes back as a `thinking` block whose signature carries the
 item's encrypted content, and when a client such as Claude Code sends that block
-back on the next turn, Otari hands the reasoning back to the provider. A thinking
-block signed this way is dropped before a call to any other provider, and
-another provider's thinking blocks are dropped before a Responses call.
+back on the next turn, Otari hands the reasoning back to the provider. The
+reasoning is encrypted for the provider account that produced it, so the
+signature also names the instance that served it: only that instance gets the
+reasoning back, and any model it serves can use it. A thinking block signed this
+way is dropped before a call to any other instance or provider, and another
+provider's thinking blocks are dropped before a Responses call. When the block it
+drops opened an assistant turn whose tool calls the request answers, `thinking`
+is also left off that call, because Anthropic refuses a tool-use turn continued
+under thinking without one; a route that falls back from such an instance to an
+Anthropic model mid-loop therefore answers that one turn without extended
+thinking.
+
+Reasoning fields are sent only to a model whose name looks like a reasoning
+model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5*` except its
+`-chat` variants, and anything with `codex` in it), whether or not the client
+asked for thinking, because any other model fails the call over them. An Azure
+OpenAI deployment is called by its deployment name, so name a reasoning
+deployment after its model (`gpt-5-mini`, not `prod-reasoner`) or its reasoning
+is neither requested nor carried across turns.
 
 Every call is sent with `store: false`, so nothing is kept upstream. A Messages
 `thinking` budget becomes a Responses `reasoning.effort`: up to 2,048 tokens is
@@ -473,7 +489,10 @@ for every non-Anthropic model.
 
 The setting covers `/v1/messages` traffic only, and only where the instance's
 provider has a Responses API; an instance whose provider has none keeps the
-default and logs a warning once. Any other value fails at startup.
+default and logs a warning once. Any other value fails at startup. It is read
+from the `providers:` block of the gateway's own config, so it applies in
+standalone mode; a hybrid gateway's instances come from the platform and keep
+the default.
 
 ### Bedrock read timeout
 

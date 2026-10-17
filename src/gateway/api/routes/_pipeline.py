@@ -1388,15 +1388,17 @@ def _served_by_headers(
     }
 
 
-def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
-    """Bind a caller-supplied prompt cache key to its authenticated scope.
+def scope_prompt_cache_key(
+    request_fields: dict[str, Any], ctx: RequestContext, *, field: str = "prompt_cache_key"
+) -> dict[str, Any]:
+    """Bind a caller-supplied prompt cache key, held in ``field``, to its authenticated scope.
 
     Provider prompt caches can be shared by every tenant using one upstream
     account. Including the resolved identity in the routing key prevents two
     callers from deliberately choosing the same provider cache namespace and
     using cached-token counts as an exact-prefix oracle.
     """
-    caller_key = request_fields.get("prompt_cache_key")
+    caller_key = request_fields.get(field)
     if not isinstance(caller_key, str):
         return request_fields
 
@@ -1415,7 +1417,7 @@ def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) 
         # Never forward an unscoped caller-controlled key when the peer did not
         # provide an authenticated identity. Provider-side automatic caching
         # still works without the routing hint.
-        request_fields.pop("prompt_cache_key", None)
+        request_fields.pop(field, None)
         return request_fields
 
     payload = json.dumps(
@@ -1423,7 +1425,7 @@ def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) 
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    request_fields["prompt_cache_key"] = hashlib.sha256(payload.encode()).hexdigest()
+    request_fields[field] = hashlib.sha256(payload.encode()).hexdigest()
     return request_fields
 
 

@@ -208,7 +208,7 @@ def _responses_part(part: dict[str, Any]) -> tuple[str, Any]:
 def test_both_conversions_tell_the_model_the_same_thing(name: str) -> None:
     request = {"max_tokens": 512, **_FIXTURES[name]}
     chat = messages_params_to_completion_params(MessagesParams(model="gpt-5", **request))
-    responses = responses_kwargs_for({"model": "openai:gpt-5", **request})
+    responses = responses_kwargs_for({"model": "openai:gpt-5", **request}, instance="openai")
     assert _responses_view(responses) == _chat_view(chat)
 
 
@@ -216,7 +216,7 @@ def test_both_conversions_tell_the_model_the_same_thing(name: str) -> None:
 def test_a_user_document_converts_the_same_way() -> None:
     request = {"max_tokens": 512, **_DOCUMENTS}
     chat = messages_params_to_completion_params(MessagesParams(model="gpt-5", **request))
-    responses = responses_kwargs_for({"model": "openai:gpt-5", **request})
+    responses = responses_kwargs_for({"model": "openai:gpt-5", **request}, instance="openai")
     assert _responses_view(responses) == _chat_view(chat)
 
 

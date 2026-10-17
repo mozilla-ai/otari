@@ -8,14 +8,22 @@ from unittest.mock import patch
 
 import pytest
 from any_llm.exceptions import UnsupportedParameterError
-from any_llm.types.messages import MessageResponse
+from any_llm.types.messages import MessageDeltaEvent, MessageResponse
+from starlette.datastructures import Headers
 
 from gateway.api.routes.messages import _ADAPTER, _messages_stream_usage
 from gateway.core.config import GatewayConfig
-from gateway.services.inference import REASONING_SIGNATURE_PREFIX, call_messages, usage_unreported, with_messages_api
+from gateway.services.inference import (
+    REASONING_SIGNATURE_PREFIX,
+    call_messages,
+    conversation_cache_key,
+    reasoning_signature,
+    usage_unreported,
+    with_responses_instance,
+)
 from gateway.services.inference._messages_responses_bridge import (
     CONVERSATION_CACHE_KEY_FIELD,
-    MESSAGES_API_FIELD,
+    RESPONSES_INSTANCE_FIELD,
     ResponsesStreamFailedError,
     responses_kwargs_for,
 )
@@ -23,6 +31,7 @@ from gateway.services.mcp_loop_messages import anthropic_tool_loop, anthropic_to
 
 _ARESPONSES = "gateway.services.inference._messages_responses_bridge.aresponses"
 _MODEL = "openai:gpt-5"
+_INSTANCE = "openai"
 _USAGE = {
     "input_tokens": 100,
     "input_tokens_details": {"cached_tokens": 40},
@@ -59,6 +68,10 @@ def _kwargs(**fields: Any) -> dict[str, Any]:
     }
 
 
+def _translate(kwargs: dict[str, Any]) -> dict[str, Any]:
+    return responses_kwargs_for(kwargs, instance=_INSTANCE)
+
+
 async def _aiter(events: list[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
     for event in events:
         yield event
@@ -74,7 +87,7 @@ async def _via_responses(result: Any, captured: list[dict[str, Any]] | None = No
         raise AssertionError("the native Messages call must not run")
 
     with patch(_ARESPONSES, new=fake_aresponses):
-        return await call_messages(native, with_messages_api(_kwargs(**fields), "responses"))
+        return await call_messages(native, with_responses_instance(_kwargs(**fields), _INSTANCE))
 
 
 # ---------- dispatch ----------
@@ -121,15 +134,43 @@ async def test_marked_call_to_a_provider_without_a_responses_api_stays_native() 
         sent.update(kwargs)
         return "native"
 
-    kwargs = with_messages_api({"model": "mistral:mistral-small-latest", "messages": []}, "responses")
+    kwargs = with_responses_instance({"model": "mistral:mistral-small-latest", "messages": []}, _INSTANCE)
     assert await call_messages(native, kwargs) == "native"
-    assert MESSAGES_API_FIELD not in sent
+    assert RESPONSES_INSTANCE_FIELD not in sent
 
 
-def test_only_responses_marks_the_kwargs() -> None:
-    assert with_messages_api({"model": _MODEL}, "completions") == {"model": _MODEL}
-    assert with_messages_api({"model": _MODEL}, None) == {"model": _MODEL}
-    assert with_messages_api({"model": _MODEL}, "responses")[MESSAGES_API_FIELD] == "responses"
+def test_only_an_opted_in_instance_marks_the_kwargs() -> None:
+    assert with_responses_instance({"model": _MODEL}, None) == {"model": _MODEL}
+    assert with_responses_instance({"model": _MODEL}, _INSTANCE)[RESPONSES_INSTANCE_FIELD] == _INSTANCE
+
+
+@pytest.mark.asyncio
+async def test_native_call_continuing_a_tool_turn_whose_thinking_it_drops_leaves_thinking_off() -> None:
+    sent: list[dict[str, Any]] = []
+
+    async def native(**kwargs: Any) -> None:
+        sent.append(kwargs)
+
+    tool_turn = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "", "signature": reasoning_signature(_INSTANCE, "enc")},
+                {"type": "tool_use", "id": "c", "name": "read", "input": {}},
+            ],
+        },
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c", "content": "x"}]},
+    ]
+    thinking = {"type": "enabled", "budget_tokens": 2048}
+    await call_messages(native, {"model": "anthropic:claude", "messages": tool_turn, "thinking": thinking})
+    # A new user turn may open without thinking, so thinking stays on.
+    new_turn = [*tool_turn, {"role": "assistant", "content": "ok"}, {"role": "user", "content": "more"}]
+    await call_messages(native, {"model": "anthropic:claude", "messages": new_turn, "thinking": thinking})
+
+    assert "thinking" not in sent[0]
+    assert sent[0]["messages"][1]["content"] == [{"type": "tool_use", "id": "c", "name": "read", "input": {}}]
+    assert sent[1]["thinking"] == thinking
 
 
 def test_config_refuses_an_unknown_messages_api() -> None:
@@ -142,7 +183,7 @@ def test_config_refuses_an_unknown_messages_api() -> None:
 
 
 def test_request_fields_translate() -> None:
-    out = responses_kwargs_for(
+    out = _translate(
         _kwargs(
             system=[{"type": "text", "text": "be brief", "cache_control": {"type": "ephemeral"}}],
             temperature=0.2,
@@ -196,7 +237,7 @@ def test_request_fields_translate() -> None:
     ],
 )
 def test_tool_choice_translates(tool_choice: dict[str, Any], expected: Any) -> None:
-    assert responses_kwargs_for(_kwargs(tool_choice=tool_choice))["tool_choice"] == expected
+    assert _translate(_kwargs(tool_choice=tool_choice))["tool_choice"] == expected
 
 
 @pytest.mark.parametrize(
@@ -204,42 +245,48 @@ def test_tool_choice_translates(tool_choice: dict[str, Any], expected: Any) -> N
     [(1024, "low"), (2048, "low"), (8000, "medium"), (16384, "medium"), (31999, "high")],
 )
 def test_thinking_budget_maps_to_an_effort(budget: int, effort: str) -> None:
-    out = responses_kwargs_for(_kwargs(thinking={"type": "enabled", "budget_tokens": budget}))
+    out = _translate(_kwargs(thinking={"type": "enabled", "budget_tokens": budget}))
     assert out["reasoning"] == {"effort": effort, "summary": "auto"}
 
 
 def test_output_config_effort_wins_over_the_budget() -> None:
-    out = responses_kwargs_for(
-        _kwargs(thinking={"type": "enabled", "budget_tokens": 1024}, output_format={"effort": "max"})
-    )
+    out = _translate(_kwargs(thinking={"type": "enabled", "budget_tokens": 1024}, output_format={"effort": "max"}))
     assert out["reasoning"] == {"effort": "high", "summary": "auto"}
 
 
 def test_reasoning_model_gets_encrypted_reasoning_without_asking() -> None:
-    out = responses_kwargs_for(_kwargs(model="openai:gpt-5.1-codex"))
+    out = _translate(_kwargs(model="openai:gpt-5.1-codex"))
     assert out["reasoning"] == {"summary": "auto"}
     assert out["include"] == ["reasoning.encrypted_content"]
-    disabled = responses_kwargs_for(_kwargs(thinking={"type": "disabled"}))
+    disabled = _translate(_kwargs(thinking={"type": "disabled"}))
     assert "reasoning" not in disabled
     assert disabled["include"] == ["reasoning.encrypted_content"]
 
 
 @pytest.mark.parametrize("model", ["openai:gpt-4.1", "openai:gpt-5-chat-latest"])
-def test_non_reasoning_model_gets_no_reasoning_fields(model: str) -> None:
-    out = responses_kwargs_for(_kwargs(model=model))
+@pytest.mark.parametrize(
+    "asked",
+    [{}, {"thinking": {"type": "enabled", "budget_tokens": 4096}}, {"output_format": {"effort": "high"}}],
+)
+def test_non_reasoning_model_gets_no_reasoning_fields(model: str, asked: dict[str, Any]) -> None:
+    out = _translate(_kwargs(model=model, **asked))
     assert "reasoning" not in out
     assert "include" not in out
 
 
+def test_a_routed_reasoning_model_is_recognized() -> None:
+    assert _translate(_kwargs(model="openrouter:openai/gpt-5"))["include"] == ["reasoning.encrypted_content"]
+
+
 def test_json_schema_output_config_becomes_a_text_format() -> None:
     schema = {"type": "object", "properties": {"a": {"type": "string"}}}
-    out = responses_kwargs_for(_kwargs(output_format={"format": {"type": "json_schema", "schema": schema}}))
+    out = _translate(_kwargs(output_format={"format": {"type": "json_schema", "schema": schema}}))
     assert out["text"] == {"format": {"type": "json_schema", "name": "output", "schema": schema, "strict": False}}
 
 
 def test_stop_sequences_are_refused() -> None:
     with pytest.raises(UnsupportedParameterError, match="stop_sequences"):
-        responses_kwargs_for(_kwargs(stop_sequences=["END"]))
+        _translate(_kwargs(stop_sequences=["END"]))
 
 
 def test_conversation_translates_to_input_items() -> None:
@@ -255,8 +302,10 @@ def test_conversation_translates_to_input_items() -> None:
         {
             "role": "assistant",
             "content": [
-                {"type": "thinking", "thinking": "plan", "signature": f"{REASONING_SIGNATURE_PREFIX}enc-1"},
+                {"type": "thinking", "thinking": "plan", "signature": reasoning_signature(_INSTANCE, "enc-1")},
                 {"type": "thinking", "thinking": "other", "signature": "anthropic-sig"},
+                # Encrypted for another instance's account, which this one would refuse.
+                {"type": "thinking", "thinking": "elsewhere", "signature": reasoning_signature("azure", "enc-2")},
                 {"type": "redacted_thinking", "data": "x"},
                 {"type": "text", "text": "Reading "},
                 {"type": "text", "text": "both."},
@@ -278,7 +327,7 @@ def test_conversation_translates_to_input_items() -> None:
             ],
         },
     ]
-    assert responses_kwargs_for(_kwargs(messages=messages))["input_data"] == [
+    assert _translate(_kwargs(messages=messages))["input_data"] == [
         {
             "role": "user",
             "content": [
@@ -300,7 +349,7 @@ def test_conversation_translates_to_input_items() -> None:
 def test_tool_result_with_an_image_keeps_its_parts() -> None:
     image = {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
     messages = [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c", "content": [image]}]}]
-    assert responses_kwargs_for(_kwargs(messages=messages))["input_data"] == [
+    assert _translate(_kwargs(messages=messages))["input_data"] == [
         {
             "type": "function_call_output",
             "call_id": "c",
@@ -312,7 +361,7 @@ def test_tool_result_with_an_image_keeps_its_parts() -> None:
 def test_unknown_user_block_is_refused() -> None:
     messages = [{"role": "user", "content": [{"type": "container_upload", "file_id": "f"}]}]
     with pytest.raises(UnsupportedParameterError, match="container_upload"):
-        responses_kwargs_for(_kwargs(messages=messages))
+        _translate(_kwargs(messages=messages))
 
 
 # ---------- response ----------
@@ -325,7 +374,7 @@ async def test_response_translates_to_a_message() -> None:
     result = await _via_responses(_response(output), captured)
 
     assert captured[0]["store"] is False
-    assert MESSAGES_API_FIELD not in captured[0]
+    assert RESPONSES_INSTANCE_FIELD not in captured[0]
     assert isinstance(result, MessageResponse)
     assert result.model_dump(exclude_none=True) == {
         "id": "msg_resp_1",
@@ -333,7 +382,7 @@ async def test_response_translates_to_a_message() -> None:
         "role": "assistant",
         "model": "gpt-5",
         "content": [
-            {"type": "thinking", "thinking": "Thinking it over", "signature": f"{REASONING_SIGNATURE_PREFIX}enc-1"},
+            {"type": "thinking", "thinking": "Thinking it over", "signature": reasoning_signature(_INSTANCE, "enc-1")},
             {"type": "text", "text": "Hello"},
             {"type": "tool_use", "id": "call_1", "name": "read", "input": {"path": "a"}},
         ],
@@ -415,7 +464,7 @@ async def test_stream_translates_to_messages_events() -> None:
         {"type": "response.output_item.done", "output_index": 2, "item": _call("read", '{"path":"a"}')},
     )
     stream = await _via_responses(_aiter(events), stream=True)
-    sig = f"{REASONING_SIGNATURE_PREFIX}enc-1"
+    sig = reasoning_signature(_INSTANCE, "enc-1")
     assert await _collect(stream) == [
         {
             "type": "message_start",
@@ -492,14 +541,42 @@ async def test_incomplete_stream_reports_max_tokens() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_stream_raises() -> None:
+async def test_failed_stream_raises_with_the_provider_code() -> None:
+    error = {"code": "context_length_exceeded", "message": "too long"}
     events = [
         {"type": "response.created", "response": {"id": "resp_1", "model": "gpt-5"}},
-        {"type": "response.failed", "response": {"id": "resp_1", "status": "failed"}},
+        {"type": "response.failed", "response": {"id": "resp_1", "status": "failed", "error": error}},
     ]
     stream = await _via_responses(_aiter(events), stream=True)
-    with pytest.raises(ResponsesStreamFailedError):
+    with pytest.raises(ResponsesStreamFailedError) as raised:
         await _collect(stream)
+    assert raised.value.code == "context_length_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_stream_opens_a_thinking_block_only_for_reasoning_with_something_to_show() -> None:
+    events = _stream(
+        {"type": "response.output_item.added", "output_index": 0, "item": {"type": "reasoning"}},
+        {"type": "response.reasoning_summary_part.added", "output_index": 0, "summary_index": 0},
+        {"type": "response.output_item.done", "output_index": 0, "item": _reasoning("")},
+        {"type": "response.output_item.added", "output_index": 1, "item": {"type": "reasoning"}},
+        {"type": "response.output_item.done", "output_index": 1, "item": _reasoning("enc-1")},
+    )
+    wire = await _collect(await _via_responses(_aiter(events), stream=True))
+    blocks = [e for e in wire if e["type"].startswith("content_block")]
+    assert blocks == [
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "signature_delta", "signature": reasoning_signature(_INSTANCE, "enc-1")},
+        },
+        {"type": "content_block_stop", "index": 0},
+    ]
 
 
 # ---------- tool loops ----------
@@ -536,7 +613,7 @@ async def test_tool_loop_sends_its_reasoning_back_through_the_bridge() -> None:
     pool = _Pool()
     with patch(_ARESPONSES, new=fake_aresponses):
         result = await anthropic_tool_loop(
-            completion_kwargs=with_messages_api(_kwargs(), "responses"),
+            completion_kwargs=with_responses_instance(_kwargs(), _INSTANCE),
             pool=cast(Any, pool),
             max_iterations=3,
         )
@@ -579,7 +656,7 @@ async def test_streaming_tool_loop_sends_its_reasoning_back_through_the_bridge()
             [
                 event
                 async for event in anthropic_tool_loop_stream(
-                    completion_kwargs=with_messages_api(_kwargs(stream=True), "responses"),
+                    completion_kwargs=with_responses_instance(_kwargs(stream=True), _INSTANCE),
                     pool=cast(Any, pool),
                     max_iterations=3,
                 )
@@ -592,7 +669,67 @@ async def test_streaming_tool_loop_sends_its_reasoning_back_through_the_bridge()
     assert {"type": "text_delta", "text": "done"} in [event.get("delta") for event in wire]
 
 
+@pytest.mark.asyncio
+async def test_tool_loop_bills_every_round_input_and_cached_input() -> None:
+    replies = iter([_response([_call("fetch_url", "{}")]), _response([_message("done")])])
+
+    async def fake_aresponses(**_: Any) -> Any:
+        return next(replies)
+
+    with patch(_ARESPONSES, new=fake_aresponses):
+        result = await anthropic_tool_loop(
+            completion_kwargs=with_responses_instance(_kwargs(), _INSTANCE), pool=cast(Any, _Pool()), max_iterations=3
+        )
+
+    assert (result.usage.input_tokens, result.usage.cache_read_input_tokens, result.usage.output_tokens) == (
+        120,
+        80,
+        60,
+    )
+
+
+@pytest.mark.asyncio
+async def test_streaming_tool_loop_bills_every_round_input_and_cached_input() -> None:
+    turns = iter(
+        [
+            _stream(
+                {"type": "response.output_item.added", "output_index": 0, "item": _call("fetch_url", "")},
+                {"type": "response.output_item.done", "output_index": 0, "item": _call("fetch_url", "{}")},
+            ),
+            _stream({"type": "response.output_item.done", "output_index": 0, "item": _message("done")}),
+        ]
+    )
+
+    async def fake_aresponses(**_: Any) -> Any:
+        return _aiter(next(turns))
+
+    with patch(_ARESPONSES, new=fake_aresponses):
+        events = [
+            event
+            async for event in anthropic_tool_loop_stream(
+                completion_kwargs=with_responses_instance(_kwargs(stream=True), _INSTANCE),
+                pool=cast(Any, _Pool()),
+                max_iterations=3,
+            )
+        ]
+
+    deltas = [event for event in events if isinstance(event, MessageDeltaEvent)]
+    assert len(deltas) == 1
+    usage = _messages_stream_usage(deltas[0])
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens) == (120, 60)
+    assert deltas[0].usage.cache_read_input_tokens == 80
+
+
 # ---------- conversation cache key ----------
+
+
+def test_the_session_supplies_the_conversation_cache_key() -> None:
+    conversation = Headers({"otari-conversation-id": "c1"})
+    assert conversation_cache_key(conversation, session_label=None) == {CONVERSATION_CACHE_KEY_FIELD: "client:c1"}
+    harness = Headers({"x-claude-code-session-id": "s1"})
+    assert conversation_cache_key(harness, session_label=None) == {CONVERSATION_CACHE_KEY_FIELD: "harness:s1"}
+    assert conversation_cache_key(Headers({}), session_label=None) == {}
 
 
 @pytest.mark.asyncio

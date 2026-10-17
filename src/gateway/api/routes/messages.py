@@ -92,11 +92,12 @@ from gateway.services.inference import (
     CONVERSATION_CACHE_KEY_FIELD,
     bind_upstream_user,
     call_messages,
+    conversation_cache_key,
     messages_user_fields,
     upstream_exception_chain,
     upstream_exception_shape,
     usage_unreported,
-    with_messages_api,
+    with_responses_instance,
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
@@ -120,7 +121,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.services.traces import read_turn, resolve_session
+from gateway.services.traces import read_turn
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -651,7 +652,7 @@ class _MessagesAdapter:
 
     def for_instance(self, kwargs: dict[str, Any], instance: str) -> dict[str, Any]:
         """``kwargs`` for a call to ``instance``, marked for its Responses API when it opted in."""
-        return with_messages_api(kwargs, "responses" if instance in self._responses_instances else None)
+        return with_responses_instance(kwargs, instance if instance in self._responses_instances else None)
 
     def error(
         self,
@@ -1037,13 +1038,9 @@ async def create_message(
         )
         # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
         fields.pop("metadata", None)
+        fields.update(conversation_cache_key(raw_request.headers, session_label=request.session_label))
         scope_prompt_cache_key(fields, ctx)
-        if "prompt_cache_key" not in fields:
-            session = resolve_session(raw_request.headers, session_label=request.session_label, tags=None)
-            if session is not None:
-                derived = scope_prompt_cache_key({"prompt_cache_key": f"{session.source}:{session.key}"}, ctx)
-                if isinstance(key := derived.get("prompt_cache_key"), str):
-                    fields[CONVERSATION_CACHE_KEY_FIELD] = key
+        scope_prompt_cache_key(fields, ctx, field=CONVERSATION_CACHE_KEY_FIELD)
         bind_upstream_user(fields, ctx.upstream_user)
         if fields.get("tools"):
             fields["tools"] = openai_to_anthropic_tools(fields["tools"])

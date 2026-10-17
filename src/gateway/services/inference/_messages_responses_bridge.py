@@ -8,12 +8,16 @@ the setting, any-llm serves the request as a chat completion, as it always has.
 
 The point of the detour is reasoning. A Responses ``reasoning`` item comes back
 as a ``thinking`` block whose ``signature`` carries the item's encrypted content
-behind :data:`REASONING_SIGNATURE_PREFIX`. A Messages client resends thinking
-blocks on the next turn, because Anthropic's API requires it, and the prefix
-tells this module which ones to hand back to the provider as reasoning items.
-A thinking block signed by anyone else means nothing to the provider and is
-dropped; one signed here means nothing to any other provider, so
-:func:`call_messages` drops those before every other call.
+behind :data:`REASONING_SIGNATURE_PREFIX` and a tag naming the instance that
+served it. A Messages client resends thinking blocks on the next turn, because
+Anthropic's API requires it, and the signature tells this module which ones to
+hand back to the provider as reasoning items. Only the instance that minted a
+block can use it: the content is encrypted for that provider account, and
+another account refuses the whole call over it (``invalid_encrypted_content``),
+so a block minted by another instance is dropped like any other provider's
+thinking. Any model on the same account accepts it. A block minted here means
+nothing to any other provider, so :func:`call_messages` drops those before
+every other call.
 
 Every request is sent with ``store: false``: nothing is kept upstream, and a
 Messages client resends the whole conversation each turn anyway.
@@ -21,10 +25,11 @@ Messages client resends the whole conversation each turn anyway.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 
 from any_llm import AnyLLM, LLMProvider
@@ -45,26 +50,25 @@ from pydantic import BaseModel
 
 from gateway.log_config import logger
 from gateway.services.providers import aresponses
+from gateway.services.traces import resolve_session
 
-MESSAGES_API_FIELD = "_otari_messages_api"
-"""Carries an instance's ``messages_api`` setting from the route to the provider call.
+RESPONSES_INSTANCE_FIELD = "_otari_responses_instance"
+"""Names the instance whose Responses API serves this call, set only for one that opted in.
 
 Never a caller field: :func:`call_messages` consumes it before any provider sees the kwargs.
 """
 
-MESSAGES_API_RESPONSES = "responses"
-
 CONVERSATION_CACHE_KEY_FIELD = "_otari_conversation_cache_key"
-"""Carries a prompt cache key derived from the request's session, already scoped to the caller.
+"""Carries a prompt cache key derived from the request's session; the route scopes it to the caller.
 
 Used only as a Responses call's ``prompt_cache_key`` when the caller sent none, so
 the turns of one conversation land on the same cache. Never reaches another call.
 """
 
 REASONING_SIGNATURE_PREFIX = "otari-rsn1."
-"""Marks a thinking block's signature as an encrypted Responses reasoning item."""
+"""Marks a thinking block's signature as ``otari-rsn1.<instance tag>.<encrypted reasoning>``."""
 
-_PRIVATE_FIELDS = frozenset({MESSAGES_API_FIELD, CONVERSATION_CACHE_KEY_FIELD})
+_PRIVATE_FIELDS = frozenset({RESPONSES_INSTANCE_FIELD, CONVERSATION_CACHE_KEY_FIELD})
 
 _BRIDGE_NOTE = "This instance serves Messages requests through the provider's Responses API."
 
@@ -110,9 +114,9 @@ _EFFORT_BY_BUDGET = ((2048, "low"), (16384, "medium"))
 _EFFORT_ABOVE_BUDGETS = "high"
 _EFFORTS = frozenset({"low", "medium", "high"})
 
-# Reasoning models, for a request that did not ask for thinking itself. Sending
-# ``reasoning`` or asking for encrypted reasoning makes other models fail the
-# call, ``gpt-5-chat-latest`` among them.
+# Reasoning models. Sending ``reasoning`` or asking for encrypted reasoning makes
+# any other model fail the call (``gpt-4.1``, ``gpt-5-chat-latest``), even when the
+# caller asked for thinking, so a model must match this to get either.
 _REASONING_MODEL = re.compile(r"^(o\d|gpt-5)(?!.*-chat)|codex", re.IGNORECASE)
 
 _STOP_FOR_INCOMPLETE = {"max_output_tokens": "max_tokens", "content_filter": "refusal"}
@@ -129,11 +133,24 @@ def serves_responses_natively(provider: str | LLMProvider) -> bool:
     return bool(getattr(provider_class, "SUPPORTS_RESPONSES", False))
 
 
-def with_messages_api(kwargs: dict[str, Any], messages_api: Any) -> dict[str, Any]:
-    """``kwargs`` marked to go through the Responses API when ``messages_api`` says so."""
-    if messages_api != MESSAGES_API_RESPONSES:
+def with_responses_instance(kwargs: dict[str, Any], instance: str | None) -> dict[str, Any]:
+    """``kwargs`` marked to go through ``instance``'s Responses API, or unchanged for ``None``."""
+    if instance is None:
         return kwargs
-    return {**kwargs, MESSAGES_API_FIELD: MESSAGES_API_RESPONSES}
+    return {**kwargs, RESPONSES_INSTANCE_FIELD: instance}
+
+
+def conversation_cache_key(headers: Mapping[str, str], *, session_label: str | None) -> dict[str, str]:
+    """The private field keying a Responses call's prompt cache by the request's session, if it has one.
+
+    The turns of one conversation then share a cache. The caller's own
+    ``prompt_cache_key`` still wins (see :func:`call_messages`), and the route scopes
+    this key to the caller as it scopes that one.
+    """
+    session = resolve_session(headers, session_label=session_label, tags=None)
+    if session is None:
+        return {}
+    return {CONVERSATION_CACHE_KEY_FIELD: f"{session.source}:{session.key}"}
 
 
 async def call_messages(native: Callable[..., Awaitable[Any]], kwargs: dict[str, Any]) -> Any:
@@ -142,15 +159,15 @@ async def call_messages(native: Callable[..., Awaitable[Any]], kwargs: dict[str,
     ``native`` is the caller's ``amessages``, taken as an argument so the caller's
     module global stays the one place a test replaces it.
     """
-    marked = kwargs.get(MESSAGES_API_FIELD) == MESSAGES_API_RESPONSES
+    instance = kwargs.get(RESPONSES_INSTANCE_FIELD)
     conversation_key = kwargs.get(CONVERSATION_CACHE_KEY_FIELD)
     kwargs = {key: value for key, value in kwargs.items() if key not in _PRIVATE_FIELDS}
-    if marked:
+    if isinstance(instance, str):
         provider = _provider_of(kwargs)
         if provider is not None and serves_responses_natively(provider):
-            if conversation_key and not kwargs.get("prompt_cache_key"):
+            if isinstance(conversation_key, str) and not kwargs.get("prompt_cache_key"):
                 kwargs["prompt_cache_key"] = conversation_key
-            return await amessages_via_responses(**kwargs)
+            return await amessages_via_responses(kwargs, instance=instance)
         if str(provider) not in _warned_unsupported:
             _warned_unsupported.add(str(provider))
             logger.warning(
@@ -159,18 +176,24 @@ async def call_messages(native: Callable[..., Awaitable[Any]], kwargs: dict[str,
                 provider,
             )
     if isinstance(messages := kwargs.get("messages"), list):
+        if kwargs.get("thinking") and _continues_tool_use_after_minted_thinking(messages):
+            # Anthropic requires a tool-use turn that continues under thinking to open
+            # with its own thinking block, and the one there is about to be dropped.
+            kwargs.pop("thinking")
         kwargs["messages"] = _without_minted_thinking(messages)
     return await native(**kwargs)
 
 
-async def amessages_via_responses(**kwargs: Any) -> MessageResponse | AsyncIterator[MessageStreamEvent]:
-    """Run ``amessages`` keyword arguments as a Responses call, answering in Messages shape."""
-    responses_kwargs = responses_kwargs_for(kwargs)
+async def amessages_via_responses(
+    kwargs: dict[str, Any], *, instance: str
+) -> MessageResponse | AsyncIterator[MessageStreamEvent]:
+    """Run ``amessages`` keyword arguments as a call to ``instance``'s Responses API, answering in Messages shape."""
+    responses_kwargs = responses_kwargs_for(kwargs, instance=instance)
     if responses_kwargs.get("stream"):
         events = await aresponses(**responses_kwargs)
-        return _stream_events(events)  # type: ignore[arg-type]
+        return _stream_events(events, instance=instance)  # type: ignore[arg-type]
     response = await aresponses(**responses_kwargs)
-    return message_from_response(_as_dict(response))
+    return message_from_response(_as_dict(response), instance=instance)
 
 
 def _provider_of(kwargs: dict[str, Any]) -> str | None:
@@ -187,12 +210,40 @@ def _as_dict(value: Any) -> Any:
     return value.model_dump(exclude_none=True, warnings=False) if isinstance(value, BaseModel) else value
 
 
+def _instance_tag(instance: str) -> str:
+    """A short stand-in for ``instance`` in a signature, which the client sees, so the config name stays private."""
+    return hashlib.sha256(instance.encode()).hexdigest()[:16]
+
+
+def reasoning_signature(instance: str, encrypted_content: str) -> str:
+    """The thinking-block signature carrying ``instance``'s encrypted reasoning."""
+    return f"{REASONING_SIGNATURE_PREFIX}{_instance_tag(instance)}.{encrypted_content}"
+
+
+def _minted_reasoning(block: dict[str, Any], instance: str) -> str | None:
+    """The encrypted reasoning a block minted by ``instance`` carries, or ``None`` for another's."""
+    tag, _, encrypted = str(block["signature"])[len(REASONING_SIGNATURE_PREFIX) :].partition(".")
+    return encrypted if tag == _instance_tag(instance) and encrypted else None
+
+
 def _is_minted_thinking(block: Any) -> bool:
     return (
         isinstance(block, dict)
         and block.get("type") == "thinking"
         and str(block.get("signature") or "").startswith(REASONING_SIGNATURE_PREFIX)
     )
+
+
+def _continues_tool_use_after_minted_thinking(messages: list[Any]) -> bool:
+    """Whether the request answers tool calls from an assistant turn that opened with a block minted here."""
+    last = messages[-1] if messages else None
+    if not isinstance(last, dict) or last.get("role") != "user" or not isinstance(last.get("content"), list):
+        return False
+    if not any(isinstance(block, dict) and block.get("type") == "tool_result" for block in last["content"]):
+        return False
+    previous = messages[-2] if len(messages) > 1 else None
+    content = previous.get("content") if isinstance(previous, dict) else None
+    return isinstance(content, list) and any(_is_minted_thinking(block) for block in content)
 
 
 def _without_minted_thinking(messages: list[Any]) -> list[Any]:
@@ -214,8 +265,8 @@ def _without_minted_thinking(messages: list[Any]) -> list[Any]:
 # ---------------------------------------------------------------------------
 
 
-def responses_kwargs_for(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Translate ``amessages`` keyword arguments into ``aresponses`` ones.
+def responses_kwargs_for(kwargs: dict[str, Any], *, instance: str) -> dict[str, Any]:
+    """Translate ``amessages`` keyword arguments into ``aresponses`` ones for a call to ``instance``.
 
     Raises ``UnsupportedParameterError`` for a field the Responses API cannot carry.
     """
@@ -227,7 +278,7 @@ def responses_kwargs_for(kwargs: dict[str, Any]) -> dict[str, Any]:
     out["model"] = kwargs["model"]
     if kwargs.get("provider"):
         out["provider"] = kwargs["provider"]
-    out["input_data"] = _input_items(kwargs.get("messages") or [], provider)
+    out["input_data"] = _input_items(kwargs.get("messages") or [], provider, instance)
     out["store"] = False
     if instructions := _system_text(kwargs.get("system")):
         out["instructions"] = instructions
@@ -320,6 +371,8 @@ def _reasoning(thinking: Any, output_config: Any, model: str) -> dict[str, Any] 
     An explicit ``output_config.effort`` wins over a thinking budget. A summary is asked
     for unless the caller turned thinking off, so a thinking block has text to show.
     """
+    if not _REASONING_MODEL.search(model.partition(":")[2].rpartition("/")[2] or model):
+        return None
     thinking = thinking if isinstance(thinking, dict) else {}
     thinking_type = thinking.get("type")
     effort = output_config.get("effort") if isinstance(output_config, dict) else None
@@ -330,9 +383,6 @@ def _reasoning(thinking: Any, output_config: Any, model: str) -> dict[str, Any] 
     if effort is None and thinking_type == "enabled":
         effort = _effort_for_budget(thinking.get("budget_tokens"))
 
-    asked = thinking_type in ("enabled", "adaptive") or effort is not None
-    if not asked and not _REASONING_MODEL.search(model.partition(":")[2] or model):
-        return None
     reasoning: dict[str, Any] = {}
     if effort is not None:
         reasoning["effort"] = effort
@@ -350,7 +400,7 @@ def _effort_for_budget(budget: Any) -> str:
     return _EFFORT_ABOVE_BUDGETS
 
 
-def _input_items(messages: list[Any], provider: str) -> list[dict[str, Any]]:
+def _input_items(messages: list[Any], provider: str, instance: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, dict):
@@ -360,13 +410,13 @@ def _input_items(messages: list[Any], provider: str) -> list[dict[str, Any]]:
         if isinstance(content, str):
             items.append({"role": role, "content": content})
         elif role == "assistant":
-            items.extend(_assistant_items(content or [], provider))
+            items.extend(_assistant_items(content or [], instance))
         else:
             items.extend(_user_items(content or [], provider))
     return items
 
 
-def _assistant_items(blocks: list[Any], provider: str) -> list[dict[str, Any]]:
+def _assistant_items(blocks: list[Any], instance: str) -> list[dict[str, Any]]:
     """Assistant blocks in order, consecutive text joined into one output message."""
     items: list[dict[str, Any]] = []
     text: list[str] = []
@@ -390,18 +440,18 @@ def _assistant_items(blocks: list[Any], provider: str) -> list[dict[str, Any]]:
                     "arguments": json.dumps(block.get("input") or {}),
                 }
             )
-        elif _is_minted_thinking(block):
+        elif _is_minted_thinking(block) and (encrypted := _minted_reasoning(block, instance)) is not None:
             flush()
             summary = str(block.get("thinking") or "")
             items.append(
                 {
                     "type": "reasoning",
                     "summary": [{"type": "summary_text", "text": summary}] if summary else [],
-                    "encrypted_content": str(block["signature"])[len(REASONING_SIGNATURE_PREFIX) :],
+                    "encrypted_content": encrypted,
                 }
             )
         elif block_type in ("thinking", "redacted_thinking"):
-            # Another provider's signature, which this one cannot read.
+            # Another provider's signature, or another instance's, which this one cannot read.
             continue
         else:
             # Server-tool activity a provider ran on an earlier Anthropic turn.
@@ -490,13 +540,13 @@ def _input_part(block: Any, provider: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _thinking_block(item: dict[str, Any]) -> dict[str, Any]:
+def _thinking_block(item: dict[str, Any], instance: str) -> dict[str, Any]:
     summary = "\n\n".join(str(part.get("text") or "") for part in item.get("summary") or [] if isinstance(part, dict))
     encrypted = item.get("encrypted_content")
     return {
         "type": "thinking",
         "thinking": summary,
-        "signature": f"{REASONING_SIGNATURE_PREFIX}{encrypted}" if encrypted else "",
+        "signature": reasoning_signature(instance, str(encrypted)) if encrypted else "",
     }
 
 
@@ -521,7 +571,10 @@ def _stop_reason(response: dict[str, Any], *, tool_called: bool, refused: bool) 
 
 
 class UnreportedUsage(MessageUsage):
-    """Zero usage on the wire for a response whose provider reported none; see :func:`usage_unreported`."""
+    """Zero usage on the wire for a response whose provider reported none; see :func:`usage_unreported`.
+
+    A subclass rather than ``None`` because any-llm's Messages types require ``usage``.
+    """
 
 
 class UnreportedDeltaUsage(MessageDeltaUsage):
@@ -562,14 +615,14 @@ def _message_id(response: dict[str, Any]) -> str:
     return f"msg_{response.get('id') or uuid.uuid4().hex}"
 
 
-def message_from_response(response: dict[str, Any]) -> MessageResponse:
-    """A Responses ``Response`` (as a dict) as a Messages response."""
+def message_from_response(response: dict[str, Any], *, instance: str) -> MessageResponse:
+    """A Responses ``Response`` (as a dict) from ``instance`` as a Messages response."""
     content: list[dict[str, Any]] = []
     tool_called = refused = False
     for item in response.get("output") or []:
         item_type = item.get("type")
         if item_type == "reasoning":
-            block = _thinking_block(item)
+            block = _thinking_block(item, instance)
             if block["thinking"] or block["signature"]:
                 content.append(block)
         elif item_type == "message":
@@ -610,18 +663,34 @@ def message_from_response(response: dict[str, Any]) -> MessageResponse:
 
 
 class ResponsesStreamFailedError(Exception):
-    """The provider ended a Responses stream with ``response.failed`` or an ``error`` event."""
+    """The provider ended a Responses stream with ``response.failed`` or an ``error`` event.
+
+    ``code`` is the provider's error code (``context_length_exceeded``, ...), when it sent one.
+    """
+
+    def __init__(self, event_type: str, code: str | None) -> None:
+        super().__init__(f"{event_type} ({code})" if code else event_type)
+        self.code = code
+
+
+def _stream_error_code(event: dict[str, Any]) -> str | None:
+    error = (event.get("response") or {}).get("error") if event.get("type") == "response.failed" else event
+    code = error.get("code") if isinstance(error, dict) else None
+    return str(code) if code else None
 
 
 class _StreamTranslator:
-    """Turns one Responses event stream into Messages events.
+    """Turns one Responses event stream from ``instance`` into Messages events.
 
     Messages numbers content blocks from zero in the order they open, so each
     Responses output item (or, for a message, each content part) is given the
-    next index when its first block opens.
+    next index when its first block opens. A reasoning item opens its thinking
+    block only once it has something to show, so an empty item leaves no block.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, instance: str) -> None:
+        self._instance = instance
+        self._pending_reasoning: set[int] = set()
         self._next_index = 0
         self._open: dict[tuple[int, int], int] = {}
         self._kinds: dict[tuple[int, int], str] = {}
@@ -695,7 +764,7 @@ class _StreamTranslator:
                 }
                 out.append(self._start(whole, block))
             elif item.get("type") == "reasoning":
-                out.append(self._start(whole, {"type": "thinking", "thinking": "", "signature": ""}))
+                self._pending_reasoning.add(output_index)
         elif event_type == "response.output_text.delta":
             out.extend(self._text_delta(event, str(event.get("delta") or "")))
         elif event_type == "response.refusal.delta":
@@ -704,26 +773,45 @@ class _StreamTranslator:
         elif event_type == "response.function_call_arguments.delta" and whole in self._open:
             self._arguments_streamed.add(output_index)
             out.append(self._delta(whole, {"type": "input_json_delta", "partial_json": str(event.get("delta") or "")}))
-        elif event_type == "response.reasoning_summary_part.added" and whole in self._open:
-            if int(event.get("summary_index") or 0) > 0:
-                out.append(self._delta(whole, {"type": "thinking_delta", "thinking": "\n\n"}))
-        elif event_type == "response.reasoning_summary_text.delta" and whole in self._open:
-            out.append(self._delta(whole, {"type": "thinking_delta", "thinking": str(event.get("delta") or "")}))
+        elif event_type == "response.reasoning_summary_part.added" and int(event.get("summary_index") or 0) > 0:
+            out.extend(self._thinking_delta(output_index, "\n\n"))
+        elif event_type == "response.reasoning_summary_text.delta":
+            out.extend(self._thinking_delta(output_index, str(event.get("delta") or "")))
         elif event_type == "response.output_item.done":
             out.extend(self._item_done(output_index, event.get("item") or {}))
         elif event_type in ("response.completed", "response.incomplete"):
             out.extend(self._finish(event.get("response") or {}))
         elif event_type in ("response.failed", "error"):
-            raise ResponsesStreamFailedError(str(event_type))
+            code = _stream_error_code(event)
+            logger.warning("Responses stream for a Messages request failed: %s code=%s", event_type, code)
+            raise ResponsesStreamFailedError(str(event_type), code)
+        return out
+
+    def _thinking_delta(self, output_index: int, text: str) -> list[MessageStreamEvent]:
+        """A thinking delta for a reasoning item, opening its block first if this is its first text."""
+        whole = (output_index, 0)
+        out: list[MessageStreamEvent] = []
+        if whole not in self._open:
+            if output_index not in self._pending_reasoning or not text:
+                return out
+            self._pending_reasoning.discard(output_index)
+            out.append(self._start(whole, {"type": "thinking", "thinking": "", "signature": ""}))
+        if text:
+            out.append(self._delta(whole, {"type": "thinking_delta", "thinking": text}))
         return out
 
     def _item_done(self, output_index: int, item: dict[str, Any]) -> list[MessageStreamEvent]:
         whole = (output_index, 0)
         out: list[MessageStreamEvent] = []
         item_type = item.get("type")
-        if item_type == "reasoning" and whole in self._open:
-            if encrypted := item.get("encrypted_content"):
-                signature = f"{REASONING_SIGNATURE_PREFIX}{encrypted}"
+        if item_type == "reasoning":
+            encrypted = item.get("encrypted_content")
+            if encrypted and output_index in self._pending_reasoning:
+                self._pending_reasoning.discard(output_index)
+                out.append(self._start(whole, {"type": "thinking", "thinking": "", "signature": ""}))
+            self._pending_reasoning.discard(output_index)
+            if encrypted and whole in self._open:
+                signature = reasoning_signature(self._instance, str(encrypted))
                 out.append(self._delta(whole, {"type": "signature_delta", "signature": signature}))
         elif item_type == "function_call" and whole in self._open and output_index not in self._arguments_streamed:
             if arguments := item.get("arguments"):
@@ -768,8 +856,8 @@ class _StreamTranslator:
         return out
 
 
-async def _stream_events(events: AsyncIterator[Any]) -> AsyncIterator[MessageStreamEvent]:
-    translator = _StreamTranslator()
+async def _stream_events(events: AsyncIterator[Any], *, instance: str) -> AsyncIterator[MessageStreamEvent]:
+    translator = _StreamTranslator(instance)
     async for raw in events:
         event = _as_dict(raw)
         if not isinstance(event, dict):

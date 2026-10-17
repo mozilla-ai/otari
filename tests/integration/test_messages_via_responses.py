@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, CONVERSATION_HEADER, GatewayConfig
 from gateway.models.usage import UsageLog
-from gateway.services.inference import REASONING_SIGNATURE_PREFIX
+from gateway.services.inference import reasoning_signature
 
 from .conftest import declared_test_providers, shared_test_config
 
@@ -88,7 +88,7 @@ def test_messages_are_served_by_the_responses_api(
     _create_user(client, master_key_header, "rsp-user")
 
     previous_turn = [
-        {"type": "thinking", "thinking": "", "signature": f"{REASONING_SIGNATURE_PREFIX}enc-0"},
+        {"type": "thinking", "thinking": "", "signature": reasoning_signature("openai", "enc-0")},
         {"type": "text", "text": "Earlier"},
     ]
     response = client.post(
@@ -107,14 +107,14 @@ def test_messages_are_served_by_the_responses_api(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["content"] == [
-        {"type": "thinking", "thinking": "", "signature": f"{REASONING_SIGNATURE_PREFIX}enc-1"},
+        {"type": "thinking", "thinking": "", "signature": reasoning_signature("openai", "enc-1")},
         {"type": "text", "text": "Hello"},
     ]
     assert body["stop_reason"] == "end_turn"
     assert sent[0]["store"] is False
     assert sent[0]["max_output_tokens"] == 256
     assert sent[0]["input_data"][1] == {"type": "reasoning", "summary": [], "encrypted_content": "enc-0"}
-    assert "_otari_messages_api" not in sent[0]
+    assert "_otari_responses_instance" not in sent[0]
 
     row = _usage_row(db_session_factory, "rsp-user")
     assert row is not None
@@ -192,7 +192,7 @@ def test_an_instance_that_did_not_opt_in_keeps_the_messages_call(
     monkeypatch.setattr(_ARESPONSES, no_responses_call)
     _create_user(client, master_key_header, "native-user")
 
-    signed_here = {"type": "thinking", "thinking": "", "signature": f"{REASONING_SIGNATURE_PREFIX}enc-0"}
+    signed_here = {"type": "thinking", "thinking": "", "signature": reasoning_signature("openai", "enc-0")}
     client.post(
         f"{API_ROOT}/messages",
         json=_body(
@@ -209,7 +209,7 @@ def test_an_instance_that_did_not_opt_in_keeps_the_messages_call(
 
     assert sent, "the native Messages call must run"
     assert sent[0]["messages"][1]["content"] == [{"type": "text", "text": "Earlier"}]
-    assert "_otari_messages_api" not in sent[0]
+    assert "_otari_responses_instance" not in sent[0]
 
 
 def test_the_conversation_id_keys_the_prompt_cache(
