@@ -1,5 +1,6 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from decimal import Decimal
+from typing import Annotated, Any, Literal
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
@@ -18,6 +19,7 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.settings.pricing import PRICE_PER_REQUEST_DESCRIPTION, price_per_request_shorthand
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float, to_usd, to_usd_or_none
@@ -136,6 +138,12 @@ class SetPricingRequest(PricedKind):
             "'images' for image generation (USD per million images)."
         ),
     )
+    price_per_request: float | None = Field(default=None, ge=0, description=PRICE_PER_REQUEST_DESCRIPTION)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_price_per_request(cls, data: Any) -> Any:
+        return price_per_request_shorthand(data)
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "SetPricingRequest":
@@ -158,6 +166,9 @@ class PricingResponse(BaseModel):
     cache_write_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str = Field(description="What the rates are per: tokens, requests, or images.")
+    price_per_request: float | None = Field(
+        default=None, description="USD for each request, for a rate in requests; null for any other unit."
+    )
     origin: str | None = Field(
         description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
     )
@@ -177,6 +188,9 @@ class PricingResponse(BaseModel):
             cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
             unit=pricing.unit or "tokens",
+            price_per_request=(
+                float(Decimal(str(pricing.input_price_per_million)) / 1_000_000) if pricing.unit == "requests" else None
+            ),
             origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),

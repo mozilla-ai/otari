@@ -1004,17 +1004,23 @@ model needs its own pricing row, for example `cohere:rerank-v3.5` at
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or
 no token usage, such as an answer endpoint served through an OpenAI-compatible
-provider instance named `exa`. Give its pricing `unit: requests`:
+provider instance named `exa`. Give its pricing a `price_per_request` in USD:
 
 ```yaml
 pricing:
   exa:exa:
-    input_price_per_million: 5000   # $0.005 per request
-    output_price_per_million: 0
-    unit: requests
+    price_per_request: 0.005
 ```
 
-Such a model is charged `input_price_per_million / 1,000,000` for each
+`price_per_request` is the readable form of `unit: requests`: Otari stores it as
+`unit: requests` with `input_price_per_million` a million times the price
+(`5000` here), and `GET /api/v1/pricing` reports both. `POST /api/v1/pricing`
+takes it too. It replaces the token prices rather than adding to them, so it
+is refused beside an `input_price_per_million` that differs, an
+`output_price_per_million`, a cache price, `pricing_tiers` or another `unit`.
+Writing the rate in full as `unit: requests` still works.
+
+Such a model is charged its price per request for each
 successful call, streamed or not, whatever tokens it reports. The token counts
 are still recorded on the usage row, and still count toward a token budget, but
 they are not priced. A failed call, including a stream that errors or that the
