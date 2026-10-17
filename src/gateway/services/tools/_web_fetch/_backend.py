@@ -177,7 +177,16 @@ class WebFetchBackend:
         started = datetime.now(UTC)
         text = await self._fetch(arguments)
         if self._tally is not None:
-            self._tally.record_result(WEB_FETCH_TOOL_NAME, text)
+            # Under what served it (design L): the instance's label and rate keys, and the
+            # provider's reported cost, which ``None`` leaves to the rate.
+            resolved, page = self._resolved, self._last_page
+            self._tally.record_result(
+                WEB_FETCH_TOOL_NAME,
+                text,
+                label=resolved.label,
+                rate_keys=resolved.rate_keys,
+                cost=page.cost if page is not None else None,
+            )
         if self._trace is not None:
             self._trace.record_tool_call(
                 tool_name=WEB_FETCH_TOOL_NAME, tool_type="otari_web_fetch", started=started, ok=not is_tool_error(text)

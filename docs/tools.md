@@ -162,7 +162,9 @@ The dashboard accepts dollars per call. The pricing API stores the value in
 `input_price_per_million`, so one cent per call is `10000`.
 
 With `require_pricing: true`, an unpriced gateway-run tool is refused before the
-model call. A failed tool invocation is recorded but not charged. Charges settle
+model call. For web fetch that check still reads only the `otari:web_fetch` row,
+whichever fetch instance serves the calls. A failed tool invocation is recorded
+but not charged. Charges settle
 on the final usage row alongside model tokens.
 
 The usage row's pricing breakdown has one line per tool and label, and the
@@ -187,12 +189,13 @@ over its calls.
 An organization's pricing override applies to its calls as to its models, with
 one limit: a call the deployment pays for, which an instance or the built-in
 fetcher served, takes only an override the deployment operator set, as a
-request on a hosted provider does. The limit applies once instances serve the
-in-loop tools; a call labeled `otari:<tool>` takes any override.
+request on a hosted provider does. A call labeled `otari:<tool>` takes any
+override.
 
-Instances do not serve the in-loop tools yet, and the in-loop tool runs
-organization keys on the older backend, so today's lines are labeled
-`otari:<tool>`.
+Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
+when `web_fetch_default_tool` names none. Search instances do not serve the
+in-loop tool yet, and it runs organization keys on the older backend, so today's
+search lines are labeled `otari:web_search`.
 
 Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
@@ -543,8 +546,10 @@ a `[tool error]` for the model to recover from. Non-streaming requests return
 HTTP `422`; a response that is already streaming emits an error event and ends
 without a completed answer.
 
-Successful Fetch calls are billed under `otari:web_fetch`; ordinary Fetch
-failures return sanitized tool errors, are counted as errors, and are not billed.
+Successful Fetch calls are billed as [Pricing a gateway-run
+tool](#pricing-a-gateway-run-tool) says: under the fetch instance that served
+them, then `otari:web_fetch`. Ordinary Fetch failures return sanitized tool
+errors, are counted as errors, and are not billed.
 
 Declaring Fetch authorizes the model to make arbitrary public GET requests
 within the workspace domain policy. Fetched content can contain prompt
@@ -573,7 +578,9 @@ one, and never with the provider's own message.
 - **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
   reports what each fetch costs (`costDollars.total`).
 - **Tabstack** (`tabstack`) needs an API key, read from the instance's
-  `api_key`, such as `${TABSTACK_API_KEY}`, and reports no cost. Tabstack's
+  `api_key`, such as `${TABSTACK_API_KEY}`. It reports no cost, so a fetch is
+  billed at the instance's rate, `tabstack:<fetch-tool-name>`, else
+  `otari:web_fetch`. Tabstack's
   [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
   page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
   whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
