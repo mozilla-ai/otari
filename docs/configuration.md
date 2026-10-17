@@ -434,6 +434,47 @@ it. A retry setting in an instance's `client_args` (`max_retries`, or
 reaches an [owned provider endpoint](provider-endpoints.md), which keeps its
 SDK's default outside a policy that can fall over.
 
+### Messages through the Responses API
+
+A request to `/v1/messages` for a model with no Anthropic Messages API of its
+own is served as a chat completion by default. An OpenAI instance (or any
+instance whose provider has a Responses API, such as Azure OpenAI) can serve it
+through the Responses API instead:
+
+```yaml
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    messages_api: responses   # default: completions
+```
+
+This reaches models OpenAI serves only on the Responses API (the codex and pro
+variants), and it keeps a reasoning model's reasoning across turns: each
+reasoning item comes back as a `thinking` block whose signature carries the
+item's encrypted content, and when a client such as Claude Code sends that block
+back on the next turn, Otari hands the reasoning back to the provider. A thinking
+block signed this way is dropped before a call to any other provider, and
+another provider's thinking blocks are dropped before a Responses call.
+
+Every call is sent with `store: false`, so nothing is kept upstream. A Messages
+`thinking` budget becomes a Responses `reasoning.effort`: up to 2,048 tokens is
+`low`, up to 16,384 is `medium`, and more is `high`. An `output_config.effort`
+takes precedence (`max` becomes `high`). Reasoning summaries are requested unless
+thinking is disabled. `stop_sequences` is refused with a 400, because the
+Responses API has no equivalent; `top_k`, `cache_control` and `metadata` are
+dropped (OpenAI caches prompts on its own). When the caller sends no
+`prompt_cache_key`, the request's session keys the provider's prompt cache, so the
+turns of one conversation land on the same cache: `Otari-Conversation-Id`, or the
+session id Claude Code sends on every request. The key is scoped to the caller
+like any prompt cache key, so the session id itself never reaches the provider.
+Anthropic's server tools are not
+forwarded: Otari's own web search, web fetch and code execution serve them, as
+for every non-Anthropic model.
+
+The setting covers `/v1/messages` traffic only, and only where the instance's
+provider has a Responses API; an instance whose provider has none keeps the
+default and logs a warning once. Any other value fails at startup.
+
 ### Bedrock read timeout
 
 A Bedrock client waits up to 600 seconds for the next part of a response.

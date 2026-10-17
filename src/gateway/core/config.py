@@ -142,6 +142,11 @@ OTARI_ENV_PREFIX = "OTARI_"
 HOSTED_OFFERING_INSTANCE = "hosted"
 RESERVED_PROVIDER_INSTANCE_NAMES: frozenset[str] = frozenset({"otari", HOSTED_OFFERING_INSTANCE})
 
+# Which API of an instance's provider serves ``/v1/messages`` traffic for a model
+# without a Messages API of its own: any-llm's chat-completions conversion (the
+# default) or the provider's Responses API.
+MESSAGES_API_VALUES = ("completions", "responses")
+
 OTARI_CONFIG_YAML_ENV = "OTARI_CONFIG_YAML"
 OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 # Mapping fields an OTARI_<FIELD> variable sets as a JSON object. The variable
@@ -2002,7 +2007,7 @@ class GatewayConfig(
                 return
 
     def validate_provider_instances(self) -> None:
-        """Validate per-instance ``provider_type`` / ``models`` / ``max_retries`` declarations.
+        """Validate per-instance ``provider_type`` / ``models`` / ``max_retries`` / ``messages_api`` declarations.
 
         Fails fast at startup so a typo in ``provider_type`` (or a non-list
         ``models``) surfaces immediately rather than as a per-request error.
@@ -2047,6 +2052,10 @@ class GatewayConfig(
                 isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0
             ):
                 msg = f"providers.{instance}.max_retries must be a non-negative integer."
+                raise ValueError(msg)
+            messages_api = entry.get("messages_api")
+            if messages_api is not None and messages_api not in MESSAGES_API_VALUES:
+                msg = f"providers.{instance}.messages_api must be one of: {', '.join(MESSAGES_API_VALUES)}."
                 raise ValueError(msg)
             if not entry:
                 self._warn_on_uncredentialed_bare_entry(instance)

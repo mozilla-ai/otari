@@ -37,6 +37,7 @@ from gateway.services._tool_loop import (
     tool_failure_detail,
 )
 from gateway.services.code_execution import ContainerLease
+from gateway.services.inference import call_messages
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
@@ -492,7 +493,7 @@ class _MessagesToolLoopStrategy:
     # ---- non-streaming hooks ----
 
     async def call(self, kwargs: dict[str, Any]) -> MessageResponse:
-        result: MessageResponse = await amessages(**kwargs)  # type: ignore[assignment]
+        result: MessageResponse = await call_messages(amessages, kwargs)
         return result
 
     def new_usage_accumulator(self) -> _MessagesUsageAccumulator:
@@ -591,7 +592,7 @@ class _MessagesToolLoopStrategy:
     # ---- streaming hooks ----
 
     async def open_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
-        stream: AsyncIterator[MessageStreamEvent] = await amessages(**kwargs)  # type: ignore[assignment]
+        stream: AsyncIterator[MessageStreamEvent] = await call_messages(amessages, kwargs)
         return stream
 
     def new_stream_state(self) -> _MessagesStreamState:

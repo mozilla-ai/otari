@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries")
+_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api")
 
 # Providers whose any-llm client is built by an SDK that takes ``max_retries``
 # in its constructor (OpenAI's, Anthropic's and the SDKs generated the same

@@ -80,6 +80,26 @@ no Anthropic Messages API of its own, so Anthropic's server-side context editing
 never runs there; Claude Code's own compaction still does.
 Test the actual agent workflow before making one a default.
 
+### OpenAI models
+
+By default an OpenAI model is served as a chat completion, which has no way to
+send a reasoning model's reasoning back, so each turn of an agent loop starts
+its reasoning over, and models OpenAI serves only on the Responses API (the
+codex and pro variants) are out of reach. Set `messages_api: responses` on the
+OpenAI instance to serve Claude Code through the Responses API instead:
+
+```yaml
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    messages_api: responses
+```
+
+Claude Code then receives the model's reasoning as thinking blocks and sends them
+back on the next turn, which is what lets the reasoning carry over. See
+[Messages through the Responses API](configuration.md#messages-through-the-responses-api)
+for how fields translate.
+
 ## Let Otari choose a subagent's model
 
 Switching the model inside a running Claude Code conversation cold-starts its

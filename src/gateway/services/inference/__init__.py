@@ -28,6 +28,12 @@ from gateway.services.inference._idempotency import (
     UnknownCaller,
 )
 from gateway.services.inference._lease import keep_claim_alive
+from gateway.services.inference._messages_responses_bridge import (
+    CONVERSATION_CACHE_KEY_FIELD,
+    REASONING_SIGNATURE_PREFIX,
+    call_messages,
+    with_messages_api,
+)
 from gateway.services.inference._passthrough_usage import (
     EMBEDDINGS_BILLING,
     IMAGES_BILLING,
@@ -85,6 +91,7 @@ from gateway.services.inference._upstream_user import (
 )
 
 __all__ = [
+    "CONVERSATION_CACHE_KEY_FIELD",
     "admit_deployment_paid",
     "describe_port_error",
     "EMBEDDINGS_BILLING",
@@ -92,6 +99,7 @@ __all__ = [
     "MODERATION_BILLING",
     "ONE_REQUEST_BILLING",
     "REASONING_ITEM_ID_PREFIX",
+    "REASONING_SIGNATURE_PREFIX",
     "UPSTREAM_USER_FIELD",
     "RERANK_BILLING",
     "TRANSCRIPTION_BILLING",
@@ -114,6 +122,7 @@ __all__ = [
     "UnknownCaller",
     "aresponses_via_chat_completions",
     "bind_upstream_user",
+    "call_messages",
     "call_responses",
     "chat_user_fields",
     "close_decision_client",
@@ -137,6 +146,7 @@ __all__ = [
     "upstream_user_identifier",
     "transcription_usage",
     "uses_chat_completions_bridge",
+    "with_messages_api",
     "with_upstream_user",
     "EMPTY_COMPLETION_DETAIL",
     "EmptyCompletionError",

@@ -89,10 +89,13 @@ from gateway.services.code_execution import ContainerLease, check_container_on_c
 from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
+    CONVERSATION_CACHE_KEY_FIELD,
     bind_upstream_user,
+    call_messages,
     messages_user_fields,
     upstream_exception_chain,
     upstream_exception_shape,
+    with_messages_api,
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
@@ -116,7 +119,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_turn, resolve_session
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -641,6 +644,14 @@ class _MessagesAdapter:
     # behavior this endpoint has always had.
     log_success_without_usage = False
 
+    def __init__(self, responses_instances: frozenset[str] = frozenset()) -> None:
+        # The provider instances whose Messages traffic goes through their Responses API.
+        self._responses_instances = responses_instances
+
+    def for_instance(self, kwargs: dict[str, Any], instance: str) -> dict[str, Any]:
+        """``kwargs`` for a call to ``instance``, marked for its Responses API when it opted in."""
+        return with_messages_api(kwargs, "responses" if instance in self._responses_instances else None)
+
     def error(
         self,
         status_code: int,
@@ -724,11 +735,11 @@ class _MessagesAdapter:
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
         provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
-        return await amessages(**provider_kwargs)  # type: ignore[return-value]
+        return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
-        return await amessages(**provider_kwargs)  # type: ignore[return-value]
+        return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     def prepare_stream_kwargs(
         self,
@@ -818,13 +829,23 @@ class _MessagesAdapter:
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return attempt.call_kwargs(base_request_fields)
+        return self.for_instance(attempt.call_kwargs(base_request_fields), attempt.instance)
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return kwargs
 
 
 _ADAPTER = _MessagesAdapter()
+
+
+def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
+    """The adapter for a request under ``config``: the shared one unless an instance set ``messages_api``."""
+    instances = frozenset(
+        name
+        for name, entry in config.providers.items()
+        if isinstance(entry, dict) and entry.get("messages_api") == "responses"
+    )
+    return _MessagesAdapter(instances) if instances else _ADAPTER
 
 
 @router.post("/messages", response_model=None)
@@ -852,6 +873,7 @@ async def create_message(
     fallback across the resolved route, tool-loop requests included (fallback
     applies up to the pre-lock-in point, same as chat).
     """
+    adapter = _adapter_for(config)
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
     merged_betas = _merge_anthropic_betas(request.betas, raw_request)
     if merged_betas is not None:
@@ -890,7 +912,7 @@ async def create_message(
                 request.tools,
                 config=config,
                 providers=target.candidate_providers,
-                dialect=_ADAPTER.name,
+                dialect=adapter.name,
                 code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
             ),
@@ -898,7 +920,7 @@ async def create_message(
                 request.tools,
                 config=config,
                 providers=target.candidate_providers,
-                dialect=_ADAPTER.name,
+                dialect=adapter.name,
                 code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
             ),
@@ -909,7 +931,7 @@ async def create_message(
 
     try:
         ctx = await resolve_request_context(
-            adapter=_ADAPTER,
+            adapter=adapter,
             raw_request=raw_request,
             response=response,
             db=db,
@@ -961,10 +983,10 @@ async def create_message(
             # A no-op in hybrid, which reserves nothing locally. Kept so this exit already settles
             # if the gate ever covers a mode that does pre-debit the estimate.
             await release_reservation(ctx)
-            raise domain_error(_ADAPTER, exc) from exc
+            raise domain_error(adapter, exc) from exc
 
     tool_ctx = await prepare_gateway_tools(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         response=response,
         declared=DeclaredTools(
@@ -1015,6 +1037,12 @@ async def create_message(
         # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
         fields.pop("metadata", None)
         scope_prompt_cache_key(fields, ctx)
+        if "prompt_cache_key" not in fields:
+            session = resolve_session(raw_request.headers, session_label=request.session_label, tags=None)
+            if session is not None:
+                derived = scope_prompt_cache_key({"prompt_cache_key": f"{session.source}:{session.key}"}, ctx)
+                if isinstance(key := derived.get("prompt_cache_key"), str):
+                    fields[CONVERSATION_CACHE_KEY_FIELD] = key
         bind_upstream_user(fields, ctx.upstream_user)
         if fields.get("tools"):
             fields["tools"] = openai_to_anthropic_tools(fields["tools"])
@@ -1043,12 +1071,12 @@ async def create_message(
         if files is None or ctx.workspace_id is None or pepper is None:
             # The blocks still name Otari's files, which no provider account holds.
             await release_reservation(ctx)
-            raise domain_error(_ADAPTER, ProviderUploadFailedError())
+            raise domain_error(adapter, ProviderUploadFailedError())
         prepare_kwargs = container_copies_step(
             files=files,
             inputs=container_inputs,
             accounts=ProviderAccounts(pepper=pepper, workspace_id=ctx.workspace_id),
-            render=partial(domain_error, _ADAPTER),
+            render=partial(domain_error, adapter),
         )
 
     # ------------------------------------------------------------------
@@ -1067,7 +1095,7 @@ async def create_message(
                 )
             try:
                 return await run_streaming_with_fallback(
-                    adapter=_ADAPTER,
+                    adapter=adapter,
                     route=route,
                     base_request_fields=request_fields,
                     config=config,
@@ -1086,17 +1114,18 @@ async def create_message(
                     raise
                 raise converted from exc
             except Exception as exc:
-                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
+                raise_all_streaming_attempts_failed(adapter, exc, route)
 
         # Standalone: single attempt streaming.
         resolved = await resolve_dispatch_provider(
-            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
+            ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
-        call_kwargs = apply_endpoint_defaults(
-            {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+        call_kwargs = adapter.for_instance(
+            apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved),
+            resolved.instance,
         )
         return await run_single_attempt_stream(
-            adapter=_ADAPTER,
+            adapter=adapter,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
@@ -1116,7 +1145,7 @@ async def create_message(
         assert route is not None  # guaranteed by the hybrid-mode preamble
         try:
             result = await run_platform_non_stream(
-                adapter=_ADAPTER,
+                adapter=adapter,
                 route=route,
                 base_request_fields=request_fields,
                 tool_ctx=tool_ctx,
@@ -1139,13 +1168,14 @@ async def create_message(
 
     # Standalone non-stream path
     resolved = await resolve_dispatch_provider(
-        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
+        ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
-    call_kwargs = apply_endpoint_defaults(
-        {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+    call_kwargs = adapter.for_instance(
+        apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved),
+        resolved.instance,
     )
     result = await run_standalone_non_stream(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,
