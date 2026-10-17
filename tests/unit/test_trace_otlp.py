@@ -4,6 +4,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from gateway.core.config import GatewayConfig
 from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
@@ -170,6 +172,60 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
     assert tokens(True) is None
     assert tokens(2**62) == _INT32_MAX
     assert tokens(str(2**40)) == _INT32_MAX
+
+
+@pytest.mark.parametrize(
+    ("provider", "input_tokens", "cache_read_key", "cache_write_key"),
+    [
+        pytest.param(
+            "anthropic",
+            48_210,
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            id="inside-as-the-conventions-count-them",
+        ),
+        pytest.param(
+            "openai",
+            48_210,
+            "gen_ai.usage.cached_tokens",
+            "gen_ai.usage.cache_write_tokens",
+            id="inside-under-older-names",
+        ),
+        pytest.param(
+            "anthropic",
+            300,
+            "gen_ai.usage.cache_read_tokens",
+            "gen_ai.usage.cache_write_tokens",
+            id="on-top-when-they-outnumber-it",
+        ),
+    ],
+)
+def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported_its_cache(
+    provider: str, input_tokens: int, cache_read_key: str, cache_write_key: str
+) -> None:
+    attrs = {
+        "gen_ai.provider.name": provider,
+        "gen_ai.usage.input_tokens": input_tokens,
+        cache_read_key: 41_900,
+        cache_write_key: 6_010,
+        "gen_ai.usage.reasoning.output_tokens": 12,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    [span] = write.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (48_210, 41_900, 6_010)
+    assert span.reasoning_tokens == 12
+
+
+def test_cached_tokens_never_lift_the_whole_prompt_past_what_the_store_holds() -> None:
+    attrs = {
+        "gen_ai.provider.name": "anthropic",
+        "gen_ai.usage.input_tokens": 10,
+        "gen_ai.usage.cache_read_tokens": _INT32_MAX,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    assert write.spans[0].input_tokens == _INT32_MAX
 
 
 def test_span_times_are_clamped_to_the_window_a_trace_can_live_in() -> None:

@@ -29,6 +29,7 @@ class TurnView:
     errors: int
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int
     cost: Decimal
     # True for the steps a session started with before any prompt was seen.
     continued: bool = False
