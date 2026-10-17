@@ -9,6 +9,7 @@ that tells the caller to declare a provider it cannot. A plain build, whose
 core adapter offers nothing, answers exactly as before.
 """
 
+import concurrent.futures
 import itertools
 import sys
 from collections.abc import Callable, Generator
@@ -201,7 +202,7 @@ def test_embeddings_for_a_managed_model_is_refused_by_name(
     response, provider = _embeddings(client, _key(client))
 
     _assert_managed(response, "openai:text-embedding-3-small", "/v1/embeddings")
-    provider.assert_not_awaited()
+    provider.assert_not_called()
     assert probe.RESOLVES == []
     assert _active_reservations(db_session_factory) == 0
     rows = _rows(db_session_factory, "/v1/embeddings")
@@ -215,7 +216,7 @@ def test_a_batch_for_a_managed_model_is_refused_by_name(
     response, provider = _batch(client, _key(client))
 
     _assert_managed(response, "openai:gpt-5-mini", "batches")
-    provider.assert_not_awaited()
+    provider.assert_not_called()
     assert probe.RESOLVES == []
     # Refused before anything is reserved, as the batch route's other refusals are.
     assert _active_reservations(db_session_factory) == 0
@@ -234,7 +235,7 @@ def test_a_policy_whose_every_candidate_is_managed_is_refused_by_name(
     _assert_managed(response, "managed_only", "a routing policy with fallbacks")
     assert "gpt-5" not in response.text
     assert "openai" not in response.text
-    provider.assert_not_awaited()
+    provider.assert_not_called()
     assert probe.RESOLVES == []
     assert _active_reservations(db_session_factory) == 0
 
@@ -272,12 +273,12 @@ def test_a_plain_build_answers_provider_not_configured(
     assert embeddings.status_code == status.HTTP_424_FAILED_DEPENDENCY, embeddings.text
     assert embeddings.headers[ERROR_CODE_HEADER] == PROVIDER_NOT_CONFIGURED
     assert embeddings.json()["detail"].startswith("No credential is configured for provider 'openai'.")
-    provider.assert_not_awaited()
+    provider.assert_not_called()
 
     batch, provider = _batch(plain, headers)
     assert batch.status_code == status.HTTP_424_FAILED_DEPENDENCY, batch.text
     assert batch.headers[ERROR_CODE_HEADER] == PROVIDER_NOT_CONFIGURED
-    provider.assert_not_awaited()
+    provider.assert_not_called()
 
     policy = _chat(plain, headers, "managed_only", AsyncMock(side_effect=AssertionError))
     assert policy.status_code == status.HTTP_424_FAILED_DEPENDENCY, policy.text
@@ -295,7 +296,7 @@ def test_an_aliased_managed_model_is_named_by_its_alias(
     _assert_managed(response, "house-embed", "/v1/embeddings")
     assert "openai" not in response.text
     assert "text-embedding" not in response.text
-    provider.assert_not_awaited()
+    provider.assert_not_called()
     assert _active_reservations(db_session_factory) == 0
 
 
@@ -306,7 +307,7 @@ def test_an_unpriced_managed_model_is_refused_as_managed_not_unpriced(
     response, provider = _embeddings(client, _key(client))
 
     _assert_managed(response, "openai:text-embedding-3-small", "/v1/embeddings")
-    provider.assert_not_awaited()
+    provider.assert_not_called()
     assert probe.RESOLVES == []
     assert _active_reservations(db_session_factory) == 0
     rows = _rows(db_session_factory, "/v1/embeddings")
@@ -319,6 +320,7 @@ def test_a_cancelled_listing_releases_the_pass_through_reservation(
     client, probe = managed
     headers = _key(client)
     probe.FAULTS.add("cancel")
-    with pytest.raises(BaseException):  # noqa: B017, PT011
+    # The test client runs the app on a portal thread, so the cancellation arrives as the futures one.
+    with pytest.raises(concurrent.futures.CancelledError):
         _embeddings(client, headers)
     assert _active_reservations(db_session_factory) == 0
