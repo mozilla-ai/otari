@@ -28,7 +28,7 @@ shaped like a signed JWT is checked as an identity token:
 1. Its issuer (`iss`) must be one of `federation_issuers`, compared exactly.
 2. Its signature must verify against the issuer's published signing keys
    (JWKS), with an asymmetric algorithm: RS256, RS384, RS512, PS256, PS384,
-   PS512, ES256, ES384 or ES512. `none` and the HMAC algorithms are refused,
+   PS512, ES256, ES384, ES512 or EdDSA. `none` and the HMAC algorithms are refused,
    a key is used only with the algorithm it is published for, and an RSA key
    shorter than 2048 bits is refused.
 3. It must carry `iss`, `sub`, `aud`, `exp` and `iat`. It must not be expired,
@@ -62,10 +62,10 @@ loopback or link-local address is refused unless the
 is on, for an issuer on your own network. Like `federation_issuers`, it is read
 and validated when the gateway starts.
 
-Keys are cached for an hour per process. A token naming a key id the cache
-lacks refetches at most once a minute, which picks up a rotation without
+Keys are cached for an hour per process. A token no cached key verifies
+refetches them at most once a minute, which picks up a rotation without
 letting made-up key ids turn each request into a fetch. A failed fetch is
-retried after ten seconds; until one succeeds, keys still within their hour
+retried after a minute; until one succeeds, keys still within their hour
 keep working and nothing else does.
 
 ## Set it up on Google Cloud

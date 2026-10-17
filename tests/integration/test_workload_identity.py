@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 import jwt
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
@@ -37,10 +38,14 @@ SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 OTHER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
-async def _fetch(url: str) -> Any:
-    assert url == JWKS_URI
+def _serve_keys(request: httpx.Request) -> httpx.Response:
+    assert str(request.url) == JWKS_URI
     jwk = RSAAlgorithm.to_jwk(SIGNING_KEY.public_key(), as_dict=True)
-    return {"keys": [{**jwk, "kid": "k1", "alg": "RS256", "use": "sig"}]}
+    return httpx.Response(200, json={"keys": [{**jwk, "kid": "k1", "alg": "RS256", "use": "sig"}]})
+
+
+def _issuer(_url: str) -> httpx.AsyncBaseTransport:
+    return httpx.MockTransport(_serve_keys)
 
 
 def _token(private_key: Any = SIGNING_KEY, *, algorithm: str = "RS256", **overrides: Any) -> str:
@@ -78,7 +83,7 @@ def client(
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     for test_client in build_test_client(federation_config):
         test_client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
-            federation_config.federation_issuers, fetch=_fetch
+            federation_config.federation_issuers, transport_factory=_issuer
         )
         yield test_client
 
@@ -305,13 +310,13 @@ def test_unsigned_and_hmac_tokens_are_refused(
         headers={"kid": "k1"},
     )
 
-    before = _failures("federation_bad_algorithm")
+    before = _failures("federation_invalid_token")
 
     refused = _chat(client, _bearer(token))
 
     assert refused.status_code == 401
     assert refused.json()["detail"] == "Invalid API key"
-    assert _failures("federation_bad_algorithm") == before + 1
+    assert _failures("federation_invalid_token") == before + 1
 
 
 def test_the_matched_key_is_still_checked(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -370,13 +375,11 @@ def test_rules_of_two_keys_matching_one_token_authenticate_neither(
 def test_an_unreachable_issuer_fails_closed(client: TestClient, master_key_header: dict[str, str]) -> None:
     _federated_key(client, master_key_header)
 
-    async def unreachable(_url: str) -> Any:
-        from gateway.services.api_keys._federation import _FetchError
-
-        raise _FetchError
+    def unreachable(_url: str) -> httpx.AsyncBaseTransport:
+        return httpx.MockTransport(lambda _request: httpx.Response(503))
 
     client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
-        [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)], fetch=unreachable
+        [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)], transport_factory=unreachable
     )
 
     refused = _chat(client, _bearer(_token()))

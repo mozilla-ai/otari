@@ -51,11 +51,14 @@ class _Jwks:
     def __init__(self) -> None:
         self.fetches = 0
 
-    async def __call__(self, url: str) -> Any:
-        assert url == JWKS_URI
+    def transport(self, _url: str) -> httpx.AsyncBaseTransport:
+        return httpx.MockTransport(self._respond)
+
+    def _respond(self, request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == JWKS_URI
         self.fetches += 1
         jwk = RSAAlgorithm.to_jwk(SIGNING_KEY.public_key(), as_dict=True)
-        return {"keys": [{**jwk, "kid": "k1", "alg": "RS256", "use": "sig"}]}
+        return httpx.Response(200, json={"keys": [{**jwk, "kid": "k1", "alg": "RS256", "use": "sig"}]})
 
 
 def _assertion(*, kid: str = "k1", **overrides: Any) -> str:
@@ -93,7 +96,7 @@ def client(
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     for test_client in build_test_client(federation_config):
         test_client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
-            federation_config.federation_issuers, fetch=jwks
+            federation_config.federation_issuers, transport_factory=jwks.transport
         )
         yield test_client
 
