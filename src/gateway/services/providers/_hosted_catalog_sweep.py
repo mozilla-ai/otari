@@ -156,6 +156,7 @@ class HostedCatalogSweep:
                 offered=frozenset(offered_keys),
                 deployment_instances=frozenset(self.config.providers),
                 search_providers=frozenset(self.config.search_tool_providers()),
+                fetch_providers=frozenset(self.config.fetch_tool_providers()),
                 owned_endpoints=frozenset(row.name for row in await self.endpoints.list_all()),
             )
             doomed = [verdict for verdict in verdicts if verdict.verdict == "removed"]
