@@ -15010,6 +15010,18 @@
             "title": "Output Price Per Million",
             "type": "number"
           },
+          "price_per_request": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for each request, for a rate in requests; null for any other unit.",
+            "title": "Price Per Request"
+          },
           "pricing_tiers": {
             "items": {
               "$ref": "#/components/schemas/PricingTier"
@@ -18342,6 +18354,19 @@
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
+          },
+          "price_per_request": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.",
+            "title": "Price Per Request"
           },
           "pricing_tiers": {
             "anyOf": [
