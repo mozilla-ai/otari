@@ -187,7 +187,8 @@ over its calls.
 An organization's pricing override applies to its calls as to its models, with
 one limit: a call the deployment pays for, which an instance or the built-in
 fetcher served, takes only an override the deployment operator set, as a
-request on a hosted provider does.
+request on a hosted provider does. The limit applies once instances serve the
+in-loop tools; a call labeled `otari:<tool>` takes any override.
 
 Instances do not serve the in-loop tools yet, and the in-loop tool runs
 organization keys on the older backend, so today's lines are labeled

@@ -16,9 +16,6 @@ from gateway.models.pricing import OPERATOR_ORIGIN, ModelPricing, OrganizationMo
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing import (
-    GATEWAY_TOOL_PRICING_PROVIDER as GATEWAY_TOOL_PRICING_PROVIDER,
-)
-from gateway.services.pricing import (
     ModelsDevPrice,
     ToolCharges,
     ToolRate,
@@ -31,10 +28,15 @@ from gateway.services.pricing import (
     resolve_as_of,
     tool_rate_lookup,
 )
-from gateway.services.pricing import (
+from gateway.types.tool_charges import (
+    GATEWAY_TOOL_PRICING_PROVIDER as GATEWAY_TOOL_PRICING_PROVIDER,
+)
+from gateway.types.tool_charges import (
+    LabelCalls,
+)
+from gateway.types.tool_charges import (
     gateway_tool_pricing_key as gateway_tool_pricing_key,
 )
-from gateway.types.tool_charges import LabelCalls
 
 # Bound on the model keys named in one ``IN()`` list, so a batched override load
 # stays under SQLite's default limit of 999 bind parameters in a statement.

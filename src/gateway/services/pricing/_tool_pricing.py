@@ -17,21 +17,12 @@ from typing import NamedTuple
 
 from gateway.core.metered_pricing import quantize_cost
 from gateway.models.pricing import PriceSource
-from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, LabelCalls
-
-GATEWAY_TOOL_PRICING_PROVIDER = "otari"
-
-
-def gateway_tool_pricing_key(tool: str) -> str:
-    """The ``ModelPricing.model_key`` an operator prices a gateway-run tool under.
-
-    ``model_key`` is a free-form ``provider:model`` string, so a tool the gateway
-    runs itself is priced as ``otari:<tool>`` (for example ``otari:web_search``).
-    A direct search on a configured tool is priced under that tool's
-    ``<search-provider>:<tool>`` instead, and under this key only a search a
-    workspace's organization key served, whose provider the deployment cannot price.
-    """
-    return f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}"
+from gateway.types.tool_charges import (
+    GATEWAY_TOOL_PRICING_PROVIDER,
+    ORGANIZATION_KEY_LABEL_PREFIX,
+    LabelCalls,
+    gateway_tool_pricing_key,
+)
 
 
 class ToolRate(NamedTuple):
@@ -122,7 +113,6 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
     # Keyed by tool and label, so two records of one label with different rate
     # keys still settle as one line.
     by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
-    by_tool: dict[str, tuple[int, Decimal]] = {}
     unpriced: dict[tuple[str, str, str], UnpricedToolLabel] = {}
     for entry in calls:
         if entry.calls <= 0:
@@ -137,8 +127,6 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
         )
         units, label_cost = by_label.get((entry.tool, label), (0, Decimal(0)))
         by_label[(entry.tool, label)] = (units + entry.calls, label_cost + cost)
-        tool_calls, tool_cost = by_tool.get(entry.tool, (0, Decimal(0)))
-        by_tool[entry.tool] = (tool_calls + entry.calls, tool_cost + cost)
         if lookup is not None and lookup.rate_keys and rate is None:
             first = lookup.rate_keys[0]
             previous = unpriced.get((entry.tool, label, first))
@@ -158,6 +146,10 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
         }
         for (tool, label), (units, cost) in sorted(by_label.items())
     ]
-    total = quantize_cost(sum((cost for _calls, cost in by_tool.values()), Decimal(0)))
-    unit_rates = {tool: cost / tool_calls for tool, (tool_calls, cost) in by_tool.items()}
+    by_tool: dict[str, tuple[int, Decimal]] = {}
+    for (tool, _label), (units, cost) in by_label.items():
+        tool_units, tool_cost = by_tool.get(tool, (0, Decimal(0)))
+        by_tool[tool] = (tool_units + units, tool_cost + cost)
+    total = quantize_cost(sum((cost for _units, cost in by_tool.values()), Decimal(0)))
+    unit_rates = {tool: cost / units for tool, (units, cost) in by_tool.items()}
     return ToolCharges(total, lines, unit_rates, list(unpriced.values()))

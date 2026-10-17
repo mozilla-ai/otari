@@ -2,13 +2,11 @@
 
 from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
 from gateway.services.pricing._tool_pricing import (
-    GATEWAY_TOOL_PRICING_PROVIDER,
     ToolCharges,
     ToolRate,
     ToolRateLookup,
     UnpricedToolLabel,
     charge_tool_calls,
-    gateway_tool_pricing_key,
     paid_by_the_deployment,
     tool_rate_lookup,
 )
@@ -53,7 +51,6 @@ from gateway.services.pricing.models_dev_index import (
 __all__ = [
     "BUNDLED_SNAPSHOT_NAME",
     "DeploymentPricingService",
-    "GATEWAY_TOOL_PRICING_PROVIDER",
     "MAX_RATE_PER_MILLION",
     "MAX_RESIDENT_GENERATIONS",
     "ModelsDevPrice",
@@ -74,7 +71,6 @@ __all__ = [
     "can_price",
     "charge_tool_calls",
     "current_index",
-    "gateway_tool_pricing_key",
     "invalid_rate_count",
     "load_bundled_index",
     "paid_by_the_deployment",

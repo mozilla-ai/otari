@@ -108,7 +108,7 @@ class ToolUsageTally:
         prices the call. A failed call's costs are dropped, since it is never
         billed. A cost that is negative, not finite, or more than a cost column
         holds is unusable: the call reads as unreported, and an enrichment cost
-        as none, rather than crediting the payer or losing the usage row.
+        as none.
         """
         failed = is_tool_error(text)
         key = self._record(tool, failed=failed)

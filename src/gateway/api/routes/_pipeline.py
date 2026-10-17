@@ -4765,13 +4765,14 @@ async def _apply_tool_charges(
         meters[TOOL_METER_NAMESPACE] = tool_meters
         usage_log.billing_meters = meters
 
-    if not tally.billable_calls():
+    calls = tally.label_calls()
+    if not calls:
         commit_meters()
         return
     try:
         charges = await price_tool_calls(
             db,
-            tally.label_calls(),
+            calls,
             as_of=usage_log.timestamp,
             organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
         )
