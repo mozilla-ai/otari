@@ -1214,7 +1214,11 @@ function AppShellChrome() {
             // without adding the region itself to the natural tab order.
             tabIndex={-1}
             inert={backgroundInert}
-            className="flex-1 overflow-y-auto focus:outline-none"
+            // The page never scrolls sideways; content meant to (a wide table)
+            // carries its own scroller. This is the backstop, not the fix: the
+            // 390px e2e check measures overflow under it. Not `overflow-x-clip`,
+            // which computes to `hidden` beside `overflow-y: auto` anyway.
+            className="flex-1 overflow-x-hidden overflow-y-auto focus:outline-none"
           >
             <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
               {answerIsStillComing ? (
