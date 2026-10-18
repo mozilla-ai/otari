@@ -32,6 +32,7 @@ from gateway.api.deps import get_config, get_db_if_needed, get_enabled_features
 from gateway.api.routes import (
     admin,
     budgets,
+    health_checks,
     hosted_providers,
     keys,
     models,
@@ -82,6 +83,7 @@ SignInMethod = Literal["master_key", "password", "passkey"]
 _DECLARED_SURFACES: tuple[Surface, ...] = (
     admin.SURFACE,
     budgets.SURFACE,
+    health_checks.SURFACE,
     hosted_providers.SURFACE,
     keys.SURFACE,
     models.SURFACE,

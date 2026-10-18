@@ -1481,6 +1481,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/health-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Health Check Status
+         * @description The settings, the run in progress, and the latest finished run by provider and by offering.
+         */
+        get: operations["health-checks-get_health_check_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health-checks/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Health Checks
+         * @description Start a run within a minute, whether or not the schedule is on.
+         */
+        post: operations["health-checks-run_health_checks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health-checks/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Health Check Settings
+         * @description Whether the checks run on a schedule, how often, and what they send.
+         */
+        get: operations["health-checks-get_health_check_settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Health Check Settings
+         * @description Change the settings. Turning the schedule on starts a run within a minute.
+         */
+        patch: operations["health-checks-update_health_check_settings"];
+        trace?: never;
+    };
     "/api/v1/health/liveness": {
         parameters: {
             query?: never;
@@ -10761,6 +10825,148 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * HealthCheckResultPublic
+         * @description What one offering answered in the latest finished run.
+         */
+        HealthCheckResultPublic: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Error */
+            error: string | null;
+            /**
+             * Failed Runs
+             * @description How many runs in a row it has failed.
+             * @default 0
+             */
+            failed_runs: number;
+            /**
+             * Failing Since
+             * @description When a failing model's unbroken run of failures began, as far back as results are kept (48 hours). Null when it answered.
+             */
+            failing_since?: string | null;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Provider */
+            provider: string;
+            /** Selector */
+            selector: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail" | "skip";
+            /** Status Code */
+            status_code: number | null;
+        };
+        /**
+         * HealthCheckRunPublic
+         * @description One pass over every offering.
+         */
+        HealthCheckRunPublic: {
+            /** Failed */
+            failed: number;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: string;
+            /** Included Reasoning */
+            included_reasoning: boolean;
+            /** Passed */
+            passed: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Total */
+            total: number;
+        };
+        /**
+         * HealthCheckSettingsPublic
+         * @description Whether the checks run, how often, and what they send.
+         */
+        HealthCheckSettingsPublic: {
+            /** Alert Emails */
+            alert_emails: string[];
+            /** Enabled */
+            enabled: boolean;
+            /** Interval Minutes */
+            interval_minutes: number;
+            /** Max Tokens */
+            max_tokens: number;
+            /** Next Run At */
+            next_run_at: string | null;
+            /** Prompt */
+            prompt: string;
+            /** Reasoning Every Runs */
+            reasoning_every_runs: number;
+            /** Reasoning Max Tokens */
+            reasoning_max_tokens: number;
+            /** Run Requested */
+            run_requested: boolean;
+        };
+        /**
+         * HealthCheckSettingsUpdate
+         * @description Settings to change. An omitted field keeps its value.
+         * @example {
+         *       "enabled": true,
+         *       "interval_minutes": 60
+         *     }
+         */
+        HealthCheckSettingsUpdate: {
+            /**
+             * Alert Emails
+             * @description Who is emailed when a model stops answering and when it answers again. An empty list emails nobody.
+             */
+            alert_emails?: string[] | null;
+            /**
+             * Enabled
+             * @description Run the checks on a schedule.
+             */
+            enabled?: boolean | null;
+            /**
+             * Interval Minutes
+             * @description Minutes between scheduled runs.
+             */
+            interval_minutes?: number | null;
+            /**
+             * Max Tokens
+             * @description Output cap for a model that does not reason.
+             */
+            max_tokens?: number | null;
+            /**
+             * Prompt
+             * @description The user message every model is sent. A check passes on any answer, whatever it says.
+             */
+            prompt?: string | null;
+            /**
+             * Reasoning Every Runs
+             * @description Include reasoning models every Nth run; 0 leaves them out.
+             */
+            reasoning_every_runs?: number | null;
+            /**
+             * Reasoning Max Tokens
+             * @description Output cap for a reasoning model.
+             */
+            reasoning_max_tokens?: number | null;
+        };
+        /**
+         * HealthCheckStatus
+         * @description The Health page: settings, the run in progress, and the latest finished run by provider.
+         */
+        HealthCheckStatus: {
+            last_run: components["schemas"]["HealthCheckRunPublic"] | null;
+            /** Providers */
+            providers: components["schemas"]["ProviderHealthSummary"][];
+            /** Results */
+            results: components["schemas"]["HealthCheckResultPublic"][];
+            running: components["schemas"]["HealthCheckRunPublic"] | null;
+            settings: components["schemas"]["HealthCheckSettingsPublic"];
+        };
+        /**
          * HostedAvailableModelsPublic
          * @description What the provider says it serves on the stored credential.
          *
@@ -14666,6 +14872,52 @@ export interface components {
              * @description True when the provider's credentials could list models.
              */
             ok: boolean;
+        };
+        /**
+         * ProviderHealthSummary
+         * @description One provider's offerings in the latest finished run.
+         *
+         *     ``down`` when none answered, ``degraded`` when some did not, ``ok`` when all did.
+         */
+        ProviderHealthSummary: {
+            /** Answered */
+            answered: number;
+            /**
+             * History
+             * @description Every finished run in the last 24 hours, oldest first.
+             */
+            history: components["schemas"]["ProviderHistoryPoint"][];
+            /** Provider */
+            provider: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded" | "down";
+            /**
+             * Top Error
+             * @description The most common failure, with the model id taken out.
+             */
+            top_error: string | null;
+            /** Top Error Count */
+            top_error_count: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * ProviderHistoryPoint
+         * @description How one provider did in one run.
+         */
+        ProviderHistoryPoint: {
+            /** Answered */
+            answered: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Total */
+            total: number;
         };
         /**
          * ProviderInfoSchema
@@ -20591,6 +20843,99 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    "health-checks-get_health_check_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckStatus"];
+                };
+            };
+        };
+    };
+    "health-checks-run_health_checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckSettingsPublic"];
+                };
+            };
+        };
+    };
+    "health-checks-get_health_check_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckSettingsPublic"];
+                };
+            };
+        };
+    };
+    "health-checks-update_health_check_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HealthCheckSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckSettingsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

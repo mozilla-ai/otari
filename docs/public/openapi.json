@@ -7959,6 +7959,372 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthCheckResultPublic": {
+        "description": "What one offering answered in the latest finished run.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed_runs": {
+            "default": 0,
+            "description": "How many runs in a row it has failed.",
+            "title": "Failed Runs",
+            "type": "integer"
+          },
+          "failing_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a failing model's unbroken run of failures began, as far back as results are kept (48 hours). Null when it answered.",
+            "title": "Failing Since"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "fail",
+              "skip"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          }
+        },
+        "required": [
+          "selector",
+          "provider",
+          "status",
+          "status_code",
+          "error",
+          "latency_ms",
+          "checked_at"
+        ],
+        "title": "HealthCheckResultPublic",
+        "type": "object"
+      },
+      "HealthCheckRunPublic": {
+        "description": "One pass over every offering.",
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "included_reasoning": {
+            "title": "Included Reasoning",
+            "type": "boolean"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "started_at",
+          "finished_at",
+          "included_reasoning",
+          "total",
+          "passed",
+          "failed"
+        ],
+        "title": "HealthCheckRunPublic",
+        "type": "object"
+      },
+      "HealthCheckSettingsPublic": {
+        "description": "Whether the checks run, how often, and what they send.",
+        "properties": {
+          "alert_emails": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Alert Emails",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "interval_minutes": {
+            "title": "Interval Minutes",
+            "type": "integer"
+          },
+          "max_tokens": {
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "next_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run At"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "reasoning_every_runs": {
+            "title": "Reasoning Every Runs",
+            "type": "integer"
+          },
+          "reasoning_max_tokens": {
+            "title": "Reasoning Max Tokens",
+            "type": "integer"
+          },
+          "run_requested": {
+            "title": "Run Requested",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "interval_minutes",
+          "prompt",
+          "max_tokens",
+          "reasoning_max_tokens",
+          "reasoning_every_runs",
+          "next_run_at",
+          "run_requested",
+          "alert_emails"
+        ],
+        "title": "HealthCheckSettingsPublic",
+        "type": "object"
+      },
+      "HealthCheckSettingsUpdate": {
+        "additionalProperties": false,
+        "description": "Settings to change. An omitted field keeps its value.",
+        "example": {
+          "enabled": true,
+          "interval_minutes": 60
+        },
+        "properties": {
+          "alert_emails": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who is emailed when a model stops answering and when it answers again. An empty list emails nobody.",
+            "items": {
+              "format": "email",
+              "type": "string"
+            },
+            "title": "Alert Emails"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run the checks on a schedule.",
+            "title": "Enabled"
+          },
+          "interval_minutes": {
+            "anyOf": [
+              {
+                "maximum": 1440.0,
+                "minimum": 15.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minutes between scheduled runs.",
+            "title": "Interval Minutes"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "maximum": 4096.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output cap for a model that does not reason.",
+            "title": "Max Tokens"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user message every model is sent. A check passes on any answer, whatever it says.",
+            "title": "Prompt"
+          },
+          "reasoning_every_runs": {
+            "anyOf": [
+              {
+                "maximum": 48.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Include reasoning models every Nth run; 0 leaves them out.",
+            "title": "Reasoning Every Runs"
+          },
+          "reasoning_max_tokens": {
+            "anyOf": [
+              {
+                "maximum": 8192.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output cap for a reasoning model.",
+            "title": "Reasoning Max Tokens"
+          }
+        },
+        "title": "HealthCheckSettingsUpdate",
+        "type": "object"
+      },
+      "HealthCheckStatus": {
+        "description": "The Health page: settings, the run in progress, and the latest finished run by provider.",
+        "properties": {
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthCheckRunPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthSummary"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/HealthCheckResultPublic"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthCheckRunPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settings": {
+            "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+          }
+        },
+        "required": [
+          "settings",
+          "running",
+          "last_run",
+          "providers",
+          "results"
+        ],
+        "title": "HealthCheckStatus",
+        "type": "object"
+      },
       "HostedAvailableModelsPublic": {
         "description": "What the provider says it serves on the stored credential.\n\nFailure is a field rather than a status: an unreachable upstream, or a\nprovider with no model listing, is an answer about the provider rather than\nabout this request, and the form still has to render a plain text box when\nthe list cannot be fetched.",
         "properties": {
@@ -15889,6 +16255,92 @@
           "model_count"
         ],
         "title": "ProviderHealthSchema",
+        "type": "object"
+      },
+      "ProviderHealthSummary": {
+        "description": "One provider's offerings in the latest finished run.\n\n``down`` when none answered, ``degraded`` when some did not, ``ok`` when all did.",
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "history": {
+            "description": "Every finished run in the last 24 hours, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ProviderHistoryPoint"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "top_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most common failure, with the model id taken out.",
+            "title": "Top Error"
+          },
+          "top_error_count": {
+            "title": "Top Error Count",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "status",
+          "answered",
+          "total",
+          "top_error",
+          "top_error_count",
+          "history"
+        ],
+        "title": "ProviderHealthSummary",
+        "type": "object"
+      },
+      "ProviderHistoryPoint": {
+        "description": "How one provider did in one run.",
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "started_at",
+          "answered",
+          "total"
+        ],
+        "title": "ProviderHistoryPoint",
         "type": "object"
       },
       "ProviderInfoSchema": {
@@ -29130,6 +29582,144 @@
         "summary": "Health Check",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/health-checks": {
+      "get": {
+        "description": "The settings, the run in progress, and the latest finished run by provider and by offering.",
+        "operationId": "health-checks-get_health_check_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Health Check Status",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/run": {
+      "post": {
+        "description": "Start a run within a minute, whether or not the schedule is on.",
+        "operationId": "health-checks-run_health_checks",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Run Health Checks",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/settings": {
+      "get": {
+        "description": "Whether the checks run on a schedule, how often, and what they send.",
+        "operationId": "health-checks-get_health_check_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Health Check Settings",
+        "tags": [
+          "health-checks"
+        ]
+      },
+      "patch": {
+        "description": "Change the settings. Turning the schedule on starts a run within a minute.",
+        "operationId": "health-checks-update_health_check_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HealthCheckSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Health Check Settings",
+        "tags": [
+          "health-checks"
         ]
       }
     },

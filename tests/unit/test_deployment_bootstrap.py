@@ -302,6 +302,7 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 # mounted route has not.
 SURFACE_ROUTE_PREFIXES = {
     "hosted_providers": f"{API_ROOT}/hosted-providers",
+    "health_checks": f"{API_ROOT}/health-checks",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",
@@ -411,6 +412,7 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
+        "health_checks",
         "playground",
         "providers",
         "traces",
@@ -435,6 +437,7 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
     # The rest of the hosted set is unchanged by the address: this is one row's
     # availability, not a different edition.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
+        "health_checks",
         "providers",
         "traces",
     }

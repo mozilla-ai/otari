@@ -95,6 +95,11 @@ DATA_PLANE_PREFIXES: tuple[tuple[str, str], ...] = (
     ),
     ("/batches", "queues completions, so it is dispatch deferred rather than avoided"),
     (
+        "/health-checks",
+        "sends a completion to every offering through the deployment's configured "
+        "instances, which a control plane does not dispatch with",
+    ),
+    (
         "/mcp",
         "caller-orchestrated MCP discovery and execution. Neither dispatches to a "
         "model, and execution bills nothing here, but both open an outbound MCP "

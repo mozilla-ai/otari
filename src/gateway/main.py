@@ -24,6 +24,7 @@ from gateway import features
 from gateway.api.deps import (
     build_budget_service,
     build_file_service,
+    build_health_check_service,
     build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
@@ -74,6 +75,7 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
+from gateway.services.health_checks import HealthCheckOffering, is_chat_model, run_health_check_worker
 from gateway.services.inference import close_decision_client, run_idempotency_sweeper
 from gateway.services.log_writer import (
     LogWriter,
@@ -133,7 +135,7 @@ from gateway.services.search_tool_store_service import (
     run_search_tool_refresher,
 )
 from gateway.services.secret_box import shares_secret_key, validate_secret_key
-from gateway.services.selector_index_service import run_selector_index_refresher
+from gateway.services.selector_index_service import list_deployment_offerings, run_selector_index_refresher
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,
     reset_org_provider_cache,
@@ -340,6 +342,27 @@ async def _report_hosted_providers_config(config: GatewayConfig) -> None:
         )
 
 
+async def _health_check_offerings(config: GatewayConfig) -> list[HealthCheckOffering]:
+    return [
+        HealthCheckOffering(
+            selector=offering.selector,
+            instance=offering.instance,
+            reasoning=bool(offering.metadata and offering.metadata.reasoning),
+            chat=is_chat_model(offering.model_id, offering.metadata.output_modalities if offering.metadata else []),
+        )
+        for offering in await list_deployment_offerings(config)
+    ]
+
+
+def _start_health_checks(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
+    """Return the health check poll, or None on hosted, whose control plane sends no inference to check."""
+    if config.is_hosted_mode:
+        return None
+    return run_health_check_worker(
+        lambda uow: build_health_check_service(uow, config), lambda: _health_check_offerings(config)
+    )
+
+
 # The periodic background workers a standalone deployment runs.
 # A new worker is one entry here.
 #
@@ -413,6 +436,8 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
     # Stored responses hold generated content, so they go once their retention passes.
     _LifespanWorker("idempotency sweep", _start_idempotency_sweeper),
+    # Polls on every replica; only the one that claims a due run sends it, and the schedule is off by default.
+    _LifespanWorker("health checks", _start_health_checks),
     # A trace is kept for its retention and no longer.
 )
 

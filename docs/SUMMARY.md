@@ -17,6 +17,7 @@
 * [Models](models.md)
 * [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
+* [Health checks](health-checks.md)
 * [OpenAI provider guide](providers/openai.md)
 
 ## For integrators

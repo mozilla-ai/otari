@@ -27,6 +27,8 @@ def test_the_surface_lists_are_spelled_out() -> None:
     assert sorted(STANDALONE_SURFACES) == [
         "admin",
         "budgets",
+        # A hosted control plane sends no inference of its own to check.
+        "health_checks",
         # The deployment's own upstream credentials, on either edition.
         "hosted_providers",
         "keys",

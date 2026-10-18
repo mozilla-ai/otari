@@ -13,6 +13,7 @@ the same way.
 import asyncio
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -255,6 +256,39 @@ async def rebuild_selector_index(
             names=_names(grouped),
         )
     )
+
+
+@dataclass(frozen=True)
+class DeploymentOffering:
+    """One offering in the deployment's own catalog view, with what models.dev knows about its model."""
+
+    selector: str
+    instance: str
+    model_id: str
+    metadata: ModelCatalogEntry | None
+
+
+async def list_deployment_offerings(config: GatewayConfig) -> list[DeploymentOffering]:
+    """Every real offering the deployment's configured instances serve, in selector order.
+
+    The master key's view, read from the caches as the scheduled index rebuild reads them.
+    """
+    async with create_unit_of_work_with_session() as (session, _uow):
+        merged = await build_merged_catalog(
+            session,
+            config,
+            auth=(None, True),
+            session_identity=None,
+            cached_only=True,
+            model_provider=None,
+            include_offered=False,
+            withhold_alias_targets=False,
+        )
+    offerings: list[DeploymentOffering] = []
+    for obj in real_offerings(merged):
+        _seed, metadata, instance, model_id, _provider_type = offering_seed(config, merged.models_dev, obj)
+        offerings.append(DeploymentOffering(obj.id, instance, model_id, metadata))
+    return offerings
 
 
 SELECTOR_INDEX_INTERVAL_SECONDS = 60.0

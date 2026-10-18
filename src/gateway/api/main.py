@@ -24,6 +24,7 @@ from gateway.api.routes import (
     end_users,
     files,
     health,
+    health_checks,
     hooks,
     hosted_mode,
     hosted_providers,
@@ -185,6 +186,8 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(agent_routing.router, Plane.DATA | Plane.CONTROL),
     RouterMount(search.router, Plane.DATA | Plane.CONTROL),
     RouterMount(batches.router, Plane.DATA | Plane.CONTROL),
+    # Sends a completion to every offering, and keeps the results in the local database.
+    RouterMount(health_checks.router, Plane.DATA | Plane.CONTROL),
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
     # otherwise sit behind the catalog router's {model_id:path} catch-all.

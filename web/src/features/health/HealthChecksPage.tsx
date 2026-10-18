@@ -1,0 +1,448 @@
+import { Link } from "@tanstack/react-router"
+import { useState } from "react"
+import type {
+  HealthCheckProvider,
+  HealthCheckResult,
+  HealthCheckSettings,
+  HealthCheckStatus,
+} from "@/client"
+import { Button } from "@/design-system/actions/Button"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Field } from "@/design-system/forms/Field"
+import { TextArea } from "@/design-system/forms/TextArea"
+import { Toggle } from "@/design-system/forms/Toggle"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import {
+  useHealthCheckStatus,
+  useRunHealthChecks,
+  useUpdateHealthCheckSettings,
+} from "@/shared/api/healthChecks"
+import { looksLikeAddress, parseAddresses } from "@/shared/helpers/addresses"
+import { formatDateTimeMinutes } from "@/shared/helpers/format"
+import { useDeployment } from "@/shared/hooks/useDeployment"
+
+// The server's cap on the alert list.
+const MAX_ALERT_EMAILS = 20
+
+const STATUS_LABELS = {
+  ok: "OK",
+  degraded: "Some failing",
+  down: "Down",
+} as const
+
+function ProviderStatus({ status }: { status: HealthCheckProvider["status"] }) {
+  return (
+    <span
+      className={`flex items-center gap-2 text-mono-caption ${status === "ok" ? "text-muted" : "text-danger"}`}
+    >
+      <Dot className={status === "ok" ? "bg-success" : "bg-danger"} />
+      {STATUS_LABELS[status]}
+    </span>
+  )
+}
+
+// One bar per run in the last 24 hours, its height the share that answered.
+function History({ provider }: { provider: HealthCheckProvider }) {
+  const points = provider.history
+  if (points.length < 2) {
+    return <span className="text-caption">—</span>
+  }
+  const healthy = points.filter((point) => point.answered === point.total)
+  return (
+    <span
+      role="img"
+      aria-label={`${healthy.length} of ${points.length} runs in the last 24 hours had every model answering`}
+      className="flex h-4 items-end gap-px"
+    >
+      {points.map((point) => (
+        <span
+          key={point.started_at}
+          title={`${formatDateTimeMinutes(point.started_at)}: ${point.answered} of ${point.total}`}
+          className={`w-1 ${point.answered === point.total ? "bg-success" : "bg-danger"}`}
+          style={{
+            height: `${Math.max(15, (point.answered / Math.max(point.total, 1)) * 100)}%`,
+          }}
+        />
+      ))}
+    </span>
+  )
+}
+
+const PROVIDER_COLUMNS: DataTableColumn<HealthCheckProvider>[] = [
+  {
+    id: "provider",
+    header: "Provider",
+    isRowHeader: true,
+    cell: (row) => <span className="text-body">{row.provider}</span>,
+  },
+  {
+    id: "status",
+    header: "Status",
+    cell: (row) => <ProviderStatus status={row.status} />,
+  },
+  {
+    id: "answered",
+    header: "Answered",
+    align: "end",
+    cell: (row) => (
+      <span className="text-mono-caption">
+        {row.answered}/{row.total}
+      </span>
+    ),
+  },
+  {
+    id: "history",
+    header: "Last 24h",
+    cell: (row) => <History provider={row} />,
+  },
+  {
+    id: "error",
+    header: "Most common error",
+    cell: (row) =>
+      row.top_error ? (
+        <span className="line-clamp-2 text-caption" title={row.top_error}>
+          {row.top_error_count}× {row.top_error}
+        </span>
+      ) : null,
+  },
+]
+
+const RESULT_COLUMNS: DataTableColumn<HealthCheckResult>[] = [
+  {
+    id: "selector",
+    header: "Model",
+    isRowHeader: true,
+    cell: (row) => <span className="text-mono-caption">{row.selector}</span>,
+  },
+  {
+    id: "status",
+    header: "Status",
+    cell: (row) => (
+      <span
+        className={`flex items-center gap-2 text-mono-caption ${row.status === "fail" ? "text-danger" : "text-muted"}`}
+      >
+        <Dot
+          className={
+            row.status === "pass"
+              ? "bg-success"
+              : row.status === "fail"
+                ? "bg-danger"
+                : "bg-text-subtle"
+          }
+        />
+        {row.status === "fail" && row.status_code
+          ? `HTTP ${row.status_code}`
+          : row.status === "pass"
+            ? "Answered"
+            : row.status === "fail"
+              ? "Failed"
+              : "Skipped"}
+      </span>
+    ),
+  },
+  {
+    id: "since",
+    header: "Failing since",
+    cell: (row) =>
+      row.failing_since ? (
+        <span className="text-mono-caption">
+          {formatDateTimeMinutes(row.failing_since)}
+          {row.failed_runs > 1 ? ` · ${row.failed_runs} runs` : ""}
+        </span>
+      ) : null,
+  },
+  {
+    id: "latency",
+    header: "Time",
+    align: "end",
+    cell: (row) =>
+      row.status === "skip" ? null : (
+        <span className="text-mono-caption">{row.latency_ms} ms</span>
+      ),
+  },
+  {
+    id: "error",
+    header: "Error",
+    cell: (row) =>
+      row.error ? (
+        <span className="line-clamp-2 text-caption" title={row.error}>
+          {row.error}
+        </span>
+      ) : null,
+  },
+]
+
+function RunSummary({ status }: { status: HealthCheckStatus }) {
+  const { last_run: last, running, settings } = status
+  const next = settings.enabled
+    ? settings.next_run_at
+      ? `Next run ${formatDateTimeMinutes(settings.next_run_at)}.`
+      : "Next run within a minute."
+    : "The schedule is off."
+  return (
+    <p className="text-sm text-muted" role="status" aria-live="polite">
+      {running
+        ? `Running since ${formatDateTimeMinutes(running.started_at)}. `
+        : settings.run_requested
+          ? "Starting a run. "
+          : null}
+      {last
+        ? `Last run ${formatDateTimeMinutes(last.started_at)}: ${last.passed} of ${last.total} answered${last.included_reasoning ? ", reasoning models included" : ""}. `
+        : "No run has finished yet. "}
+      {next}
+    </p>
+  )
+}
+
+function parseCount(value: string): number | undefined {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+function SettingsCard({ settings }: { settings: HealthCheckSettings }) {
+  const update = useUpdateHealthCheckSettings()
+  const [draft, setDraft] = useState({
+    interval: String(settings.interval_minutes),
+    prompt: settings.prompt,
+    maxTokens: String(settings.max_tokens),
+    reasoningMaxTokens: String(settings.reasoning_max_tokens),
+    reasoningEvery: String(settings.reasoning_every_runs),
+  })
+  const set = (field: keyof typeof draft) => (value: string) =>
+    setDraft((current) => ({ ...current, [field]: value }))
+
+  return (
+    <SettingsGroup
+      title="Schedule"
+      description="Checks use this deployment's own provider keys. They write no usage and are billed to no organization, but your providers charge for every request."
+    >
+      <div className="flex flex-col gap-4 py-4">
+        <ErrorBanner error={update.error} />
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-body">Run the checks on a schedule</p>
+            <p className="mt-1 max-w-3xl text-caption">
+              Every chat model each provider serves is sent the prompt below. A
+              check passes on any answer, whatever it says.
+            </p>
+          </div>
+          <Toggle
+            isSelected={settings.enabled}
+            onChange={(enabled) => update.mutate({ enabled })}
+            label="Run the checks on a schedule"
+            isDisabled={update.isPending}
+          />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Minutes between runs"
+            value={draft.interval}
+            onChange={set("interval")}
+            description="15 to 1440."
+          />
+          <Field
+            label="Include reasoning models every Nth run"
+            value={draft.reasoningEvery}
+            onChange={set("reasoningEvery")}
+            description="They cost the most. 0 leaves them out."
+          />
+          <Field
+            label="Max output tokens"
+            value={draft.maxTokens}
+            onChange={set("maxTokens")}
+          />
+          <Field
+            label="Max output tokens for reasoning models"
+            value={draft.reasoningMaxTokens}
+            onChange={set("reasoningMaxTokens")}
+            description="They spend tokens thinking before they answer."
+          />
+        </div>
+        <Field label="Prompt" value={draft.prompt} onChange={set("prompt")} />
+        <div>
+          <Button
+            size="sm"
+            isDisabled={update.isPending}
+            onPress={() =>
+              update.mutate({
+                interval_minutes: parseCount(draft.interval),
+                prompt: draft.prompt,
+                max_tokens: parseCount(draft.maxTokens),
+                reasoning_max_tokens: parseCount(draft.reasoningMaxTokens),
+                reasoning_every_runs: parseCount(draft.reasoningEvery),
+              })
+            }
+          >
+            {update.isPending ? "Saving…" : "Save"}
+          </Button>
+          {update.isSuccess ? (
+            <span role="status" className="ml-3 text-sm text-success">
+              Saved
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </SettingsGroup>
+  )
+}
+
+function addressProblem(addresses: string[]): string | undefined {
+  const invalid = addresses.filter((address) => !looksLikeAddress(address))
+  if (invalid.length > 0) {
+    return `Not an email address: ${invalid.join(", ")}`
+  }
+  if (addresses.length > MAX_ALERT_EMAILS) {
+    return `Up to ${MAX_ALERT_EMAILS} addresses.`
+  }
+  return undefined
+}
+
+/** Who hears about a failure. Saved apart from the schedule, which has its own Save. */
+function AlertsCard({ saved }: { saved: string[] }) {
+  const { mail_ready } = useDeployment()
+  const update = useUpdateHealthCheckSettings()
+  const [draft, setDraft] = useState(saved.join("\n"))
+  const addresses = parseAddresses(draft).map((address) =>
+    address.toLowerCase(),
+  )
+  const problem = addressProblem(addresses)
+  const isDirty = addresses.join("\n") !== saved.join("\n")
+
+  return (
+    <SettingsGroup
+      title="Email alerts"
+      description="One email when a model stops answering, and one when it answers again. A run that changes nothing sends nothing, so a provider that stays down all night sends two emails, not one an hour."
+    >
+      <div className="flex flex-col gap-4 py-4">
+        {mail_ready ? null : (
+          <InfoBanner tone="warning">
+            This deployment can't send email yet, so nobody below hears about a
+            failure. Set up outgoing mail in{" "}
+            <Link to="/settings" className="text-link hover:underline">
+              Settings
+            </Link>
+            .
+          </InfoBanner>
+        )}
+        <ErrorBanner error={update.error} />
+        <TextArea
+          label="Send alerts to"
+          value={draft}
+          onChange={setDraft}
+          rows={3}
+          placeholder="oncall@example.com"
+          isInvalid={problem !== undefined}
+          errorMessage={problem}
+          description="Separated by commas or new lines. Leave it empty to send no email."
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            isDisabled={!isDirty || problem !== undefined || update.isPending}
+            onPress={() => update.mutate({ alert_emails: addresses })}
+          >
+            {update.isPending ? "Saving…" : "Save addresses"}
+          </Button>
+          {update.isSuccess && !isDirty ? (
+            <span role="status" className="text-sm text-success">
+              Saved
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </SettingsGroup>
+  )
+}
+
+/**
+ * The operator's view of whether every model this deployment serves answers.
+ *
+ * Read from the runs a worker stores, not from customer traffic, so a provider
+ * nobody has called today still has a status. One table per provider first,
+ * because the question this page answers is which provider is failing; the
+ * models follow, failing ones only unless asked.
+ */
+export function HealthChecksPage() {
+  const status = useHealthCheckStatus()
+  const run = useRunHealthChecks()
+  const [showAll, setShowAll] = useState(false)
+  const data = status.data
+
+  if (status.isPending && !data) {
+    return <PageLoading label="Loading health checks…" />
+  }
+
+  const busy = Boolean(data?.running || data?.settings.run_requested)
+  const results = data
+    ? data.results.filter((result) => showAll || result.status === "fail")
+    : []
+
+  return (
+    <div className="flex flex-col gap-6">
+      <PageIntro
+        title="Health"
+        action={
+          data ? (
+            <Button
+              size="sm"
+              variant="primary"
+              isDisabled={busy || run.isPending}
+              onPress={() => run.mutate(undefined)}
+            >
+              {busy ? "Running…" : "Run now"}
+            </Button>
+          ) : null
+        }
+      >
+        Whether every model your providers serve answers, checked with one small
+        request each.
+      </PageIntro>
+      <ErrorBanner error={status.error ?? run.error} />
+      {data ? (
+        <>
+          <RunSummary status={data} />
+          {data.last_run && data.last_run.total === 0 ? (
+            <InfoBanner tone="warning">
+              The last run found no chat model to check. Add a provider on
+              Deployment providers.
+            </InfoBanner>
+          ) : null}
+          <DataTable
+            ariaLabel="Providers"
+            columns={PROVIDER_COLUMNS}
+            rows={data.providers}
+            getRowKey={(row) => row.provider}
+            mobileLayout="cards"
+            emptyContent="No results yet. Run the checks to see each provider."
+          />
+          {data.results.length > 0 ? (
+            <SettingsGroup
+              title={showAll ? "Models" : "Failing models"}
+              action={
+                <Button size="sm" onPress={() => setShowAll(!showAll)}>
+                  {showAll ? "Failing only" : "Show all"}
+                </Button>
+              }
+            >
+              <DataTable
+                ariaLabel="Models"
+                columns={RESULT_COLUMNS}
+                rows={results}
+                getRowKey={(row) => row.selector}
+                mobileLayout="cards"
+                emptyContent="Every model answered."
+              />
+            </SettingsGroup>
+          ) : null}
+          <AlertsCard saved={data.settings.alert_emails} />
+          <SettingsCard settings={data.settings} />
+        </>
+      ) : null}
+    </div>
+  )
+}

@@ -282,6 +282,17 @@ listed and never edited here.
 
 Built in the target shape from the start.
 
+### health-checks
+
+The scheduled checks an operator turns on from the Health page: every offering
+the deployment's own instances serve is sent one small completion, and what
+each answered is kept for 48 hours and folded into one line per provider. A
+probe is a side call with the deployment's credentials, so it writes no usage
+row and holds no budget. The offerings come from the catalog. Every replica
+polls, and the conditional update on the settings row decides which one runs.
+
+Built in the target shape from the start.
+
 ### alerts
 
 Alert destinations, rules, send-once delivery and the test send. It knows
