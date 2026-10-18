@@ -15,19 +15,22 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event
+from sqlalchemy import event, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.exceptions.traces_exceptions import TraceAmbiguousError
+from gateway.models.traces import TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
 from gateway.services.traces import TraceService
 from gateway.services.traces import _service as trace_service_module
+from gateway.services.traces._collector import call_id_digest
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
 
 pytestmark = pytest.mark.asyncio
@@ -481,3 +484,18 @@ async def test_a_series_fails_a_session_for_its_own_errors_and_not_its_tools(
     assert [(point.succeeded, point.failed) for point in series] == [(1, 1)]
     page = await store.search(TraceScope.deployment(), TraceFilter(has_error=True), limit=10, offset=0)
     assert sorted((item.trace_id, item.error_count) for item in page.items) == [("failed", 2), ("recovered", 1)]
+
+
+@pytest.mark.parametrize("legacy", ["call/" + "x" * 80, "toolu_01AbCdEf"])
+async def test_a_tool_call_id_an_older_version_stored_as_sent_reads_back_as_its_digest(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, legacy: str
+) -> None:
+    workspace, _ = tenants
+    await store.write((_write(workspace, "session-1", _span("tool-1", kind="tool", tool_name="Bash")),))
+    await async_db.execute(update(TraceSpan).where(col(TraceSpan.span_id) == "tool-1").values(tool_call_id=legacy))
+    await async_db.commit()
+
+    detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
+
+    assert detail is not None
+    assert detail.spans[0].tool_call_id == call_id_digest(workspace, legacy)

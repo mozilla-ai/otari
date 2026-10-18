@@ -726,6 +726,45 @@ def test_otlp_agent_spans_from_a_budgeted_key_are_not_traced(
     assert writer.writes == []
 
 
+def test_otlp_claude_code_spans_record_the_tool_a_hook_refused(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude Code's own spans are read by their scope: a hook's refusal lands on the tool call it refused."""
+    headers = _exempt_key(client, master_key_header)
+    writer = _install_writer(client, monkeypatch)
+    trace_id = base64.b64encode(bytes.fromhex("6c8efff798038103d269b633813fc60c")).decode()
+    ids = [base64.b64encode(bytes.fromhex(f"{index:016x}")).decode() for index in range(1, 4)]
+    session = _attr("session.id", "77192d4d-b969-44eb-bb05-e7ca84f6dfab")
+
+    def span(index: int, span_type: str, parent: int | None, *attrs: dict[str, Any]) -> dict[str, Any]:
+        return _agent_span(
+            trace_id,
+            ids[index],
+            name=f"claude_code.{span_type}",
+            attributes=[session, _attr("span.type", span_type), *attrs],
+            **({"parentSpanId": ids[parent]} if parent is not None else {}),
+        )
+
+    spans = [
+        span(0, "interaction", None),
+        span(1, "tool", 0, _attr("tool_name", "Edit"), _attr("tool_use_id", "toolu_01Y5eZnM7cScX5y8GyV7fT7q")),
+        span(2, "tool.blocked_on_user", 1, _attr("decision", "reject"), _attr("source", "hook")),
+    ]
+    body = {
+        "resourceSpans": [{"scopeSpans": [{"scope": {"name": "com.anthropic.claude_code.tracing"}, "spans": spans}]}]
+    }
+
+    resp = client.post("/otlp/v1/traces", json=body, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    [write] = writer.writes
+    tool = next(record for record in write.spans if record.kind == "tool")
+    assert (write.harness, tool.tool_name) == ("claude-code", "Edit")
+    assert tool.tool_call_id is not None and tool.tool_call_id.startswith("tc-")
+    assert (tool.outcome, tool.error_class) == ("blocked", None)
+    assert tool.attributes["otari.tool.decision_source"] == "hook"
+
+
 # --- Claude Platform -------------------------------------------------------------
 # Span names, attributes and token semantics follow the Claude API's OpenTelemetry span
 # reference: ``gen_ai.usage.input_tokens`` counts cache reads and writes, and a

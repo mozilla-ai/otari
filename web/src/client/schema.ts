@@ -16421,7 +16421,7 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "ok" | "error" | "unknown";
+            outcome: "ok" | "error" | "unknown" | "blocked";
             /** Output Tokens */
             output_tokens: number | null;
             /** Parent Span Id */

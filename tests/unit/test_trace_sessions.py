@@ -20,7 +20,7 @@ from gateway.services.traces import (
     read_turn,
 )
 from gateway.services.traces import resolve_session as resolve
-from gateway.services.traces._collector import client_tool_span_id
+from gateway.services.traces._collector import call_id_digest, client_tool_span_id
 
 _WORKSPACE = uuid.uuid4()
 _CLAUDE_CODE = {"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-claude-code-session-id": "b57732d4"}
@@ -333,6 +333,16 @@ def test_answered_calls_become_client_tool_spans_ending_when_this_request_arrive
     assert all(span.start_time is None and span.end_time is not None for span in tools)
 
 
+def test_a_call_id_is_kept_on_its_tool_span_as_a_digest() -> None:
+    call_id = "toolu_01Vd8AQi5j3wv6NtfNJFHkdM"
+    turn = TurnFacts(opens_turn=False, answered=(AnsweredCall(call_id=call_id, name="Read", is_error=False),))
+
+    write = _trace(session=None, turn=turn).finish(status_code=200, completed=True)
+
+    (tool,) = [span for span in write.spans if span.kind == "tool"]
+    assert tool.tool_call_id == call_id_digest(_WORKSPACE, call_id)
+
+
 def test_a_client_tool_span_id_never_carries_the_call_id() -> None:
     turn = TurnFacts(
         opens_turn=False, answered=(AnsweredCall(call_id="my private\u0000note", name=None, is_error=False),)
@@ -342,7 +352,7 @@ def test_a_client_tool_span_id_never_carries_the_call_id() -> None:
 
     (tool,) = [span for span in write.spans if span.kind == "tool"]
     assert tool.span_id == client_tool_span_id("my private\u0000note", 0)
-    assert "private" not in tool.span_id and tool.tool_call_id is None
+    assert "private" not in tool.span_id and "private" not in (tool.tool_call_id or "")
 
 
 def test_a_call_id_reused_later_in_the_session_is_its_own_span_and_a_retry_is_not() -> None:

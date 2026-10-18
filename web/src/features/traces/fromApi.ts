@@ -52,11 +52,19 @@ const GUARDRAIL_STATUS: Record<GuardrailVerdict, string | undefined> = {
   unchecked: "Could not run. The request went to the model unchecked.",
 }
 
+const REFUSED_BY: Record<string, string> = {
+  hook: "Blocked by a hook before it ran.",
+  user: "Refused by the user.",
+  config: "Refused by a permission rule.",
+}
+
 function spanLevel(
   span: TraceSpan,
   verdict: GuardrailVerdict | null,
 ): ObservationLevel {
   if (verdict) return GUARDRAIL_LEVEL[verdict]
+  // Stopped on purpose: worth a look, not a failure.
+  if (span.outcome === "blocked") return "WARNING"
   if (span.outcome !== "error") return "DEFAULT"
   return span.recovered ? "WARNING" : "ERROR"
 }
@@ -66,6 +74,13 @@ function spanStatus(
   verdict: GuardrailVerdict | null,
 ): string | undefined {
   if (verdict) return GUARDRAIL_STATUS[verdict]
+  if (span.outcome === "blocked") {
+    const source = span.attributes["otari.tool.decision_source"]
+    return (
+      (typeof source === "string" && REFUSED_BY[source]) ||
+      "Blocked before it ran."
+    )
+  }
   if (span.outcome !== "error") return undefined
   if (span.kind === "mcp_connect") {
     return "Connecting to the server or listing its tools failed."

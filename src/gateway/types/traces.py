@@ -53,8 +53,10 @@ SpanOrigin = Literal["gateway", "otlp"]
 SPAN_ORIGINS: tuple[SpanOrigin, ...] = ("gateway", "otlp")
 
 # ``unknown`` is a client-run tool whose result no later request has carried yet.
-SpanOutcome = Literal["ok", "error", "unknown"]
-SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown")
+# ``blocked`` is work a guardrail stopped on purpose: the guardrail doing its job,
+# so it is never counted as an error.
+SpanOutcome = Literal["ok", "error", "unknown", "blocked"]
+SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown", "blocked")
 
 # The signal that grouped a trace's requests into one session. ``none`` is a request
 # that named no session, which is a trace of its own: the gateway never infers that
@@ -106,6 +108,9 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.mcp.tool_count": int,
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
+    "otari.tool.decision": str,
+    "otari.tool.decision_source": str,
+    "otari.tool.succeeded": bool,
 }
 # The allowlisted attributes OTel defines as an array of strings. Each is stored as
 # its elements joined by LIST_SEPARATOR, so every stored attribute stays a scalar,
@@ -194,7 +199,7 @@ class SpanRecord:
         _check_choice("kind", self.kind, SPAN_KINDS)
         _check_choice("origin", self.origin, SPAN_ORIGINS)
         _check_choice("outcome", self.outcome, SPAN_OUTCOMES)
-        for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id"):
+        for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id", "tool_call_id"):
             _check_id(name, getattr(self, name))
         if not (self.origin == "gateway" and self.kind == "step" and is_endpoint(self.name)):
             _check_identifier("name", self.name)
@@ -205,7 +210,6 @@ class SpanRecord:
             "provider",
             "tool_name",
             "tool_type",
-            "tool_call_id",
         ):
             _check_identifier(name, getattr(self, name))
         # Copied before it is checked and frozen after, so the mapping a caller still

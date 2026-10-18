@@ -10,6 +10,7 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyVa
 from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
 from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
+from gateway.services.traces._collector import call_id_digest
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
 from gateway.types.traces import TraceWrite, is_identifier
 
@@ -30,6 +31,7 @@ def _span(
     attrs: Any = None,
     start: datetime | None = _T0,
     end: datetime | None = _T0 + timedelta(seconds=2),
+    scope: str = "",
 ) -> OtlpSpan:
     return OtlpSpan(
         trace_id=trace_id,
@@ -40,6 +42,7 @@ def _span(
         end_time=end,
         failed=failed,
         attributes=attrs or {},
+        scope=scope,
     )
 
 
@@ -101,6 +104,142 @@ def test_a_claude_sessions_threads_share_one_trace() -> None:
     )
 
     assert [len(write.spans) for write in writes] == [2]
+
+
+_CLAUDE_CODE = "com.anthropic.claude_code.tracing"
+_TOOL_USE_ID = "toolu_01Y5eZnM7cScX5y8GyV7fT7q"
+
+
+def _claude(span_id: str, span_type: str, *, parent: str | None = None, **attrs: Any) -> OtlpSpan:
+    return _span(
+        span_id,
+        trace_id=attrs.pop("trace_id", "c" * 32),
+        parent=parent,
+        name=f"claude_code.{span_type}",
+        attrs={"span.type": span_type, "session.id": "77192d4d-b969-44eb-bb05-e7ca84f6dfab", **attrs},
+        scope=_CLAUDE_CODE,
+    )
+
+
+def test_a_claude_code_interaction_is_a_turn_with_its_model_calls_and_tools() -> None:
+    [write] = _project(
+        _claude("i1", "interaction"),
+        _claude(
+            "l1",
+            "llm_request",
+            parent="i1",
+            model="claude-haiku-4-5-20251001",
+            **{"gen_ai.system": "anthropic"},
+            input_tokens="10",
+            output_tokens="300",
+            cache_read_tokens="18157",
+            cache_creation_tokens="2000",
+            success="True",
+        ),
+        _claude("t1", "tool", parent="i1", tool_name="Read", tool_use_id=_TOOL_USE_ID),
+        _claude("d1", "tool.blocked_on_user", parent="t1", decision="accept", source="config"),
+        _claude("e1", "tool.execution", parent="t1", success="True"),
+    )
+
+    by_id = {span.otel_span_id: span for span in write.spans}
+    turn, llm, tool = by_id["i1"], by_id["l1"], by_id["t1"]
+    assert (turn.kind, turn.opens_turn) == ("step", True)
+    assert (llm.kind, llm.parent_span_id, llm.model, llm.provider) == (
+        "llm",
+        turn.span_id,
+        "claude-haiku-4-5-20251001",
+        "anthropic",
+    )
+    # Claude Code counts the cache outside its input tokens; a span counts it in.
+    assert (llm.input_tokens, llm.output_tokens, llm.cache_read_tokens, llm.cache_write_tokens) == (
+        20_167,
+        300,
+        18_157,
+        2_000,
+    )
+    assert (tool.kind, tool.tool_name, tool.tool_type, tool.tool_call_id, tool.outcome) == (
+        "tool",
+        "Read",
+        "client",
+        call_id_digest(_WORKSPACE, _TOOL_USE_ID),
+        "ok",
+    )
+    assert dict(tool.attributes) == {"otari.tool.decision": "accept", "otari.tool.decision_source": "config"}
+    assert write.harness == "claude-code"
+
+
+def test_a_tool_a_hook_refused_is_blocked_not_failed() -> None:
+    [write] = _project(
+        _claude("i1", "interaction"),
+        _claude("t1", "tool", parent="i1", tool_name="Edit", tool_use_id=_TOOL_USE_ID),
+        _claude("d1", "tool.blocked_on_user", parent="t1", decision="reject", source="hook"),
+    )
+
+    by_id = {span.otel_span_id: span for span in write.spans}
+    assert (by_id["t1"].outcome, by_id["t1"].error_class) == ("blocked", None)
+    assert dict(by_id["t1"].attributes) == {"otari.tool.decision": "reject", "otari.tool.decision_source": "hook"}
+    assert dict(by_id["d1"].attributes) == dict(by_id["t1"].attributes)
+    assert by_id["d1"].outcome == "ok"
+
+
+def test_a_claude_code_tool_that_returned_an_error_ran_and_is_not_a_session_error() -> None:
+    [write] = _project(
+        _claude("t1", "tool", parent="i1", tool_name="Bash", tool_use_id=_TOOL_USE_ID),
+        _claude("e1", "tool.execution", parent="t1", success="False"),
+    )
+
+    tool = next(span for span in write.spans if span.otel_span_id == "t1")
+    assert (tool.outcome, tool.error_class) == ("ok", None)
+    assert tool.attributes["otari.tool.succeeded"] is False
+
+
+def test_a_claude_code_sessions_turns_share_one_trace_across_otel_traces() -> None:
+    writes = _project(
+        _claude("i1", "interaction", trace_id="1" * 32),
+        _claude("i2", "interaction", trace_id="2" * 32),
+    )
+
+    assert [len(write.spans) for write in writes] == [2]
+    assert all(span.opens_turn for span in writes[0].spans)
+
+
+def test_session_id_groups_only_claude_codes_own_spans() -> None:
+    writes = _project(
+        _span("a", trace_id="1" * 32, attrs={"session.id": "s-1"}),
+        _span("b", trace_id="2" * 32, attrs={"session.id": "s-1"}),
+    )
+
+    assert [len(write.spans) for write in writes] == [1, 1]
+
+
+def test_a_nested_claude_code_interaction_is_an_agent_not_a_new_turn() -> None:
+    [write] = _project(
+        _claude("i1", "interaction"),
+        _claude("t1", "tool", parent="i1", tool_name="Task"),
+        _claude("i2", "interaction", parent="t1"),
+    )
+
+    nested = next(span for span in write.spans if span.otel_span_id == "i2")
+    assert (nested.kind, nested.opens_turn) == ("agent", False)
+
+
+def test_a_call_id_is_kept_as_a_digest_never_as_sent() -> None:
+    [write] = _project(_claude("t1", "tool", tool_name="Bash", tool_use_id="hf_AbCdEfGhIjKlMnOpQrStUvWx0123456789"))
+
+    stored = write.spans[0].tool_call_id
+    assert stored is not None and stored.startswith("tc-") and "AbCd" not in stored
+
+
+def test_a_claude_code_tool_that_returned_an_error_is_no_error_at_all() -> None:
+    [write] = _project(
+        _claude("t1", "tool", tool_name="Bash", tool_use_id=_TOOL_USE_ID),
+        _claude("e1", "tool.execution", parent="t1", success="False"),
+    )
+
+    outcomes = {span.otel_span_id: span.outcome for span in write.spans}
+    assert outcomes == {"t1": "ok", "e1": "ok"}
+    run = next(span for span in write.spans if span.otel_span_id == "e1")
+    assert run.attributes["otari.tool.succeeded"] is False
 
 
 def test_text_in_a_span_name_or_attribute_never_reaches_the_document() -> None:

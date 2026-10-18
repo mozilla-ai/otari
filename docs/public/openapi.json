@@ -19688,7 +19688,8 @@
             "enum": [
               "ok",
               "error",
-              "unknown"
+              "unknown",
+              "blocked"
             ],
             "title": "Outcome",
             "type": "string"
