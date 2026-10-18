@@ -22,6 +22,7 @@ Contents:
 - [Where the files live](#where-the-files-live)
 - [Checking a guardrail before it runs](#checking-a-guardrail-before-it-runs)
 - [Checking a pull request in CI](#checking-a-pull-request-in-ci)
+- [Reporting to Otari](#reporting-to-otari)
 - [Generating gates from AGENTS.md or CLAUDE.md](#generating-gates-from-agentsmd-or-claudemd)
 - [Recommendations](#recommendations)
 - [Why gates rather than written rules](#why-gates-rather-than-written-rules)
@@ -409,6 +410,51 @@ The two workflows protect different things, and neither is a boundary against so
 
 - The judge workflow runs on `pull_request_target`, so GitHub runs it as it is on `main`, and a pull request cannot edit the job that holds the credential. No tree from the pull request is checked out there. The pull request arrives as Git objects, and only its diff reaches the judge, so nothing in it runs next to the credential. That is also why the `agent-guardrails` environment can restrict its deployment branches to `main`.
 - The path and verifier workflow runs on `pull_request`, so it runs as the pull request has it, and holds no secret. A pull request can edit it, and a verifier runs in the pull request's tree, so whatever it calls there, such as `scripts/check_architecture.py`, is the pull request's own code. A required status check and review of the workflow and the scripts a verifier calls are what keep it honest.
+
+## Reporting to Otari
+
+`otari hook` can report every gate it checks to an Otari server, so a team sees
+which gates ran, which blocked, and which never fire. Setting the server and an
+API key where the agent runs turns it on, for every repository the agent works
+in:
+
+```bash
+export OTARI_URL="http://localhost:8000"     # or your Otari deployment
+export OTARI_API_KEY="tk-your-import-key"    # budget-exempt, as for an OTLP export
+```
+
+Each check sends one span per gate that applied to the agent's session, by the
+session id the harness gives the hook. It names the gate, its type, whether it
+came from the repository or from `~/.otari/`, the outcome, whether it blocked,
+the moment it ran at, a fingerprint of the guardrail, and on a tool call the
+call's id. It never carries a gate's message or the paths and commands the gate
+read. What each gate is and says goes separately, once per version of the
+guardrail, to the server `OTARI_URL` names: its id, type, enforcement, when it
+runs, whether it is yours or the repository's, and its `message`. That includes
+your own gates in `~/.otari/`, and the server keeps it, so set `OTARI_URL` only
+for a server you would show your guardrails to. A session then
+shows each gate's message where it blocked, and lists the gates the guardrail
+declares that never ran. When the agent also exports its own spans, as
+[Claude Code can](traces.md#claude-code-without-routing), a gate shows under
+the tool call it checked, and a `Stop` gate under the turn it held.
+
+A gate's span covers the time it took. A judge or verifier gate is timed by its
+own run; any other gate, from when `otari hook` started, since what it waits on
+is the hook starting and reading the evidence. A judge gate run with `claude`
+also carries the model it ran on and the tokens it used. Otari books them as the
+session's usage, under the source `otari-hook`, and prices them like the
+session's own requests. A judge run with Codex carries no usage yet.
+
+Reporting never slows a check or changes its verdict. A report is written to
+`~/.otari/outbox/`, under the server and key it is for, and a separate process
+sends it with that same key; one the server cannot take yet, a rejected key
+included, waits there for the next check, for up to a day. The API key is read
+from the environment when it is sent and never written to the outbox.
+
+Without `OTARI_URL`, a harness's own OpenTelemetry trace export
+(`OTEL_TRACES_EXPORTER=otlp` with `OTEL_EXPORTER_OTLP_ENDPOINT` and its headers)
+is used instead. Claude Code does not pass `OTEL_*` variables to its hooks, so
+it needs `OTARI_URL`. `OTARI_HOOK_REPORT=off` turns reporting off.
 
 ## Generating gates from AGENTS.md or CLAUDE.md
 

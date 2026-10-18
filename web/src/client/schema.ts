@@ -1658,6 +1658,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hooks/guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Guardrail Definition
+         * @description Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.
+         *
+         *     `otari hook` sends this once per version, the first time it reports a check
+         *     against it. The fingerprint is recomputed from the gates, and one that does
+         *     not match the one sent is refused, so a version cannot be stored under
+         *     another's name. Sending a version again changes nothing. It is stored in the
+         *     API key's workspace, beside that key's traces, and takes the same key a trace
+         *     export does: a budget-exempt API key, never the master key.
+         */
+        post: operations["hooks-record_guardrail_definition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/hosted-providers": {
         parameters: {
             query?: never;
@@ -10619,6 +10646,33 @@ export interface components {
              */
             token_type: string;
         };
+        /**
+         * GateDefinitionRequest
+         * @description One gate of a guardrail version: what it is, when it runs, and what it says when it fails.
+         */
+        GateDefinitionRequest: {
+            /**
+             * Enforcement
+             * @enum {string}
+             */
+            enforcement: "required" | "advisory";
+            /** Gate Id */
+            gate_id: string;
+            /**
+             * Gate Type
+             * @enum {string}
+             */
+            gate_type: "path" | "command" | "command_if_changed" | "judge" | "verifier";
+            /** Message */
+            message: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "repo" | "user";
+            /** Runs */
+            runs: ("pre_tool_use.edit_target" | "pre_tool_use.read_target" | "pre_tool_use.command" | "stop.working_tree" | "stop.session" | "stop.verifier")[];
+        };
         /** GateResultResponse */
         GateResultResponse: {
             /** Detail */
@@ -10631,6 +10685,53 @@ export interface components {
             message: string;
             /** Outcome */
             outcome: string;
+        };
+        /**
+         * GateSummaryPublic
+         * @description How often one agent guardrail gate ran in a session, by what it decided.
+         */
+        GateSummaryPublic: {
+            /**
+             * Blocked
+             * @description Checks where the gate stopped the agent.
+             */
+            blocked: number;
+            /** Enforcement */
+            enforcement: ("required" | "advisory") | null;
+            /**
+             * Flagged
+             * @description Checks an advisory gate failed; the agent went ahead.
+             */
+            flagged: number;
+            /** Gate Id */
+            gate_id: string;
+            /**
+             * Gate Type
+             * @description From the guardrail's definition, when it was sent.
+             */
+            gate_type: string | null;
+            /**
+             * Message
+             * @description What the gate says when it fails, from the guardrail's definition.
+             */
+            message: string | null;
+            /** Passed */
+            passed: number;
+            /**
+             * Refused
+             * @description Checks where the gate could not decide and held the agent anyway.
+             */
+            refused: number;
+            /**
+             * Span Id
+             * @description The check to open first: the earliest that did anything but pass. Null for a gate that never ran.
+             */
+            span_id: string | null;
+            /**
+             * Undecided
+             * @description Checks where the gate could not decide; the agent went ahead unchecked.
+             */
+            undecided: number;
         };
         /**
          * GatewaySettings
@@ -10724,6 +10825,18 @@ export interface components {
             validate_kwargs?: {
                 [key: string]: unknown;
             };
+        };
+        /** GuardrailDefinitionRequest */
+        GuardrailDefinitionRequest: {
+            /** Digest */
+            digest: string;
+            /** Gates */
+            gates: components["schemas"]["GateDefinitionRequest"][];
+        };
+        /** GuardrailDefinitionResponse */
+        GuardrailDefinitionResponse: {
+            /** Digest */
+            digest: string;
         };
         /**
          * GuardrailParameterSpec
@@ -16741,6 +16854,11 @@ export interface components {
         };
         /** TraceDetailPublic */
         TraceDetailPublic: {
+            /**
+             * Gates
+             * @description Each agent guardrail gate a coding agent's hook reported, the ones that did something first.
+             */
+            gates: components["schemas"]["GateSummaryPublic"][];
             /** Spans */
             spans: components["schemas"]["SpanPublic"][];
             /**
@@ -21066,6 +21184,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hooks-record_guardrail_definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuardrailDefinitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailDefinitionResponse"];
                 };
             };
             /** @description Validation Error */

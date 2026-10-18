@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { traceDetail, traceSpan, traceSummary } from "@/tests/traceFixtures"
+import {
+  gateSummary,
+  traceDetail,
+  traceSpan,
+  traceSummary,
+} from "@/tests/traceFixtures"
 
 import { toTrace } from "./fromApi"
 import { summarizeTrace } from "./types"
@@ -151,6 +156,77 @@ describe("toTrace", () => {
     expect(trace.observations.find((o) => o.id === "tool-1")).toMatchObject({
       level: "WARNING",
       statusMessage: "Blocked by a hook before it ran.",
+    })
+  })
+
+  it("draws a gate that blocked a tool call as a warning that explains it, not an error", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            message: "CHANGELOG.md is generated.",
+          }),
+        ],
+        spans: [
+          traceSpan({ span_id: "req-1", origin: "otlp" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            origin: "otlp",
+            tool_name: "Edit",
+            outcome: "blocked",
+            attributes: {
+              "otari.tool.decision": "reject",
+              "otari.tool.decision_source": "hook",
+            },
+          }),
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "tool-1",
+            kind: "guardrail",
+            origin: "otlp",
+            outcome: "blocked",
+            attributes: {
+              "otari.guardrail.profile": "no-changelog",
+              "otari.guardrail.mode": "block",
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": true,
+            },
+          }),
+          traceSpan({
+            span_id: "gate-2",
+            parent_span_id: "req-1",
+            kind: "guardrail",
+            origin: "otlp",
+            attributes: {
+              "otari.guardrail.profile": "docs-updated",
+              "otari.guardrail.mode": "monitor",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": false,
+            },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("tool-1")).toMatchObject({
+      level: "WARNING",
+      statusMessage: "Blocked by a hook before it ran.",
+    })
+    expect(byId.get("gate-1")).toMatchObject({
+      name: "no-changelog",
+      parentObservationId: "tool-1",
+      level: "WARNING",
+      statusMessage: "Blocked the agent's action. CHANGELOG.md is generated.",
+    })
+    expect(byId.get("gate-2")).toMatchObject({
+      level: "WARNING",
+      statusMessage: "Flagged. The gate is advisory, so the agent went ahead.",
     })
   })
 

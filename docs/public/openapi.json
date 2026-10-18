@@ -7618,6 +7618,76 @@
         "title": "FederationTokenResponse",
         "type": "object"
       },
+      "GateDefinitionRequest": {
+        "additionalProperties": false,
+        "description": "One gate of a guardrail version: what it is, when it runs, and what it says when it fails.",
+        "properties": {
+          "enforcement": {
+            "enum": [
+              "required",
+              "advisory"
+            ],
+            "title": "Enforcement",
+            "type": "string"
+          },
+          "gate_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "gate_type": {
+            "enum": [
+              "path",
+              "command",
+              "command_if_changed",
+              "judge",
+              "verifier"
+            ],
+            "title": "Gate Type",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4096,
+            "title": "Message",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "repo",
+              "user"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "enum": [
+                "pre_tool_use.edit_target",
+                "pre_tool_use.read_target",
+                "pre_tool_use.command",
+                "stop.working_tree",
+                "stop.session",
+                "stop.verifier"
+              ],
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "gate_id",
+          "gate_type",
+          "enforcement",
+          "origin",
+          "runs",
+          "message"
+        ],
+        "title": "GateDefinitionRequest",
+        "type": "object"
+      },
       "GateResultResponse": {
         "properties": {
           "detail": {
@@ -7655,6 +7725,104 @@
           "message"
         ],
         "title": "GateResultResponse",
+        "type": "object"
+      },
+      "GateSummaryPublic": {
+        "description": "How often one agent guardrail gate ran in a session, by what it decided.",
+        "properties": {
+          "blocked": {
+            "description": "Checks where the gate stopped the agent.",
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "enforcement": {
+            "anyOf": [
+              {
+                "enum": [
+                  "required",
+                  "advisory"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enforcement"
+          },
+          "flagged": {
+            "description": "Checks an advisory gate failed; the agent went ahead.",
+            "title": "Flagged",
+            "type": "integer"
+          },
+          "gate_id": {
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "gate_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the guardrail's definition, when it was sent.",
+            "title": "Gate Type"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the gate says when it fails, from the guardrail's definition.",
+            "title": "Message"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "refused": {
+            "description": "Checks where the gate could not decide and held the agent anyway.",
+            "title": "Refused",
+            "type": "integer"
+          },
+          "span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The check to open first: the earliest that did anything but pass. Null for a gate that never ran.",
+            "title": "Span Id"
+          },
+          "undecided": {
+            "description": "Checks where the gate could not decide; the agent went ahead unchecked.",
+            "title": "Undecided",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gate_id",
+          "passed",
+          "blocked",
+          "flagged",
+          "refused",
+          "undecided",
+          "span_id",
+          "gate_type",
+          "enforcement",
+          "message"
+        ],
+        "title": "GateSummaryPublic",
         "type": "object"
       },
       "GatewaySettings": {
@@ -7825,6 +7993,44 @@
           "profile"
         ],
         "title": "GuardrailConfig",
+        "type": "object"
+      },
+      "GuardrailDefinitionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateDefinitionRequest"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Gates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "digest",
+          "gates"
+        ],
+        "title": "GuardrailDefinitionRequest",
+        "type": "object"
+      },
+      "GuardrailDefinitionResponse": {
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "title": "GuardrailDefinitionResponse",
         "type": "object"
       },
       "GuardrailParameterSpec": {
@@ -20282,6 +20488,14 @@
       },
       "TraceDetailPublic": {
         "properties": {
+          "gates": {
+            "description": "Each agent guardrail gate a coding agent's hook reported, the ones that did something first.",
+            "items": {
+              "$ref": "#/components/schemas/GateSummaryPublic"
+            },
+            "title": "Gates",
+            "type": "array"
+          },
           "spans": {
             "items": {
               "$ref": "#/components/schemas/SpanPublic"
@@ -20318,7 +20532,8 @@
           "state",
           "turns",
           "spans",
-          "truncated"
+          "truncated",
+          "gates"
         ],
         "title": "TraceDetailPublic",
         "type": "object"
@@ -29903,6 +30118,56 @@
           }
         ],
         "summary": "Check Policy",
+        "tags": [
+          "hooks"
+        ]
+      }
+    },
+    "/api/v1/hooks/guardrails": {
+      "post": {
+        "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+        "operationId": "hooks-record_guardrail_definition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailDefinitionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Record Guardrail Definition",
         "tags": [
           "hooks"
         ]

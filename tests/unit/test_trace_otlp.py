@@ -242,6 +242,111 @@ def test_a_claude_code_tool_that_returned_an_error_is_no_error_at_all() -> None:
     assert run.attributes["otari.tool.succeeded"] is False
 
 
+def _gate(span_id: str, outcome: str, *, enforcement: str = "required", **attrs: Any) -> OtlpSpan:
+    return _span(
+        span_id,
+        trace_id=attrs.pop("trace_id", "e" * 32),
+        name="otari.gate",
+        attrs={
+            "session.id": "77192d4d-b969-44eb-bb05-e7ca84f6dfab",
+            "otari.harness": "claude-code",
+            "otari.gate.id": "no-changelog",
+            "otari.gate.type": "path",
+            "otari.gate.origin": "repo",
+            "otari.gate.enforcement": enforcement,
+            "otari.gate.outcome": outcome,
+            "otari.gate.blocked": outcome == "fail" and enforcement == "required",
+            "otari.gate.moment": "pre_tool_use.edit_target",
+            "otari.policy.digest": "0123456789abcdef",
+            "gen_ai.tool.call.id": _TOOL_USE_ID,
+            **attrs,
+        },
+        scope="otari.hook",
+    )
+
+
+def test_a_gate_the_hook_reported_is_a_guardrail_span_named_for_the_gate() -> None:
+    [write] = _project(_gate("g1", "fail"))
+
+    [gate] = write.spans
+    assert (gate.kind, gate.name, gate.outcome, gate.error_class, gate.tool_call_id) == (
+        "guardrail",
+        "gate:no-changelog",
+        "blocked",
+        None,
+        call_id_digest(_WORKSPACE, _TOOL_USE_ID),
+    )
+    assert gate.attributes["otari.guardrail.profile"] == "no-changelog"
+    assert gate.attributes["otari.guardrail.mode"] == "block"
+    assert gate.attributes["otari.gate.blocked"] is True
+    assert gate.attributes["otari.policy.digest"] == "0123456789abcdef"
+    assert write.harness == "claude-code"
+
+
+def test_a_judge_gate_keeps_the_model_its_calls_ran_on_and_the_tokens_they_used() -> None:
+    [write] = _project(
+        _gate(
+            "g1",
+            "pass",
+            enforcement="advisory",
+            **{
+                "otari.gate.type": "judge",
+                "gen_ai.provider.name": "anthropic",
+                "gen_ai.request.model": "claude-haiku-4-5-20251001",
+                "gen_ai.usage.input_tokens": "9",
+                "gen_ai.usage.output_tokens": "111",
+                "gen_ai.usage.cache_read_tokens": "0",
+                "gen_ai.usage.cache_write_tokens": "6684",
+            },
+        )
+    )
+
+    [gate] = write.spans
+    assert (gate.kind, gate.model, gate.provider) == ("guardrail", "claude-haiku-4-5-20251001", "anthropic")
+    # The hook counts the cache outside its input tokens, as Claude does; a span counts it in.
+    assert (gate.input_tokens, gate.output_tokens, gate.cache_read_tokens, gate.cache_write_tokens) == (
+        6_693,
+        111,
+        0,
+        6_684,
+    )
+
+
+def test_a_gate_that_called_no_model_has_no_usage() -> None:
+    [write] = _project(_gate("g1", "pass"))
+
+    [gate] = write.spans
+    assert (gate.model, gate.input_tokens, gate.cache_read_tokens, gate.cache_write_tokens) == (None, None, None, None)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "enforcement", "expected"),
+    [
+        ("pass", "required", ("ok", None, "block")),
+        ("fail", "advisory", ("ok", None, "monitor")),
+        ("not_run", "advisory", ("error", "guardrail_unavailable", "monitor")),
+        ("unknown", "required", ("error", "guardrail_unavailable", "block")),
+    ],
+)
+def test_only_a_gate_that_could_not_decide_is_an_error(
+    outcome: str, enforcement: str, expected: tuple[Any, ...]
+) -> None:
+    [write] = _project(_gate("g1", outcome, enforcement=enforcement))
+
+    [gate] = write.spans
+    assert (gate.outcome, gate.error_class, gate.attributes["otari.guardrail.mode"]) == expected
+
+
+def test_a_gate_lands_on_the_same_session_as_the_agents_own_spans() -> None:
+    writes = _project(
+        _claude("i1", "interaction"),
+        _claude("t1", "tool", parent="i1", tool_name="Edit", tool_use_id=_TOOL_USE_ID),
+        _gate("g1", "fail"),
+    )
+
+    assert [len(write.spans) for write in writes] == [3]
+
+
 def test_text_in_a_span_name_or_attribute_never_reaches_the_document() -> None:
     [write] = _project(
         _span(

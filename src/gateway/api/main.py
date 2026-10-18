@@ -24,6 +24,7 @@ from gateway.api.routes import (
     end_users,
     files,
     health,
+    hook_guardrails,
     hooks,
     hosted_mode,
     hosted_providers,
@@ -159,6 +160,8 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # Evaluates only the policy and evidence the caller sent in the same
     # request, so it needs no tenancy, no provider and no database.
     RouterMount(hooks.router),
+    # Writes to the trace store, so only where a control plane holds one.
+    RouterMount(hook_guardrails.router, Plane.CONTROL),
     RouterMount(admin.router, Plane.CONTROL),
     RouterMount(auth_session.router, Plane.CONTROL),
     RouterMount(auth_password.router, Plane.CONTROL),

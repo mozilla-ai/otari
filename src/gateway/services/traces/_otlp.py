@@ -10,6 +10,12 @@ names: each says what it is in ``span.type`` and names its session in
 ``session.id``. Every interaction is the root of an OTel trace of its own, so
 without that session a conversation would read as one trace per turn.
 
+``otari hook`` reports each gate it checked the same way, on the session the
+harness named, as a guardrail span: required gates block, advisory ones only
+flag. A gate span names the tool call it checked, and a read attaches it there.
+A gate that fired is the guardrail working, so neither it nor the tool call it
+stopped is an error: only a gate that could not decide is.
+
 Nothing is passed through verbatim. Each name and value is projected the way the
 gateway's own spans are, so text an agent put in a span name or attribute never
 reaches the store, and the original OTLP body is never kept. Numbers and times
@@ -43,6 +49,18 @@ _CLAUDE_CODE_KINDS = {"interaction": "step", "llm_request": "llm", "tool": "tool
 # whom: ``source`` is ``hook`` when a hook refused it.
 _CLAUDE_CODE_DECISION = "tool.blocked_on_user"
 _CLAUDE_CODE_EXECUTION = "tool.execution"
+
+HOOK_SCOPE = "otari.hook"
+# A gate that could not decide, which reads like a guardrail that could not run.
+_UNDECIDED_GATE = frozenset({"unknown", "error", "not_run"})
+_GATE_ATTRIBUTES = (
+    "otari.gate.id",
+    "otari.gate.type",
+    "otari.gate.origin",
+    "otari.gate.outcome",
+    "otari.gate.moment",
+    "otari.policy.digest",
+)
 
 # Token counts and durations are stored as 32-bit integers.
 _INT32_MAX = 2_147_483_647
@@ -79,6 +97,11 @@ class OtlpSpan:
         if not self.scope.startswith(_CLAUDE_CODE_SCOPE_PREFIX):
             return None
         return _str(self.attributes, "span.type")
+
+    @property
+    def names_harness_session(self) -> bool:
+        """Whether ``session.id`` is the harness's session: on Claude Code's spans and ``otari hook``'s."""
+        return self.scope == HOOK_SCOPE or self.claude_code_type is not None
 
 
 @dataclass(frozen=True)
@@ -172,7 +195,7 @@ def _false(attributes: Mapping[str, Any], key: str) -> bool:
 def _session(span: OtlpSpan) -> SessionRef:
     # A Claude Managed Agents session names each thread a conversation of its own.
     keys: tuple[str, ...] = ("anthropic.session.id", "gen_ai.conversation.id", "otari.session_label")
-    if span.claude_code_type is not None:
+    if span.names_harness_session:
         keys = ("session.id", *keys)
     return SessionRef(source="otlp", key=_str(span.attributes, *keys) or span.trace_id)
 
@@ -224,6 +247,8 @@ def _record(span: OtlpSpan, window: _Window, workspace_id: uuid.UUID, tool: _Too
 
 def _projected(span: OtlpSpan, window: _Window, tool: _ToolFacts | None) -> SpanRecord:
     attributes = span.attributes
+    if span.scope == HOOK_SCOPE:
+        return _gate_record(span, window)
     claude_code = span.claude_code_type
     if claude_code is not None:
         return _claude_code_record(span, claude_code, window, tool or _ToolFacts())
@@ -379,6 +404,74 @@ def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _
     )
 
 
+def _judge_prompt(attributes: Mapping[str, Any]) -> tuple[int | None, int | None, int | None]:
+    """A judge's whole prompt and the part of it the cache read and wrote.
+
+    ``otari hook`` reports its judge's tokens the way Claude counts them, the
+    cache outside ``gen_ai.usage.input_tokens``.
+    """
+    fresh = _int(attributes, "gen_ai.usage.input_tokens")
+    cache_read = _int(attributes, "gen_ai.usage.cache_read_tokens")
+    cache_write = _int(attributes, "gen_ai.usage.cache_write_tokens")
+    if fresh is None:
+        return None, cache_read, cache_write
+    return min(fresh + (cache_read or 0) + (cache_write or 0), _INT32_MAX), cache_read, cache_write
+
+
+def _gate_record(span: OtlpSpan, window: _Window) -> SpanRecord:
+    """Project one gate ``otari hook`` checked: a guardrail span, labeled by the gate's id.
+
+    A judge gate also carries the model its calls ran on and the tokens they used.
+    """
+    attributes = span.attributes
+    gate_id = identifier_or_none(_str(attributes, "otari.gate.id"))
+    undecided = _str(attributes, "otari.gate.outcome") in _UNDECIDED_GATE
+    required = _str(attributes, "otari.gate.enforcement") == "required"
+    extra: dict[str, str | bool] = {
+        key: value for key in _GATE_ATTRIBUTES if (value := identifier_or_none(_str(attributes, key))) is not None
+    }
+    if gate_id:
+        extra["otari.guardrail.profile"] = gate_id
+    extra["otari.guardrail.mode"] = "block" if required else "monitor"
+    blocked = attributes.get("otari.gate.blocked") is True
+    extra["otari.gate.blocked"] = blocked
+    model = identifier_or_none(_str(attributes, "gen_ai.request.model"))
+    prompt, cache_read, cache_write = _judge_prompt(attributes) if model else (None, None, None)
+    start, end, duration = _times(span, window)
+    return SpanRecord(
+        span_id=_span_id(span.trace_id, span.span_id),
+        parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
+        kind="guardrail",
+        origin="otlp",
+        name=f"gate:{gate_id}" if gate_id and is_identifier(f"gate:{gate_id}") else "otari.gate",
+        operation=identifier_or_none(_str(attributes, "otari.gate.moment")),
+        outcome="error" if undecided else "blocked" if blocked else "ok",
+        error_class="guardrail_unavailable" if undecided else None,
+        start_time=start,
+        end_time=end,
+        duration_ms=duration,
+        model=model,
+        provider=identifier_or_none(_str(attributes, "gen_ai.provider.name")) if model else None,
+        input_tokens=prompt,
+        output_tokens=_int(attributes, "gen_ai.usage.output_tokens") if model else None,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        tool_name=identifier_or_none(_str(attributes, "gen_ai.tool.name")),
+        otel_trace_id=span.trace_id[:64],
+        otel_span_id=span.span_id[:64],
+        attributes=extra,
+    )
+
+
+def _harness(span: OtlpSpan) -> str | None:
+    named = identifier_or_none(_str(span.attributes, "otari.client_name"))
+    if named:
+        return named
+    if span.scope == HOOK_SCOPE:
+        return identifier_or_none(_str(span.attributes, "otari.harness"))
+    return _CLAUDE_CODE_HARNESS if span.claude_code_type is not None else None
+
+
 def _project(
     spans: list[OtlpSpan],
     *,
@@ -408,8 +501,7 @@ def _project(
             invalid += 1
             continue
         by_session.setdefault(session, []).append(record)
-        named = identifier_or_none(_str(span.attributes, "otari.client_name"))
-        harness.setdefault(session, named or (_CLAUDE_CODE_HARNESS if span.claude_code_type is not None else None))
+        harness.setdefault(session, _harness(span))
     if invalid:
         SPANS_DROPPED.labels(reason="invalid").inc(invalid)
     if over_cap:
