@@ -203,8 +203,11 @@ the count the provider reports (Anthropic's
 as `web_search` calls labeled `<provider>:web_search`, so the row and the
 budget carry what the provider will charge. They are priced at the operator's
 `anthropic:web_search` row when there is one, otherwise, with `default_pricing`
-on, at the provider's list price: Anthropic's is $10 per 1,000 searches. With
-neither, the searches stay on the row at no cost. A search Otari runs in the
+on, at the provider's list price: Anthropic's is $10 per 1,000 searches. An
+organization's override prices them as it prices the call's tokens, so a
+search on the organization's own provider key takes its override. With
+neither, the searches stay on the row at no cost. Searches across the rounds
+of a gateway tool loop are added up, as the rounds' tokens are. A search Otari runs in the
 model's place, under [interception](#web-search-interception) or the
 `Otari-Web-Search` header, is the provider's no longer, so it bills as
 `otari:web_search` instead and never twice.

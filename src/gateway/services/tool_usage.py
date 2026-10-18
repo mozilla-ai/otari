@@ -87,7 +87,7 @@ class ToolUsageTally:
 
     def __init__(self) -> None:
         self._counts: dict[str, dict[str, int]] = {}
-        self._labels: dict[tuple[str, str | None, tuple[str, ...] | None], _LabelTotals] = {}
+        self._labels: dict[tuple[str, str | None, tuple[str, ...] | None, bool | None], _LabelTotals] = {}
         self._overflowed = False
 
     def record_result(
@@ -114,7 +114,7 @@ class ToolUsageTally:
         key = self._record(tool, failed=failed)
         if failed:
             return
-        totals = self._labels.setdefault((key, label, rate_keys), _LabelTotals())
+        totals = self._labels.setdefault((key, label, rate_keys, None), _LabelTotals())
         totals.calls += 1
         reported = _usable_cost(cost)
         if reported is None:
@@ -123,19 +123,21 @@ class ToolUsageTally:
             totals.reported_cost += reported
         totals.enrichment_cost += _usable_cost(enrichment_cost) or Decimal(0)
 
-    def record_provider_searches(self, provider: str, searches: int) -> None:
+    def record_provider_searches(self, provider: str, searches: int, *, deployment_paid: bool) -> None:
         """Record searches a model's provider ran itself and bills per search, as Anthropic's search does.
 
         They are counted under ``web_search`` beside the gateway's own searches and
         priced under the ``<provider>:web_search`` label, at an operator's rate or,
-        with default pricing, the provider's list price.
+        with default pricing, the provider's list price. ``deployment_paid`` is the
+        model call's own, so whose overrides price them follows the credential that
+        ran the call, as it does for the call's tokens.
         """
         if searches <= 0:
             return
         key = self._key(PROVIDER_WEB_SEARCH_TOOL)
         self._counts.setdefault(key, {"billed": 0, "errors": 0})["billed"] += searches
         label = provider_web_search_label(provider)
-        totals = self._labels.setdefault((key, label, (label,)), _LabelTotals())
+        totals = self._labels.setdefault((key, label, (label,), deployment_paid), _LabelTotals())
         totals.calls += searches
         totals.unreported_calls += searches
 
@@ -181,8 +183,9 @@ class ToolUsageTally:
                 unreported_calls=totals.unreported_calls,
                 reported_cost=totals.reported_cost,
                 enrichment_cost=totals.enrichment_cost,
+                deployment_paid=deployment_paid,
             )
-            for (tool, label, rate_keys), totals in self._labels.items()
+            for (tool, label, rate_keys, deployment_paid), totals in self._labels.items()
         ]
 
     def meters(self) -> dict[str, dict[str, float]]:

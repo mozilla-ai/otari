@@ -6,6 +6,7 @@ from any_llm.types.messages import MessageDeltaEvent, MessageResponse, MessageUs
 
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter
 from gateway.core.usage import GatewayUsage, provider_web_searches_of
+from gateway.services.pricing import tool_rate_lookup
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.streaming import merge_stream_usage
 
@@ -58,8 +59,8 @@ def test_a_stream_keeps_the_count_its_final_delta_reports() -> None:
 def test_the_tally_counts_provider_searches_under_their_own_label() -> None:
     tally = ToolUsageTally()
     tally.record_result("web_search", "results")
-    tally.record_provider_searches("anthropic", 2)
-    tally.record_provider_searches("anthropic", 0)
+    tally.record_provider_searches("anthropic", 2, deployment_paid=False)
+    tally.record_provider_searches("anthropic", 0, deployment_paid=False)
 
     assert tally.billable_calls() == {"web_search": 3}
     [own, provider] = sorted(tally.label_calls(), key=lambda entry: entry.label or "")
@@ -70,3 +71,21 @@ def test_the_tally_counts_provider_searches_under_their_own_label() -> None:
         2,
         2,
     )
+    assert provider.deployment_paid is False
+
+
+def test_whose_overrides_price_a_provider_search_follows_the_call_not_the_label() -> None:
+    """A search on a tenant's own Anthropic key takes the tenant's override.
+
+    One on the deployment's own key takes only the operator's, as the call's tokens do.
+    """
+    for deployment_paid in (False, True):
+        tally = ToolUsageTally()
+        tally.record_provider_searches("anthropic", 1, deployment_paid=deployment_paid)
+        [entry] = tally.label_calls()
+
+        lookup = tool_rate_lookup(entry)
+
+        assert lookup is not None
+        assert lookup.rate_keys == ("anthropic:web_search",)
+        assert lookup.operator_set_only is deployment_paid

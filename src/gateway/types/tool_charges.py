@@ -58,7 +58,8 @@ class LabelCalls:
     tool's own ``otari:<tool>`` row; an empty ``rate_keys`` prices nothing.
     ``reported_cost`` sums the costs providers reported, over ``calls`` minus
     ``unreported_calls``, and ``enrichment_cost`` what a search's enrichment
-    fetches reported.
+    fetches reported. ``deployment_paid`` says whose account ran the calls when the
+    label cannot: ``None`` reads it off the label.
     """
 
     tool: str
@@ -68,3 +69,4 @@ class LabelCalls:
     unreported_calls: int
     reported_cost: Decimal
     enrichment_cost: Decimal
+    deployment_paid: bool | None = None

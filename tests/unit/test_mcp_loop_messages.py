@@ -140,6 +140,7 @@ def _message_response(
     input_tokens: int = 1,
     output_tokens: int = 1,
     iterations: list[dict[str, Any]] | None = None,
+    web_search_requests: int | None = None,
 ) -> MessageResponse:
     return MessageResponse(
         id="msg_1",
@@ -156,6 +157,11 @@ def _message_response(
                 "cache_creation_input_tokens": None,
                 "cache_read_input_tokens": None,
                 "iterations": iterations,
+                "server_tool_use": (
+                    {"web_search_requests": web_search_requests, "web_fetch_requests": 0}
+                    if web_search_requests is not None
+                    else None
+                ),
             }
         ),
         container=None,
@@ -662,6 +668,7 @@ def _msg_delta_event(
     *,
     iterations: list[dict[str, Any]] | None = None,
     applied_edits: list[dict[str, Any]] | None = None,
+    web_search_requests: int | None = None,
 ) -> MessageDeltaEvent:
     return MessageDeltaEvent.model_validate(
         {
@@ -672,7 +679,11 @@ def _msg_delta_event(
                 "output_tokens": output_tokens,
                 "cache_creation_input_tokens": None,
                 "cache_read_input_tokens": None,
-                "server_tool_use": None,
+                "server_tool_use": (
+                    {"web_search_requests": web_search_requests, "web_fetch_requests": 0}
+                    if web_search_requests is not None
+                    else None
+                ),
                 "iterations": iterations,
             },
             "context_management": {"applied_edits": applied_edits} if applied_edits is not None else None,
@@ -2374,3 +2385,73 @@ async def test_native_result_announces_a_stored_file_the_block_did_not_name(monk
 
     tool_result = cast(Any, result.content[1])
     assert [o.file_id for o in tool_result.content.content] == ["file-9"]
+
+
+@pytest.mark.asyncio
+async def test_loop_sums_the_providers_own_searches_across_iterations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A round's usage counts its own searches only, so the loop adds them up, as it adds up tokens."""
+    responses = iter(
+        [
+            _message_response(
+                stop_reason="tool_use", content=[_tool_use("tu_1", "fetch_url", {})], web_search_requests=2
+            ),
+            _message_response(stop_reason="end_turn", content=[_text_block("done")], web_search_requests=1),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return next(responses)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    out = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+    )
+
+    assert out.usage is not None
+    assert out.usage.server_tool_use is not None
+    assert out.usage.server_tool_use.web_search_requests == 3
+
+
+@pytest.mark.asyncio
+async def test_stream_adds_hidden_rounds_searches_to_the_final_delta(monkeypatch: pytest.MonkeyPatch) -> None:
+    streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_1", "fetch_url"),
+                _input_json_delta(0, "{}"),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use", web_search_requests=2),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn", web_search_requests=1),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+            pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+            max_iterations=5,
+        )
+    ]
+
+    final_delta = next(event for event in events if event.type == "message_delta")
+    assert final_delta.usage.server_tool_use is not None
+    assert final_delta.usage.server_tool_use.web_search_requests == 3
