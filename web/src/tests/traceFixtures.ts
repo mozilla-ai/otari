@@ -1,4 +1,9 @@
-import type { TraceDetail, TraceSpan, TraceSummary } from "@/client"
+import type {
+  TraceDetail,
+  TraceGateSummary,
+  TraceSpan,
+  TraceSummary,
+} from "@/client"
 
 export function traceSummary(
   overrides: Partial<TraceSummary> = {},
@@ -122,6 +127,25 @@ export function traceDetail(overrides: Partial<TraceDetail> = {}): TraceDetail {
       }),
     ],
     truncated: false,
+    gates: [],
+    ...overrides,
+  }
+}
+
+export function gateSummary(
+  overrides: Partial<TraceGateSummary> = {},
+): TraceGateSummary {
+  return {
+    gate_id: "no-changelog",
+    passed: 0,
+    blocked: 0,
+    flagged: 0,
+    refused: 0,
+    undecided: 0,
+    span_id: "req-1",
+    gate_type: "path",
+    enforcement: "required",
+    message: null,
     ...overrides,
   }
 }

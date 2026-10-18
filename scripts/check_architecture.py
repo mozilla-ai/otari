@@ -1720,6 +1720,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/traces/span_repository.py",
         "baseline": (),
     },
+    "gateway.models.traces.TraceGuardrailDefinition": {
+        "repository": "gateway/repositories/traces/definition_repository.py",
+        "baseline": (),
+    },
     "gateway.models.usage.AgentTelemetry": {
         "repository": None,
         "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),

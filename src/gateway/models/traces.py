@@ -137,3 +137,23 @@ class TraceSpan(Base):
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )
+
+
+class TraceGuardrailDefinition(Base):
+    """One version of an agent guardrail a coding agent's hook checked: its gates, and what each says.
+
+    A gate span names the version it was checked against by its fingerprint, so a
+    read can say what a gate is for without each check carrying it. The fingerprint
+    is recomputed from the gates when one is stored, and a stored one never changes.
+    """
+
+    __tablename__ = "trace_guardrail_definitions"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    gates: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )

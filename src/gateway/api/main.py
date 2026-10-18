@@ -24,6 +24,7 @@ from gateway.api.routes import (
     end_users,
     files,
     health,
+    hook_guardrails,
     hooks,
     hosted_providers,
     identity,
@@ -124,6 +125,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # Evaluates only the policy and evidence the caller sent in the same
     # request, so it needs no tenancy, no provider and no database.
     hooks.router,
+    hook_guardrails.router,
     admin.router,
     auth_session.router,
     auth_password.router,

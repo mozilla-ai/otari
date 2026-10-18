@@ -3,6 +3,7 @@ import type { TraceDetail, TraceSpan, TraceSummary, TraceTurn } from "@/client"
 import {
   failureLabel,
   type GuardrailVerdict,
+  gateVerdict,
   gatewayEvents,
   guardrailProfile,
   guardrailVerdict,
@@ -52,6 +53,24 @@ const GUARDRAIL_STATUS: Record<GuardrailVerdict, string | undefined> = {
   unchecked: "Could not run. The request went to the model unchecked.",
 }
 
+// A gate that fired is the guardrail working, so it asks for attention, not alarm.
+// Only one that could not decide is a failure.
+const GATE_LEVEL: Record<GuardrailVerdict, ObservationLevel> = {
+  passed: "DEFAULT",
+  blocked: "WARNING",
+  flagged: "WARNING",
+  refused: "ERROR",
+  unchecked: "ERROR",
+}
+
+const GATE_STATUS: Record<GuardrailVerdict, string | undefined> = {
+  passed: undefined,
+  blocked: "Blocked the agent's action.",
+  flagged: "Flagged. The gate is advisory, so the agent went ahead.",
+  refused: "Could not decide, and blocked the agent's action.",
+  unchecked: "Could not decide. The action went ahead unchecked.",
+}
+
 const REFUSED_BY: Record<string, string> = {
   hook: "Blocked by a hook before it ran.",
   user: "Refused by the user.",
@@ -62,8 +81,9 @@ function spanLevel(
   span: TraceSpan,
   verdict: GuardrailVerdict | null,
 ): ObservationLevel {
-  if (verdict) return GUARDRAIL_LEVEL[verdict]
-  // Stopped on purpose: worth a look, not a failure.
+  if (verdict) {
+    return gateVerdict(span) ? GATE_LEVEL[verdict] : GUARDRAIL_LEVEL[verdict]
+  }
   if (span.outcome === "blocked") return "WARNING"
   if (span.outcome !== "error") return "DEFAULT"
   return span.recovered ? "WARNING" : "ERROR"
@@ -72,7 +92,16 @@ function spanLevel(
 function spanStatus(
   span: TraceSpan,
   verdict: GuardrailVerdict | null,
+  gateMessages: ReadonlyMap<string, string>,
 ): string | undefined {
+  if (verdict && gateVerdict(span)) {
+    const said = GATE_STATUS[verdict]
+    const gateId = span.attributes["otari.gate.id"]
+    const message =
+      typeof gateId === "string" ? gateMessages.get(gateId) : undefined
+    // A passing gate's message describes a failure it did not find.
+    return said && message ? `${said} ${message}` : said
+  }
   if (verdict) return GUARDRAIL_STATUS[verdict]
   if (span.outcome === "blocked") {
     const source = span.attributes["otari.tool.decision_source"]
@@ -157,6 +186,11 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
     }
 
     const byId = new Map(detail.spans.map((span) => [span.span_id, span]))
+    const gateMessages = new Map(
+      detail.gates.flatMap((gate) =>
+        gate.message ? [[gate.gate_id, gate.message] as const] : [],
+      ),
+    )
     const visit = (node: SpanNode) => {
       const { span } = node
       const verdict =
@@ -179,7 +213,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         startMs,
         endMs: Math.max(startMs, endMs),
         level: spanLevel(span, verdict),
-        statusMessage: spanStatus(span, verdict),
+        statusMessage: spanStatus(span, verdict, gateMessages),
         model: span.model ?? undefined,
         provider: span.provider ?? undefined,
         promptTokens: span.input_tokens ?? undefined,
@@ -204,6 +238,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
     gateway: detail
       ? {
           events: gatewayEvents(detail),
+          gates: detail.gates,
           apiKeyId: summary.api_key_id ?? "",
           cost: summary.cost,
         }

@@ -87,13 +87,15 @@ from gateway.services.external_usage_service import (
     ingest_external_events,
     is_reserved_source,
 )
-from gateway.services.traces import OtlpSpan, TraceWriter, record_otlp_export
+from gateway.services.traces import HOOK_SCOPE, OtlpSpan, TraceWriter, record_otlp_export
 
 router = APIRouter(tags=["otel"])
 
 _JSON = "application/json"
 _PROTOBUF = ("application/x-protobuf", "application/octet-stream")
 _DEFAULT_SOURCE = "otel"
+# What a judge gate's model calls, reported on its span by ``otari hook``, are imported as.
+_HOOK_SOURCE = "otari-hook"
 
 # Request bounds. OTLP exporters batch to a few MiB per export; the cap keeps one
 # request from expanding without bound in memory (gzip bombs decompress fully
@@ -549,8 +551,12 @@ async def receive_traces(
                     )
                     pairs.extend((CLAUDE_SOURCE, event) for event in events)
                     continue
+                attrs = _attributes(span.attributes)
+                if scope == HOOK_SCOPE:
+                    # A judge's calls are made for the agent's session, so they are booked to it.
+                    attrs = {**attrs, "otari.client_name": _HOOK_SOURCE, "otari.session_label": attrs.get("session.id")}
                 mapped = _build_event(
-                    _attributes(span.attributes),
+                    attrs,
                     fallback_event_id=span.span_id.hex() or None,
                     default_timestamp=_nanos_to_dt(span.start_time_unix_nano),
                     duration_ms=duration,

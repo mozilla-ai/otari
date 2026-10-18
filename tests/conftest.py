@@ -248,8 +248,9 @@ def isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.Temp
 
 @pytest.fixture
 def no_otari_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unset every ``OTARI_*`` variable, so the developer's shell cannot switch a mode or put a key in test output."""
-    for name in [name for name in os.environ if name.startswith("OTARI_")]:
+    """Unset every ``OTARI_*`` and ``OTEL_*`` variable, so the developer's shell cannot switch a mode, put a key in
+    test output, or have `otari hook` report a test's gates to a real server."""
+    for name in [name for name in os.environ if name.startswith(("OTARI_", "OTEL_"))]:
         monkeypatch.delenv(name)
 
 

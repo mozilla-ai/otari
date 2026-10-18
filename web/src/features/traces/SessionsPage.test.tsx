@@ -7,7 +7,29 @@ import type { ScopedBudget } from "@/client"
 import { SessionsPage } from "@/features/traces/SessionsPage"
 import { jsonResponse, mockApi, renderPage } from "@/tests/activity"
 import { scopedBudget } from "@/tests/fixtures"
-import { traceDetail, traceSummary } from "@/tests/traceFixtures"
+import {
+  gateSummary,
+  traceDetail,
+  traceSpan,
+  traceSummary,
+} from "@/tests/traceFixtures"
+
+// The span a gate's check was recorded as, under the tool call it checked.
+function gateCheck(gateId: string) {
+  return traceSpan({
+    span_id: "gate-1",
+    parent_span_id: "call-toolu_1",
+    kind: "guardrail",
+    origin: "otlp",
+    outcome: "blocked",
+    attributes: {
+      "otari.guardrail.profile": gateId,
+      "otari.gate.id": gateId,
+      "otari.gate.outcome": "fail",
+      "otari.gate.blocked": true,
+    },
+  })
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -253,6 +275,160 @@ describe("SessionsPage", () => {
     expect(
       within(peek).getByText("error, recovered by a fallback"),
     ).toBeInTheDocument()
+  })
+
+  it("lists the gates the agent's hook ran, and opens the check that blocked", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            message: "CHANGELOG.md is generated.",
+            passed: 12,
+            blocked: 1,
+            flagged: 0,
+            undecided: 0,
+            span_id: "gate-1",
+          }),
+          gateSummary({
+            gate_id: "python-needs-check",
+            passed: 2,
+            blocked: 0,
+            flagged: 0,
+            undecided: 0,
+            span_id: null,
+          }),
+          gateSummary({ gate_id: "no-secret-reads", span_id: null }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const gatesTab = await within(peek).findByRole("button", {
+      name: "Gates · 1 blocked",
+    })
+    await userEvent.click(gatesTab)
+
+    expect(
+      await within(peek).findByText(
+        "2 gates ran 15 checks, and stopped the agent once.",
+      ),
+    ).toBeInTheDocument()
+    const gate = within(peek).getByRole("button", { name: /^no-changelog/ })
+    expect(gate).toHaveTextContent("1 blocked")
+    expect(gate).toHaveTextContent("12 passed")
+    expect(gate).toHaveTextContent("CHANGELOG.md is generated.")
+    const unlinked = within(peek).getByRole("button", {
+      name: /^python-needs-check/,
+    })
+    expect(unlinked).toHaveTextContent("2 passed")
+    expect(unlinked).toBeDisabled()
+    expect(
+      within(peek).getByText("Did not run in this session"),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("no-secret-reads")).toBeInTheDocument()
+
+    await userEvent.click(gate)
+
+    await waitFor(() =>
+      expect(
+        within(peek).getByRole("button", { current: true }),
+      ).toHaveAccessibleName(/no-changelog/),
+    )
+    expect(
+      within(peek).getByRole("button", { name: "Attributes" }),
+    ).toBeInTheDocument()
+  })
+
+  it("brings the check a gate blocked into view, inside a collapsed turn", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            passed: 0,
+            blocked: 1,
+            flagged: 0,
+            undecided: 0,
+            span_id: "gate-1",
+          }),
+        ],
+      },
+    })
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView")
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Collapse all" }),
+    )
+    expect(
+      within(peek).queryByRole("button", { name: /^Tool, Bash/ }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(within(peek).getByRole("button", { name: /^Gates/ }))
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^no-changelog/ }),
+    )
+
+    await waitFor(() =>
+      expect(
+        within(peek).getByRole("button", { current: true }),
+      ).toHaveAccessibleName(/no-changelog/),
+    )
+    const check = within(peek).getByRole("button", { current: true })
+    expect(scrolled.mock.contexts).toContain(check)
+    expect(
+      within(peek).getByRole("button", { name: /^Tool, Bash/ }),
+    ).toBeInTheDocument()
+    scrolled.mockRestore()
+  })
+
+  it("counts a gate that could not decide but held the agent as stopping it", async () => {
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...traceDetail(),
+        gates: [gateSummary({ gate_id: "judge-review", refused: 1 })],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Gates · 1 blocked" }),
+    )
+
+    expect(
+      await within(peek).findByText(
+        "1 gate ran 1 check, and stopped the agent once.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("1 could not decide, held"),
+    ).toBeInTheDocument()
+  })
+
+  it("has no Gates tab for a session no hook reported to", async () => {
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(
+      await within(peek).findByRole("button", { name: "Log View" }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("button", { name: /^Gates/ }),
+    ).not.toBeInTheDocument()
   })
 
   it("says so when the session list cannot be read", async () => {

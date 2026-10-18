@@ -24,7 +24,7 @@ from sqlmodel import col
 
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.traces import Trace, TraceSpan
+from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
 from .test_otlp import _agent_span, _exempt_key, _otlp_traces
@@ -449,3 +449,72 @@ def test_a_span_received_over_otlp_reads_back_with_the_otel_ids_it_was_sent(
 
     [read] = detail["spans"]
     assert (read["otel_trace_id"], read["otel_span_id"]) == ("5b8efff798038103d269b633813fc60c", "eee19b7ec3c1b174")
+
+
+def test_the_detail_counts_each_gate_an_agents_hook_reported_and_names_the_ones_that_never_ran(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    with db_session_factory() as session:
+        workspace_id = session.scalars(select(Trace.workspace_id).where(col(Trace.trace_id) == "s-one")).one()
+        gate = {"gate_type": "path", "enforcement": "required", "origin": "repo", "runs": ["pre_tool_use.edit_target"]}
+        session.add(
+            TraceGuardrailDefinition(
+                workspace_id=workspace_id,
+                digest="0123456789abcdef",
+                gates=[
+                    {**gate, "gate_id": "no-changelog", "message": "CHANGELOG.md is generated."},
+                    {**gate, "gate_id": "no-secret-reads", "message": ""},
+                ],
+            )
+        )
+        for index, (outcome, blocked) in enumerate([("pass", False), ("pass", False), ("fail", True)]):
+            session.add(
+                TraceSpan(
+                    workspace_id=workspace_id,
+                    trace_id="s-one",
+                    span_id=f"gate-{index}",
+                    kind="guardrail",
+                    origin="otlp",
+                    name="gate:no-changelog",
+                    outcome="blocked" if blocked else "ok",
+                    start_time=_T0 + timedelta(seconds=index),
+                    end_time=_T0 + timedelta(seconds=index),
+                    attributes={
+                        "otari.gate.id": "no-changelog",
+                        "otari.gate.outcome": outcome,
+                        "otari.gate.blocked": blocked,
+                        "otari.policy.digest": "0123456789abcdef",
+                    },
+                )
+            )
+        session.commit()
+
+    detail = _operator_get(client, world, "/traces/s-one").json()
+
+    assert detail["gates"] == [
+        {
+            "gate_id": "no-changelog",
+            "passed": 2,
+            "blocked": 1,
+            "flagged": 0,
+            "refused": 0,
+            "undecided": 0,
+            "span_id": "gate-2",
+            "gate_type": "path",
+            "enforcement": "required",
+            "message": "CHANGELOG.md is generated.",
+        },
+        {
+            "gate_id": "no-secret-reads",
+            "passed": 0,
+            "blocked": 0,
+            "flagged": 0,
+            "refused": 0,
+            "undecided": 0,
+            "span_id": None,
+            "gate_type": "path",
+            "enforcement": "required",
+            "message": None,
+        },
+    ]
+    assert _operator_get(client, world, "/traces/s-two").json()["gates"] == []

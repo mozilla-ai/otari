@@ -4,11 +4,14 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gateway.models.money import as_float
 from gateway.types.trace_views import TraceView, TurnView
 from gateway.types.traces import SpanRecord, TraceBucket, TracePage, TraceSummary
+from otari_agent.domain.definitions import DIGEST_LENGTH, MAX_DEFINITION_GATES, MAX_GATE_MESSAGE_LENGTH, MAX_GATE_RUNS
+from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
+from otari_agent.domain.types import RunsAt
 
 
 class TraceSummaryPublic(BaseModel):
@@ -118,12 +121,32 @@ class TurnPublic(BaseModel):
     cost: float
 
 
+class GateSummaryPublic(BaseModel):
+    """How often one agent guardrail gate ran in a session, by what it decided."""
+
+    gate_id: str
+    passed: int
+    blocked: int = Field(description="Checks where the gate stopped the agent.")
+    flagged: int = Field(description="Checks an advisory gate failed; the agent went ahead.")
+    refused: int = Field(description="Checks where the gate could not decide and held the agent anyway.")
+    undecided: int = Field(description="Checks where the gate could not decide; the agent went ahead unchecked.")
+    span_id: str | None = Field(
+        description="The check to open first: the earliest that did anything but pass. Null for a gate that never ran."
+    )
+    gate_type: str | None = Field(description="From the guardrail's definition, when it was sent.")
+    enforcement: Literal["required", "advisory"] | None
+    message: str | None = Field(description="What the gate says when it fails, from the guardrail's definition.")
+
+
 class TraceDetailPublic(BaseModel):
     summary: TraceSummaryPublic
     state: Literal["active", "idle"]
     turns: list[TurnPublic]
     spans: list[SpanPublic]
     truncated: bool = Field(description="True when the session holds more spans than one read returns.")
+    gates: list[GateSummaryPublic] = Field(
+        description="Each agent guardrail gate a coding agent's hook reported, the ones that did something first.",
+    )
 
 
 def summary_public(summary: TraceSummary) -> TraceSummaryPublic:
@@ -216,4 +239,50 @@ def detail_public(view: TraceView) -> TraceDetailPublic:
         turns=[_turn_public(turn) for turn in view.turns],
         spans=[_span_public(span, view.approximate) for span in view.spans],
         truncated=view.truncated,
+        gates=[
+            GateSummaryPublic(
+                gate_id=gate.gate_id,
+                passed=gate.passed,
+                blocked=gate.blocked,
+                flagged=gate.flagged,
+                refused=gate.refused,
+                undecided=gate.undecided,
+                span_id=gate.span_id,
+                gate_type=gate.gate_type,
+                enforcement=gate.enforcement,  # type: ignore[arg-type]
+                message=gate.message,
+            )
+            for gate in view.gates
+        ],
     )
+
+
+class GateDefinitionRequest(BaseModel):
+    """One gate of a guardrail version: what it is, when it runs, and what it says when it fails."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gate_id: str = Field(min_length=1, max_length=MAX_GATE_ID_LENGTH)
+    gate_type: Literal["path", "command", "command_if_changed", "judge", "verifier"]
+    enforcement: Literal["required", "advisory"]
+    origin: Literal["repo", "user"]
+    runs: list[RunsAt] = Field(max_length=MAX_GATE_RUNS)
+    message: str = Field(max_length=MAX_GATE_MESSAGE_LENGTH)
+
+
+class GuardrailDefinitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    digest: str = Field(pattern=rf"^[0-9a-f]{{{DIGEST_LENGTH}}}$")
+    gates: list[GateDefinitionRequest] = Field(min_length=1, max_length=MAX_DEFINITION_GATES)
+
+    @model_validator(mode="after")
+    def _one_definition_per_gate(self) -> "GuardrailDefinitionRequest":
+        ids = [gate.gate_id for gate in self.gates]
+        if len(ids) != len(set(ids)):
+            raise ValueError("each gate_id may appear once")
+        return self
+
+
+class GuardrailDefinitionResponse(BaseModel):
+    digest: str
