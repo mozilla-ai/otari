@@ -60,6 +60,34 @@ def _fill_client_tool_starts(spans: list[SpanRecord], steps: list[SpanRecord]) -
     return filled, approximate
 
 
+def _settle_tools(spans: list[SpanRecord]) -> list[SpanRecord]:
+    """Give a tool call what its decision and its run say about it, wherever they were stored.
+
+    An agent may export a tool's children apart from the tool itself, and the
+    projection only sees the children of one export, so a refusal or a failed run
+    the tool never heard of is settled here.
+    """
+    decided: dict[str, SpanRecord] = {}
+    failed: set[str] = set()
+    for span in spans:
+        if span.parent_span_id is None:
+            continue
+        if span.attributes.get("otari.tool.decision") is not None and span.kind != "tool":
+            decided[span.parent_span_id] = span
+        if span.attributes.get("otari.tool.succeeded") is False:
+            failed.add(span.parent_span_id)
+    settled: list[SpanRecord] = []
+    for span in spans:
+        if span.kind == "tool" and span.outcome == "ok":
+            decision = decided.get(span.span_id)
+            if decision is not None and decision.attributes.get("otari.tool.decision") == "reject":
+                span = replace(span, outcome="blocked", attributes={**span.attributes, **decision.attributes})
+            elif span.span_id in failed:
+                span = replace(span, attributes={**span.attributes, "otari.tool.succeeded": False})
+        settled.append(span)
+    return settled
+
+
 def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -> tuple[TurnView, ...]:
     steps = sorted((span for span in spans if span.kind == "step"), key=_moment)
     turns: list[_Turn] = []
@@ -113,7 +141,7 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
 def trace_view(detail: TraceDetail, *, now: datetime) -> TraceView:
     """One stored trace as a person reads it: its spans in order, grouped into turns."""
     steps = sorted((span for span in detail.spans if span.kind == "step"), key=_moment)
-    spans, approximate = _fill_client_tool_starts(list(detail.spans), steps)
+    spans, approximate = _fill_client_tool_starts(_settle_tools(list(detail.spans)), steps)
     spans.sort(key=_moment)
     last_activity = detail.summary.last_activity_at
     return TraceView(

@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from gateway.services.traces._reading import _fill_client_tool_starts, _turns
+from gateway.services.traces._reading import _fill_client_tool_starts, _settle_tools, _turns
 from gateway.types.traces import SpanRecord
 
 _T0 = datetime(2026, 10, 7, 12, tzinfo=UTC)
@@ -93,3 +93,36 @@ def test_each_client_tool_in_a_long_session_starts_after_the_step_that_asked_for
 
     assert len(approximate) == 2_500
     assert all(span.parent_span_id == f"req-{span.span_id.removeprefix('call-')}" for span in filled)
+
+
+def test_a_tool_a_guardrail_blocked_is_not_an_error() -> None:
+    spans = [_span("turn-1", "step", opens_turn=True), replace(_span("tool-1", "tool", "turn-1"), outcome="blocked")]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.state, turn.errors, turn.tool_calls) == ("completed", 0, 1)
+
+
+def test_a_refusal_stored_apart_from_its_tool_still_blocks_it() -> None:
+    """An agent may export a tool's children in another batch than the tool."""
+    tool = _span("tool-1", "tool")
+    decision = _span(
+        "ask-1",
+        "other",
+        "tool-1",
+        attributes={"otari.tool.decision": "reject", "otari.tool.decision_source": "hook"},
+    )
+
+    [settled, _] = _settle_tools([tool, decision])
+
+    assert settled.outcome == "blocked"
+    assert settled.attributes["otari.tool.decision_source"] == "hook"
+
+
+def test_a_failed_run_stored_apart_from_its_tool_still_marks_it_as_returning_an_error() -> None:
+    tool = _span("tool-1", "tool")
+    run = _span("run-1", "other", "tool-1", attributes={"otari.tool.succeeded": False})
+
+    [settled, _] = _settle_tools([tool, run])
+
+    assert (settled.outcome, settled.attributes["otari.tool.succeeded"]) == ("ok", False)

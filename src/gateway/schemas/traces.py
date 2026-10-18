@@ -73,7 +73,7 @@ class SpanPublic(BaseModel):
     end_time: datetime | None
     duration_ms: int | None
     approximate: bool = Field(description="True when the start was inferred rather than measured.")
-    outcome: Literal["ok", "error", "unknown"]
+    outcome: Literal["ok", "error", "unknown", "blocked"]
     recovered: bool
     error_class: str | None
     opens_turn: bool

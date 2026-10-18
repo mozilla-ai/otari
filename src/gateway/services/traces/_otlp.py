@@ -5,6 +5,11 @@ spans (``invoke_agent``, ``execute_tool``) are what the gateway cannot see for
 itself. A span's session is the Claude session or the conversation it names
 (``anthropic.session.id``, ``gen_ai.conversation.id``), or its OTel trace when it names none.
 
+Claude Code's own spans follow neither the GenAI conventions nor the Agent SDK's
+names: each says what it is in ``span.type`` and names its session in
+``session.id``. Every interaction is the root of an OTel trace of its own, so
+without that session a conversation would read as one trace per turn.
+
 Nothing is passed through verbatim. Each name and value is projected the way the
 gateway's own spans are, so text an agent put in a span name or attribute never
 reaches the store, and the original OTLP body is never kept. Numbers and times
@@ -16,12 +21,12 @@ import hashlib
 import itertools
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from gateway.log_config import logger
-from gateway.services.traces._collector import identifier_or_none
+from gateway.services.traces._collector import call_id_digest, identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
 from gateway.types.traces import LIST_SEPARATOR, SpanRecord, TraceWrite, is_identifier, is_identifier_list
@@ -30,6 +35,14 @@ from gateway.types.traces import LIST_SEPARATOR, SpanRecord, TraceWrite, is_iden
 _LLM_OPERATIONS = frozenset({"chat", "text_completion", "generate_content", "embeddings"})
 _AGENT_OPERATIONS = frozenset({"invoke_agent", "create_agent", "invoke_workflow", "plan"})
 _TOOL_OPERATIONS = frozenset({"execute_tool"})
+
+_CLAUDE_CODE_SCOPE_PREFIX = "com.anthropic.claude_code"
+_CLAUDE_CODE_HARNESS = "claude-code"
+_CLAUDE_CODE_KINDS = {"interaction": "step", "llm_request": "llm", "tool": "tool"}
+# The child of a tool span that records whether it was allowed to run, and by
+# whom: ``source`` is ``hook`` when a hook refused it.
+_CLAUDE_CODE_DECISION = "tool.blocked_on_user"
+_CLAUDE_CODE_EXECUTION = "tool.execution"
 
 # Token counts and durations are stored as 32-bit integers.
 _INT32_MAX = 2_147_483_647
@@ -58,6 +71,23 @@ class OtlpSpan:
     end_time: datetime | None
     failed: bool
     attributes: Mapping[str, Any]
+    scope: str = ""
+
+    @property
+    def claude_code_type(self) -> str | None:
+        """The ``span.type`` of a span Claude Code sent, or None for any other exporter's."""
+        if not self.scope.startswith(_CLAUDE_CODE_SCOPE_PREFIX):
+            return None
+        return _str(self.attributes, "span.type")
+
+
+@dataclass(frozen=True)
+class _ToolFacts:
+    """What a Claude Code tool span's children say about it: who decided, and whether it ran."""
+
+    decision: str | None = None
+    source: str | None = None
+    failed: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,12 +163,42 @@ def _kind(operation: str | None) -> str:
     return "other"
 
 
+def _false(attributes: Mapping[str, Any], key: str) -> bool:
+    """Whether a Claude Code ``success`` attribute says the work failed; it sends ``"True"``/``"False"``."""
+    value = attributes.get(key)
+    return value is False or (isinstance(value, str) and value.strip().lower() == "false")
+
+
 def _session(span: OtlpSpan) -> SessionRef:
     # A Claude Managed Agents session names each thread a conversation of its own.
-    key = (
-        _str(span.attributes, "anthropic.session.id", "gen_ai.conversation.id", "otari.session_label") or span.trace_id
-    )
-    return SessionRef(source="otlp", key=key)
+    keys: tuple[str, ...] = ("anthropic.session.id", "gen_ai.conversation.id", "otari.session_label")
+    if span.claude_code_type is not None:
+        keys = ("session.id", *keys)
+    return SessionRef(source="otlp", key=_str(span.attributes, *keys) or span.trace_id)
+
+
+def _tool_facts(spans: Iterable[OtlpSpan]) -> dict[tuple[str, str], _ToolFacts]:
+    """Each Claude Code tool span's decision and execution outcome, keyed by its OTel trace and span id.
+
+    Only children in the same export are seen. One the batch exporter sent apart
+    from its tool is still stored with its own decision; the tool then reads as run.
+    """
+    facts: dict[tuple[str, str], _ToolFacts] = {}
+    for span in spans:
+        kind = span.claude_code_type
+        if kind not in (_CLAUDE_CODE_DECISION, _CLAUDE_CODE_EXECUTION) or not span.parent_span_id:
+            continue
+        key = (span.trace_id, span.parent_span_id)
+        known = facts.get(key, _ToolFacts())
+        if kind == _CLAUDE_CODE_DECISION:
+            facts[key] = replace(
+                known,
+                decision=identifier_or_none(_str(span.attributes, "decision")),
+                source=identifier_or_none(_str(span.attributes, "source")),
+            )
+        else:
+            facts[key] = replace(known, failed=span.failed or _false(span.attributes, "success"))
+    return facts
 
 
 def _span_id(otel_trace_id: str, otel_span_id: str) -> str:
@@ -156,8 +216,17 @@ def _first_int(attributes: Mapping[str, Any], *keys: str) -> int | None:
     return next((count for key in keys if (count := _int(attributes, key)) is not None), None)
 
 
-def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
+def _record(span: OtlpSpan, window: _Window, workspace_id: uuid.UUID, tool: _ToolFacts | None = None) -> SpanRecord:
+    record = _projected(span, window, tool)
+    call_id = call_id_digest(workspace_id, _str(span.attributes, "gen_ai.tool.call.id", "tool_use_id"))
+    return replace(record, tool_call_id=call_id) if call_id else record
+
+
+def _projected(span: OtlpSpan, window: _Window, tool: _ToolFacts | None) -> SpanRecord:
     attributes = span.attributes
+    claude_code = span.claude_code_type
+    if claude_code is not None:
+        return _claude_code_record(span, claude_code, window, tool or _ToolFacts())
     operation = identifier_or_none(_str(attributes, "gen_ai.operation.name"))
     tool_name = identifier_or_none(_str(attributes, "gen_ai.tool.name"))
     kind = _kind(operation)
@@ -168,13 +237,7 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
     else:
         name = operation or "span"
     error_type = identifier_or_none(_str(attributes, "error.type"))
-    start = window.clamp(span.start_time)
-    end = window.clamp(span.end_time)
-    if start is not None and end is not None and end < start:
-        end = start
-    duration = (
-        min(round((end - start).total_seconds() * 1000), _INT32_MAX) if start is not None and end is not None else None
-    )
+    start, end, duration = _times(span, window)
     projected: dict[str, str | int | float | bool] = {}
     if span.failed and error_type:
         projected["error.type"] = error_type
@@ -216,10 +279,103 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
         reasoning_tokens=_int(attributes, "gen_ai.usage.reasoning.output_tokens"),
         tool_name=tool_name,
         tool_type=identifier_or_none(_str(attributes, "gen_ai.tool.type")),
-        tool_call_id=identifier_or_none(_str(attributes, "gen_ai.tool.call.id")),
         otel_trace_id=span.trace_id[:64],
         otel_span_id=span.span_id[:64],
         attributes=projected,
+    )
+
+
+def _times(span: OtlpSpan, window: _Window) -> tuple[datetime | None, datetime | None, int | None]:
+    start = window.clamp(span.start_time)
+    end = window.clamp(span.end_time)
+    if start is not None and end is not None and end < start:
+        end = start
+    duration = (
+        min(round((end - start).total_seconds() * 1000), _INT32_MAX) if start is not None and end is not None else None
+    )
+    return start, end, duration
+
+
+def _claude_code_prompt(attributes: Mapping[str, Any]) -> tuple[int | None, int | None, int | None]:
+    """A Claude Code request's whole prompt and the part of it the cache read and wrote.
+
+    Claude Code counts cache reads and writes outside ``input_tokens``, where a
+    span's input tokens count them in.
+    """
+    fresh = _int(attributes, "input_tokens")
+    cache_read = _int(attributes, "cache_read_tokens")
+    cache_write = _int(attributes, "cache_creation_tokens")
+    if fresh is None:
+        return None, cache_read, cache_write
+    return min(fresh + (cache_read or 0) + (cache_write or 0), _INT32_MAX), cache_read, cache_write
+
+
+def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _ToolFacts) -> SpanRecord:
+    """Project one of Claude Code's own spans.
+
+    An interaction is the user's turn, so it opens one as a step, unless it is
+    nested under another span (a subagent's). A tool something refused (a hook,
+    the user, a permission rule) was blocked, not failed: it never ran. A tool
+    that returned an error, such as a command exiting non-zero, ran too: the
+    agent reads the error like any other result, so it is not a session error.
+    The decision and the run under a tool are facts about it, not outcomes of
+    their own.
+    """
+    attributes = span.attributes
+    kind = _CLAUDE_CODE_KINDS.get(span_type, "other")
+    nested = span.parent_span_id is not None
+    if kind == "step" and nested:
+        kind = "agent"
+    rejected = kind == "tool" and tool.decision == "reject"
+    detail_of_tool = span_type in (_CLAUDE_CODE_DECISION, _CLAUDE_CODE_EXECUTION)
+    span_failed = span.failed or _false(attributes, "success")
+    returned_error = kind == "tool" and not rejected and (span_failed or tool.failed)
+    failed = not rejected and not detail_of_tool and kind != "tool" and span_failed
+    error_class = (identifier_or_none(_str(attributes, "error.type", "error")) or "error") if failed else None
+    decided = (
+        tool
+        if kind == "tool"
+        else _ToolFacts(
+            decision=identifier_or_none(_str(attributes, "decision")),
+            source=identifier_or_none(_str(attributes, "source")),
+        )
+    )
+    extra: dict[str, str | bool] = {}
+    if span_type == _CLAUDE_CODE_EXECUTION:
+        extra["otari.tool.succeeded"] = not span_failed
+    elif returned_error:
+        extra["otari.tool.succeeded"] = False
+    if span_type in ("tool", _CLAUDE_CODE_DECISION) and decided.decision:
+        extra["otari.tool.decision"] = decided.decision
+        if decided.source:
+            extra["otari.tool.decision_source"] = decided.source
+    start, end, duration = _times(span, window)
+    llm = kind == "llm"
+    prompt, cache_read, cache_write = _claude_code_prompt(attributes) if llm else (None, None, None)
+    return SpanRecord(
+        span_id=_span_id(span.trace_id, span.span_id),
+        parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
+        kind=kind,
+        origin="otlp",
+        name=span.name if is_identifier(span.name) else f"claude_code.{kind}",
+        operation=identifier_or_none(span_type),
+        outcome="blocked" if rejected else "error" if failed else "ok",
+        error_class=error_class,
+        opens_turn=kind == "step",
+        start_time=start,
+        end_time=end,
+        duration_ms=duration,
+        model=identifier_or_none(_str(attributes, "gen_ai.request.model", "model")) if llm else None,
+        provider=identifier_or_none(_str(attributes, "gen_ai.system")) if llm else None,
+        input_tokens=prompt,
+        output_tokens=_int(attributes, "output_tokens") if llm else None,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        tool_name=identifier_or_none(_str(attributes, "tool_name")) if kind == "tool" else None,
+        tool_type="client" if kind == "tool" else None,
+        otel_trace_id=span.trace_id[:64],
+        otel_span_id=span.span_id[:64],
+        attributes=extra,
     )
 
 
@@ -236,6 +392,7 @@ def _project(
     harness: dict[SessionRef, str | None] = {}
     invalid = 0
     over_cap = 0
+    tools = _tool_facts(spans)
     for span in spans:
         if not span.trace_id or not span.span_id:
             continue
@@ -244,14 +401,15 @@ def _project(
             if session not in by_session and len(by_session) >= max_traces:
                 over_cap += 1
                 continue
-            record = _record(span, window)
+            record = _record(span, window, workspace_id, tools.get((span.trace_id, span.span_id)))
         except Exception as exc:  # noqa: BLE001 - one bad span is dropped, never the export
             # The class only: an exception's message may quote what the exporter sent.
             logger.debug("OTLP span not recorded: %s", type(exc).__name__)
             invalid += 1
             continue
         by_session.setdefault(session, []).append(record)
-        harness.setdefault(session, identifier_or_none(_str(span.attributes, "otari.client_name")))
+        named = identifier_or_none(_str(span.attributes, "otari.client_name"))
+        harness.setdefault(session, named or (_CLAUDE_CODE_HARNESS if span.claude_code_type is not None else None))
     if invalid:
         SPANS_DROPPED.labels(reason="invalid").inc(invalid)
     if over_cap:

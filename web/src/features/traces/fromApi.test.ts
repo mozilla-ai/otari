@@ -126,6 +126,34 @@ describe("toTrace", () => {
     ])
   })
 
+  it("draws a tool a hook refused as blocked, with who refused it, not as an error", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", origin: "otlp" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            origin: "otlp",
+            tool_name: "Edit",
+            outcome: "blocked",
+            attributes: {
+              "otari.tool.decision": "reject",
+              "otari.tool.decision_source": "hook",
+            },
+          }),
+        ],
+      }),
+    )
+
+    expect(trace.observations.find((o) => o.id === "tool-1")).toMatchObject({
+      level: "WARNING",
+      statusMessage: "Blocked by a hook before it ran.",
+    })
+  })
+
   it("has no gateway report until the spans load", () => {
     expect(toTrace(traceSummary()).gateway).toBeUndefined()
   })

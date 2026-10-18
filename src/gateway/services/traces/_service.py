@@ -13,6 +13,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.traces_exceptions import RequestTraceNotFoundError, TraceAmbiguousError, TraceNotFoundError
 from gateway.models.traces import Trace, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
+from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
@@ -281,6 +282,13 @@ def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
     }
 
 
+def _stored_call_id(row: TraceSpan) -> str | None:
+    """A row's tool call id, digested on read where an older version stored the id as the client sent it."""
+    if row.tool_call_id is None or CALL_ID_DIGEST.fullmatch(row.tool_call_id):
+        return row.tool_call_id
+    return call_id_digest(row.workspace_id, row.tool_call_id)
+
+
 def _span_record(row: TraceSpan) -> SpanRecord:
     return SpanRecord(
         span_id=row.span_id,
@@ -306,7 +314,7 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         cost_snapshot=row.cost_snapshot,
         tool_name=row.tool_name,
         tool_type=row.tool_type,
-        tool_call_id=row.tool_call_id,
+        tool_call_id=_stored_call_id(row),
         request_id=row.request_id,
         otel_trace_id=row.otel_trace_id,
         otel_span_id=row.otel_span_id,
