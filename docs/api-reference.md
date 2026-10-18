@@ -289,7 +289,7 @@ often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
 user: any other value is refused with
 `403 'user' field does not match the authenticated API key's user`. A key's
-`reject_user_mismatch` (see [API keys](access-control.md#api-keys)), or the
+`reject_user_mismatch` (see [Mismatched `user` fields](access-control.md#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
 [service key](access-control.md#service-keys-and-end-users) may name its own end

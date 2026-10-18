@@ -18,11 +18,18 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
+Claude Code puts a telemetry value in `metadata.user_id`. An otari.ai key
+needs no setting for it, because a hybrid gateway does not check that field
+against the key's owner.
+
 ### Standalone
 
-Claude Code sends a telemetry value in the request's `user` field. It is not an
+Claude Code sends a telemetry value in `metadata.user_id`. It is not an
 Otari user ID, so create or update its API key with
-`reject_user_mismatch: false`. Spend still binds to the key's user.
+`reject_user_mismatch: false`, or pick **Always accept** for "Mismatched `user`
+field" under the dashboard key form's **Advanced** section. Spend still binds
+to the key's user; see
+[Mismatched `user` fields](access-control.md#mismatched-user-fields).
 
 ```bash
 curl "$OTARI_URL/api/v1/keys" \
