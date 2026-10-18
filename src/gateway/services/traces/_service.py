@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -24,6 +25,7 @@ from gateway.services.traces._content import open_content, seal_content
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
+    TRACE_BUCKET_DURATION,
     GuardrailDefinition,
     SpanRecord,
     TraceBucket,
@@ -39,8 +41,11 @@ from gateway.types.traces import (
 )
 from otari_agent.domain.definitions import GateDefinition, definition_digest, gates_from_body
 
-# The most buckets one series read returns: 90 days by the hour.
+# The most buckets one series read returns: 90 days by the hour. Each bucket is
+# joined against every session it overlaps, so the finer ones are held to fewer:
+# 12 hours by the minute, 2.5 days in 5-minute buckets, 15 days by the half hour.
 MAX_SERIES_BUCKETS = 90 * 24
+MAX_FINE_SERIES_BUCKETS = 720
 
 
 class TraceService:
@@ -165,16 +170,29 @@ class TraceService:
     async def series(
         self, scope: TraceScope, filters: TraceFilter, *, bucket: TraceBucketGrain
     ) -> tuple[TraceBucket, ...]:
-        """Count the scope's matching traces per bucket of their start, oldest first, populated buckets only.
+        """Count the scope's matching sessions active in each bucket, oldest first, populated buckets only.
 
-        At most :data:`MAX_SERIES_BUCKETS`, reaching back from the newest trace, whatever window the filters
-        leave open.
+        A session is active from its start to its last activity, so it counts in
+        every bucket it overlaps. The window is the filters' (or the sessions'
+        own, from the first start to the last activity), cut into buckets aligned
+        to their size in UTC, the newest :data:`MAX_SERIES_BUCKETS` of them
+        (:data:`MAX_FINE_SERIES_BUCKETS` below an hour).
         """
+        grain = TRACE_BUCKET_DURATION[bucket]
+        limit = MAX_FINE_SERIES_BUCKETS if grain < TRACE_BUCKET_DURATION["hour"] else MAX_SERIES_BUCKETS
         async with self._uow:
-            rows = await self._traces.bucket_counts(
-                _workspace_ids(scope), filters, bucket=bucket, limit=MAX_SERIES_BUCKETS
+            oldest, newest = await self._traces.activity_bounds(_workspace_ids(scope), filters)
+            if oldest is None or newest is None:
+                return ()
+            lower = filters.start or oldest
+            upper = filters.end or newest + timedelta(microseconds=1)
+            rows = await self._traces.count_active(
+                _workspace_ids(scope), filters, starts=_bucket_starts(lower, upper, grain, limit), grain=grain
             )
-            return tuple(TraceBucket(bucket=key, succeeded=ok, failed=bad) for key, ok, bad in rows)
+            return tuple(
+                TraceBucket(bucket=start.strftime("%Y-%m-%dT%H:%M:%SZ"), succeeded=ok, failed=bad)
+                for start, ok, bad in rows
+            )
 
     async def detail(self, scope: TraceScope, trace_id: str, *, workspace_id: uuid.UUID | None = None) -> TraceView:
         """One session with its turns.
@@ -216,6 +234,21 @@ class TraceService:
         """
         async with self._uow:
             return await self._traces.delete_expired(idle_before=idle_before, started_before=started_before)
+
+
+def _bucket_starts(lower: datetime, upper: datetime, grain: timedelta, limit: int) -> list[datetime]:
+    """The starts of the buckets covering ``[lower, upper)``, aligned to ``grain`` in UTC, the newest ``limit``."""
+    lower, upper = _utc(lower), _utc(upper)
+    if lower >= upper:
+        return []
+    step = grain.total_seconds()
+    first = datetime.fromtimestamp((lower.timestamp() // step) * step, tz=UTC)
+    total = math.ceil((upper - first) / grain)
+    return [first + grain * index for index in range(max(0, total - limit), total)]
+
+
+def _utc(moment: datetime) -> datetime:
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 def _workspace_ids(scope: TraceScope) -> frozenset[uuid.UUID] | None:

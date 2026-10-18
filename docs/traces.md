@@ -187,6 +187,10 @@ reads back empty once no configured key opens it, so keep a rotated-out key in
 | `GET /api/v1/traces`, `/count`, `/series`, `/{trace_id}`, `/requests/{request_id}` | the deployment operator, every workspace of their active organization |
 | `GET /api/v1/organizations/me/traces`, and the same four | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to |
 
+`/series` counts the sessions active in each bucket of a window: a session is
+active from its start to its last activity, so a long one counts in every bucket
+it ran through. `bucket` is `1m`, `5m`, `30m`, `hour`, `6h` or `day`.
+
 A list read narrows to one workspace with `workspace_id`, inside the caller's
 scope and never beyond it. `q` matches the start of a session's trace id or of
 its name, case-sensitively, inside the same scope. A trace is keyed by its

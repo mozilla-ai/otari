@@ -20490,12 +20490,12 @@
             "type": "string"
           },
           "failed": {
-            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
+            "description": "Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
             "title": "Failed",
             "type": "integer"
           },
           "succeeded": {
-            "description": "Sessions that started in the bucket and did not fail.",
+            "description": "Sessions active in the bucket that did not fail.",
             "title": "Succeeded",
             "type": "integer"
           }
@@ -20598,7 +20598,11 @@
         "properties": {
           "bucket": {
             "enum": [
+              "1m",
+              "5m",
+              "30m",
               "hour",
+              "6h",
               "day"
             ],
             "title": "Bucket",
@@ -37647,7 +37651,7 @@
     },
     "/api/v1/organizations/me/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+        "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets, not last activity: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
         "operationId": "organization-traces-trace_series",
         "parameters": [
           {
@@ -37657,7 +37661,11 @@
             "schema": {
               "default": "hour",
               "enum": [
+                "1m",
+                "5m",
+                "30m",
                 "hour",
+                "6h",
                 "day"
               ],
               "title": "Bucket",
@@ -44802,7 +44810,7 @@
     },
     "/api/v1/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+        "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets, not last activity: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
         "operationId": "traces-trace_series",
         "parameters": [
           {
@@ -44812,7 +44820,11 @@
             "schema": {
               "default": "hour",
               "enum": [
+                "1m",
+                "5m",
+                "30m",
                 "hour",
+                "6h",
                 "day"
               ],
               "title": "Bucket",
