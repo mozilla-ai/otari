@@ -173,6 +173,8 @@ def _gate_summaries(
             gate_type=declared[gate_id].gate_type if gate_id in declared else None,
             enforcement=declared[gate_id].enforcement if gate_id in declared else None,
             message=(declared[gate_id].message or None) if gate_id in declared else None,
+            runs=declared[gate_id].runs if gate_id in declared else (),
+            origin=declared[gate_id].origin if gate_id in declared else None,
             **counts.get(gate_id, dict.fromkeys(_VERDICTS, 0)),
         )
         for gate_id in {**counts, **declared}
@@ -241,10 +243,11 @@ def trace_view(detail: TraceDetail, *, now: datetime) -> TraceView:
     spans, approximate = _fill_client_tool_starts(_settle_tools(_attach_gates(list(detail.spans), steps)), steps)
     spans.sort(key=_moment)
     last_activity = detail.summary.last_activity_at
+    turns = _turns(spans, now=now, last_activity=last_activity)
     return TraceView(
         summary=detail.summary,
         state="active" if now - last_activity < IDLE_TIMEOUT else "idle",
-        turns=_turns(spans, now=now, last_activity=last_activity),
+        turns=turns,
         spans=tuple(spans),
         approximate=frozenset(approximate),
         truncated=detail.truncated,

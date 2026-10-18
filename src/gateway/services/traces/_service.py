@@ -20,6 +20,7 @@ from gateway.exceptions.traces_exceptions import (
 from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
+from gateway.services.traces._content import open_content, seal_content
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
@@ -307,6 +308,7 @@ def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
         "otel_trace_id": span.otel_trace_id,
         "otel_span_id": span.otel_span_id,
         "attributes": dict(span.attributes) or None,
+        "content_sealed": seal_content(span.content, workspace_id=trace.workspace_id, span_id=span.span_id),
     }
 
 
@@ -347,6 +349,7 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         otel_trace_id=row.otel_trace_id,
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
+        content=open_content(row.content_sealed, workspace_id=row.workspace_id, span_id=row.span_id),
     )
 
 

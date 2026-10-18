@@ -110,6 +110,7 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.mcp.tool_count": int,
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
+    "otari.llm.ttft_ms": int,
     "otari.tool.decision": str,
     "otari.tool.decision_source": str,
     "otari.tool.succeeded": bool,
@@ -126,6 +127,13 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
 # and each element is held to the identifier rule on its own.
 LIST_ATTRIBUTES = frozenset({"gen_ai.response.finish_reasons"})
 LIST_SEPARATOR = ","
+
+
+# What a span may say it was about, when a deployment keeps content
+# (``trace_content_enabled``). Prose, so never a typed field or an attribute,
+# and never searched: shown on the span, and only there.
+SPAN_CONTENT_KEYS = frozenset({"prompt", "command", "file_path", "gate.evidence", "gate.detail"})
+SPAN_CONTENT_MAX_LENGTH = 4_000
 
 
 class InvalidSpanError(ValueError):
@@ -203,6 +211,7 @@ class SpanRecord:
     otel_trace_id: str | None = None
     otel_span_id: str | None = None
     attributes: Mapping[str, str | int | float | bool] = field(default_factory=dict)
+    content: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _check_choice("kind", self.kind, SPAN_KINDS)
@@ -235,6 +244,15 @@ class SpanRecord:
             ):
                 raise InvalidSpanError(f"attribute {key} must be identifier-shaped")
         object.__setattr__(self, "attributes", MappingProxyType(attributes))
+        content = dict(self.content)
+        for key, value in content.items():
+            if key not in SPAN_CONTENT_KEYS:
+                raise InvalidSpanError("content may only hold its known keys")
+            if not isinstance(value, str) or len(value) > SPAN_CONTENT_MAX_LENGTH:
+                raise InvalidSpanError(
+                    f"content {key} must be a string of at most {SPAN_CONTENT_MAX_LENGTH} characters"
+                )
+        object.__setattr__(self, "content", MappingProxyType(content))
 
 
 @dataclass(frozen=True)

@@ -18,12 +18,13 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
-
+import { ExplainCard } from "./ExplainCard"
 import {
   formatDuration,
   formatRelativeTime,
   formatTraceTimestamp,
 } from "./format"
+import { GateCard } from "./GateCard"
 import { GatesView, stoppedBy } from "./GatesView"
 import { GatewayPanel } from "./GatewayPanel"
 import { type Format, IOBlock } from "./IOBlock"
@@ -305,9 +306,9 @@ export function TracePeek({
   const [navView, setNavView] = useState<NavView>("tree")
   const [navCollapsed, setNavCollapsed] = useState(false)
   const [navQuery, setNavQuery] = useState("")
-  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
-    new Set(),
-  )
+  // The rows a person opened or closed, against the default below, so a tool
+  // call a live session adds later starts closed like the rest.
+  const [toggledIds, setToggledIds] = useState<ReadonlySet<string>>(new Set())
   const bodyRef = useRef<HTMLDivElement>(null)
   const bodyBox = useRef<DOMRect | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -362,6 +363,47 @@ export function TracePeek({
     ],
     [trace],
   )
+  // A tool call and a group of gates start closed: their row says enough until
+  // someone asks for more.
+  const defaultCollapsed = useMemo(() => {
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+    // Only a row whose children are all details of it, so a tool call another
+    // agent made with work of its own under it never hides that work.
+    const onlyDetails = new Map<string, boolean>()
+    for (const o of trace.observations) {
+      if (o.parentObservationId === null) continue
+      onlyDetails.set(
+        o.parentObservationId,
+        (onlyDetails.get(o.parentObservationId) ?? true) && o.detail === true,
+      )
+    }
+    return new Set(
+      parentIds.filter((id) => {
+        const row = byId.get(id)
+        return (
+          (row?.type === "TOOL" || row?.detail === true) &&
+          onlyDetails.get(id) === true
+        )
+      }),
+    )
+  }, [trace, parentIds])
+  const collapsedIds = useMemo(
+    () =>
+      new Set(
+        parentIds.filter(
+          (id) => defaultCollapsed.has(id) !== toggledIds.has(id),
+        ),
+      ),
+    [parentIds, defaultCollapsed, toggledIds],
+  )
+  const setCollapsedIds = (collapsed: ReadonlySet<string>) =>
+    setToggledIds(
+      new Set(
+        parentIds.filter(
+          (id) => defaultCollapsed.has(id) !== collapsed.has(id),
+        ),
+      ),
+    )
   const everythingCollapsed =
     parentIds.length > 0 && parentIds.every((id) => collapsedIds.has(id))
   // Opens a span from outside the tree (a gate, a gateway decision): selects it,
@@ -377,7 +419,7 @@ export function TracePeek({
       parent = byId.get(parent)?.parentObservationId ?? null
     }
     setCollapsedIds(
-      (current) => new Set([...current].filter((id) => !ancestors.has(id))),
+      new Set([...collapsedIds].filter((id) => !ancestors.has(id))),
     )
     setNavQuery("")
     setNavCollapsed(false)
@@ -393,7 +435,7 @@ export function TracePeek({
       ?.scrollIntoView({ block: "center" })
   })
   const toggleCollapsed = (id: string) =>
-    setCollapsedIds((current) => {
+    setToggledIds((current) => {
       const next = new Set(current)
       if (!next.delete(id)) next.add(id)
       return next
@@ -449,15 +491,14 @@ export function TracePeek({
     }
   }, [])
 
-  // A panel opened on a span brings it into view once the spans arrive.
+  // A panel opened on a span opens the rows above it and brings it into view
+  // once the spans arrive, as picking it from the panel would.
   const isSpanUnseen = useRef(initialSpanId !== "")
   useEffect(() => {
-    if (!loaded || !isSpanUnseen.current) return
+    if (!loaded || !isSpanUnseen.current || !initialSpanId) return
     isSpanUnseen.current = false
-    navRef.current
-      ?.querySelector('[aria-current="true"]')
-      ?.scrollIntoView({ block: "nearest" })
-  }, [loaded])
+    reveal(initialSpanId)
+  })
 
   // The pane swap below md moves focus with it, as ListDetail does. Only on a
   // change, and a no-op from md up, where the Back control is not displayed.
@@ -786,14 +827,26 @@ export function TracePeek({
                   startedAt={trace.timestamp}
                   onSelect={reveal}
                 />
+              ) : observation?.gate ? (
+                <GateCard gate={observation.gate} />
               ) : observation ? (
-                <PreviewBody
-                  input={observation.input}
-                  output={observation.output}
-                  statusMessage={observation.statusMessage}
-                  level={observation.level}
-                  format={format}
-                />
+                <>
+                  {observation.explain ? (
+                    <ExplainCard explanation={observation.explain} />
+                  ) : null}
+                  {observation.explain &&
+                  observation.input == null &&
+                  observation.output == null &&
+                  !observation.statusMessage ? null : (
+                    <PreviewBody
+                      input={observation.input}
+                      output={observation.output}
+                      statusMessage={observation.statusMessage}
+                      level={observation.level}
+                      format={format}
+                    />
+                  )}
+                </>
               ) : null}
             </div>
           </>

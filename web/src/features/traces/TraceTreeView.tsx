@@ -126,7 +126,7 @@ function TreeRow({
         <span className={TEXT}>
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-body">{obs.name}</span>
-            <LevelChip level={obs.level} />
+            <LevelChip level={obs.level} returnedError={obs.returnedError} />
           </span>
           <Metrics
             durationMs={obs.endMs - obs.startMs}
@@ -188,7 +188,7 @@ function SearchRow({
         <span className="flex min-w-0 flex-1 flex-col py-0.5 pl-2">
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-body">{obs.name}</span>
-            <LevelChip level={obs.level} />
+            <LevelChip level={obs.level} returnedError={obs.returnedError} />
           </span>
           <Metrics
             durationMs={obs.endMs - obs.startMs}

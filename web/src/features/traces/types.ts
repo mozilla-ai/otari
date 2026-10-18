@@ -3,7 +3,8 @@
 
 import type { TraceGateSummary } from "@/client"
 
-import type { GatewayEvent } from "./gateway"
+import type { Explanation } from "./explain"
+import type { GatewayEvent, GuardrailVerdict } from "./gateway"
 
 // GUARDRAIL and MCP are the gateway's own work, which Langfuse has no type for.
 export type ObservationType =
@@ -25,6 +26,8 @@ export interface Observation {
   startMs: number
   endMs: number
   level: ObservationLevel
+  /** A tool call that returned an error to the agent, which read it like any other result. */
+  returnedError?: boolean
   statusMessage?: string
   // GENERATION only, the fields a gateway request carries.
   model?: string
@@ -39,6 +42,27 @@ export interface Observation {
   input?: unknown
   output?: unknown
   metadata?: Record<string, string>
+  /** A guardrail gate's check: what the gate is, what it decided and what it read. */
+  gate?: GateCheck
+  /** What the span means, in a sentence and a few facts. */
+  explain?: Explanation
+  /** A detail of the row above it (a permission decision, a run, a group of gates), not work of its own. */
+  detail?: boolean
+}
+
+export interface GateCheck {
+  gateId: string
+  verdict: GuardrailVerdict
+  message: string | null
+  gateType: string | null
+  enforcement: "required" | "advisory" | null
+  runs: string[]
+  origin: "repo" | "user" | null
+  /** The moment this check ran at, which may be one of several in `runs`. */
+  moment: string | null
+  digest: string | null
+  evidence: string | null
+  detail: string | null
 }
 
 export interface Trace {

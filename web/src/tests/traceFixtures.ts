@@ -59,6 +59,7 @@ export function traceSpan(overrides: Partial<TraceSpan> = {}): TraceSpan {
     otel_trace_id: null,
     otel_span_id: null,
     attributes: {},
+    content: {},
     ...overrides,
   }
 }
@@ -146,6 +147,8 @@ export function gateSummary(
     gate_type: "path",
     enforcement: "required",
     message: null,
+    runs: ["pre_tool_use.edit_target"],
+    origin: "repo",
     ...overrides,
   }
 }

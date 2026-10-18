@@ -342,8 +342,9 @@ class RequestTrace:
                     origin="gateway",
                     name=f"execute_tool:{name}" if name and is_identifier(f"execute_tool:{name}") else "execute_tool",
                     operation="execute_tool",
-                    outcome="error" if call.is_error else "ok",
-                    error_class="tool_error" if call.is_error else None,
+                    # The agent reads an error result like any other, so it is no session error.
+                    outcome="ok",
+                    attributes={"otari.tool.succeeded": False} if call.is_error else {},
                     end_time=self.started_at,
                     tool_name=name,
                     tool_type="client",

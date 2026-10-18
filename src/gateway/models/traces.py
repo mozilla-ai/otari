@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, ForeignKeyConstraint, Index, String, Uuid, false, func
+from sqlalchemy import JSON, BigInteger, ForeignKey, ForeignKeyConstraint, Index, String, Text, Uuid, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
@@ -134,6 +134,9 @@ class TraceSpan(Base):
     otel_span_id: Mapped[str | None] = mapped_column(String(TRACE_ID_MAX_LENGTH))
     # Allowlisted, typed attributes only (``types.traces.SPAN_ATTRIBUTES``).
     attributes: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # What the span was about, sealed with OTARI_SECRET_KEY by ``services.traces._content``;
+    # kept only where the deployment keeps content (``trace_content_enabled``).
+    content_sealed: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )

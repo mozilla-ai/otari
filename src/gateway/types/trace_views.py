@@ -54,6 +54,8 @@ class GateSummary:
     gate_type: str | None = None
     enforcement: str | None = None
     message: str | None = None
+    runs: tuple[str, ...] = ()
+    origin: str | None = None
 
 
 @dataclass(frozen=True)

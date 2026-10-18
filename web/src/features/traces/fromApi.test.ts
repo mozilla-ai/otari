@@ -159,6 +159,33 @@ describe("toTrace", () => {
     })
   })
 
+  it("marks a tool call that returned an error as a result the agent read, not an error", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", origin: "otlp" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            origin: "otlp",
+            tool_name: "Bash",
+            attributes: { "otari.tool.succeeded": false },
+          }),
+        ],
+      }),
+    )
+
+    expect(trace.observations.find((o) => o.id === "tool-1")).toMatchObject({
+      level: "DEFAULT",
+      returnedError: true,
+      statusMessage: expect.stringMatching(
+        /^Returned an error, which the agent read/,
+      ),
+    })
+  })
+
   it("draws a gate that blocked a tool call as a warning that explains it, not an error", () => {
     const trace = toTrace(
       traceSummary(),
@@ -205,6 +232,7 @@ describe("toTrace", () => {
             attributes: {
               "otari.guardrail.profile": "docs-updated",
               "otari.guardrail.mode": "monitor",
+              "otari.gate.id": "docs-updated",
               "otari.gate.outcome": "fail",
               "otari.gate.blocked": false,
             },
@@ -216,11 +244,20 @@ describe("toTrace", () => {
 
     expect(byId.get("tool-1")).toMatchObject({
       level: "WARNING",
-      statusMessage: "Blocked by a hook before it ran.",
+      statusMessage:
+        "Blocked by no-changelog before it ran. CHANGELOG.md is generated.",
+    })
+    expect(byId.get("tool-1:gates")).toMatchObject({
+      name: "Gates · 1 blocked",
+      parentObservationId: "tool-1",
+      level: "WARNING",
+    })
+    expect(byId.get("req-1:gates")).toMatchObject({
+      name: "Gates · 1 flagged",
     })
     expect(byId.get("gate-1")).toMatchObject({
       name: "no-changelog",
-      parentObservationId: "tool-1",
+      parentObservationId: "tool-1:gates",
       level: "WARNING",
       statusMessage: "Blocked the agent's action. CHANGELOG.md is generated.",
     })
@@ -228,6 +265,201 @@ describe("toTrace", () => {
       level: "WARNING",
       statusMessage: "Flagged. The gate is advisory, so the agent went ahead.",
     })
+  })
+
+  it("shows what a span was about as its input, where content was kept", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", content: { prompt: "Fix the test" } }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Bash",
+            content: { command: "pytest -x" },
+          }),
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "tool-1",
+            kind: "guardrail",
+            content: { "gate.evidence": "pytest -x", "gate.detail": "ok" },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("req-1")?.input).toBe("Fix the test")
+    expect(byId.get("tool-1")).toMatchObject({
+      name: "Bash · pytest -x",
+      input: "pytest -x",
+    })
+    expect(byId.get("gate-1")?.input).toEqual({
+      "gate.evidence": "pytest -x",
+      "gate.detail": "ok",
+    })
+  })
+
+  it("says what a permission decision, a run and a model call were", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Bash",
+            content: { command: "git push" },
+          }),
+          traceSpan({
+            span_id: "ask-1",
+            parent_span_id: "tool-1",
+            kind: "other",
+            operation: "tool.blocked_on_user",
+            duration_ms: 14_000,
+            attributes: {
+              "otari.tool.decision": "accept",
+              "otari.tool.decision_source": "user",
+            },
+          }),
+          traceSpan({
+            span_id: "run-1",
+            parent_span_id: "tool-1",
+            kind: "other",
+            operation: "tool.execution",
+            duration_ms: 96,
+          }),
+          traceSpan({
+            span_id: "llm-9",
+            parent_span_id: "req-1",
+            kind: "llm",
+            model: "claude-haiku-4-5",
+            attributes: { "gen_ai.response.finish_reasons": "tool_use" },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("ask-1")).toMatchObject({ name: "Permission · allowed" })
+    expect(byId.get("ask-1")?.explain?.sentence).toBe(
+      "Claude Code asked the user whether to run Bash on git push, and they allowed it after 14.00 s.",
+    )
+    expect(byId.get("run-1")).toMatchObject({ name: "Ran" })
+    expect(byId.get("run-1")?.explain?.sentence).toMatch(
+      /^Ran for .* and succeeded\.$/,
+    )
+    expect(byId.get("llm-9")?.explain?.facts).toContainEqual([
+      "Stopped because",
+      "It asked to use a tool",
+    ])
+  })
+
+  it("says a tool call that returned an error ran and returned one, not that it succeeded", () => {
+    const failed = { "otari.tool.succeeded": false }
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Bash",
+            content: { command: "grep -r nothing" },
+            attributes: failed,
+          }),
+          traceSpan({
+            span_id: "run-1",
+            parent_span_id: "tool-1",
+            kind: "other",
+            operation: "tool.execution",
+            duration_ms: 96,
+            attributes: failed,
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("run-1")?.explain?.sentence).toMatch(
+      /^Ran for .* and returned an error\.$/,
+    )
+    expect(byId.get("tool-1")?.explain?.sentence).toMatch(
+      /It ran and returned an error, which the agent read\.$/,
+    )
+  })
+
+  it("says a model call that errored failed rather than answered", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "llm-1",
+            parent_span_id: "req-1",
+            kind: "llm",
+            model: "claude-haiku-4-5",
+            outcome: "error",
+          }),
+        ],
+      }),
+    )
+    const llm = trace.observations.find((o) => o.id === "llm-1")
+
+    expect(llm?.explain?.sentence).toMatch(/^claude-haiku-4-5 failed/)
+  })
+
+  it("names a gate that could not decide but held a tool call as what blocked it", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Edit",
+            outcome: "blocked",
+          }),
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "tool-1",
+            kind: "guardrail",
+            origin: "otlp",
+            outcome: "error",
+            attributes: {
+              "otari.gate.id": "judge-review",
+              "otari.gate.outcome": "error",
+              "otari.gate.blocked": true,
+            },
+          }),
+          traceSpan({
+            span_id: "ask-1",
+            parent_span_id: "tool-1",
+            kind: "other",
+            operation: "tool.blocked_on_user",
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("tool-1")?.statusMessage).toBe(
+      "Blocked by judge-review before it ran.",
+    )
+    expect(byId.get("tool-1:gates")?.name).toBe("Gates · 1 could not decide")
+    expect(byId.get("ask-1")?.name).toBe("Permission")
+    expect(byId.get("ask-1")?.explain?.sentence).toMatch(
+      /did not say what was decided/,
+    )
   })
 
   it("has no gateway report until the spans load", () => {
