@@ -4057,11 +4057,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets, not last activity: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["organization-traces-trace_series"];
         put?: never;
@@ -6093,11 +6096,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets, not last activity: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["traces-trace_series"];
         put?: never;
@@ -17024,12 +17030,12 @@ export interface components {
             bucket: string;
             /**
              * Failed
-             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
+             * @description Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
              */
             failed: number;
             /**
              * Succeeded
-             * @description Sessions that started in the bucket and did not fail.
+             * @description Sessions active in the bucket that did not fail.
              */
             succeeded: number;
         };
@@ -17074,7 +17080,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "hour" | "day";
+            bucket: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
             /** Points */
             points: components["schemas"]["TraceBucketPublic"][];
         };
@@ -25677,7 +25683,7 @@ export interface operations {
     "organization-traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
@@ -28887,7 +28893,7 @@ export interface operations {
     "traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */

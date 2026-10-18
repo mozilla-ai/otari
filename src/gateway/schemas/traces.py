@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gateway.models.money import as_float
 from gateway.types.trace_views import TraceView, TurnView
-from gateway.types.traces import SpanRecord, TraceBucket, TracePage, TraceSummary
+from gateway.types.traces import SpanRecord, TraceBucket, TraceBucketGrain, TracePage, TraceSummary
 from otari_agent.domain.definitions import DIGEST_LENGTH, MAX_DEFINITION_GATES, MAX_GATE_MESSAGE_LENGTH, MAX_GATE_RUNS
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
 from otari_agent.domain.types import GateType, RunsAt
@@ -51,15 +51,15 @@ class TraceCountPublic(BaseModel):
 
 class TraceBucketPublic(BaseModel):
     bucket: str = Field(description="Bucket start, ISO 8601 UTC.")
-    succeeded: int = Field(description="Sessions that started in the bucket and did not fail.")
+    succeeded: int = Field(description="Sessions active in the bucket that did not fail.")
     failed: int = Field(
-        description="Sessions that started in the bucket and hold an unrecovered error other than a tool's. "
+        description="Sessions active in the bucket that hold an unrecovered error other than a tool's. "
         "A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session."
     )
 
 
 class TraceSeriesPublic(BaseModel):
-    bucket: Literal["hour", "day"]
+    bucket: TraceBucketGrain
     points: list[TraceBucketPublic]
 
 
@@ -183,7 +183,7 @@ def list_public(page: TracePage) -> TraceListPublic:
     return TraceListPublic(items=[summary_public(item) for item in page.items], has_more=page.has_more)
 
 
-def series_public(bucket: Literal["hour", "day"], points: tuple[TraceBucket, ...]) -> TraceSeriesPublic:
+def series_public(bucket: TraceBucketGrain, points: tuple[TraceBucket, ...]) -> TraceSeriesPublic:
     return TraceSeriesPublic(
         bucket=bucket,
         points=[TraceBucketPublic(bucket=p.bucket, succeeded=p.succeeded, failed=p.failed) for p in points],

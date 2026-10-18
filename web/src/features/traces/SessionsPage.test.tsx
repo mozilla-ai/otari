@@ -531,6 +531,25 @@ describe("SessionsPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("charts the sessions active each minute of the last hour", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?range=1h")
+
+    expect(
+      await screen.findByText("Active sessions / minute"),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.url.includes("/traces/series") &&
+            call.url.includes("bucket=1m"),
+        ),
+      ).toBe(true),
+    )
+  })
+
   it("counts a gate that could not decide but held the agent as stopping it", async () => {
     mockApi({
       traces: [traceSummary()],
