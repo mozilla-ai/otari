@@ -71,7 +71,7 @@ The four cases a fixture can record:
 | Case | What it is |
 |---|---|
 | `normal` | A successful answer with content. |
-| `empty` | A successful answer with nothing in it: no hits, or a page with no text. |
+| `empty` | A successful answer with nothing in it: no hits, or a page with no text. A fetch provider that never answers a page with no text, failing the call instead, has none. |
 | `error` | A failed call, with an HTTP status. A key the provider refuses is the easiest to record, unless it refuses keys inside a 200; then try a malformed parameter. |
 | `in_body_error` | An error inside a 200. Leave it out when the provider has none. |
 
@@ -106,7 +106,8 @@ The four cases a fixture can record:
   answer with neither a page nor a reason raises `unexpected_response`; it is not an empty page.
 - A provider with no error inside a 200 either fails the call for a page it could not fetch or
   returns the text of the site's own error page. Find out which live, with a page that does not
-  exist, and say so in the docstring, the README and `EXPECTED`'s `page_errors`.
+  exist, and say so in the docstring, the README and `EXPECTED`'s `page_errors`, or
+  `page_errors_fail` when the call fails.
 - List the fields the adapter checks in the module's docstring and the README's section on the
   provider.
 - `builtin` is not added here: the host registers it (`AnyFetch.register_builtin`).
@@ -199,3 +200,29 @@ The first search provider with the key in the URL and errors inside a 200.
   pricing note in `docs/tools.md` then says what it charges, and no more.
 - Fixture recipes: `https://example.com/` for a normal page small enough to keep whole, and the
   key variable set to a made-up key for the error.
+
+### 2026-10-18, DeepSeek (both libraries)
+
+The first provider whose search and fetch are one account and one key, and the first fetch
+provider with no empty page.
+
+- An error body's fields can differ in how much they say. DeepSeek's OpenAI-shaped body sends
+  `code` `invalid_request_error` for every failure, a refused key included, while `type` tells
+  them apart (`authentication_error`, `not_found_error`). Record more than one failure before
+  choosing which field becomes the tag.
+- An error message can carry part of the key: DeepSeek's 401 quotes its last four characters, so
+  a fixture recorded with a real key that was refused holds them. Record the error fixture with a
+  made-up key, and never read the message.
+- A fetch provider can fail the call for every page it cannot use and never answer an empty
+  page. DeepSeek answers a 404 `not_found_error` for a missing page, a site's 500, a private
+  address, a PDF, a zero-byte file and HTML with an empty body, with nothing saying which. That
+  cannot be read as an empty page, since a missing page looks the same, so the provider leaves
+  `empty` out of the conformance scenarios, and `EXPECTED` says `page_errors_fail`. Probe those
+  cases live before deciding: a page with only a title came back with the title as its text.
+- A provider can have no recency parameter but a query operator: DeepSeek's `after:YYYY-MM-DD`,
+  which counts toward its 128-character query limit, so a long query with a `time_range` is
+  refused. Check the operator live (it filtered to the week asked for).
+- A search provider can return URLs with tracking parameters or fragments
+  (`?spm=a2c6h`, `#1`); the adapter passes them as they are.
+- Fixture recipes: an empty search with `site:` set to a domain that does not exist; a refused
+  key as any `sk-` string of the right length.

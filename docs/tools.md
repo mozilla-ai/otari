@@ -557,6 +557,13 @@ names a provider for `otari_web_fetch` and for enriching search results. Neither
 runs on fetch instances yet, so the built-in fetcher above still does both;
 `POST /api/v1/search-tools/{name}/test` with a `url` tries one.
 
+- **DeepSeek** (`deepseek`) needs an API key, read from the instance's `api_key`,
+  such as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too, and reports
+  no cost. DeepSeek's [pricing](https://api-docs.deepseek.com/guides/search),
+  read 2026-10-18, is $0.75 per 1,000 successful fetches, free until 00:00
+  Beijing time on 2026-11-01, with at most 5 fetches a second per account. A
+  page it cannot turn into markdown, a missing one or a PDF included, fails the
+  fetch.
 - **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
   reports what each fetch costs (`costDollars.total`).
 - **Tabstack** (`tabstack`) needs an API key, read from the instance's
@@ -744,6 +751,14 @@ The request, the response and the errors are in the
 
 ### Search providers
 
+- **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such as
+  `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no cost, so a
+  search is billed at the tool's rate, `deepseek:<search-tool-name>`. DeepSeek's
+  [pricing](https://api-docs.deepseek.com/guides/search), read 2026-10-18, is $0.75
+  per 1,000 successful searches, whatever the number of results, free until 00:00
+  Beijing time on 2026-11-01, with at most 5 searches a second per account. A search
+  returns at most 50 results, and its hits carry a snippet; page text only with the
+  `need_content` option.
 - **Exa** (`exa`) needs an API key, read from the tool's `api_key`, such as
   `${EXA_API_KEY}`, and reports what each search costs (`costDollars.total`), which
   is what the search is billed at. Exa's [pricing](https://exa.ai/docs/admin/pricing),

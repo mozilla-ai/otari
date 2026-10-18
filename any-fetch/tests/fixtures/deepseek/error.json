@@ -1,0 +1,11 @@
+{
+  "status": 404,
+  "body": {
+    "error": {
+      "message": "failed to fetch URL (request_id: 5d94cdc6-39b5-4604-8117-7a69a3a2cfad)",
+      "type": "not_found_error",
+      "param": null,
+      "code": "invalid_request_error"
+    }
+  }
+}

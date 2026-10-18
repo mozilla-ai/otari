@@ -56,8 +56,13 @@ def _replay(provider: str, case: str) -> Callable[[httpx.Request], httpx.Respons
     return handler
 
 
-# A provider that signals no error inside a successful response leaves "in_body_error" out.
+# A provider that signals no error inside a successful response leaves "in_body_error" out, and one
+# that never answers a page with no text, failing the call instead, leaves "empty" out.
 SCENARIOS: dict[str, dict[Case, Scenario]] = {
+    "deepseek": {
+        "normal": Scenario(handler=_replay("deepseek", "normal")),
+        "error": Scenario(handler=_replay("deepseek", "error")),
+    },
     "exa": {
         "normal": Scenario(handler=_replay("exa", "normal")),
         "empty": Scenario(handler=_replay("exa", "empty")),
@@ -139,7 +144,7 @@ def _exception_texts(exc: BaseException | None) -> list[str]:
 def test_every_provider_has_scenarios() -> None:
     assert sorted([*SCENARIOS, "builtin"]) == PROVIDERS
     for cases in SCENARIOS.values():
-        assert {"normal", "empty", "error"} <= cases.keys()
+        assert {"normal", "error"} <= cases.keys()
 
 
 def test_builtin_before_registration_is_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:

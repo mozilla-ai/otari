@@ -45,6 +45,7 @@ jobs:
       HAS_EXA_KEY: ${{ secrets.EXA_API_KEY != '' }}
       HAS_MOJEEK_KEY: ${{ secrets.MOJEEK_API_KEY != '' }}
       HAS_TABSTACK_KEY: ${{ secrets.TABSTACK_API_KEY != '' }}
+      HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
 
     steps:
     - name: Say so when the Exa key is absent
@@ -77,6 +78,16 @@ jobs:
         echo "::error::The TABSTACK_API_KEY secret is not set, so the Tabstack live tests cannot run."
         exit 1
 
+    - name: Say so when the DeepSeek key is absent
+      if: env.HAS_DEEPSEEK_KEY != 'true' && github.event_name == 'pull_request'
+      run: echo "::notice::The DEEPSEEK_API_KEY secret is not available to this run; the DeepSeek live tests skip."
+
+    - name: Fail a scheduled or manual run without the DeepSeek key
+      if: env.HAS_DEEPSEEK_KEY != 'true' && github.event_name != 'pull_request'
+      run: |
+        echo "::error::The DEEPSEEK_API_KEY secret is not set, so the DeepSeek live tests cannot run."
+        exit 1
+
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
@@ -95,6 +106,7 @@ jobs:
         ANY_SEARCH_LIVE: "1"
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         MOJEEK_API_KEY: ${{ secrets.MOJEEK_API_KEY }}
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       run: uv run pytest -v -rs any-search/tests/test_live.py
 
     - name: Live fetches
@@ -102,4 +114,5 @@ jobs:
         ANY_FETCH_LIVE: "1"
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         TABSTACK_API_KEY: ${{ secrets.TABSTACK_API_KEY }}
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       run: uv run pytest -v -rs any-fetch/tests/test_live.py

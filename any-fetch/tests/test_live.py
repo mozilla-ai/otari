@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from any_fetch import AnyFetch
+from any_fetch import AnyFetch, ProviderError
 
 live = pytest.mark.skipif(os.environ.get("ANY_FETCH_LIVE") != "1", reason="set ANY_FETCH_LIVE=1 to run")
 
@@ -39,9 +39,14 @@ class Expected:
     # It reports a page the site answered with an error as an error inside the
     # answer; otherwise it returns the text of the site's own error page.
     page_errors: bool
+    # It fails the call for a page the site answered with an error, so
+    # page_errors does not apply.
+    page_errors_fail: bool = False
 
 
 EXPECTED: dict[str, Expected] = {
+    # DeepSeek fails the call with a 404 for any page it cannot turn into markdown.
+    "deepseek": Expected(reports_cost=False, titles=True, page_errors=False, page_errors_fail=True),
     "exa": Expected(reports_cost=True, titles=True, page_errors=True),
     "tabstack": Expected(reports_cost=False, titles=True, page_errors=False),
 }
@@ -81,6 +86,11 @@ async def test_a_live_fetch_returns_the_page_text(provider: str) -> None:
 async def test_a_live_fetch_of_a_missing_page_is_an_error_or_the_sites_error_page(provider: str) -> None:
     _require_key(provider)
     async with AnyFetch.create(provider) as fetcher:
+        if EXPECTED[provider].page_errors_fail:
+            with pytest.raises(ProviderError) as raised:
+                await fetcher.fetch(MISSING_URL, max_chars=500)
+            assert raised.value.status == 404
+            return
         page = await fetcher.fetch(MISSING_URL, max_chars=500)
     if EXPECTED[provider].page_errors:
         assert page.error is not None
