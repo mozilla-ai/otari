@@ -34,11 +34,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from gateway.log_config import logger
+from gateway.services.secret_box import secret_box_configured
 from gateway.services.traces._collector import call_id_digest, identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
 from gateway.types.traces import (
     LIST_SEPARATOR,
+    SPAN_CONTENT_MAX_LENGTH,
     SpanRecord,
     TraceWrite,
     is_gate_id,
@@ -248,10 +250,42 @@ def _first_int(attributes: Mapping[str, Any], *keys: str) -> int | None:
     return next((count for key in keys if (count := _int(attributes, key)) is not None), None)
 
 
-def _record(span: OtlpSpan, window: _Window, workspace_id: uuid.UUID, tool: _ToolFacts | None = None) -> SpanRecord:
+# Where content lives on the spans that carry it, by the key it is kept under.
+# Claude Code sends its keys only with OTEL_LOG_TOOL_DETAILS / OTEL_LOG_USER_PROMPTS,
+# and otari hook its own only with OTARI_HOOK_REPORT_CONTENT.
+_CLAUDE_CODE_CONTENT = {"prompt": "user_prompt", "command": "full_command", "file_path": "file_path"}
+_HOOK_CONTENT = {"gate.evidence": "otari.gate.evidence", "gate.detail": "otari.gate.detail"}
+_REDACTED = "<REDACTED>"
+
+
+def _content(span: OtlpSpan) -> dict[str, str]:
+    """What the span says it was about, cut to what the store keeps."""
+    if span.scope == HOOK_SCOPE:
+        sources = _HOOK_CONTENT
+    elif span.claude_code_type is not None:
+        sources = _CLAUDE_CODE_CONTENT
+    else:
+        return {}
+    content: dict[str, str] = {}
+    for key, source in sources.items():
+        value = span.attributes.get(source)
+        if isinstance(value, str) and value.strip() and value != _REDACTED:
+            content[key] = value[:SPAN_CONTENT_MAX_LENGTH]
+    return content
+
+
+def _record(
+    span: OtlpSpan,
+    window: _Window,
+    workspace_id: uuid.UUID,
+    tool: _ToolFacts | None = None,
+    *,
+    keep_content: bool = False,
+) -> SpanRecord:
     record = _projected(span, window, tool)
     call_id = call_id_digest(workspace_id, _str(span.attributes, "gen_ai.tool.call.id", "tool_use_id"))
-    return replace(record, tool_call_id=call_id) if call_id else record
+    content = _content(span) if keep_content else {}
+    return replace(record, tool_call_id=call_id or record.tool_call_id, content=content or record.content)
 
 
 def _projected(span: OtlpSpan, window: _Window, tool: _ToolFacts | None) -> SpanRecord:
@@ -344,6 +378,16 @@ def _claude_code_prompt(attributes: Mapping[str, Any]) -> tuple[int | None, int 
     return min(fresh + (cache_read or 0) + (cache_write or 0), _INT32_MAX), cache_read, cache_write
 
 
+def _llm_attributes(attributes: Mapping[str, Any]) -> dict[str, str | int]:
+    """What a Claude Code model request says about itself beyond its tokens: why it stopped and how fast."""
+    kept: dict[str, str | int] = {}
+    if reason := identifier_or_none(_str(attributes, "stop_reason")):
+        kept["gen_ai.response.finish_reasons"] = reason
+    if (ttft := _int(attributes, "ttft_ms")) is not None:
+        kept["otari.llm.ttft_ms"] = ttft
+    return kept
+
+
 def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _ToolFacts) -> SpanRecord:
     """Project one of Claude Code's own spans.
 
@@ -374,7 +418,10 @@ def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _
             source=identifier_or_none(_str(attributes, "source")),
         )
     )
-    extra: dict[str, str | bool] = {}
+    llm = kind == "llm"
+    extra: dict[str, str | int | bool] = {}
+    if llm:
+        extra.update(_llm_attributes(attributes))
     if span_type == _CLAUDE_CODE_EXECUTION:
         extra["otari.tool.succeeded"] = not span_failed
     elif returned_error:
@@ -384,7 +431,6 @@ def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _
         if decided.source:
             extra["otari.tool.decision_source"] = decided.source
     start, end, duration = _times(span, window)
-    llm = kind == "llm"
     prompt, cache_read, cache_write = _claude_code_prompt(attributes) if llm else (None, None, None)
     return SpanRecord(
         span_id=_span_id(span.trace_id, span.span_id),
@@ -494,6 +540,7 @@ def _project(
     api_key_id: str | None,
     window: _Window,
     max_traces: int,
+    keep_content: bool,
 ) -> OtlpProjection:
     by_session: dict[SessionRef, list[SpanRecord]] = {}
     harness: dict[SessionRef, str | None] = {}
@@ -510,7 +557,9 @@ def _project(
             if session not in by_session and len(by_session) >= max_traces:
                 over_cap += 1
                 continue
-            record = _record(span, window, workspace_id, tools.get((span.trace_id, span.span_id)))
+            record = _record(
+                span, window, workspace_id, tools.get((span.trace_id, span.span_id)), keep_content=keep_content
+            )
         except Exception as exc:  # noqa: BLE001 - one bad span is dropped, never the export
             # The class only: an exception's message may quote what the exporter sent.
             logger.debug("OTLP span not recorded: %s", type(exc).__name__)
@@ -546,6 +595,7 @@ def project_otlp_spans(
     retention: timedelta,
     now: datetime | None = None,
     max_traces: int = MAX_TRACES_PER_EXPORT,
+    keep_content: bool = False,
 ) -> OtlpProjection:
     """Group received spans by session and project each one, attributed to the exporting key.
 
@@ -563,6 +613,7 @@ def project_otlp_spans(
             api_key_id=api_key_id,
             window=window,
             max_traces=max_traces,
+            keep_content=keep_content,
         )
     except Exception as exc:  # noqa: BLE001 - recording spans never fails the export
         logger.warning("OTLP spans not recorded: %s", type(exc).__name__)
@@ -580,6 +631,7 @@ def record_otlp_export(
     user_id: str | None,
     api_key_id: str | None,
     retention: timedelta,
+    content_enabled: bool = False,
 ) -> None:
     """Hand one export's spans to the trace writer, attributed to the exporting key.
 
@@ -588,14 +640,20 @@ def record_otlp_export(
 
     Only a key that may import is traced (``budget_exempt``), the rule the usage
     import holds it to, whatever the export carries: an export of agent spans
-    alone never reaches that import's own check.
+    alone never reaches that import's own check. What a span was about is kept
+    only where the deployment enabled it and can store it encrypted.
     """
     if not budget_exempt:
         return
     try:
         kept = list(itertools.islice(spans, MAX_SPANS_PER_EXPORT))
         projection = project_otlp_spans(
-            kept, workspace_id=workspace_id, user_id=user_id, api_key_id=api_key_id, retention=retention
+            kept,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            retention=retention,
+            keep_content=content_enabled and secret_box_configured(),
         )
         truncated = max(0, total - len(kept))
         for index, write in enumerate(projection.writes):

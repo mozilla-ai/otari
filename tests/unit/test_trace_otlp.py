@@ -135,6 +135,8 @@ def test_a_claude_code_interaction_is_a_turn_with_its_model_calls_and_tools() ->
             output_tokens="300",
             cache_read_tokens="18157",
             cache_creation_tokens="2000",
+            stop_reason="tool_use",
+            ttft_ms="917",
             success="True",
         ),
         _claude("t1", "tool", parent="i1", tool_name="Read", tool_use_id=_TOOL_USE_ID),
@@ -158,6 +160,7 @@ def test_a_claude_code_interaction_is_a_turn_with_its_model_calls_and_tools() ->
         18_157,
         2_000,
     )
+    assert dict(llm.attributes) == {"gen_ai.response.finish_reasons": "tool_use", "otari.llm.ttft_ms": 917}
     assert (tool.kind, tool.tool_name, tool.tool_type, tool.tool_call_id, tool.outcome) == (
         "tool",
         "Read",
@@ -650,3 +653,46 @@ def test_one_export_can_never_fill_the_trace_queue() -> None:
 def test_the_session_cap_binds_below_the_span_cap() -> None:
     """A cap on sessions at or above the span cap could never take effect."""
     assert MAX_TRACES_PER_EXPORT < MAX_SPANS_PER_EXPORT
+
+
+def test_content_is_kept_only_where_the_deployment_keeps_it() -> None:
+    spans = (
+        _claude("i1", "interaction", user_prompt="Fix the flaky test"),
+        _claude("t1", "tool", parent="i1", tool_name="Bash", tool_use_id=_TOOL_USE_ID, full_command="pytest -x"),
+        _claude("t2", "tool", parent="i1", tool_name="Edit", file_path="src/app.py"),
+        _gate("g1", "fail", **{"otari.gate.evidence": "CHANGELOG.md", "otari.gate.detail": "(CHANGELOG.md)"}),
+    )
+
+    [kept] = project_otlp_spans(
+        list(spans),
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+        now=_NOW,
+        keep_content=True,
+    ).writes
+    [dropped] = _project(*spans)
+
+    by_id = {span.otel_span_id: dict(span.content) for span in kept.spans}
+    assert by_id == {
+        "i1": {"prompt": "Fix the flaky test"},
+        "t1": {"command": "pytest -x"},
+        "t2": {"file_path": "src/app.py"},
+        "g1": {"gate.evidence": "CHANGELOG.md", "gate.detail": "(CHANGELOG.md)"},
+    }
+    assert all(not span.content for span in dropped.spans)
+
+
+def test_a_prompt_claude_code_redacted_is_not_content() -> None:
+    [write] = project_otlp_spans(
+        [_claude("i1", "interaction", user_prompt="<REDACTED>")],
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+        now=_NOW,
+        keep_content=True,
+    ).writes
+
+    assert not write.spans[0].content

@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event, update
+from sqlalchemy import event, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -28,6 +28,7 @@ from gateway.models.traces import TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
+from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import TraceService
 from gateway.services.traces import _service as trace_service_module
 from gateway.services.traces._collector import call_id_digest
@@ -499,3 +500,37 @@ async def test_a_tool_call_id_an_older_version_stored_as_sent_reads_back_as_its_
 
     assert detail is not None
     assert detail.spans[0].tool_call_id == call_id_digest(workspace, legacy)
+
+
+async def test_what_a_span_was_about_is_stored_encrypted_and_reads_back(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    command = "cat ~/.aws/credentials"
+    await store.write(
+        (_write(workspace, "session-1", _span("tool-1", kind="tool", tool_name="Bash", content={"command": command})),)
+    )
+
+    sealed = (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
+    ).scalar_one()
+    assert sealed is not None and "credentials" not in sealed
+    detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
+    assert detail is not None
+    assert dict(detail.spans[0].content) == {"command": command}
+
+
+async def test_without_a_key_what_a_span_was_about_is_not_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    workspace, _ = tenants
+    await store.write(
+        (_write(workspace, "session-1", _span("tool-1", kind="tool", content={"command": "cat ~/.aws/credentials"})),)
+    )
+
+    sealed = (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
+    ).scalar_one()
+    assert sealed is None

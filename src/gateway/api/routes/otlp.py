@@ -585,6 +585,7 @@ async def receive_traces(
             user_id=api_key.user_id,
             api_key_id=api_key.id,
             retention=timedelta(days=config.trace_retention_days),
+            content_enabled=config.trace_content_enabled,
         )
     return _otlp_response(content_type, response)
 

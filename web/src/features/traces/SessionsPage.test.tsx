@@ -392,6 +392,145 @@ describe("SessionsPage", () => {
     scrolled.mockRestore()
   })
 
+  it("marks a tool call's error result in the tree without calling it an error", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, attributes: { "otari.tool.succeeded": false } }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const bash = await within(peek).findByRole("button", {
+      name: /^Tool, Bash/,
+    })
+
+    expect(within(bash).getByText("Error result")).toBeInTheDocument()
+    expect(within(bash).queryByText("Error")).not.toBeInTheDocument()
+  })
+
+  it("shows a quiet session's spend", async () => {
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(await within(peek).findByText("Spend")).toBeInTheDocument()
+  })
+
+  it("says what a gate is and what its check read when it is opened", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "call-toolu_1",
+            kind: "guardrail",
+            origin: "otlp",
+            name: "gate:no-changelog",
+            operation: "pre_tool_use.edit_target",
+            outcome: "blocked",
+            attributes: {
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": true,
+              "otari.policy.digest": "0123456789abcdef",
+            },
+            content: { "gate.evidence": "CHANGELOG.md" },
+          }),
+        ],
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            blocked: 1,
+            span_id: "gate-1",
+            message: "CHANGELOG.md is generated.",
+          }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^Gates/ }),
+    )
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^no-changelog/ }),
+    )
+
+    expect(
+      await within(peek).findByText("The gate stopped the agent here."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("CHANGELOG.md is generated."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("Before the agent edits a file"),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("Required: stops the agent when it fails"),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("What it checked")).toBeInTheDocument()
+  })
+
+  it("starts a tool call closed, its gates one row inside it", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "call-toolu_1",
+            kind: "guardrail",
+            origin: "otlp",
+            outcome: "blocked",
+            attributes: {
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": true,
+            },
+          }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const tool = await within(peek).findByRole("button", {
+      name: /^Tool, Bash/,
+    })
+
+    expect(
+      within(peek).queryByRole("button", { name: /Gates · 1 blocked/ }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(
+      within(tool.closest("li") as HTMLElement).getByRole("button", {
+        name: "Expand",
+      }),
+    )
+    expect(
+      await within(peek).findByRole("button", { name: /Gates · 1 blocked/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("button", { name: /no-changelog/ }),
+    ).not.toBeInTheDocument()
+  })
+
   it("counts a gate that could not decide but held the agent as stopping it", async () => {
     mockApi({
       traces: [traceSummary()],
@@ -414,6 +553,78 @@ describe("SessionsPage", () => {
     ).toBeInTheDocument()
     expect(
       within(peek).getByText("1 could not decide, held"),
+    ).toBeInTheDocument()
+  })
+
+  it("opens a link to a gate check with the tool call above it opened", async () => {
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "call-toolu_1",
+            kind: "guardrail",
+            origin: "otlp",
+            outcome: "blocked",
+            attributes: {
+              "otari.guardrail.profile": "no-changelog",
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": true,
+            },
+          }),
+        ],
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    await waitFor(() =>
+      expect(
+        within(peek).getByRole("button", { current: true }),
+      ).toHaveAccessibleName(/no-changelog/),
+    )
+  })
+
+  it("leaves open a tool call another agent did work under", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "sub-llm",
+            parent_span_id: "call-toolu_1",
+            kind: "llm",
+            model: "subagent-model",
+          }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    const tool = await within(peek).findByRole("button", {
+      name: /^Tool, Bash/,
+    })
+    expect(
+      within(tool.closest("li") as HTMLElement).getByRole("button", {
+        name: "Collapse",
+      }),
     ).toBeInTheDocument()
   })
 

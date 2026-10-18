@@ -102,7 +102,7 @@ without a name.
   are timed as they run.
 - **Tools the client runs** (a shell, a file read in a coding agent) are
   recorded from the request that carries their result: the tool's name, whether
-  it failed, and when the result arrived. Their start is when the step before
+  it returned an error, and when the result arrived. Their start is when the step before
   ended, so their duration is marked approximate.
 
 ## Sessions and failures
@@ -159,6 +159,26 @@ error, such as a command that exited non-zero: the agent reads that error like
 any other result, and `grep` finding nothing or a test failing on purpose
 returns one too. A short `claude -p` run can exit before its last spans are
 exported.
+
+### Keeping what a span was about
+
+A trace keeps no prompt, command or file path. A deployment can keep them by
+setting `OTARI_TRACE_CONTENT_ENABLED=true`. They are stored encrypted with
+`OTARI_SECRET_KEY`, the key that encrypts stored provider credentials, and are
+not kept at all on a deployment without it. They are kept only when the agent
+sends them:
+
+- Claude Code sends the prompt that opened a turn with `OTEL_LOG_USER_PROMPTS=1`,
+  and each tool's command or file path with `OTEL_LOG_TOOL_DETAILS=1`. Otari
+  never keeps a tool's output, even when Claude Code exports it
+  (`OTEL_LOG_TOOL_CONTENT=1`).
+- `otari hook` sends the command or paths a gate checked, and the gate's own
+  detail, with `OTARI_HOOK_REPORT_CONTENT=1`.
+
+A span shows what it was about as its input, and a tool call is named for its
+command or file in the tree. A span's content is sealed for that span alone, and
+reads back empty once no configured key opens it, so keep a rotated-out key in
+`OTARI_SECRET_KEY` for as long as you keep traces.
 
 ## Reading traces
 

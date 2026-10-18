@@ -7819,6 +7819,22 @@
             "description": "What the gate says when it fails, from the guardrail's definition.",
             "title": "Message"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "repo",
+                  "user"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).",
+            "title": "Origin"
+          },
           "passed": {
             "title": "Passed",
             "type": "integer"
@@ -7827,6 +7843,14 @@
             "description": "Checks where the gate could not decide and held the agent anyway.",
             "title": "Refused",
             "type": "integer"
+          },
+          "runs": {
+            "description": "The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Runs",
+            "type": "array"
           },
           "span_id": {
             "anyOf": [
@@ -7856,7 +7880,9 @@
           "span_id",
           "gate_type",
           "enforcement",
-          "message"
+          "message",
+          "runs",
+          "origin"
         ],
         "title": "GateSummaryPublic",
         "type": "object"
@@ -19869,7 +19895,7 @@
         "type": "object"
       },
       "SpanPublic": {
-        "description": "One span of a session. Content is never part of a span.",
+        "description": "One span of a session. Its content is empty unless the deployment keeps content.",
         "properties": {
           "approximate": {
             "description": "True when the start was inferred rather than measured.",
@@ -19919,6 +19945,14 @@
             ],
             "description": "Input tokens written to the prompt cache.",
             "title": "Cache Write Tokens"
+          },
+          "content": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.",
+            "title": "Content",
+            "type": "object"
           },
           "cost": {
             "anyOf": [
@@ -20192,7 +20226,8 @@
           "request_id",
           "otel_trace_id",
           "otel_span_id",
-          "attributes"
+          "attributes",
+          "content"
         ],
         "title": "SpanPublic",
         "type": "object"

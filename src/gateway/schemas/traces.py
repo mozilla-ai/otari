@@ -64,7 +64,7 @@ class TraceSeriesPublic(BaseModel):
 
 
 class SpanPublic(BaseModel):
-    """One span of a session. Content is never part of a span."""
+    """One span of a session. Its content is empty unless the deployment keeps content."""
 
     span_id: str
     parent_span_id: str | None
@@ -101,6 +101,12 @@ class SpanPublic(BaseModel):
         "Null on a span the gateway recorded itself."
     )
     attributes: dict[str, str | int | float | bool]
+    content: dict[str, str] = Field(
+        description=(
+            "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the "
+            "deployment keeps content and the agent sent it. Empty otherwise."
+        )
+    )
 
 
 class TurnPublic(BaseModel):
@@ -136,6 +142,10 @@ class GateSummaryPublic(BaseModel):
     gate_type: str | None = Field(description="From the guardrail's definition, when it was sent.")
     enforcement: Literal["required", "advisory"] | None
     message: str | None = Field(description="What the gate says when it fails, from the guardrail's definition.")
+    runs: list[str] = Field(description="The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).")
+    origin: Literal["repo", "user"] | None = Field(
+        description="Whether the gate is the repository's (.otari/) or the user's own (~/.otari/)."
+    )
 
 
 class TraceDetailPublic(BaseModel):
@@ -211,6 +221,7 @@ def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
         otel_trace_id=span.otel_trace_id,
         otel_span_id=span.otel_span_id,
         attributes=dict(span.attributes),
+        content=dict(span.content),
     )
 
 
@@ -251,6 +262,8 @@ def detail_public(view: TraceView) -> TraceDetailPublic:
                 gate_type=gate.gate_type,
                 enforcement=gate.enforcement,  # type: ignore[arg-type]
                 message=gate.message,
+                runs=list(gate.runs),
+                origin=gate.origin,  # type: ignore[arg-type]
             )
             for gate in view.gates
         ],

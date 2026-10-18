@@ -26,6 +26,8 @@ from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.secret_box import generate_secret_key
+from gateway.services.traces._content import seal_content
 
 from .test_otlp import _agent_span, _exempt_key, _otlp_traces
 
@@ -503,6 +505,8 @@ def test_the_detail_counts_each_gate_an_agents_hook_reported_and_names_the_ones_
             "gate_type": "path",
             "enforcement": "required",
             "message": "CHANGELOG.md is generated.",
+            "runs": ["pre_tool_use.edit_target"],
+            "origin": "repo",
         },
         {
             "gate_id": "no-secret-reads",
@@ -515,6 +519,31 @@ def test_the_detail_counts_each_gate_an_agents_hook_reported_and_names_the_ones_
             "gate_type": "path",
             "enforcement": "required",
             "message": None,
+            "runs": ["pre_tool_use.edit_target"],
+            "origin": "repo",
         },
     ]
     assert _operator_get(client, world, "/traces/s-two").json()["gates"] == []
+
+
+def test_the_detail_returns_what_a_span_was_about_where_it_was_kept(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    with db_session_factory() as session:
+        span = session.scalars(
+            select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
+        ).one()
+        span.content_sealed = seal_content(
+            {"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id
+        )
+        session.commit()
+
+    detail = _operator_get(client, world, "/traces/s-one").json()
+
+    contents = {span["span_id"]: span["content"] for span in detail["spans"]}
+    assert contents["call-toolu_1"] == {"command": "pytest -x"}
+    assert contents["req-1"] == {}

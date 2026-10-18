@@ -10783,6 +10783,11 @@ export interface components {
              * @description What the gate says when it fails, from the guardrail's definition.
              */
             message: string | null;
+            /**
+             * Origin
+             * @description Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).
+             */
+            origin: ("repo" | "user") | null;
             /** Passed */
             passed: number;
             /**
@@ -10790,6 +10795,11 @@ export interface components {
              * @description Checks where the gate could not decide and held the agent anyway.
              */
             refused: number;
+            /**
+             * Runs
+             * @description The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).
+             */
+            runs: string[];
             /**
              * Span Id
              * @description The check to open first: the earliest that did anything but pass. Null for a gate that never ran.
@@ -16625,7 +16635,7 @@ export interface components {
         };
         /**
          * SpanPublic
-         * @description One span of a session. Content is never part of a span.
+         * @description One span of a session. Its content is empty unless the deployment keeps content.
          */
         SpanPublic: {
             /**
@@ -16647,6 +16657,13 @@ export interface components {
              * @description Input tokens written to the prompt cache.
              */
             cache_write_tokens: number | null;
+            /**
+             * Content
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.
+             */
+            content: {
+                [key: string]: string;
+            };
             /** Cost */
             cost: number | null;
             /** Duration Ms */

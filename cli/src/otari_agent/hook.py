@@ -55,7 +55,7 @@ from otari_agent.domain.types import (
     by_priority,
 )
 from otari_agent.domain.validation import validate_policy
-from otari_agent.report import CheckReport, GateReport, ModelUsage, enqueue
+from otari_agent.report import CheckReport, GateReport, ModelUsage, enqueue, reports_content
 
 # What a judge or verifier gate's caller-observed outcome may be
 # (domain.types.JudgeVerdict.outcome); the gate runners produce it as a plain
@@ -2182,6 +2182,7 @@ def _hook_report(
     started_ns: int,
     runs: Mapping[str, _GateRun],
     evaluated_ns: int,
+    evidence: str | None,
 ) -> None:
     """Queue this check's gates for the agent's session on its Otari server; see `otari_agent.report`.
 
@@ -2207,6 +2208,7 @@ def _hook_report(
             for gate in guardrail.spec.gates
         )
         types = {gate.gate_id: gate.gate_type for gate in definition}
+        content = reports_content(os.environ)
         gates = tuple(
             GateReport(
                 gate_id=result.gate_id,
@@ -2218,6 +2220,7 @@ def _hook_report(
                 started_ns=run.started_ns if (run := runs.get(result.gate_id)) else started_ns,
                 ended_ns=run.ended_ns if run else evaluated_ns,
                 usage=run.usage if run else (),
+                detail=result.detail if content else None,
             )
             for result in results
             if result.outcome is not Outcome.NOT_APPLICABLE
@@ -2234,6 +2237,7 @@ def _hook_report(
                 gates=gates,
                 tool_call_id=tool_call_id if isinstance(tool_call_id, str) else None,
                 tool_name=tool_name if isinstance(tool_name, str) else None,
+                evidence=evidence if content else None,
             ),
             os.environ,
             definition=definition,
@@ -2612,6 +2616,10 @@ def hook(
     except PolicyCheckError as exc:
         _hook_not_enforcing(f"could not evaluate {guardrail_name} ({exc}); no gate is being enforced.")
         return
+    # What a tool call's check read; a Stop check reads the whole tree and session, which says nothing to a reader.
+    evidence = None
+    if event == "PreToolUse":
+        evidence = "\n".join(commands or []) or ", ".join(dict.fromkeys(paths)) or None
     _hook_report(
         payload,
         harness=harness,
@@ -2624,6 +2632,7 @@ def hook(
         # Judges and verifiers ran before the evaluation, so the other gates' share
         # is the hook's own work before them, plus the evaluation.
         evaluated_ns=(evidence_ns or evaluating_ns) + time.time_ns() - evaluating_ns,
+        evidence=evidence,
     )
     failing = [
         {

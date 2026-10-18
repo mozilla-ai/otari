@@ -328,8 +328,10 @@ def test_answered_calls_become_client_tool_spans_ending_when_this_request_arrive
     tools = [span for span in write.spans if span.kind == "tool"]
     assert [(span.span_id, span.tool_name, span.outcome, span.tool_type) for span in tools] == [
         (client_tool_span_id("toolu_1", 0), "Bash", "ok", "client"),
-        (client_tool_span_id("toolu_2", 0), None, "error", "client"),
+        (client_tool_span_id("toolu_2", 0), None, "ok", "client"),
     ]
+    # An error result the agent read is marked, not counted as the session's error.
+    assert [span.attributes.get("otari.tool.succeeded") for span in tools] == [None, False]
     assert all(span.start_time is None and span.end_time is not None for span in tools)
 
 

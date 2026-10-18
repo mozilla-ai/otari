@@ -1,5 +1,16 @@
-import type { TraceDetail, TraceSpan, TraceSummary, TraceTurn } from "@/client"
-
+import type {
+  TraceDetail,
+  TraceGateSummary,
+  TraceSpan,
+  TraceSummary,
+  TraceTurn,
+} from "@/client"
+import {
+  explainSpan,
+  type GateTally,
+  gateGroupExplanation,
+  groupWords,
+} from "./explain"
 import {
   failureLabel,
   type GuardrailVerdict,
@@ -16,6 +27,7 @@ import {
   spanLabel,
 } from "./traceModel"
 import type {
+  GateCheck,
   Observation,
   ObservationLevel,
   ObservationType,
@@ -89,10 +101,17 @@ function spanLevel(
   return span.recovered ? "WARNING" : "ERROR"
 }
 
+function returnedError(span: TraceSpan): boolean {
+  return (
+    span.kind === "tool" && span.attributes["otari.tool.succeeded"] === false
+  )
+}
+
 function spanStatus(
   span: TraceSpan,
   verdict: GuardrailVerdict | null,
   gateMessages: ReadonlyMap<string, string>,
+  blockedBy: readonly string[] = [],
 ): string | undefined {
   if (verdict && gateVerdict(span)) {
     const said = GATE_STATUS[verdict]
@@ -103,6 +122,14 @@ function spanStatus(
     return said && message ? `${said} ${message}` : said
   }
   if (verdict) return GUARDRAIL_STATUS[verdict]
+  if (span.outcome === "blocked" && blockedBy.length > 0) {
+    const said = blockedBy
+      .map((gateId) => gateMessages.get(gateId))
+      .filter((message) => message !== undefined)
+    return [`Blocked by ${blockedBy.join(", ")} before it ran.`, ...said].join(
+      " ",
+    )
+  }
   if (span.outcome === "blocked") {
     const source = span.attributes["otari.tool.decision_source"]
     return (
@@ -111,12 +138,58 @@ function spanStatus(
       "Blocked before it ran."
     )
   }
+  if (returnedError(span)) {
+    return "Returned an error, which the agent read like any other result. A command returns one when it exits with a non-zero status, as grep finding nothing or a failing test does, so it is not counted as an error of the session."
+  }
   if (span.outcome !== "error") return undefined
   if (span.kind === "mcp_connect") {
     return "Connecting to the server or listing its tools failed."
   }
   const error = failureLabel(span.error_class)
   return span.recovered ? `${error}, recovered by a fallback` : error
+}
+
+// What the span was about, where the deployment keeps content: the one value on
+// its own, so a command or a prompt reads as text rather than as an object.
+function spanInput(span: TraceSpan): unknown {
+  const values = Object.values(span.content)
+  if (values.length === 0) return undefined
+  return values.length === 1 ? values[0] : span.content
+}
+
+function stringAttribute(span: TraceSpan, key: string): string | null {
+  const value = span.attributes[key]
+  return typeof value === "string" ? value : null
+}
+
+function gateOrigin(value: string | null): GateCheck["origin"] {
+  return value === "repo" || value === "user" ? value : null
+}
+
+// A gate's check, joined to what the session's guardrail says about the gate.
+function gateCheck(
+  span: TraceSpan,
+  gates: ReadonlyMap<string, TraceGateSummary>,
+): GateCheck | undefined {
+  const verdict = gateVerdict(span)
+  const gateId = stringAttribute(span, "otari.gate.id")
+  if (!verdict || !gateId) return undefined
+  const declared = gates.get(gateId)
+  return {
+    gateId,
+    verdict,
+    message: declared?.message ?? null,
+    gateType: declared?.gate_type ?? stringAttribute(span, "otari.gate.type"),
+    enforcement: declared?.enforcement ?? null,
+    runs: declared?.runs ?? [],
+    origin:
+      declared?.origin ??
+      gateOrigin(stringAttribute(span, "otari.gate.origin")),
+    moment: span.operation,
+    digest: stringAttribute(span, "otari.policy.digest"),
+    evidence: span.content["gate.evidence"] ?? null,
+    detail: span.content["gate.detail"] ?? null,
+  }
 }
 
 function spanMetadata(span: TraceSpan): Record<string, string> {
@@ -186,13 +259,47 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
     }
 
     const byId = new Map(detail.spans.map((span) => [span.span_id, span]))
+    // The gates that stopped each tool call, by the tool call they hang under.
+    const blockedBy = new Map<string, string[]>()
+    for (const span of detail.spans) {
+      const gateId = span.attributes["otari.gate.id"]
+      const verdict = gateVerdict(span)
+      if (
+        (verdict === "blocked" || verdict === "refused") &&
+        span.parent_span_id &&
+        typeof gateId === "string"
+      ) {
+        blockedBy.set(span.parent_span_id, [
+          ...(blockedBy.get(span.parent_span_id) ?? []),
+          gateId,
+        ])
+      }
+    }
+    const gateSummaries = new Map(
+      detail.gates.map((gate) => [gate.gate_id, gate] as const),
+    )
     const gateMessages = new Map(
       detail.gates.flatMap((gate) =>
         gate.message ? [[gate.gate_id, gate.message] as const] : [],
       ),
     )
-    const visit = (node: SpanNode) => {
+    const isGate = (node: SpanNode) =>
+      node.span.kind === "guardrail" &&
+      typeof node.span.attributes["otari.gate.id"] === "string"
+    const tallyOf = (nodes: SpanNode[]): GateTally => {
+      const tally: GateTally = {}
+      for (const { span } of nodes) {
+        const verdict = gateVerdict(span)
+        if (verdict) tally[verdict] = (tally[verdict] ?? 0) + 1
+      }
+      return tally
+    }
+    // A span's gates go under one row of their own, so a tool call reads as one
+    // line until it is opened, and its gates as one more until they are.
+    const visit = (node: SpanNode, parentOverride?: string) => {
       const { span } = node
+      const gateNodes = node.children.filter(isGate)
+      const tally = gateNodes.length ? tallyOf(gateNodes) : undefined
       const verdict =
         span.kind === "guardrail"
           ? guardrailVerdict(
@@ -205,15 +312,34 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
       observations.push({
         id: span.span_id,
         parentObservationId:
-          span.parent_span_id && byId.has(span.parent_span_id)
+          parentOverride ??
+          (span.parent_span_id && byId.has(span.parent_span_id)
             ? span.parent_span_id
-            : (turnOf.get(span.span_id) ?? null),
+            : (turnOf.get(span.span_id) ?? null)),
+        explain: explainSpan(
+          span,
+          span.parent_span_id ? byId.get(span.parent_span_id) : undefined,
+          blockedBy.get(span.span_id) ?? [],
+          tally,
+        ),
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),
+        input: spanInput(span),
+        gate: gateCheck(span, gateSummaries),
+        detail:
+          span.operation === "tool.blocked_on_user" ||
+          span.operation === "tool.execution" ||
+          parentOverride !== undefined,
         startMs,
         endMs: Math.max(startMs, endMs),
         level: spanLevel(span, verdict),
-        statusMessage: spanStatus(span, verdict, gateMessages),
+        returnedError: returnedError(span),
+        statusMessage: spanStatus(
+          span,
+          verdict,
+          gateMessages,
+          blockedBy.get(span.span_id),
+        ),
         model: span.model ?? undefined,
         provider: span.provider ?? undefined,
         promptTokens: span.input_tokens ?? undefined,
@@ -224,7 +350,37 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         cost: span.cost ?? undefined,
         metadata: spanMetadata(span),
       })
-      for (const child of node.children) visit(child)
+      for (const child of node.children) if (!isGate(child)) visit(child)
+      if (tally) {
+        const groupId = `${span.span_id}:gates`
+        const starts = gateNodes.map(
+          (gate) => offset(gate.span.start_time ?? gate.span.end_time) ?? 0,
+        )
+        const ends = gateNodes.map(
+          (gate) => offset(gate.span.end_time) ?? startMs,
+        )
+        observations.push({
+          id: groupId,
+          parentObservationId: span.span_id,
+          type: "GUARDRAIL",
+          detail: true,
+          name: `Gates · ${groupWords(tally, gateNodes.length)}`,
+          startMs: Math.min(...starts),
+          endMs: Math.max(...starts, ...ends),
+          level:
+            tally.refused || tally.unchecked
+              ? "ERROR"
+              : tally.blocked || tally.flagged
+                ? "WARNING"
+                : "DEFAULT",
+          explain: gateGroupExplanation(
+            tally,
+            span.kind === "step",
+            gateNodes.length,
+          ),
+        })
+        for (const gate of gateNodes) visit(gate, groupId)
+      }
     }
     for (const { steps } of tree.turns) for (const step of steps) visit(step)
     for (const root of tree.roots) visit(root)
