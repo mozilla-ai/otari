@@ -4648,7 +4648,6 @@ async def record_usage(
         usage_log.pricing_reference = None
         usage_log.pricing_effective_at = None
 
-    # Searches the model's provider ran itself bill per search, like the gateway's own.
     provider_searches = provider_web_searches_of(usage_data) if usage_data else 0
     if provider_searches and provider:
         tool_tally = tool_tally if tool_tally is not None else ToolUsageTally()
