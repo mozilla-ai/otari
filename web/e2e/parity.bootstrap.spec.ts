@@ -45,7 +45,6 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // sign-in credential while staying the API one; see
     // docs/access-control.md#dashboard-sessions-and-identity.
     sign_in_methods: ["master_key"],
-    management_url: null,
     // Null because this gateway is its own data plane, which is what makes the
     // dashboard's request snippets correct when they name the address the
     // browser reached. Only a hosted control plane sets it; see otari#823.

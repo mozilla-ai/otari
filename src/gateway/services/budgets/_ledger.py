@@ -6,7 +6,6 @@ The sweep reclaims a leaked hold on its own.
 The sweep takes no row lock, and the conditional UPDATE in :func:`try_terminate` decides between two sweepers.
 A row is written after the holds it records, so the sweep never releases an amount that nobody holds.
 A claim and the release it authorizes commit in one transaction, so a terminal row never has an outstanding hold.
-This module runs in standalone mode only, because in hybrid mode the platform holds against its own ledger.
 """
 
 from __future__ import annotations

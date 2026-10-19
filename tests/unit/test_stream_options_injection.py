@@ -80,7 +80,7 @@ def test_no_injection_for_non_streaming() -> None:
     assert "stream_options" not in kwargs
 
 
-def test_hybrid_stream_forces_usage_when_client_disabled_it() -> None:
+def test_require_usage_forces_usage_when_client_disabled_it() -> None:
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {"include_usage": False, "custom_field": "value"}},
         require_usage=True,

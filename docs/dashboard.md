@@ -10,8 +10,6 @@ server rather than duplicated in the frontend.
   process.
 - **Hosted** shows the multi-tenant control plane. Inference snippets point to
   `data_plane_url`; the hosted process does not serve inference.
-- **Hybrid** shows gateway health and a link to the otari.ai control plane. It has
-  no local management UI.
 
 The dashboard reads `GET /api/v1/bootstrap` before rendering. That response controls
 the available sign-in methods and navigation surfaces, so a page that is not
@@ -90,7 +88,7 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
-- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. On a standalone gateway, Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only. A hybrid or hosted deployment says that its policies are not where a request's attempt plan comes from.
+- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. On a standalone gateway, Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only. A hosted deployment says that its policies are not where a request's attempt plan comes from.
 - Tools
 - API keys and workspace members
 
@@ -264,8 +262,7 @@ not offer the page at all.
 ## Observability
 
 Activity is the per-request log. Sessions lists [agent sessions](traces.md)
-where the deployment records traces (`trace_capture_enabled`, on by default; a
-hybrid gateway records none), and has no entry where it does not. Its chart
+where the deployment records traces (`trace_capture_enabled`, on by default), and has no entry where it does not. Its chart
 counts sessions per hour or day as succeeded or failed, and its Levels column
 counts each session's errors, tools' errors included; a tool's error alone does
 not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). A session

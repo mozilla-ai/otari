@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError, MissingApiKeyError
+from botocore.config import Config as BotocoreConfig
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import (
@@ -60,7 +61,6 @@ from gateway.core.error_codes import MANAGED_CREDENTIAL_UNSUPPORTED, PROVIDER_NO
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
-from gateway.services.bedrock_gateway_auth import with_bedrock_read_timeout
 from gateway.services.catalog import resolve_catalog_offerings, resolve_catalog_selector, resolve_undated_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
@@ -72,6 +72,41 @@ if TYPE_CHECKING:
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
 _INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api")
+
+# How long a Bedrock client waits for the next byte of a response. botocore's
+# default of 60s fails a stream whose model goes quiet for a minute, which a model
+# writing a long tool call does. Callers run their own inactivity deadlines, so this
+# one only has to outlast them. Matches the Anthropic SDK's default read timeout.
+BEDROCK_READ_TIMEOUT_SECONDS = 600
+
+
+def with_bedrock_read_timeout(client_args: Mapping[str, Any] | None) -> dict[str, Any]:
+    """``client_args`` whose Bedrock client waits :data:`BEDROCK_READ_TIMEOUT_SECONDS` for a response.
+
+    A ``config`` the operator supplied, as a botocore ``Config`` or as the mapping
+    a YAML file gives, is merged over the default, so a read timeout it sets wins.
+    A pre-built ``client`` is left as built. The mapping is copied, never mutated,
+    because it can be the one held by the deployment's config.
+
+    Raises:
+        ValueError: ``config`` is neither a ``Config`` nor a mapping.
+    """
+    args = dict(client_args or {})
+    if "client" in args:
+        return args
+    default = BotocoreConfig(read_timeout=BEDROCK_READ_TIMEOUT_SECONDS)
+    config = args.get("config")
+    if config is None:
+        args["config"] = default
+    elif isinstance(config, BotocoreConfig):
+        args["config"] = default.merge(config)
+    elif isinstance(config, Mapping):
+        args["config"] = default.merge(BotocoreConfig(**config))
+    else:
+        msg = f"Bedrock client_args.config must be a botocore Config or a mapping, not {type(config).__name__}."
+        raise ValueError(msg)
+    return args
+
 
 # Providers whose any-llm client is built by an SDK that takes ``max_retries``
 # in its constructor (OpenAI's, Anthropic's and the SDKs generated the same

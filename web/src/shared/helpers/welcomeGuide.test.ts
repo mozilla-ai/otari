@@ -2,14 +2,11 @@ import { describe, expect, it } from "vitest"
 import { welcomeGuideHref } from "./welcomeGuide"
 
 describe("welcomeGuideHref", () => {
-  // The two deployments whose gateway process serves the bundle, and so serves
-  // `/welcome` on the same origin the dashboard was loaded from.
-  it.each(["standalone", "hybrid"] as const)(
-    "links the page a %s deployment serves beside the dashboard",
-    (deployment_type) => {
-      expect(welcomeGuideHref({ deployment_type })).toBe("/welcome")
-    },
-  )
+  // The gateway process serves the bundle, and so serves `/welcome` on the
+  // same origin the dashboard was loaded from.
+  it("links the page a standalone deployment serves beside the dashboard", () => {
+    expect(welcomeGuideHref({ deployment_type: "standalone" })).toBe("/welcome")
+  })
 
   // Not a 404 to route around: otari.ai publishes the bundle as static files
   // from its own edge, and the page it would reach documents a bootstrap key

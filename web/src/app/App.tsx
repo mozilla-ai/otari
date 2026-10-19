@@ -1,6 +1,5 @@
 import { RouterProvider } from "@tanstack/react-router"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { HybridLanding } from "@/app/HybridLanding"
 import { PublicPageTitle } from "@/app/PublicPageTitle"
 import { router } from "@/app/router"
 import { ErrorBoundary } from "@/design-system/feedback/ErrorBoundary"
@@ -103,24 +102,8 @@ export default function App({
  * again.
  */
 function DeploymentRoot({ hash }: { hash: string }) {
-  const { deployment_type, session_type, public_catalog, open_signup } =
-    useDeployment()
+  const { session_type, public_catalog, open_signup } = useDeployment()
   const { isAuthenticated } = useAuth()
-
-  // A hybrid gateway is data-plane only: otari.ai owns its organizations,
-  // credentials, routing, budgets and usage, and a second management UI beside
-  // that one is what the deployment contract rules out. Hosted otari.ai serves
-  // the same dashboard as standalone, so it falls through. Checked first: a
-  // hybrid gateway holds no tenancy state, so an invitation link reaching one
-  // is a link this deployment cannot honor, and the landing page's own
-  // explanation is more useful here than a page that would just 404.
-  if (deployment_type === "hybrid") {
-    return (
-      <PublicPageTitle page="Gateway">
-        <HybridLanding />
-      </PublicPageTitle>
-    )
-  }
 
   // The one URL every visitor may reach without a session or the master key:
   // the recipient of an emailed invitation holds neither. Every route under

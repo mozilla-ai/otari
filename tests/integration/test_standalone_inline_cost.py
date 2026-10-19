@@ -1,8 +1,8 @@
 """A standalone response names its request and carries the cost it settled at.
 
 The gateway prices every standalone request into its own usage row. These pin
-that the same amount reaches the caller on the response, under the fields a
-hybrid response uses, together with a request id, so a client that bills per
+that the same amount reaches the caller on the response, together with a
+request id, so a client that bills per
 request needs neither a second lookup nor a price table of its own.
 """
 

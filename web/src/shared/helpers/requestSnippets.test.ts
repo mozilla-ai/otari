@@ -142,17 +142,6 @@ describe("resolveSnippetBaseUrl", () => {
     ).toBe(ORIGIN)
   })
 
-  it("uses the browser's own origin on a hybrid gateway", () => {
-    // A gateway attached to otari.ai *is* the data plane; only its management
-    // surface lives elsewhere.
-    expect(
-      resolveSnippetBaseUrl(
-        { deployment_type: "hybrid", data_plane_url: null },
-        ORIGIN,
-      ),
-    ).toBe(ORIGIN)
-  })
-
   it("uses the published data plane on a hosted control plane", () => {
     expect(
       resolveSnippetBaseUrl(

@@ -311,12 +311,6 @@ def test_the_optional_request_dependency_produces_a_unit_of_work_over_the_route_
     assert response.json() == {"has_unit_of_work": True, "wraps_route_session": True}
 
 
-def test_the_optional_request_dependency_produces_no_unit_of_work_in_hybrid_mode() -> None:
-    response = TestClient(_probe_app(GatewayConfig(mode="hybrid"))).get("/probe")
-
-    assert response.json() == {"has_unit_of_work": False, "has_session": False}
-
-
 class _StubCodeExecutionPort:
     """Only ``label`` is read when the registry is built."""
 
@@ -355,7 +349,7 @@ def _build_registry(uow: UnitOfWork | None) -> SandboxContainerRegistry | None:
 async def test_a_sandbox_collaborator_needs_a_unit_of_work(
     notes_database: None, build: Callable[[UnitOfWork | None], object | None]
 ) -> None:
-    """Hybrid mode has no Unit of Work, and a collaborator that writes cannot be built without one."""
+    """A collaborator that writes cannot be built without a Unit of Work."""
     assert build(None) is None
     async with create_unit_of_work() as uow:
         assert build(uow) is not None

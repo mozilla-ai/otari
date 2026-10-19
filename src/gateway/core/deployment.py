@@ -58,13 +58,10 @@ def deployment_for(config: GatewayConfig) -> Deployment:
 
     A hosted control plane serves no data plane, because it owns many tenants'
     wallets and credentials while running none of their traffic: a completion
-    served here would skip the usage report that debits the wallet.
-    A hybrid gateway owns no control plane, because a peer answers for it.
+    served here would skip the wallet debit.
     A standalone deployment serves both from the one process.
     """
-    planes = Plane(0)
+    planes = Plane.CONTROL
     if not config.is_hosted_mode:
         planes |= Plane.DATA
-    if not config.is_hybrid_mode:
-        planes |= Plane.CONTROL
     return Deployment(planes)

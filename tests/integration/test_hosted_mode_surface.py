@@ -1,7 +1,6 @@
 """A hosted control plane serves the management plane and refuses inference.
 
-The mirror of ``test_hybrid_mode_surface``, which asserts the opposite posture
-for the opposite deployment. Regression cover for otari#822: hosted mode used to
+Regression cover for otari#822: hosted mode used to
 mount every data-plane router alongside the management API, so a workspace key
 pointed at the control plane host ran real inference that no wallet was ever
 debited for.
@@ -140,7 +139,7 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
         f"{API_ROOT}/keys",
         f"{API_ROOT}/usage",
         f"{API_ROOT}/organizations/me/provider-keys",
-        # An organization's own web search keys, which its hybrid gateways search with.
+        # An organization's own web search keys.
         f"{API_ROOT}/organizations/me/web-search-keys",
         # Discovery, not dispatch, and a surface bootstrap publishes for a
         # hosted deployment, so it stays mounted.

@@ -93,9 +93,6 @@ aliases for the OpenAI implementation.
 The optional `models` list supplies discovery for a backend that has no
 model-listing endpoint. It does not restrict direct dispatch.
 
-Named instances are local configuration and do not apply in hybrid mode, where
-the control plane resolves each attempt.
-
 A workspace or a single user can also bring its own server, reached the same
 way (`my-vllm:qwen3`) but visible only to its owner. See
 [Provider endpoints](provider-endpoints.md).
@@ -151,9 +148,7 @@ Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.
 
-Hosted mode keeps `GET /api/v1/models` for control-plane discovery. Hybrid mode
-does not serve the local catalog: it relays the control plane's list, limits
-included (see [Model listing](hybrid-mode-protocol.md#model-listing)).
+Hosted mode keeps `GET /api/v1/models` for control-plane discovery.
 
 ### Who is shown which models
 
@@ -350,7 +345,7 @@ another tenant's selector lands, and a model nobody offers to the caller
 resolves as the deployment's view says. A model's `selector` in the catalog is
 null where the caller has no such spelling for it.
 
-In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it. In hybrid mode, the control plane decides which offerings a request may try.
+In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it.
 
 The Routing page's "Automatic fallback" section, read from
 `GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your

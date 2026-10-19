@@ -27,9 +27,8 @@ async def test_commits_so_the_connection_returns_to_the_pool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hybrid_mode_has_no_session_to_release() -> None:
-    # Hybrid mode resolves credentials over HTTP and is handed no session at
-    # all, so this must not assume one.
+async def test_no_session_means_nothing_to_release() -> None:
+    # The signature admits a missing session, so this must not assume one.
     assert await release_session(None) is False
 
 

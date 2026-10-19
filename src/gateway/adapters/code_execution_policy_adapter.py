@@ -1,20 +1,14 @@
-"""The two places a workspace's code execution policy comes from.
-
-``LocalCodeExecutionPolicy`` reads the row this deployment holds.
-``RemoteCodeExecutionPolicy`` asks a peer, speaking `docs/hybrid-mode-protocol.md`.
-"""
+"""Where a workspace's code execution policy comes from: the row this deployment holds."""
 
 from __future__ import annotations
 
-from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionPolicyResolutionFailedError,
     CodeExecutionPolicyResolutionFailure,
 )
 from gateway.models.tools import ResolvedCodeExecutionPolicy
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
-from gateway.services.control_plane import ResolveEndpoint, resolve
-from gateway.services.tools import WorkspaceCodeExecutionPolicies, read_code_execution_policy
+from gateway.services.tools import WorkspaceCodeExecutionPolicies
 
 # The policy of a workspace that holds no row where this deployment makes code execution opt-in.
 _NOT_TURNED_ON = ResolvedCodeExecutionPolicy(
@@ -43,28 +37,3 @@ class LocalCodeExecutionPolicy(CodeExecutionPolicyPort):
         if policy is None and not self._on_without_policy:
             return _NOT_TURNED_ON
         return policy
-
-
-class RemoteCodeExecutionPolicy(CodeExecutionPolicyPort):
-    """The policy the control plane holds for this deployment's workspaces."""
-
-    def __init__(self, config: GatewayConfig) -> None:
-        self._config = config
-
-    async def resolve(self, scope: CodeExecutionPolicyScope) -> ResolvedCodeExecutionPolicy | None:
-        if not scope.user_token:
-            raise CodeExecutionPolicyResolutionFailedError(CodeExecutionPolicyResolutionFailure.NO_CALLER_CREDENTIAL)
-        answer = await resolve(
-            self._config,
-            user_token=scope.user_token,
-            endpoint=ResolveEndpoint.CODE_EXECUTION,
-            body={},
-        )
-        if not isinstance(answer, dict):
-            raise CodeExecutionPolicyResolutionFailedError(CodeExecutionPolicyResolutionFailure.ANSWER_UNREADABLE)
-        try:
-            return read_code_execution_policy(answer)
-        except ValueError:
-            raise CodeExecutionPolicyResolutionFailedError(
-                CodeExecutionPolicyResolutionFailure.ANSWER_UNREADABLE
-            ) from None

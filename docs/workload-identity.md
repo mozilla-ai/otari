@@ -13,8 +13,7 @@ authenticates as that key. Everything the key carries still applies: its
 active flag and expiry, its user being blocked, its model allow-list, its
 budgets and ceilings, and whether it is a service key.
 
-Workload identity is available in standalone and hosted modes. A hybrid
-gateway verifies no keys of its own and refuses the setting at startup. It also
+Workload identity is available in standalone and hosted modes. It
 needs `OTARI_SECRET_KEY`, which signs the access tokens of the
 [token exchange](#claude-code-and-the-anthropic-sdks): with `federation_issuers`
 set and no `OTARI_SECRET_KEY`, the gateway refuses to start.

@@ -30,7 +30,6 @@ from gateway.main import _create_lifespan, create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "src" / "gateway" / "features.py"
-PLATFORM_TOKEN = "gw_test_token"
 
 
 @pytest.fixture(autouse=True)
@@ -56,10 +55,6 @@ def _hosted(tmp_path: Path) -> GatewayConfig:
         master_key="sk-test-master",
         data_plane_url="https://gateway.example.com",
     )
-
-
-def _hybrid() -> GatewayConfig:
-    return GatewayConfig(mode="hybrid", platform={"base_url": "http://localhost:8100/api/v1"})
 
 
 def _probe(*, enabled: bool, surface: Surface | None = Surface("probe"), worker: Worker | None = None) -> CoreFeature:
@@ -131,15 +126,6 @@ def test_a_feature_route_is_a_core_route_with_no_capability_gate(
     assert response.json() == {"ok": "yes"}
 
 
-def test_a_hybrid_gateway_mounts_no_feature_routers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Management plane only: hybrid returns before the management routers, and a feature sits with them."""
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True),))
-    app = create_app(_hybrid())
-    mounted = {route.path for route in iter_route_contexts(app.routes) if isinstance(route.original_route, APIRoute)}
-    assert f"{API_ROOT}/probe" not in mounted
-
-
 def test_an_enabled_feature_hosts_its_surface_beside_the_fixed_set(tmp_path: Path) -> None:
     enabled = (_probe(enabled=True),)
     assert published_surfaces(_standalone(tmp_path), enabled) == sorted((*STANDALONE_SURFACES, "probe"))
@@ -171,17 +157,6 @@ def test_a_disabled_feature_hosts_no_surface(tmp_path: Path, monkeypatch: pytest
 def test_a_feature_with_no_page_hosts_no_surface(tmp_path: Path) -> None:
     enabled = (_probe(enabled=True, surface=None),)
     assert published_surfaces(_standalone(tmp_path), enabled) == sorted(STANDALONE_SURFACES)
-
-
-def test_a_hybrid_gateway_publishes_no_surface_whatever_the_registry_says(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True),))
-    app = create_app(_hybrid())
-
-    with TestClient(app) as client:
-        surfaces = client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
-
-    assert surfaces == []
 
 
 def test_the_bootstrap_publishes_an_enabled_feature_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -299,20 +274,6 @@ async def test_a_worker_that_will_not_stop_is_abandoned_and_named_as_a_worker(
         await asyncio.gather(*tasks, return_exceptions=True)
 
     assert "probe worker did not stop within" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_a_hybrid_gateway_starts_no_feature_worker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Standalone only, like the refreshers: a hybrid gateway has no local database for a worker to work on."""
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    probe = _Probe()
-    monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, worker=probe.run),))
-    app = create_app(_hybrid())
-
-    async with _create_lifespan()(app):
-        await asyncio.sleep(0)
-
-    assert not probe.started.is_set()
 
 
 @pytest.mark.parametrize("built_enabled", [True, False], ids=["switched-off-later", "switched-on-later"])

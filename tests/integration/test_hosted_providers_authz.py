@@ -28,10 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import reset_db
-from gateway.main import create_app
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.model_discovery_service import ProviderDiscovery
@@ -352,26 +349,3 @@ def test_an_operator_reaches_every_route(
         )
 
         assert 200 <= response.status_code < 300, (principal, method, template, response.text)
-
-
-def test_hybrid_mode_mounts_none_of_the_surface(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A hybrid gateway has no local control plane, so the routes are absent rather than gated."""
-    routes = _hosted_routes(client)
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    config = GatewayConfig(
-        mode="hybrid", master_key="test-master-key", platform={"base_url": "http://localhost:8100/api/v1"}
-    )
-
-    try:
-        with TestClient(create_app(config)) as hybrid:
-            assert _hosted_routes(hybrid) == []
-            for method, template in routes:
-                path = _concrete(template, uuid.uuid4())
-                for headers in ({}, {"Authorization": "Bearer test-master-key"}):
-                    response = hybrid.request(
-                        method, path, json=_example_body(client, method, template), headers=headers
-                    )
-                    assert response.status_code == 404, (method, template, response.text)
-    finally:
-        reset_config()
-        reset_db()

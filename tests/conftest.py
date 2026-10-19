@@ -11,10 +11,9 @@ from collections.abc import AsyncIterator, Callable, Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 import anyio
-import httpx
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,17 +27,6 @@ if TYPE_CHECKING:
     from gateway.services.pricing import ModelsDevPriceIndex
 
 MODELS_DEV_MINI = ROOT / "tests" / "fixtures" / "models_dev_mini.json"
-
-
-class ControlPlaneHandler(Protocol):
-    """One call to a control plane, as a test answers it."""
-
-    async def __call__(
-        self, *, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
-    ) -> httpx.Response: ...
-
-
-InstallControlPlane = Callable[[ControlPlaneHandler], None]
 
 
 @dataclass(frozen=True)
@@ -263,25 +251,6 @@ def no_otari_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unset every ``OTARI_*`` variable, so the developer's shell cannot switch a mode or put a key in test output."""
     for name in [name for name in os.environ if name.startswith("OTARI_")]:
         monkeypatch.delenv(name)
-
-
-@pytest.fixture
-def control_plane_transport(monkeypatch: pytest.MonkeyPatch) -> InstallControlPlane:
-    """Answer a hybrid gateway's control plane calls with ``handler``.
-
-    ``handler`` receives the request the gateway would have sent and returns the
-    response it should read back, so a test states the answers it wants rather
-    than where the call is made.
-
-    NOTE: this is the only place the suite names the transport. A test that
-    reaches for it directly pins the call to wherever it lives today, and a
-    later move leaves that test passing while intercepting nothing.
-    """
-
-    def install(handler: ControlPlaneHandler) -> None:
-        monkeypatch.setattr("gateway.services.control_plane.transport.post", handler)
-
-    return install
 
 
 class TaskGroupMcpTransport:

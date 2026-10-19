@@ -4,8 +4,7 @@ The ``/api/v1/providers`` endpoint reports static, network-free metadata for eve
 configured provider. The ``/api/v1/provider-credentials`` endpoints manage the
 ``provider_credentials`` table: providers an operator adds at runtime through the
 dashboard, encrypted at rest and merged over config.yml providers. Those describe or
-change the gateway's own configuration, so their router is operator-gated;
-standalone-mode only (it is not mounted in hybrid).
+change the gateway's own configuration, so their router is operator-gated.
 
 ``/api/v1/providers/catalog`` is the exception, on ``catalog_router``: it lists the
 providers any-llm knows, which is a property of the build rather than of this

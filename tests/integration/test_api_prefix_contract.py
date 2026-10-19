@@ -12,8 +12,7 @@ path built in a helper or a message from the literal is invisible above.
 
 The stamp checks are weaker on purpose. ``custom_openapi`` reads the same
 lists, so a mounted path wrongly added to ``_UNAUTHENTICATED_PATHS`` stamps
-itself consistent and passes; only the gateway-token check asserts an exact
-value. Whether a listed path really answers without a credential is a runtime
+itself consistent and passes. Whether a listed path really answers without a credential is a runtime
 question, and not this test's.
 
 On the worker's PostgreSQL like the rest of ``tests/integration``, because
@@ -37,7 +36,6 @@ from gateway.api.routes import (
     chat,
     embeddings,
     hosted_mode,
-    hybrid_mode,
     images,
     mcp,
     messages,
@@ -45,12 +43,10 @@ from gateway.api.routes import (
     rerank,
     responses,
     search,
-    web_search_backend,
 )
-from gateway.core.config import API_ROOT, OTLP_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
+from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 from gateway.main import (
     _COOKIE_AUTH_PREFIXES,
-    _GATEWAY_TOKEN_PATHS,
     _PUBLIC_PREFIXES,
     _UNAUTHENTICATED_PATHS,
     create_app,
@@ -90,33 +86,12 @@ def _mounted(app: FastAPI) -> set[str]:
 
 @pytest.fixture(scope="module")
 def standalone(postgres_url: str) -> FastAPI:
-    # Web search configured, so web_search_backend.router mounts and the
-    # gateway-token path exists to be checked.
-    return create_app(
-        _config(
-            postgres_url,
-            "standalone",
-            enable_metrics=True,
-            web_search_provider="tavily",
-            web_search_provider_api_key="test-search-key",
-            web_search_backend_token="test-gateway-token",
-        )
-    )
+    return create_app(_config(postgres_url, "standalone", enable_metrics=True))
 
 
 @pytest.fixture(scope="module")
 def hosted(postgres_url: str) -> FastAPI:
     return create_app(_config(postgres_url, "hosted"))
-
-
-@pytest.fixture(scope="module")
-def hybrid(postgres_url: str) -> FastAPI:
-    # The token is read once, while the config loads, so it need only be in
-    # the environment for the construction. Left set, it would make the next
-    # standalone app built in this process refuse to start.
-    with pytest.MonkeyPatch.context() as env:
-        env.setenv(PLATFORM_TOKEN_ENV_VAR, "test-platform-token")
-        return create_app(_config(postgres_url, "hybrid", platform={"base_url": "http://localhost:8100/api/v1"}))
 
 
 def _under(path: str, root: str) -> bool:
@@ -152,15 +127,11 @@ def test_frozen_root_paths_still_exist(standalone: FastAPI) -> None:
     assert not missing, f"frozen root paths were moved or dropped: {sorted(missing)}"
 
 
-def test_exact_match_allowlists_name_mounted_routes(standalone: FastAPI) -> None:
+def test_exact_match_allowlist_names_mounted_routes(standalone: FastAPI) -> None:
     mounted = _mounted(standalone)
-    for name, paths in (
-        ("_UNAUTHENTICATED_PATHS", _UNAUTHENTICATED_PATHS),
-        ("_GATEWAY_TOKEN_PATHS", _GATEWAY_TOKEN_PATHS),
-    ):
-        assert paths, f"{name} is empty"
-        missing = set(paths) - mounted
-        assert not missing, f"{name} names routes that are not mounted: {sorted(missing)}"
+    assert _UNAUTHENTICATED_PATHS, "_UNAUTHENTICATED_PATHS is empty"
+    missing = set(_UNAUTHENTICATED_PATHS) - mounted
+    assert not missing, f"_UNAUTHENTICATED_PATHS names routes that are not mounted: {sorted(missing)}"
 
 
 def test_prefix_allowlists_cover_at_least_one_route(standalone: FastAPI) -> None:
@@ -180,12 +151,6 @@ def test_generated_document_stamps_security_as_the_allowlists_say(standalone: Fa
         for method, operation in paths[path].items():
             if isinstance(operation, dict):
                 assert "security" not in operation, f"{method.upper()} {path} is stamped but listed as unauthenticated"
-    for path in _GATEWAY_TOKEN_PATHS:
-        for method, operation in paths[path].items():
-            if isinstance(operation, dict):
-                assert operation.get("security") == [{"GatewayTokenAuth": []}], (
-                    f"{method.upper()} {path} must be stamped GatewayTokenAuth only"
-                )
 
 
 def _operation_ids(app: FastAPI) -> Counter[str]:
@@ -199,7 +164,7 @@ def _operation_ids(app: FastAPI) -> Counter[str]:
     return ids
 
 
-def test_no_operation_id_names_a_mount_root(standalone: FastAPI, hosted: FastAPI, hybrid: FastAPI) -> None:
+def test_no_operation_id_names_a_mount_root(standalone: FastAPI, hosted: FastAPI) -> None:
     """The id is the method name a generated SDK exposes, so it must outlive a path move.
 
     FastAPI's default folds the whole path into the id, which is how every
@@ -207,7 +172,7 @@ def test_no_operation_id_names_a_mount_root(standalone: FastAPI, hosted: FastAPI
     form that default writes them, with every non-word character an underscore.
     """
     roots = tuple(re.sub(r"\W", "_", root) for root in (API_ROOT, OTLP_ROOT))
-    for mode, app in (("standalone", standalone), ("hosted", hosted), ("hybrid", hybrid)):
+    for mode, app in (("standalone", standalone), ("hosted", hosted)):
         stray = sorted(op for op in _operation_ids(app) if any(root in op for root in roots))
         assert not stray, f"{mode}: operation ids carry a mount root: {stray}"
 
@@ -217,29 +182,27 @@ def test_operation_ids_are_tag_and_handler(standalone: FastAPI) -> None:
     assert "keys-create_key" in _operation_ids(standalone)
 
 
-def test_the_mode_stubs_are_not_published(hosted: FastAPI, hybrid: FastAPI) -> None:
+def test_the_hosted_stub_is_not_published(hosted: FastAPI) -> None:
     """A refusal is a deployment posture, not an operation a client can call.
 
-    Pinned by name rather than left to the duplicate check, which the stubs
-    would also pass if they were split into one route per method.
+    Pinned by name rather than left to the duplicate check, which the stub
+    would also pass if it were split into one route per method.
     """
-    hosted_prefixes = [f"{API_ROOT}{prefix}" for prefix, _ in hosted_mode.DATA_PLANE_PREFIXES]
-    hybrid_prefixes = [f"{API_ROOT}{route.path}" for route in hybrid_mode.router.routes if hasattr(route, "path")]
-    for mode, app, prefixes in (("hosted", hosted, hosted_prefixes), ("hybrid", hybrid, hybrid_prefixes)):
-        assert prefixes, f"{mode}: no stub prefixes to check"
-        published = {p for p in app.openapi()["paths"] if any(_under(p, prefix) for prefix in prefixes)}
-        assert not published, f"{mode}: refused paths reached the document: {sorted(published)}"
+    prefixes = [f"{API_ROOT}{prefix}" for prefix, _ in hosted_mode.DATA_PLANE_PREFIXES]
+    assert prefixes, "no stub prefixes to check"
+    published = {p for p in hosted.openapi()["paths"] if any(_under(p, prefix) for prefix in prefixes)}
+    assert not published, f"refused paths reached the document: {sorted(published)}"
 
 
-def test_operation_ids_are_unique_in_every_mode(standalone: FastAPI, hosted: FastAPI, hybrid: FastAPI) -> None:
+def test_operation_ids_are_unique_in_every_mode(standalone: FastAPI, hosted: FastAPI) -> None:
     """A duplicate id makes the document invalid, and only one mode's document is committed.
 
-    The mode stubs answer seven methods at two paths from one handler, and an
-    id is derived once per route, so any stub that reaches the document
-    duplicates itself. Standalone mounts no stub, which is why the committed
-    document never showed it.
+    The hosted stub answers several methods from one handler, and an id is
+    derived once per route, so a stub that reaches the document duplicates
+    itself. Standalone mounts no stub, which is why the committed document
+    never showed it.
     """
-    for mode, app in (("standalone", standalone), ("hosted", hosted), ("hybrid", hybrid)):
+    for mode, app in (("standalone", standalone), ("hosted", hosted)):
         duplicated = sorted(op for op, count in _operation_ids(app).items() if count > 1)
         assert not duplicated, f"{mode}: duplicate operation ids: {duplicated}"
 
@@ -329,7 +292,6 @@ FROZEN_LABELS = frozenset(
         responses.USAGE_ENDPOINT,
         search.SEARCH_ENDPOINT,
         PLAYGROUND_USAGE_ENDPOINT,
-        web_search_backend.SEARCH_ENDPOINT,
     }
 )
 # OpenAI's Batch API names the operation each line runs by OpenAI's own path,

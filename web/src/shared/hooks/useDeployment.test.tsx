@@ -19,7 +19,7 @@ function wrapper(value = bootstrap()) {
 
 describe("useDeployment", () => {
   it("hands back the bootstrap the page was served with", () => {
-    const served = bootstrap({ deployment_type: "hybrid" })
+    const served = bootstrap({ deployment_type: "hosted" })
     const { result } = renderHook(() => useDeployment(), {
       wrapper: wrapper(served),
     })
@@ -49,14 +49,6 @@ describe("useSurfaces", () => {
     expect(result.current("usage")).toBe(true)
     expect(result.current("models")).toBe(true)
     expect(result.current("budgets")).toBe(false)
-  })
-
-  it("hosts nothing on a hybrid gateway", () => {
-    const { result } = renderHook(() => useSurfaces(), {
-      wrapper: wrapper(bootstrap({ deployment_type: "hybrid", surfaces: [] })),
-    })
-
-    expect(result.current("usage")).toBe(false)
   })
 })
 

@@ -129,7 +129,6 @@ class WebRetrievalBackend:
         search_timeout_s: float = _DEFAULT_SEARCH_TIMEOUT_S,
         purpose_hint: str | None = None,
         provider_options: dict[str, Any] | None = None,
-        auth_token: str | None = None,
         tally: ToolUsageTally | None = None,
         trace: RequestTrace | None = None,
         retrieval_service: WebFetchService | None = None,
@@ -181,11 +180,6 @@ class WebRetrievalBackend:
         # (see `_search`); complex / None values are dropped so a misconfigured
         # entry can't smuggle structured payloads into the GET.
         self._provider_options = dict(provider_options) if provider_options else {}
-        # Optional bearer-style credential forwarded as `X-Gateway-Token` on the
-        # `/search` request. Set when the search backend is the platform-hosted
-        # endpoint (which authenticates the gateway); unset for a standalone
-        # SearXNG / self-hosted adapter, which ignores the header.
-        self._auth_token = auth_token
         self._client: httpx.AsyncClient | None = None
         # The search results' own fetcher, for enrichment; a fetch tool call never uses it.
         self._retrieval_service = retrieval_service
@@ -424,11 +418,9 @@ class WebRetrievalBackend:
                 params[key] = "true" if value else "false"
             elif isinstance(value, (str, int, float)):
                 params[key] = value
-        headers = {"X-Gateway-Token": self._auth_token} if self._auth_token else None
         response = await self._client.get(
             f"{self._base_url}/search",
             params=params,
-            headers=headers,
             timeout=self._search_timeout_s,
         )
         response.raise_for_status()

@@ -1,39 +1,38 @@
 # Runtime modes
 
-Otari has three deployment modes. Standalone serves both the control plane and
-data plane. Hosted serves only a multi-tenant control plane. Hybrid serves a data
-plane connected to an external control plane such as otari.ai.
+Otari has two deployment modes, selected by `OTARI_MODE`. Standalone serves both
+the control plane and data plane. Hosted serves only a multi-tenant control plane.
 
 ## Comparison
 
-| | Standalone | Hosted | Hybrid |
-| --- | --- | --- | --- |
-| Local database | Yes | Yes | No |
-| Local management API | Yes | Yes | No |
-| Local inference | Yes | No | Yes |
-| Provider credentials | Local config or database | Organization-scoped for tenants; deployment config is operator-only | Resolved per request from the platform |
-| Usage | Stored locally | Received and stored by the control plane | Reported to the platform |
-| Dashboard | Full local dashboard | Organization-scoped control plane | Health and control-plane link |
+| | Standalone | Hosted |
+| --- | --- | --- |
+| Local database | Yes | Yes |
+| Local management API | Yes | Yes |
+| Local inference | Yes | No |
+| Provider credentials | Local config or database | Organization-scoped for tenants; deployment config is operator-only |
+| Dashboard | Full local dashboard | Organization-scoped control plane |
 
 `GET /api/v1/bootstrap` publishes the effective mode, sign-in methods, available
-management surfaces, and the management or data-plane URL the dashboard needs.
+management surfaces, and the data-plane URL the dashboard needs.
+
+Hybrid mode, a gateway attached to otari.ai, has been removed. Otari refuses to
+start while `OTARI_AI_TOKEN` is set or `OTARI_MODE` is `hybrid`, and ignores a
+leftover `platform:` block in `config.yml` with a warning. The `PLATFORM_*` and
+`STREAMING_FALLBACK_*` variables are no longer read. To keep serving, unset the
+token and run the gateway in standalone mode with providers of its own.
 
 ## Mode and who runs it
 
 The mode says what a process serves. It does not say who runs the process.
 
-- A **self-hosted** gateway is one you run on your own infrastructure. It runs in
-  standalone mode, or in hybrid mode when it connects to otari.ai.
-- **otari.ai's own gateway** is the one mozilla.ai runs to serve otari.ai's
-  inference. It runs in hybrid mode.
-
-"Hosted" names the control-plane mode. It is not the opposite of
+A **self-hosted** gateway is one you run on your own infrastructure, in
+standalone mode. "Hosted" names the control-plane mode. It is not the opposite of
 "self-hosted": a hosted deployment serves no inference, and anyone can run one.
 
 ## Standalone
 
-Standalone is the default when neither `OTARI_MODE` nor `OTARI_AI_TOKEN` is
-set. It serves the full API, stores keys, budgets, and usage locally, and resolves
+Standalone is the default when `OTARI_MODE` is unset. It serves the full API, stores keys, budgets, and usage locally, and resolves
 providers from configuration or stored credentials.
 
 SQLite is useful for evaluation. Use PostgreSQL for a durable deployment.
@@ -60,43 +59,6 @@ operator configures the credentials the deployment pays for (see
 It also hides the Playground, whose whole purpose is to dispatch a completion.
 Deployment-wide APIs still require operator authority; organization-scoped APIs
 apply membership and role checks.
-
-A hosted control plane and its hybrid gateways form one system: the gateway
-resolves credentials from the control plane and reports usage back so the
-control plane can debit the correct tenant.
-
-## Hybrid, connected to otari.ai
-
-Hybrid mode is selected when `OTARI_AI_TOKEN` is present. Set
-`OTARI_MODE=hybrid` as well if you want startup to require that mode. Conflicting
-configurations fail at startup:
-
-- `hybrid` without a platform token
-- `standalone` or `hosted` with a platform token
-
-The token is the gateway credential created in otari.ai, commonly prefixed
-`gw_`. It is not the user token sent by clients.
-
-```bash
-export OTARI_AI_TOKEN=gw_your_gateway_token
-otari serve
-```
-
-Hybrid serves health, bootstrap, Chat Completions, Messages, Responses,
-embeddings, rerank, image generation, audio transcription and speech,
-moderations, direct MCP tool execution (`POST /api/v1/mcp/execute`), and the
-guardrail hook check (`POST /api/v1/hooks/check`). Files, batches, direct search
-and decision calls (`/decisions`, `/systemone`, `/routing/recommend`) are
-standalone only. It
-does not initialize the local management database or use local provider
-configuration. Clients authenticate with an otari.ai user
-token, accepted in the same header forms as standalone mode
-(`Authorization: Bearer`, `Otari-Key`, or `x-api-key`).
-
-The gateway asks the platform to resolve an ordered set of provider attempts,
-tries retryable fallbacks before a response begins, and reports each outcome.
-Workspace MCP and web-search configuration are resolved through the same control
-plane.
 
 ## Hosted providers and BYO credentials
 
@@ -152,19 +114,6 @@ of either view dials at once, and changing or deleting a hosted provider drops
 its cached listing so the next read dials the credential as it now stands. A
 provider switched off and one whose key cannot be decrypted are never dialed.
 
-otari.ai is one deployment of this feature: its hosted control plane holds the
-hosted providers that serve its managed models. Hybrid mode can therefore
-receive two kinds of provider credential:
-
-- A workspace's own provider key. The upstream provider bills that workspace.
-  Any hybrid gateway can use it, including a self-hosted one.
-- A control plane's hosted-provider credential. Usage is billed by the control
-  plane. On otari.ai, only otari.ai's own gateway receives it.
-
-Managed model identifiers use the catalog values the control plane publishes.
-otari.ai refuses a hosted credential to a self-hosted gateway, so platform-owned
-secrets never leave mozilla.ai's infrastructure.
-
 ## Deployment-paid credentials in standalone
 
 A deployment can serve a model on a credential it owns, once an organization's
@@ -190,10 +139,3 @@ the deployment offers the organization only that way is refused there with `424`
 (`managed_credential_unsupported`) rather than `provider_not_configured`, before
 anything is sent upstream. A routing policy skips such a candidate as it skips
 one with no credential, and answers with that code only when no candidate served.
-
-## Internal protocol
-
-The gateway and control plane exchange provider resolution, MCP configuration,
-web-search policy, and usage reports. Integrators building a compatible control
-plane should use the normative [hybrid-mode protocol](hybrid-mode-protocol.md)
-rather than this overview.

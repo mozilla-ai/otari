@@ -15,9 +15,7 @@ exporter appends `/v1/traces`, `/v1/logs` and `/v1/metrics`.
 
 ## Authentication
 
-Otari accepts a credential in any of these forms, whatever the mode: a local API
-key or the master key in standalone and hosted mode, an otari.ai user token in
-hybrid mode:
+Otari accepts an API key or the master key in any of these forms:
 
 ```text
 Authorization: Bearer <token>
@@ -33,24 +31,16 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
-In hybrid mode, the generation APIs and the `/api/v1/mcp` and `/api/v1/hooks`
-endpoints accept an otari.ai user token in the same header forms. Local API
-keys and management APIs are not used.
-
 ## Availability by mode
 
-| Surface | Standalone | Hosted | Hybrid |
-| --- | --- | --- | --- |
-| Health and `/api/v1/bootstrap` | Yes | Yes | Yes |
-| Chat, Messages, and Responses | Yes | No | Yes |
-| Caller-orchestrated MCP | Yes | No | Yes |
-| Other inference APIs | Yes | No | No |
-| `/api/v1/models` | Yes | Yes | Yes |
-| Management APIs | Yes | Yes | No |
-
-In hybrid mode, `/api/v1/models` lists the models the platform reports for the
-caller's key, so it needs the platform's model-listing endpoint (see the
-[Hybrid mode protocol](hybrid-mode-protocol.md#model-listing)).
+| Surface | Standalone | Hosted |
+| --- | --- | --- |
+| Health and `/api/v1/bootstrap` | Yes | Yes |
+| Chat, Messages, and Responses | Yes | No |
+| Caller-orchestrated MCP | Yes | No |
+| Other inference APIs | Yes | No |
+| `/api/v1/models` | Yes | Yes |
+| Management APIs | Yes | Yes |
 
 Hosted mode is a control plane. Its inference paths return a descriptive `404`
 and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
@@ -114,8 +104,7 @@ no way to send them back.
 ### Request ID and inline cost
 
 Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
-header, streaming or not. In hybrid mode it is the platform's id for the
-request; a standalone gateway mints its own. A standalone gateway also names the
+header, streaming or not. The gateway also names the
 provider instance and model that served the request, whether a fallback did, and
 how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
 `Otari-Fallback` and `Otari-Response-Duration-Ms`; see
@@ -131,12 +120,11 @@ and Gemini report usage on the chunk carrying `finish_reason`); `message_delta` 
 Messages; and `response.completed` for Responses. The two fields always appear
 together, and an unpriced or unreported request carries neither.
 
-In standalone mode the amount is the one the gateway wrote to its own usage
+The amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
 rate that priced the model: `organization` (an organization's override),
 `deployment` (a rate stored on this gateway), or `defaults` (the bundled or
-accepted models.dev snapshot). Hybrid mode attaches the platform's settlement instead;
-see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
+accepted models.dev snapshot).
 
 Each request's cost is settled to the micro-dollar, half-up, so a request that
 costs less than half a micro-dollar, such as a few tokens of a cheap embedding
@@ -341,10 +329,6 @@ background, and for an id that is unknown or belongs to another key. A stream th
 client abandoned before the provider reported any usage, and that ran no gateway
 tools, has nothing to bill and writes no row, so its id stays 404.
 
-This lookup is standalone only. In hybrid mode the platform owns settlement, and
-a failed stream reports no usage to it; see
-[Hybrid mode protocol](hybrid-mode-protocol.md).
-
 ### Retrying safely
 
 A request the provider or the gateway refused (a 429, a 529, any other error) is
@@ -391,8 +375,7 @@ fails the next retry runs in its place.
 - Only a successful response is kept. On a retry the request is still
   authenticated and checked against the key's model access, and a user who has
   since been blocked is refused rather than given the stored response.
-- Streaming requests ignore the header, and so does hybrid mode, which has no
-  local database to keep the response in.
+- Streaming requests ignore the header.
 
 A retry runs again, and is billed again, whenever the original's response was
 not stored or can no longer be read. The cases above are the ones a deployment
@@ -682,7 +665,7 @@ reworded.
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
-| `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
+| `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, or a direct search's pricing row is missing (see [Search](#search)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: declare the provider in `config.yml` with an `api_key` reading the environment variable the detail names (a keyless or ambient-credential provider needs only the entry), store it through the dashboard, or add an organization provider key. The variable alone serves nothing | |
@@ -724,12 +707,12 @@ A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request
 would get unstreamed: a `400` for a parameter the provider does not accept, a
 `502` for a provider outage. Otari holds the response until the provider's first
-chunk to make that possible. A standalone gateway holds it for at most
+chunk to make that possible. The gateway holds it for at most
 `streaming_first_chunk_hold_ms` (15 seconds by default; `0` turns the hold off
 and commits the `200` as soon as the stream opens), and does not hold a stream
 that runs gateway tools (MCP, code execution, web search). A provider slower than
 that to start still streams, and a failure after that point is reported as
-below. A hybrid gateway holds every stream for its first-chunk failover timeout.
+below.
 
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:

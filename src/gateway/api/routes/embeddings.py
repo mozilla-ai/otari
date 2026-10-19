@@ -112,11 +112,8 @@ async def create_embedding(
         estimate=estimate,
         enforce_require_pricing=True,
         billing=EMBEDDINGS_BILLING,
-        inline_cost=True,
     )
-    body = InferenceService.embeddings_response(
-        outcome.result, pricing=outcome.pricing, cost=outcome.cost, inline_cost=outcome.inline_cost
-    )
-    if outcome.inline_cost is not None or (outcome.cost is not None and outcome.pricing is not None):
+    body = InferenceService.embeddings_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
+    if outcome.cost is not None and outcome.pricing is not None:
         record_inline_cost_settlement("attached" if body.usage is not None else "unattached")
     return body

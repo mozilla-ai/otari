@@ -2,13 +2,11 @@
 
 import asyncio
 from types import TracebackType
-from typing import Any
 
 import pytest
 
 from gateway.api.deps import get_db_if_needed
 from gateway.core import database
-from gateway.core.config import GatewayConfig
 
 
 class _FakeSession:
@@ -34,7 +32,7 @@ async def test_teardown_closes_the_session_it_borrowed(monkeypatch: pytest.Monke
     session = _FakeSession()
     monkeypatch.setattr(database, "_SessionLocal", lambda: session)
 
-    dependency = get_db_if_needed(GatewayConfig(database_url="sqlite:///./test.db"))
+    dependency = get_db_if_needed()
     yielded: object = await anext(dependency)
     assert yielded is session
     assert not session.closed, "the session must stay open for the life of the request"
@@ -56,23 +54,10 @@ async def test_teardown_closes_the_session_when_the_request_fails(
     session = _FakeSession()
     monkeypatch.setattr(database, "_SessionLocal", lambda: session)
 
-    dependency = get_db_if_needed(GatewayConfig(database_url="sqlite:///./test.db"))
+    dependency = get_db_if_needed()
     await anext(dependency)
 
     with pytest.raises(type(error)):
         await dependency.athrow(error)
 
     assert session.closed
-
-
-@pytest.mark.asyncio
-async def test_hybrid_mode_yields_no_session_and_opens_no_connection(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _unreachable() -> Any:
-        raise AssertionError("hybrid mode must not open a local session")
-
-    monkeypatch.setattr(database, "_SessionLocal", _unreachable)
-    config = GatewayConfig(mode="hybrid", platform={"base_url": "https://example.invalid", "token": "t"})
-
-    dependency = get_db_if_needed(config)
-    assert await anext(dependency) is None
-    await dependency.aclose()

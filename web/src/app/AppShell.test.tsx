@@ -837,9 +837,7 @@ describe("AppShell entitlement gating", () => {
     // The other half of that split, and the reason the page may call
     // `useDeploymentAdminAccess()` with no surface gate of its own: the route
     // declares `surface: "admin"`, so a deployment that does not host it never
-    // reaches the page at all, and the caller axis is never asked. A hybrid
-    // gateway does not even get this far, since `App` hands it `HybridLanding`
-    // rather than the router.
+    // reaches the page at all, and the caller axis is never asked.
     await renderShell(bootstrap({ surfaces: ["models"] }), {
       url: "/admin/accounts",
       operator: true,

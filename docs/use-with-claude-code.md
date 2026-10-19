@@ -1,8 +1,7 @@
 # Use with Claude Code
 
 Claude Code speaks the Anthropic Messages API. Otari serves
-`POST /api/v1/messages` and `POST /api/v1/messages/count_tokens` in standalone and
-hybrid modes.
+`POST /api/v1/messages` and `POST /api/v1/messages/count_tokens`.
 
 ## Route Claude Code through Otari
 
@@ -18,9 +17,8 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
-Claude Code puts a telemetry value in `metadata.user_id`. An otari.ai key
-needs no setting for it, because a hybrid gateway does not check that field
-against the key's owner.
+Claude Code puts a telemetry value in `metadata.user_id`; the next section
+says how a key accepts it.
 
 ### Standalone
 
@@ -51,9 +49,8 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
-Use `ANTHROPIC_AUTH_TOKEN`, which sends an Authorization bearer token and works
-in both modes. `ANTHROPIC_API_KEY` uses `x-api-key`; standalone Otari accepts
-it, but hybrid authentication does not.
+`ANTHROPIC_AUTH_TOKEN` sends an Authorization bearer token, and
+`ANTHROPIC_API_KEY` sends `x-api-key`; Otari accepts either.
 
 The same values can go in the `env` block of Claude Code's settings file.
 
@@ -150,8 +147,7 @@ type, the task and the parent's model, which is the cheapest candidate that
 would do the task well? The candidate Jev picks is the recommendation. Any
 active API key may ask. The decision call is billed to the caller and recorded
 in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
-the harness acts on the answer with its own provider credentials. Like
-decisions, the route is standalone only: a hybrid gateway does not serve it.
+the harness acts on the answer with its own provider credentials.
 
 Who answers depends on the build. A standalone deployment asks the decision
 model `agent_recommender_model` names, which may be a local one, and the call
@@ -213,8 +209,7 @@ publishes as a plugin marketplace. In a Claude Code session:
 The install asks for the gateway URL and an API key. Both are required; the
 key goes to Claude Code's secure storage, never to a settings file. The URL
 must be `https` unless the gateway runs on the same machine, since the key
-travels in a header, and it must point at a standalone gateway: a hybrid one
-does not serve the route, so every spawn would fall back. The plugin is
+travels in a header. The plugin is
 active from then on, in that session and
 every one after. The
 [plugin's README](../plugins/otari-router/README.md) has the options, the
@@ -233,8 +228,7 @@ line says so.
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
 sessions that do not already route through Otari. Send it to a standalone
-deployment or a hosted control plane; hybrid gateways do not serve the OTLP
-endpoints.
+deployment or a hosted control plane.
 
 Create a dedicated API key with `exclude_from_budget: true`, then configure the
 logs exporter. The optional metrics exporter adds content-free outcome counters.

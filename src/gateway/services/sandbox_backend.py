@@ -271,7 +271,7 @@ class SandboxBackend:
         # None outside a request (tests, direct use), which announces none.
         self.files_base_url = files_base_url
         # The request's file bridge, or None when it has no uploads to seed and
-        # nowhere to keep what a run produces (hybrid mode, tests, direct use).
+        # nowhere to keep what a run produces (tests, direct use).
         self._files = files
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).

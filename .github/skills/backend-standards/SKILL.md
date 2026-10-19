@@ -102,10 +102,8 @@ Catch specific exceptions, not a broad `except Exception`.
 
 A domain's service is its Service Layer, and [DOMAINS.md](../../../DOMAINS.md#the-target-shape)
 gives its shape: one service per domain with a small public API, built by constructor injection,
-from a builder in `api/deps.py`. Two rules add to it:
+from a builder in `api/deps.py`. One rule adds to it:
 
-- **Hybrid mode.** A hybrid gateway has no local database, so a service that needs one is not
-  built there.
 - **Moving old code.** A module-level function that takes a session becomes a method of its
   domain's service, or a repository method when all it does is run a query. A helper that
   needs no database stays a plain function.
@@ -135,7 +133,6 @@ rolls back.
 - Only a service opens a block. A repository never commits, and a route never opens a block.
 - A request whose database work all runs in blocks needs no `release_session` before it
   dispatches upstream.
-- Hybrid mode has no local database and no Unit of Work.
 
 Code still in the old shape commits in its services, and some routes still commit. A domain's
 commits move into blocks when the domain moves

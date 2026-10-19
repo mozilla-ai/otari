@@ -254,19 +254,6 @@ def create_log_writer(strategy: str, signal: UsageSignalPort) -> LogWriter:
     return SignalingLogWriter(inner, signal)
 
 
-class NoopLogWriter:
-    """LogWriter implementation that discards all writes (used when DB is unavailable)."""
-
-    async def put(self, log: UsageLog) -> bool:  # noqa: D401,B027 - trivial no-op
-        return False
-
-    async def start(self) -> None:  # noqa: D401,B027
-        return None
-
-    async def stop(self) -> None:  # noqa: D401,B027
-        return None
-
-
 class TracingLogWriter:
     """A usage log writer that also hands each row to its request's trace as an LLM call.
 

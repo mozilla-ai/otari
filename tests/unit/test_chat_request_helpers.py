@@ -354,7 +354,6 @@ def _capped_context(entry: dict[str, Any] | None) -> ToolContext:
         use_web_search=True,
         web_search_tool_entry=entry,
         web_search_url="http://search.invalid",
-        web_search_auth_token=None,
         remaining_user_tools=None,
         max_tool_iterations=10,
         tools_header=None,

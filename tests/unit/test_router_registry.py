@@ -11,8 +11,7 @@ from gateway.api import main as api_main
 from gateway.core.config import GatewayConfig
 from gateway.core.deployment import Deployment, Plane, RouterMount, deployment_for
 
-# Data-plane paths that need a control plane as well. None of them has hybrid
-# handling, so mounting one on a hybrid gateway would fail at request time.
+# Data-plane paths that need a control plane as well.
 _DATA_PLANE_NEEDING_CONTROL = {
     "/batches",
     "/decisions",
@@ -22,8 +21,7 @@ _DATA_PLANE_NEEDING_CONTROL = {
     "/systemone",
 }
 
-# The pass-through paths, which a hybrid gateway serves with credentials the
-# control plane resolves, as it serves a completion.
+# The pass-through paths, served with the deployment's own provider credentials.
 _PASSTHROUGH = {
     "/audio/speech",
     "/audio/transcriptions",
@@ -47,8 +45,6 @@ def _served(config: GatewayConfig) -> set[str]:
 
 
 def _standalone() -> set[str]:
-    # Named rather than left to default: an ambient OTARI_AI_TOKEN selects
-    # hybrid when no mode is set, and these tests would then pass on hybrid.
     return _served(GatewayConfig(require_pricing=False, mode="standalone"))
 
 
@@ -56,14 +52,10 @@ def _hosted() -> set[str]:
     return _served(GatewayConfig(require_pricing=False, mode="hosted"))
 
 
-def _hybrid() -> set[str]:
-    return _served(GatewayConfig(require_pricing=False, mode="hybrid"))
-
-
 def test_a_deployment_serves_the_planes_its_settings_describe() -> None:
     assert deployment_for(GatewayConfig(mode="standalone")).planes == Plane.CONTROL | Plane.DATA
     assert deployment_for(GatewayConfig(mode="hosted")).planes == Plane.CONTROL
-    assert deployment_for(GatewayConfig(mode="hybrid")).planes == Plane.DATA
+    assert deployment_for(GatewayConfig()).planes == Plane.CONTROL | Plane.DATA
 
 
 def test_a_router_needing_no_plane_mounts_everywhere() -> None:
@@ -112,28 +104,4 @@ def test_a_hosted_control_plane_serves_no_data_plane() -> None:
         "/responses",
         "/mcp/execute",
         "/mcp/servers",
-    }
-
-
-def test_a_hybrid_gateway_serves_no_control_plane() -> None:
-    """An entry that omits ``requires`` mounts everywhere.
-    Only an exact set catches a management router added without one.
-    """
-    assert _hybrid() == {
-        # Read nothing a control plane owns.
-        "/bootstrap",
-        "/health",
-        "/health/liveness",
-        "/health/readiness",
-        "/hooks/check",
-        # Dispatch, with the platform answering for tenancy and policy.
-        "/chat/completions",
-        "/mcp/execute",
-        "/mcp/servers",
-        "/messages",
-        "/messages/count_tokens",
-        "/responses",
-        *_PASSTHROUGH,
-        # Discovery, answered from the platform's list for the caller's key.
-        "/models",
     }

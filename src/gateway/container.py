@@ -34,20 +34,19 @@ from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRec
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
-from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy, RemoteCodeExecutionPolicy
+from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
-from gateway.adapters.mcp_server_adapter import LocalMcpServers, RemoteMcpServers
+from gateway.adapters.mcp_server_adapter import LocalMcpServers
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.usage_signal_adapter import NullUsageSignalAdapter
-from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
+from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy
 from gateway.core.config import GatewayConfig
-from gateway.core.deployment import Plane, deployment_for
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
@@ -85,10 +84,9 @@ T = TypeVar("T")
 # :meth:`Container.resolve`.
 PortKey = Callable[..., T]
 # A port is resolved per request against that request's database session; an
-# adapter that needs no session ignores it. The session is ``None`` in hybrid
-# mode, where the gateway has no local database at all (``init_db`` is skipped,
-# see ``gateway.main``) and its control plane lives at the other end of the
-# resolve protocol, so an adapter that needs one must say what it does without.
+# adapter that needs no session ignores it. The session may be ``None`` (the
+# boot-time shape check resolves with none), so an adapter that needs one must
+# say what it does without.
 PortFactory = Callable[[AsyncSession | None], T]
 # A port whose adapter writes workspace membership also needs the request's Unit
 # of Work, because the membership listener writes through its open block and only
@@ -122,8 +120,7 @@ class RouterContribution:
     route in ``gateway.api.routes``); Otari mounts no router-level default here
     because there is no single right answer to mount. The choice differs per
     route, a contributed route may be deliberately public, and
-    ``verify_api_key_or_master_key`` resolves ``get_db``, which has no session
-    to open in hybrid mode.
+    ``verify_api_key_or_master_key`` resolves ``get_db``.
     """
 
     capability: str
@@ -222,8 +219,7 @@ def _verify_port_shape(container: Container, port: type[Any]) -> None:
     A port is a plain ``Protocol`` and a bind checks nothing, so an overlay
     written against an older shape of the port binds cleanly and fails on the
     first request that reaches the missing method, as a 500 with no startup
-    signal. Checked for the ports whose adapters build with no session, which
-    the hybrid data plane already requires of ``ModelProviderPort``.
+    signal. Checked for the ports whose adapters build with no session.
 
     Raises:
         PortShapeError: the bound adapter lacks one of the port's methods.
@@ -257,8 +253,7 @@ def _model_provider_adapter_factory(
     """Build the core ``ModelProviderPort`` factory: the deployment's hosted providers.
 
     The adapter reads the hosted-providers store, so it needs the request's Unit
-    of Work. Without one (the hybrid data plane, which has no database, and the
-    boot-time shape check) it is built with no service and answers nothing.
+    of Work. Without one (the boot-time shape check) it is built with no service and answers nothing.
     With one, the service comes from ``hosted_provider_service``, the builder
     the API layer passes in, for the reason the membership listener's is passed.
     """
@@ -533,15 +528,12 @@ def _bind_workspace_ports(
     search_keys: WorkspaceSearchKeysBuilder | None,
     code_execution_policies: CodeExecutionPoliciesBuilder | None,
 ) -> None:
-    """Bind each workspace port to this deployment's own rows, or to its peer where a peer holds them.
-
-    The planes a deployment serves are fixed for the life of the process, so they are read once, here.
-    """
+    """Bind each workspace port to this deployment's own rows."""
     if config is None:
         container.bind(CodeExecutionPolicyPort, _requires_config(CodeExecutionPolicyPort))
         container.bind(McpServerPort, _requires_config(McpServerPort))
         container.bind(WebSearchPolicyPort, _requires_config(WebSearchPolicyPort))
-    elif deployment_for(config).supports(Plane.CONTROL):
+    else:
         container.bind(
             CodeExecutionPolicyPort,
             _with_session(CodeExecutionPolicyPort, _local_code_execution_policy(config, code_execution_policies)),
@@ -550,10 +542,6 @@ def _bind_workspace_ports(
         container.bind(
             WebSearchPolicyPort, _with_session(WebSearchPolicyPort, _local_web_search_policy(config, search_keys))
         )
-    else:
-        container.bind(CodeExecutionPolicyPort, _shared(RemoteCodeExecutionPolicy(config)))
-        container.bind(McpServerPort, _shared(RemoteMcpServers(config)))
-        container.bind(WebSearchPolicyPort, _shared(RemoteWebSearchPolicy(config)))
 
 
 def build_container(

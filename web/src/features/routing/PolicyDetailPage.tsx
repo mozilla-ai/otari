@@ -104,8 +104,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
       {deployment_type === "standalone" ? null : (
         <InfoBanner>
           Policies are a standalone feature: they apply only on a gateway that
-          serves requests itself. A hybrid gateway receives its attempt plan
-          from the connected control plane.
+          serves requests itself.
         </InfoBanner>
       )}
 

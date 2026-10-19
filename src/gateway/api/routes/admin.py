@@ -8,8 +8,7 @@ itself.
 The one prefix in the management API that is scoped to the *deployment* rather
 than to an organization or a workspace, which is what it is for: every other
 identity surface reads through a membership and so cannot see an account whose
-memberships are all suspended. It is standalone-only like the rest of the
-management plane; a hybrid gateway's accounts live on otari.ai.
+memberships are all suspended.
 """
 
 import uuid

@@ -93,7 +93,7 @@ async def test_tearing_down_the_data_plane_dependency_returns_its_connection(
         assert engine is not None
         assert isinstance(engine.pool, AsyncAdaptedQueuePool), "checkedout() needs a queue pool, so PostgreSQL"
 
-        dependency = get_db_if_needed(test_config)
+        dependency = get_db_if_needed()
         session = await anext(dependency)
         assert session is not None
         # The session opens its transaction on the first statement, which is

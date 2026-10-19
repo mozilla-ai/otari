@@ -119,7 +119,7 @@ def test_each_label_of_a_tool_is_kept_apart_under_one_meter() -> None:
 
 
 def test_empty_rate_keys_are_kept_apart_from_none() -> None:
-    """A hybrid credential's calls carry no rate keys, which prices nothing, unlike the omitted ``otari:<tool>``."""
+    """Calls that carry no rate keys price nothing, unlike the omitted ``otari:<tool>``."""
     tally = ToolUsageTally()
     tally.record_result("web_search", _HITS, label=None, rate_keys=())
     tally.record_result("web_search", _HITS)

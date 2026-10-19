@@ -59,7 +59,7 @@ Check these on every review; each has broken a PR here before.
   import services or the API layer, API routes must not import `sqlalchemy.orm`, and
   repository modules end in `_repository.py`.
 - **Mode coverage.** New management routes are standalone-only; confirm `register_routers()`
-  placement matches, and that hybrid mode still resolves credentials per request.
+  placement matches.
 - **Error boundaries.** Public error responses must not leak provider or internal detail,
   and nothing may log secrets, tokens, or raw API keys.
 - **Test hygiene.** A global `reruns` policy is out; a genuinely flaky test carries

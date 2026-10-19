@@ -187,12 +187,6 @@ key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
 config.yml. The deployment-wide default is a runtime setting, changed on the
 Settings page or with `PATCH /api/v1/settings`.
 
-The check is a standalone one. A hybrid gateway, such as otari.ai's, does not
-compare the field with the key's owner, so a key there needs no setting: the
-value only feeds the
-[end-user identifier](hybrid-mode-protocol.md#end-user-identifier) sent to the
-provider.
-
 ## Service keys and end users
 
 A service key lets one application track spend per end user without sharing
@@ -390,8 +384,7 @@ key's list.
 End users are supported on the endpoints above. The other endpoints
 (embeddings, files, batches and the other pass-through
 routes) treat a service key as an ordinary key, so a `user` naming someone else
-is handled by the `reject_user_mismatch` setting there. Hybrid mode resolves
-users on the platform and does not support service keys.
+is handled by the `reject_user_mismatch` setting there.
 
 ## Budgets
 

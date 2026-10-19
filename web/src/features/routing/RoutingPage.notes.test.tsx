@@ -115,14 +115,7 @@ describe("RoutingPage deployment note", () => {
     })
 
     expect(await screen.findByText(NOTE)).toHaveTextContent(
-      "A hybrid gateway receives its attempt plan from the connected control plane.",
+      "Policies are a standalone feature: they apply only on a gateway that serves requests itself.",
     )
-  })
-
-  it("says the same on a hybrid gateway", async () => {
-    mockEmptyApi()
-    renderPage({ deployment_type: "hybrid", surfaces: [] })
-
-    expect(await screen.findByText(NOTE)).toBeInTheDocument()
   })
 })

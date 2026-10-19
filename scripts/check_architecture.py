@@ -61,7 +61,7 @@ Enforces:
     public API.
 22. Mode branches: nothing under services/ reads the deployment's mode,
     so the behavior for each mode is chosen by a binding, not by a branch in a service.
-    A read is any use of is_hosted_mode, is_hybrid_mode, effective_mode or configured_mode, or a call to deployment_for.
+    A read is any use of is_hosted_mode, effective_mode or configured_mode, or a call to deployment_for.
     The raw mode field and the platform token stay with review, because their names do not say that a mode is read.
     The modules that still read one are named on a baseline, and the baseline only shrinks.
 23. Model access: each ORM model has one repository module that may construct or query it,
@@ -761,7 +761,7 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
     return violations
 
 
-MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_mode")
+MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode")
 MODE_FUNCTION = "deployment_for"
 # The services that still read the deployment's mode.
 # An entry that stops reading it fails the check until it is removed, so the list only shrinks.
@@ -1009,7 +1009,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/agent_telemetry_service.py",
     "gateway/services/alias_service.py",
     "gateway/services/batch_service.py",
-    "gateway/services/bedrock_gateway_auth.py",
     "gateway/services/bootstrap_service.py",
     "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
@@ -1107,7 +1106,6 @@ SHARED_HEADING = "Shared"
 # A package's entry names every module it holds, so a new module in it is refused.
 DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
     "gateway/exceptions/budget_exceptions.py": (),
-    "gateway/exceptions/control_plane_exceptions.py": (),
     "gateway/repositories/code_execution/": (
         "__init__.py",
         "sandbox_container_repository.py",
@@ -1127,11 +1125,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "__init__.py",
         "container_sweeper.py",
         "containers.py",
-    ),
-    "gateway/services/control_plane/": (
-        "__init__.py",
-        "_resolve.py",
-        "transport.py",
     ),
     "gateway/services/mail/": (
         "__init__.py",

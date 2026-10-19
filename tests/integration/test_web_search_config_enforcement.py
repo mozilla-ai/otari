@@ -362,7 +362,7 @@ def test_a_request_cannot_shed_the_workspace_block_list(
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The fail-open case the hybrid path's default-only precedence would allow."""
+    """The fail-open case a default-only precedence would allow."""
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, blocked_domains=["banned.example"])

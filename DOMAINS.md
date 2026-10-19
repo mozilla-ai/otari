@@ -120,8 +120,7 @@ them from there.
 
 The deployment price list, organization rate overrides and upstream price
 snapshots, and the rule that says what a rate bills: its unit chooses the meter
-it prices (`price_usage` in `services/pricing/`). Standalone settlement and a
-hybrid gateway's control plane both price through it.
+it prices (`price_usage` in `services/pricing/`).
 
 `services/pricing/` also holds the deployment price list's service, which is how
 another domain reads a current rate or stores one. It also owns
@@ -257,14 +256,6 @@ and the Playground.
 ### platform
 
 Deployment settings, health, modes, maintenance mode and mail.
-
-`control_plane/` is how a deployment asks the control plane a peer runs for it
-what a workspace may do. It is a Gateway in Fowler's sense and an
-anticorruption layer in Evans's: it holds how a deployment asks a peer for
-policy and credentials, and raises this codebase's own errors so the peer's
-status codes stop at its edge. Usage reporting still builds its own call from
-the API layer. `ResolveEndpoint` is a closed set, so it answers questions and cannot
-grow into a route for the data plane's own traffic.
 
 `deployment.py` holds `Plane`, which names the control plane and the data
 plane, and the value that says which of them a process serves. `surface.py`

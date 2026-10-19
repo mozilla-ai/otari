@@ -141,14 +141,6 @@ class WebSearchPolicyResolutionFailure(StrEnum):
 
     message: str
 
-    ANSWER_UNREADABLE = (
-        "the answer could not be read",
-        "Authorization service returned a malformed web-access policy",
-    )
-    NO_CALLER_CREDENTIAL = (
-        "the request carried no caller credential",
-        "Web search configuration could not be resolved for this request",
-    )
     NO_WORKSPACE = (
         "the request named no workspace",
         "Web search configuration could not be resolved for this request",
@@ -225,14 +217,6 @@ class CodeExecutionPolicyResolutionFailure(StrEnum):
 
     message: str
 
-    ANSWER_UNREADABLE = (
-        "the answer could not be read",
-        "Authorization service returned a malformed code-execution policy",
-    )
-    NO_CALLER_CREDENTIAL = (
-        "the request carried no caller credential",
-        "Code execution policy could not be resolved for this request",
-    )
     NO_WORKSPACE = (
         "the request named no workspace",
         "Code execution policy could not be resolved for this request",
@@ -252,16 +236,9 @@ class McpResolutionFailure(StrEnum):
     """Why an MCP server could not be resolved.
 
     The message a caller sees is fixed, so a member is the only thing that tells one cause from another.
-    No member names any part of the peer's answer.
     """
 
-    ANSWER_NOT_AN_OBJECT = "the answer is not an object"
-    ENTRY_UNREADABLE = "an entry could not be read"
-    ID_MISMATCH = "an entry names a different server"
-    NO_CALLER_CREDENTIAL = "the request carried no caller credential"
-    NO_SERVER_LIST = "the answer carries no list of servers"
     NO_WORKSPACE = "the request named no workspace"
-    SEVERAL_ENTRIES = "several entries answered a request for one"
 
 
 class McpServerResolutionFailedError(TenancyError):

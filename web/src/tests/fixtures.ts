@@ -195,7 +195,6 @@ export function bootstrap(
     // The master key, because an unclaimed deployment is what a fixture
     // describes by default; a test about the password login overrides it.
     sign_in_methods: ["master_key"],
-    management_url: null,
     // Null, because a standalone gateway is its own data plane: the address that
     // served this page is the address that serves the API. The hosted-mode
     // snippet tests set it.

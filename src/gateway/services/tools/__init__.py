@@ -60,7 +60,6 @@ from gateway.services.tools._code_execution_policy import (
     WorkspaceCodeExecutionPolicyPublic,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceCodeExecutionPolicyUpdate,
-    read_code_execution_policy,
 )
 from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CALL_ID_PREFIX
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
@@ -157,7 +156,6 @@ __all__ = [
     "WorkspaceCodeExecutionPolicyPublic",
     "WorkspaceCodeExecutionPolicyService",
     "WorkspaceCodeExecutionPolicyUpdate",
-    "read_code_execution_policy",
     "BUILTIN_TOOLS",
     "CODE_EXECUTION_HEADER",
     "CODE_EXECUTION_TOOL",

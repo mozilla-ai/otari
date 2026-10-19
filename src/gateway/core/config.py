@@ -49,9 +49,6 @@ PROVIDER_TYPE_ALIASES = {
     "anthropic_compatible": "anthropic",
 }
 X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here (no Bearer prefix).
-# How a deployment's own data-plane gateway identifies itself to the search
-# backend it calls. Not an API key: no key or dashboard session opens that route.
-GATEWAY_TOKEN_HEADER = "X-Gateway-Token"
 
 # The OAuth providers a deployment may configure dashboard sign-in with, in the
 # spelling that appears in a config key (``oauth_google_client_id``), on the
@@ -78,15 +75,9 @@ CONVERSATION_HEADER = "Otari-Conversation-Id"
 # pass-through until that partition alone is warm; records from other tasks never
 # influence it. Submit the matching label via the /rank task_id.
 ROUTER_TASK_HEADER = "Otari-Router-Task"
-# Response header naming one inference request: the platform's id in hybrid mode,
-# minted by the gateway in standalone. Clients use it to correlate a response with
-# its usage record.
+# Response header naming one inference request, minted by the gateway. Clients use
+# it to correlate a response with its usage record.
 REQUEST_ID_HEADER = "Otari-Request-ID"
-# Response header naming the single provider attempt that served the request, or
-# the last one tried when every attempt failed. One request id spans several
-# attempt ids, so this is the finer grained of the two. Hybrid mode only: a
-# standalone gateway resolves no attempts to name.
-ATTEMPT_ID_HEADER = "Otari-Attempt-ID"
 # Response headers describing how a standalone completion was served: the
 # provider instance that answered (its name, never its base URL), the model it
 # was sent, how many candidates were sent the request, whether a candidate other
@@ -111,24 +102,9 @@ API_VERSION = "v1"
 API_ROOT = f"/api/{API_VERSION}"
 # Base only: OTel exporters append /otlp/v1/traces and the other signal paths.
 OTLP_ROOT = "/otlp"
-DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
-# Where a hybrid gateway's control plane lives for a person, as opposed to
-# DEFAULT_PLATFORM_BASE_URL above, which is where it lives for the gateway. The
-# deployment bootstrap hands this to the browser so a hybrid landing page can
-# link to the dashboard that actually manages this gateway; an operator pointed
-# at a staging platform overrides it with platform.management_url.
-DEFAULT_PLATFORM_MANAGEMENT_URL = "https://otari.ai"
-# The route the reachability probe asks for under DEFAULT_PLATFORM_BASE_URL. It
-# is an otari.ai route, so a deployment resolving against any other peer sets
-# platform.health_path (PLATFORM_HEALTH_PATH) to one that peer serves.
-DEFAULT_PLATFORM_HEALTH_PATH = "/utils/health-check/"
-# health_path is always joined onto base_url, which only works when the peer's
-# health route lives under the same path prefix as the rest of its API. Some
-# peers serve health outside that prefix entirely (an unversioned /health
-# beside a versioned /v1 API): no join of base_url and a relative path reaches
-# that. platform.health_url (PLATFORM_HEALTH_URL) is a full URL that bypasses
-# the join and is checked first, for exactly that peer shape.
-PLATFORM_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
+# Selected hybrid mode before it was removed; refused at startup so a leftover
+# attached-gateway deployment fails loudly rather than booting as standalone.
+_REMOVED_HYBRID_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
 # OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
@@ -294,11 +270,6 @@ def validate_decision_provider_entry(name: str, entry: Any) -> None:
 
 class _NonScalarField(Exception):
     """Raised when a config field is not a simple scalar settable from a plain env string."""
-
-
-def _get_platform_token_from_env() -> str | None:
-    token = os.getenv(PLATFORM_TOKEN_ENV_VAR, "").strip()
-    return token or None
 
 
 # Self-hosted backends any-llm calls without a key although each declares a
@@ -610,14 +581,10 @@ class GatewayConfig(
     mode: Annotated[str | None, Shown(SettingsGroup.SERVER)] = Field(
         default=None,
         description=(
-            "Otari operating mode: 'standalone', 'hosted' or 'hybrid'. When unset (the default), the "
-            "mode is derived from the platform token: hybrid if a token is present (OTARI_AI_TOKEN), "
-            "else standalone. Set explicitly to assert the intended mode: 'hybrid' requires a token, "
-            "and 'standalone' or 'hosted' with a token present is rejected at startup as conflicting "
-            "configuration. 'hosted' is standalone's multi-tenant sibling: it owns its own database "
-            "and serves the whole management API, and it reports the per-organization provider-key "
-            "surface rather than the process-global one. "
-            "Legacy value 'platform' is accepted as an alias for 'hybrid'."
+            "Otari operating mode: 'standalone' (the default when unset) or 'hosted'. 'hosted' is "
+            "standalone's multi-tenant sibling: it owns its own database and serves the whole "
+            "management API, and it reports the per-organization provider-key surface rather than "
+            "the process-global one."
         ),
     )
     auto_migrate: Annotated[bool, Shown(SettingsGroup.SERVER)] = Field(
@@ -828,12 +795,11 @@ class GatewayConfig(
             f"even as part of a full endpoint like '{API_ROOT}/chat/completions' (e.g. "
             "'https://gateway.otari.ai'): the dashboard appends that path itself. It carries no "
             "credential either, so no query string, fragment, or user:password. Only a hosted control "
-            "plane needs it: a standalone gateway and a hybrid one both serve inference at "
-            "their own address, so whatever reached the dashboard reaches the API, and this "
+            "plane needs it: a standalone gateway serves inference at "
+            "its own address, so whatever reached the dashboard reaches the API, and this "
             "stays unset. A control plane serving many organizations does not, so it has to "
             "say where the data-plane gateway is or the dashboard has nothing runnable to "
-            "hand somebody with a new key. Unlike platform.management_url, which is a human "
-            "link target, this is the base URL a client suffixes with the API root."
+            "hand somebody with a new key. This is the base URL a client suffixes with the API root."
         ),
     )
     ui_base_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
@@ -1009,7 +975,7 @@ class GatewayConfig(
             "is routed to its target ('instance:model' or 'provider:model'), and the alias is "
             "what users see in GET /api/v1/models and in response 'model' fields, so the underlying "
             "provider/model can stay hidden. Pricing, budgets, and usage logs key on the resolved "
-            "target. Standalone-mode only (hybrid resolves models against the platform)."
+            "target."
         ),
     )
     routing: Annotated[RoutingConfig, OMITTED] = Field(
@@ -1018,8 +984,7 @@ class GatewayConfig(
             "Named routing policies. A policy is a model name callers use like any other, which "
             "decides which real model serves the request ('select'), what is tried after a retryable "
             "failure ('on_failure'), and which guardrails always run. A one-target policy is an alias, "
-            "so 'aliases:' remains its shorthand. Standalone-mode only: in hybrid mode the platform "
-            "resolves the model, so a policy name would be sent upstream and rejected there."
+            "so 'aliases:' remains its shorthand."
         ),
     )
     # Tuning for the learned (kNN) router a policy can name via `select: [{router: knn}]`.
@@ -1541,17 +1506,6 @@ class GatewayConfig(
             "provider_allow_private_hosts says. Also settable via OTARI_PROVIDER_ENDPOINTS_ENABLED."
         ),
     )
-    platform: Annotated[dict[str, Any], OMITTED] = Field(
-        default_factory=dict, description="otari.ai connection settings"
-    )
-
-    # Resolved once from the environment (primed by load_config, or lazily on
-    # first access for a directly-constructed config) so the runtime mode stays
-    # stable for the process: the token cannot flip mid-request from an env
-    # mutation, and hot paths no longer re-read os.getenv on every access.
-    _platform_token: str | None = PrivateAttr(default=None)
-    _platform_token_resolved: bool = PrivateAttr(default=False)
-
     # The config-file providers as loaded, before any dashboard-stored providers
     # are overlaid onto ``providers`` at runtime. Captured once by
     # ``provider_store_service`` so every refresh rebuilds the merged view from a
@@ -1570,29 +1524,6 @@ class GatewayConfig(
     # without the plaintext ever living in config.
     _master_key_hash: str | None = PrivateAttr(default=None)
 
-    def _resolve_platform_token(self) -> str | None:
-        if not self._platform_token_resolved:
-            self._platform_token = _get_platform_token_from_env()
-            self._platform_token_resolved = True
-        return self._platform_token
-
-    @property
-    def platform_token(self) -> str | None:
-        return self._resolve_platform_token()
-
-    @property
-    def platform_management_url(self) -> str:
-        """The otari.ai dashboard URL a hybrid gateway points its operator at.
-
-        Not a credential and not the resolve/report base URL: it is the human
-        destination the deployment bootstrap publishes so a hybrid landing page
-        can link to the control plane that owns this gateway.
-        """
-        configured = self.platform.get("management_url")
-        if isinstance(configured, str) and configured.strip():
-            return configured.strip()
-        return DEFAULT_PLATFORM_MANAGEMENT_URL
-
     @property
     def configured_mode(self) -> str | None:
         """The explicitly set mode (normalized), or None when unset/blank."""
@@ -1601,34 +1532,19 @@ class GatewayConfig(
 
     @property
     def effective_mode(self) -> str:
-        configured = self.configured_mode
-        if configured in {"hybrid", "platform"}:
-            return "hybrid"
-        if configured == "hosted":
-            return "hosted"
-        if configured == "standalone":
-            return "standalone"
-        # Mode unset: derive from the platform token.
-        return "hybrid" if self.platform_token else "standalone"
-
-    @property
-    def is_hybrid_mode(self) -> bool:
-        return self.effective_mode == "hybrid"
+        return "hosted" if self.configured_mode == "hosted" else "standalone"
 
     @property
     def is_hosted_mode(self) -> bool:
         """Whether this deployment is the multi-tenant control plane, not a single tenant's.
 
-        Not a third runtime: hosted mode owns its own database and mounts the
-        whole management API the way standalone does, and every request path
-        that asks ``is_hybrid_mode`` gets the same answer here as it would for a
-        standalone gateway. What it changes is who the deployment serves, and
+        Not a second runtime: hosted mode owns its own database and mounts the
+        whole management API the way standalone does. What it changes is who the deployment serves, and
         two things follow from that. Which management surfaces make sense on it:
         the per-organization credential set rather than the process-global one
         (see ``bootstrap.HOSTED_SURFACES``). And whether it serves a data plane
         at all: it does not, because a control plane runs no customer traffic
-        and inference belongs on a hybrid gateway, whose usage report is what
-        debits the wallet (see ``api.main._register_core_routers``).
+        (see ``api.main._register_core_routers``).
         """
         return self.effective_mode == "hosted"
 
@@ -1933,23 +1849,7 @@ class GatewayConfig(
             raise ValueError(msg) from exc
 
     def validate_declared_access(self) -> None:
-        """Refuse declared access a hybrid gateway cannot hold, and federation without ``OTARI_SECRET_KEY``.
-
-        A hybrid gateway holds no budgets or keys of its own, so it refuses both
-        rather than ignoring them, the way it refuses ``rate_limits``.
-        """
-        if self.is_hybrid_mode and (self.budgets or self.api_keys):
-            msg = (
-                "budgets and api_keys are declared in config, but a hybrid gateway holds neither; "
-                "declare them on the control plane instead"
-            )
-            raise ValueError(msg)
-        if self.is_hybrid_mode and self.federation_issuers:
-            msg = (
-                "federation_issuers is set, but a hybrid gateway verifies no API keys of its own; "
-                "workload identity needs standalone or hosted mode"
-            )
-            raise ValueError(msg)
+        """Refuse federation without ``OTARI_SECRET_KEY``."""
         if self.federation_issuers and not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
             msg = (
                 "federation_issuers is set, but OTARI_SECRET_KEY is not; it signs the access tokens "
@@ -2121,11 +2021,6 @@ class GatewayConfig(
         nothing.
         """
         entries = self.hosted_provider_entries()
-        if entries and self.is_hybrid_mode:
-            logger.warning(
-                "hosted_providers is ignored in hybrid mode: a hybrid gateway is served the credentials otari.ai "
-                "resolves for it, and has no hosted providers of its own."
-            )
         for name, entry in entries.items():
             if (problem := hosted_provider_name_problem(name, entry.provider)) is not None:
                 msg = f"hosted_providers.{name}: the name {problem}."
@@ -2336,9 +2231,8 @@ class GatewayConfig(
 
         The deployment bootstrap publishes each of these to the browser as a link
         target, so a scheme that is not http(s) would be a script URL an operator
-        put in their own config. Rejected at load rather than dropped per request,
-        for the same reason ``platform.management_url`` is: a typo should be a
-        startup error, not a Documentation link that silently goes nowhere.
+        put in their own config. Rejected at load rather than dropped per request:
+        a typo should be a startup error, not a Documentation link that silently goes nowhere.
 
         ``data_plane_url`` keeps its own, stricter validator: a client builds a
         request from it rather than following it.
@@ -2514,42 +2408,6 @@ class GatewayConfig(
             raise ValueError(msg)
         return normalized
 
-    @field_validator("platform")
-    @classmethod
-    def _validate_platform_streaming_timeouts(cls, platform: dict[str, Any]) -> dict[str, Any]:
-        """Reject non-sensical platform timeout settings at load time.
-
-        The per-attempt first-chunk and inline-settlement budgets must be
-        positive. The terminal-attempt extra grace must be non-negative, since
-        it is added on top of the first-chunk budget.
-        """
-        inline_key = "usage_inline_timeout_ms"
-        if inline_key in platform:
-            raw_inline_timeout = platform[inline_key]
-            try:
-                inline_timeout = int(raw_inline_timeout)
-            except (TypeError, ValueError):
-                raise ValueError(f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}") from None
-            if (
-                isinstance(raw_inline_timeout, bool)
-                or (isinstance(raw_inline_timeout, float) and not raw_inline_timeout.is_integer())
-                or inline_timeout <= 0
-            ):
-                raise ValueError(f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}")
-            platform[inline_key] = inline_timeout
-
-        positive_ms_keys = (
-            "streaming_first_chunk_timeout_ms",
-            "streaming_first_chunk_timeout_ms_tool_loop",
-        )
-        for key in positive_ms_keys:
-            if key in platform and float(platform[key]) <= 0:
-                raise ValueError(f"{key} must be > 0, got {platform[key]}")
-        extra_key = "streaming_final_attempt_extra_first_chunk_timeout_ms"
-        if extra_key in platform and float(platform[extra_key]) < 0:
-            raise ValueError(f"{extra_key} must be >= 0, got {platform[extra_key]}")
-        return platform
-
     def validate_mail_transport(self) -> None:
         """Refuse a mail transport the deployment cannot actually run.
 
@@ -2709,33 +2567,16 @@ class GatewayConfig(
             raise ValueError(msg)
 
     def validate_mode_selection(self) -> None:
+        """Refuse an unknown mode, and a leftover hybrid-mode token."""
+        if os.getenv(_REMOVED_HYBRID_TOKEN_ENV_VAR, "").strip():
+            msg = (
+                f"{_REMOVED_HYBRID_TOKEN_ENV_VAR} is set, but hybrid mode has been removed. Unset it to run "
+                "this deployment in standalone mode."
+            )
+            raise ValueError(msg)
         configured_mode = self.configured_mode
-        # Mode unset: the runtime mode is derived from the token, so there is
-        # nothing to assert here.
-        if configured_mode is None:
-            return
-        # "platform" is the legacy alias for "hybrid" (the otari.ai-connected
-        # runtime mode); accept it so pre-rename configs keep working.
-        if configured_mode not in {"standalone", "hosted", "hybrid", "platform"}:
-            msg = (
-                "Invalid mode (set via OTARI_MODE or the config 'mode' field). "
-                "Expected 'standalone', 'hosted' or 'hybrid'."
-            )
-            raise ValueError(msg)
-
-        token_present = self.platform_token is not None
-        if configured_mode in {"hybrid", "platform"} and not token_present:
-            msg = "Hybrid mode (legacy value 'platform') requires OTARI_AI_TOKEN to be set."
-            raise ValueError(msg)
-        # Both local-control-plane modes conflict with the token for the same
-        # reason: a deployment that holds its own management API is not also a
-        # data plane reporting to somebody else's.
-        if configured_mode in {"standalone", "hosted"} and token_present:
-            msg = (
-                f"{configured_mode.capitalize()} mode conflicts with OTARI_AI_TOKEN being set: the token "
-                "selects hybrid mode. Unset the token to run a control plane of your own, or clear the "
-                "mode setting to let the token select hybrid mode."
-            )
+        if configured_mode is not None and configured_mode not in {"standalone", "hosted"}:
+            msg = "Invalid mode (set via OTARI_MODE or the config 'mode' field). Expected 'standalone' or 'hosted'."
             raise ValueError(msg)
 
 
@@ -2814,13 +2655,10 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     yaml_bridged_fields = {name for name in ENV_BRIDGED_FIELDS if config_dict.get(name) is not None}
 
     _apply_otari_env_overrides(config_dict)
-    _apply_platform_env_overrides(config_dict)
+    if config_dict.pop("platform", None) is not None:
+        logger.warning("Ignoring the 'platform' config block: hybrid mode has been removed.")
 
     config = GatewayConfig(**config_dict)
-    # Resolve and cache the platform token once, at load time, so the runtime
-    # mode is fixed for the process instead of re-derived from os.getenv on
-    # every property read.
-    config._resolve_platform_token()
     config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_hosted_providers()
@@ -2934,64 +2772,6 @@ def _apply_json_env_overrides(config: dict[str, Any]) -> None:
             msg = f"{env_name} must be a JSON object, got {type(value).__name__}."
             raise ValueError(msg)
         config[field_name] = _resolve_env_vars(value)
-
-
-def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
-    platform = config.get("platform")
-    if not isinstance(platform, dict):
-        platform = {}
-
-    env_mappings: dict[str, tuple[str, type[Any]]] = {
-        "PLATFORM_BASE_URL": ("base_url", str),
-        "PLATFORM_MANAGEMENT_URL": ("management_url", str),
-        "PLATFORM_HEALTH_PATH": ("health_path", str),
-        "PLATFORM_HEALTH_URL": ("health_url", str),
-        "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
-        "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),
-        # Budget for the one usage report the response path waits on. Expiry
-        # detaches the wait without cancelling the accounting report.
-        "PLATFORM_USAGE_INLINE_TIMEOUT_MS": ("usage_inline_timeout_ms", int),
-        "PLATFORM_USAGE_MAX_RETRIES": ("usage_max_retries", int),
-        # Per-attempt budget for streaming fallback: how long to wait for the
-        # first chunk from each attempt before treating it as hung and moving
-        # to the next entry in the routing policy. Tunable per deployment;
-        # v1.2 will move this onto the routing_policy schema for per-policy
-        # control.
-        "STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS": (
-            "streaming_first_chunk_timeout_ms",
-            int,
-        ),
-        # The same budget for a request that runs a gateway-managed tool loop or
-        # forwards provider-native tools, which are slow to emit a first token
-        # because the model picks a tool before it says anything.
-        "STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP": (
-            "streaming_first_chunk_timeout_ms_tool_loop",
-            int,
-        ),
-        # Extra first-chunk grace for the sole/final streaming attempt, added on
-        # top of the per-attempt budget above. The failover budget exists to move
-        # to the next routing-policy entry when an attempt is slow; the final
-        # attempt has no next entry, so this keeps its wait bounded without cutting
-        # off a slow-but-valid first token.
-        "STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS": (
-            "streaming_final_attempt_extra_first_chunk_timeout_ms",
-            int,
-        ),
-    }
-
-    for env_name, (field_name, caster) in env_mappings.items():
-        value = os.getenv(env_name)
-        if value is None or value == "":
-            continue
-        platform[field_name] = caster(value)
-
-    configured_mode = str(config.get("mode") or "").strip().lower()
-    platform_requested = configured_mode in {"hybrid", "platform"} or _get_platform_token_from_env() is not None
-    if platform_requested and not platform.get("base_url"):
-        platform["base_url"] = DEFAULT_PLATFORM_BASE_URL
-
-    if platform:
-        config["platform"] = platform
 
 
 def _load_dotenv(config_path: str | None = None) -> None:

@@ -5,7 +5,7 @@ import type { DeploymentBootstrap } from "@/client"
  *
  * `/welcome` is a route on the gateway process (`src/gateway/main.py`) rather
  * than a client route, so it answers on the origin that process serves and
- * nowhere else. In standalone and hybrid that is the dashboard's own origin,
+ * nowhere else. In standalone that is the dashboard's own origin,
  * because the same process serves the bundle. On hosted it is not: otari.ai
  * builds the bundle under a path prefix and publishes it as static files from
  * its own edge, so a root-absolute `/welcome` leaves the app for an origin that

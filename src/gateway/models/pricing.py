@@ -17,8 +17,7 @@ from gateway.models.money import UsdRate
 PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 
 # The counts an attempt reports in a unit other than tokens, keyed by meter. They
-# are the keys of ``billing_meters`` on the row a count settles, and of ``units``
-# in a hybrid gateway's usage report.
+# are the keys of ``billing_meters`` on the row a count settles.
 UNIT_METERS: tuple[str, ...] = ("requests", "search_units", "images")
 
 # The largest count one attempt may report under any meter.

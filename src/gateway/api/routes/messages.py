@@ -14,7 +14,7 @@ from any_llm.types.messages import (
     MessageStartEvent,
     MessageStreamEvent,
 )
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,6 @@ from gateway.api.deps import (
     ToolPortsDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
-    extract_credential_token,
     get_config,
     get_db_if_needed,
     get_log_writer,
@@ -42,31 +41,22 @@ from gateway.api.routes._normalize import (
 )
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
-    NO_RESOLVABLE_PROVIDER_DETAIL,
     DeclaredTools,
     ErrorKind,
     ToolBackends,
     ToolContext,
     classify_provider_error,
-    default_attempt_kwargs,
     domain_error,
     error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
     provider_failure_detail,
-    raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
-    run_platform_non_stream,
     run_single_attempt_stream,
     run_standalone_non_stream,
-    run_streaming_with_fallback,
     scope_prompt_cache_key,
-)
-from gateway.api.routes._platform import (
-    ResolvedAttempt,
-    _resolve_platform_credentials,
 )
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
@@ -80,12 +70,11 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
-from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialError
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import SettledCost
-from gateway.services.code_execution import ContainerLease, check_container_on_credential, gateway_container_value
+from gateway.services.code_execution import ContainerLease, gateway_container_value
 from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
@@ -514,8 +503,7 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
     HTTPExceptions already carrying the Anthropic ``detail`` dict (raised via
     ``_anthropic_error``) pass through unchanged, so this is safe to apply to any
     HTTPException on the ``/api/v1/messages`` path, including format-agnostic ones
-    raised by the hybrid preamble (platform resolve/auth) and the shared
-    execution runners.
+    raised by the shared preamble and execution runners.
     """
     if not isinstance(exc.detail, str):
         return exc
@@ -794,8 +782,7 @@ class _MessagesAdapter:
         use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> MessageResponse:
-        # Standalone dispatch has no lock-in callback; only pass the kwarg on
-        # the platform-attempt path so test fakes can mirror each call shape.
+        # Only pass the lock-in callback when given, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
@@ -849,22 +836,12 @@ class _MessagesAdapter:
     ) -> dict[str, Any]:
         return inject_purpose_hints_anthropic({**kwargs}, hints, header=header)
 
-    def attempt_kwargs(
-        self,
-        attempt: ResolvedAttempt,
-        base_request_fields: dict[str, Any],
-    ) -> dict[str, Any]:
-        return default_attempt_kwargs(attempt, base_request_fields)
-
     def local_attempt_kwargs(
         self,
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
         return self.for_instance(attempt.call_kwargs(base_request_fields), attempt.instance)
-
-    def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        return kwargs
 
 
 _ADAPTER = _MessagesAdapter()
@@ -884,7 +861,6 @@ def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
 async def create_message(
     raw_request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     request: MessagesRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
@@ -900,10 +876,7 @@ async def create_message(
     """Anthropic Messages API-compatible endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-    web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-    resolve credentials via the platform service and get multi-attempt
-    fallback across the resolved route, tool-loop requests included (fallback
-    applies up to the pre-lock-in point, same as chat).
+    web_search.
     """
     adapter = _adapter_for(config)
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
@@ -997,25 +970,9 @@ async def create_message(
     except IdempotentReplay as replay:
         return replay.response()
     except HTTPException as exc:
-        # The hybrid preamble (platform resolve / auth) raises format-agnostic
-        # plain-string HTTPExceptions (some with a Retry-After header); re-wrap
-        # them in the Anthropic envelope so /api/v1/messages errors stay structured.
+        # The preamble raises format-agnostic plain-string HTTPExceptions (some
+        # with a Retry-After header); re-wrap them in the Anthropic envelope so /api/v1/messages errors stay structured.
         raise _ensure_anthropic_error(exc) from exc
-
-    # Standalone credentials are the operator's own, so only hybrid can route to a managed one.
-    # Any managed attempt counts, not only the first: fallback decides which serves, past this point.
-    if request.container is not None and ctx.hybrid_mode:
-        route = ctx.route
-        try:
-            check_container_on_credential(
-                request.container,
-                managed_credential=route is not None and any(attempt.managed for attempt in route.attempts),
-            )
-        except ContainerOnManagedCredentialError as exc:
-            # A no-op in hybrid, which reserves nothing locally. Kept so this exit already settles
-            # if the gate ever covers a mode that does pre-debit the estimate.
-            await release_reservation(ctx)
-            raise domain_error(adapter, exc) from exc
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
@@ -1111,40 +1068,6 @@ async def create_message(
     # Streaming path
     # ------------------------------------------------------------------
     if request.stream:
-        if ctx.hybrid_mode:
-            route = ctx.route
-            assert route is not None  # guaranteed by the hybrid-mode preamble
-            if not route.attempts:
-                logger.error("Platform returned empty attempts list request_id=%s", route.request_id)
-                raise _anthropic_error(
-                    _ERR_API,
-                    NO_RESOLVABLE_PROVIDER_DETAIL,
-                    status.HTTP_502_BAD_GATEWAY,
-                )
-            try:
-                return await run_streaming_with_fallback(
-                    adapter=adapter,
-                    route=route,
-                    base_request_fields=request_fields,
-                    config=config,
-                    background_tasks=background_tasks,
-                    rate_limit_info=ctx.rate_limit_info,
-                    tool_ctx=tool_ctx,
-                    session_label=request.session_label,
-                    started_at=ctx.started_at,
-                )
-            except HTTPException as exc:
-                # Hybrid terminal failures arrive as format-agnostic plain-string
-                # HTTPExceptions; ensure the Anthropic envelope (dict details pass
-                # through unchanged).
-                converted = _ensure_anthropic_error(exc)
-                if converted is exc:
-                    raise
-                raise converted from exc
-            except Exception as exc:
-                raise_all_streaming_attempts_failed(adapter, exc, route)
-
-        # Standalone: single attempt streaming.
         resolved = await resolve_dispatch_provider(
             ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
@@ -1159,7 +1082,6 @@ async def create_message(
             call_kwargs=call_kwargs,
             provider=resolved.instance,
             model=resolved.model,
-            session_label=request.session_label,
             display_model=resolved.alias,
             base_request_fields=request_fields,
             prepare_kwargs=prepare_kwargs,
@@ -1168,33 +1090,6 @@ async def create_message(
     # ------------------------------------------------------------------
     # Non-streaming path
     # ------------------------------------------------------------------
-    if ctx.hybrid_mode:
-        route = ctx.route
-        assert route is not None  # guaranteed by the hybrid-mode preamble
-        try:
-            result = await run_platform_non_stream(
-                adapter=adapter,
-                route=route,
-                base_request_fields=request_fields,
-                tool_ctx=tool_ctx,
-                response=response,
-                background_tasks=background_tasks,
-                config=config,
-                rate_limit_info=ctx.rate_limit_info,
-                session_label=request.session_label,
-            )
-        except HTTPException as exc:
-            # Hybrid terminal failures arrive as format-agnostic plain-string
-            # HTTPExceptions; ensure the Anthropic envelope (dict details pass
-            # through unchanged, including the sandbox / web_search 502s that
-            # run_platform_non_stream raises via the adapter).
-            converted = _ensure_anthropic_error(exc)
-            if converted is exc:
-                raise
-            raise converted from exc
-        return result.model_dump(exclude_none=True)
-
-    # Standalone non-stream path
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
@@ -1246,28 +1141,16 @@ async def count_message_tokens(
 
     Returns ``{"input_tokens": N}`` without contacting an upstream provider:
     counting is local, so there is no budget reservation, pricing, or usage
-    logging. Authentication mirrors :func:`create_message` — hybrid mode
-    resolves the caller's token against the platform, standalone mode validates
-    the API key — so the endpoint is not an open token-counting oracle.
+    logging. Authentication mirrors :func:`create_message`, validating the API
+    key, so the endpoint is not an open token-counting oracle.
     """
     try:
-        if config.is_hybrid_mode:
-            # Resolve against the platform purely to authenticate the caller (same
-            # as create_message); the routing plan is discarded since counting is
-            # local. Without this, any non-empty bearer string would be accepted.
-            user_token = extract_credential_token(raw_request)
-            await _resolve_platform_credentials(
-                config=config,
-                user_token=user_token,
-                model_selector=request.model,
-            )
-        else:
-            if db is None:
-                raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
-            # No session cookie here either, for the reason the completions path
-            # gives (`_pipeline.resolve_request_context`): this counts tokens for
-            # the plane a cookie may not reach, so it must not report on one.
-            await verify_api_key_or_master_key(raw_request, db, config)
+        if db is None:
+            raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # No session cookie here either, for the reason the completions path
+        # gives (`_pipeline.resolve_request_context`): this counts tokens for
+        # the plane a cookie may not reach, so it must not report on one.
+        await verify_api_key_or_master_key(raw_request, db, config)
     except HTTPException as exc:
         # Keep count_tokens auth errors in the Anthropic envelope too.
         raise _ensure_anthropic_error(exc) from exc

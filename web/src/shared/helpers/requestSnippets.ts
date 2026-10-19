@@ -176,9 +176,8 @@ export function buildAgentPrompt({
 /**
  * Where a snippet should send its request, or undefined when nothing here knows.
  *
- * Three deployments, two answers. A standalone gateway and a hybrid one both
- * serve the API at the address that served this page, so the browser's own
- * origin is the answer and is more trustworthy than anything the server could
+ * A standalone gateway serves the API at the address that served this page, so
+ * the browser's own origin is the answer and is more trustworthy than anything the server could
  * say about itself from behind a proxy. A hosted control plane is the exception
  * the whole function exists for: it serves this dashboard, and customer
  * inference belongs on the data-plane gateway rather than on it, so it has to
@@ -194,8 +193,8 @@ export function buildAgentPrompt({
  * value the rest of the tree branches on.
  *
  * `data_plane_url` is read whichever mode published it, but only a hosted
- * deployment does: `bootstrap.py` answers null for standalone and hybrid even
- * when the setting is present, because each of those serves its own API. The
+ * deployment does: `bootstrap.py` answers null for standalone even when the
+ * setting is present, because it serves its own API. The
  * trailing slash is trimmed again here because this is the value the gateway
  * published, not the value it validated.
  */

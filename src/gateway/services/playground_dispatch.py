@@ -16,21 +16,15 @@ settlement happens here: the data-plane gateway runs the pipeline and reports th
 usage upstream, and that report is what debits the wallet. The billing path is
 the one every other request on this deployment already takes.
 
-**Why it has to be a real API key.** The wire between a control plane and its
-gateway carries one (``docs/hybrid-mode-protocol.md``): the gateway forwards it
-as ``X-User-Token`` and the control plane authenticates it on the way back. There
-is no channel on which this deployment can simply assert who to bill, so the
-credential has to be something the resolve path already accepts. The key carries
+**Why it has to be a real API key.** There is no channel on which this
+deployment can simply assert who to bill to its data-plane gateway, so the
+credential has to be one that gateway already accepts. The key carries
 the caller's own user, workspace and model allow-list, so spend, budgets and the
 allow-list gate bind exactly as they would for a key of theirs.
 
 **Transport.** This hop carries a credential, so it belongs on a network the
-operator controls or behind TLS. ``data_plane_url`` accepts ``http`` for the same
-reason ``platform.base_url`` does, and deliberately: the two are one protocol's
-two directions between the same pair of processes, and the reverse one carries
-the caller's own API key. Holding this direction to https while that one accepts
-plaintext would describe a boundary that is not there. otari#1295 settles the
-pair together.
+operator controls or behind TLS; ``data_plane_url`` accepts ``http`` for a
+private network. otari#1295 tracks requiring https.
 
 **Why it is stored, and why that is not otari-ai#1598 again.** This deployment
 has to *present* the credential rather than merely verify one, which is the one

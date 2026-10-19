@@ -7,8 +7,7 @@ heart of [otari.ai](https://otari.ai).
 ## Runtime modes
 
 - **Standalone** serves management and inference with local storage.
-- **Hosted** serves a multi-tenant control plane while inference runs elsewhere.
-- **Hybrid** serves inference using a connected control plane such as otari.ai.
+- **Hosted** serves a multi-tenant control plane and no inference.
 
 See [Modes](modes.md) for the full comparison.
 
@@ -23,13 +22,13 @@ The docs are grouped by what you are trying to do.
 ### Start here
 
 - [Quickstart](quickstart.md): get running and make your first request.
-- [Modes](modes.md): standalone, hosted, and hybrid deployments.
+- [Modes](modes.md): standalone and hosted deployments.
 
 ### For operators
 
 Running and managing a gateway.
 
-- [Deployment](deployment.md): Docker, Railway, hybrid mode, and optional services.
+- [Deployment](deployment.md): Docker, Railway, and optional services.
 - [Configuration](configuration.md): configuration sources, precedence, and common settings.
 - [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
@@ -66,7 +65,6 @@ Calling the gateway from your own code.
 
 ### For platform builders
 
-- [Hybrid-mode protocol](hybrid-mode-protocol.md): the Otari/platform wire contract, for building a platform that Otari connects to.
 - [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](public/code-execution-openapi.yaml).
 
 ### For contributors

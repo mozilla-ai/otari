@@ -346,13 +346,6 @@ def test_an_issuer_listed_twice_is_refused() -> None:
         GatewayConfig.model_validate({"federation_issuers": [ISSUER, {"issuer": ISSUER, "jwks_uri": JWKS_URI}]})
 
 
-def test_a_hybrid_gateway_refuses_federation() -> None:
-    config = GatewayConfig.model_validate({"mode": "hybrid", "federation_issuers": [ISSUER]})
-
-    with pytest.raises(ValueError, match="federation_issuers"):
-        config.validate_declared_access()
-
-
 def test_a_rule_must_name_a_subject_or_an_email() -> None:
     with pytest.raises(ValidationError, match="names a subject, an email, or both"):
         FederationRuleCreate(issuer=ISSUER, audience=AUDIENCE)

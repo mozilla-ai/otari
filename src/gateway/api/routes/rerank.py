@@ -16,7 +16,6 @@ from gateway.api.deps import (
     verify_api_key_or_master_key_if_needed,
 )
 from gateway.api.routes._passthrough import run_passthrough
-from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
@@ -106,10 +105,5 @@ async def create_rerank(
         estimate=estimate,
         enforce_require_pricing=True,
         billing=RERANK_BILLING,
-        inline_cost=True,
     )
-    if outcome.inline_cost is not None:
-        record_inline_cost_settlement("attached")
-    return InferenceService.rerank_response(
-        outcome.result, pricing=outcome.pricing, cost=outcome.cost, inline_cost=outcome.inline_cost
-    )
+    return InferenceService.rerank_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)

@@ -127,11 +127,9 @@ A one-click deployment template is available for
 | Mode | Purpose |
 | --- | --- |
 | Standalone | One process serves management and inference using local storage. |
-| Hosted | A multi-tenant control plane; inference runs on connected gateways. |
-| Hybrid | A data-plane gateway resolves credentials and reports usage to otari.ai. |
+| Hosted | A multi-tenant control plane that serves management only, no inference. |
 
-When `OTARI_MODE` is unset, `OTARI_AI_TOKEN` selects hybrid mode; otherwise
-Otari defaults to standalone. A mode says what a process serves, not who runs it,
+`OTARI_MODE` selects the mode, and unset means standalone. A mode says what a process serves, not who runs it,
 so "hosted" is not the opposite of "self-hosted". See
 [Runtime modes](docs/modes.md#mode-and-who-runs-it).
 

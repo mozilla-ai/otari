@@ -21,13 +21,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from gateway.api.deps import get_web_search_policy_port, reset_config
+from gateway.api.deps import get_web_search_policy_port
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, RateLimitRule
-from gateway.core.database import reset_db
 from gateway.core.settings.pricing import PricingConfig
 from gateway.exceptions.tools_exceptions import SearchToolNotFoundError
 from gateway.inflight import InFlightRegistry
-from gateway.main import create_app
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.ports.web_search_policy_port import WebSearchPolicyScope
@@ -726,19 +724,6 @@ def test_a_config_priced_search_is_reserved_before_it_runs(
     searched.assert_not_awaited()
 
 
-def test_search_is_not_registered_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Search is a standalone-mode surface: hybrid has no local search config."""
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    app = create_app(GatewayConfig(mode="hybrid", platform={"base_url": "http://localhost:8100/api/v1"}))
-    try:
-        with TestClient(app) as hybrid_client:
-            resp = hybrid_client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD)
-        assert resp.status_code == 404
-    finally:
-        reset_config()
-        reset_db()
-
-
 def test_search_is_tracked_while_its_provider_call_runs(client: TestClient, api_key_header: dict[str, str]) -> None:
     """A search is registered in flight during its provider call and gone after.
 
@@ -1103,7 +1088,6 @@ def test_the_route_reads_the_policy_through_the_port(
     assert resp.status_code == 403
     ((scope, requested),) = stub.asked
     assert scope.workspace_id is not None
-    assert scope.user_token is None
     assert requested == (WebTool.SEARCH,)
     (row,) = _search_rows(client, master_key_header, api_key_obj["user_id"])
     assert (row["model"], row["status_code"]) == ("fake-search", 403)

@@ -6,9 +6,6 @@ spill-over past a rate limit, learned selection, or guardrails the caller cannot
 remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
-Policies are a standalone feature. Hybrid gateways receive their attempt plan
-from the connected control plane.
-
 ## Failover
 
 ```yaml

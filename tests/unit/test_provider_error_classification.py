@@ -34,6 +34,7 @@ from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi import HTTPException
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
+from gateway.api.routes._attempts import get_shared_rejection, provider_failure_http_exc
 from gateway.api.routes._helpers import SHOULD_RETRY_HEADER, with_retry_hint
 from gateway.api.routes._pipeline import (
     _FORWARDED_PARAMS,
@@ -54,10 +55,6 @@ from gateway.api.routes._pipeline import (
     stream_error_code,
     stream_error_message,
     with_provider_failure,
-)
-from gateway.api.routes._platform import (
-    _provider_failure_http_exc,
-    get_shared_rejection,
 )
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
@@ -362,8 +359,8 @@ def test_retry_after_read_through_the_exception_chain() -> None:
     assert upstream_retry_after(_WrappedError(429, _rate_limited_with("7"))) == "7"
 
 
-def test_platform_terminal_exc_forwards_retry_after() -> None:
-    exc = _provider_failure_http_exc(_rate_limited_with("34"), fallback_detail="LLM provider error")
+def test_terminal_exc_forwards_retry_after() -> None:
+    exc = provider_failure_http_exc(_rate_limited_with("34"), fallback_detail="LLM provider error")
     assert exc.status_code == 429
     assert exc.headers == {"Otari-Error-Code": "upstream_rate_limited", "Retry-After": "34"}
 
@@ -383,15 +380,14 @@ def test_gateway_fault_details_never_echo_the_raw_message() -> None:
         assert "abc123" not in mapping.detail
 
 
-def test_platform_terminal_exc_uses_classified_status() -> None:
-    """Platform-mode terminal failures get the same classified status as the
-    standalone adapters, so the production path is not stuck on a generic 502."""
-    exc = _provider_failure_http_exc(_StatusError(404), fallback_detail="LLM provider error")
+def test_terminal_exc_uses_classified_status() -> None:
+    """A terminal failure gets its classified status, not a generic 502."""
+    exc = provider_failure_http_exc(_StatusError(404), fallback_detail="LLM provider error")
     assert exc.status_code == 404
 
 
-def test_platform_terminal_exc_falls_back_to_generic() -> None:
-    exc = _provider_failure_http_exc(Exception(_RAW), fallback_detail="LLM provider error")
+def test_terminal_exc_falls_back_to_generic() -> None:
+    exc = provider_failure_http_exc(Exception(_RAW), fallback_detail="LLM provider error")
     assert exc.status_code == 502
     assert exc.detail == "LLM provider error"
     assert "SECRET" not in str(exc.detail)
@@ -473,8 +469,8 @@ def test_missing_credential_error_code_is_not_sent_for_an_upstream_424() -> None
     assert provider_error_headers(_StatusError(424), 424) is None
 
 
-def test_platform_terminal_exc_for_a_missing_credential_is_a_424() -> None:
-    exc = _provider_failure_http_exc(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"), fallback_detail="x")
+def test_terminal_exc_for_a_missing_credential_is_a_424() -> None:
+    exc = provider_failure_http_exc(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"), fallback_detail="x")
     assert exc.status_code == 424
     assert (exc.headers or {}).get("Otari-Error-Code") == PROVIDER_NOT_CONFIGURED
 
@@ -1302,15 +1298,15 @@ def test_no_retry_is_not_sent_below_500() -> None:
     assert with_retry_hint(rejected, mapping.status_code, None) is None
 
 
-def test_platform_terminal_exc_tells_a_client_not_to_retry_a_local_fault() -> None:
-    exc = _provider_failure_http_exc(KeyError("content"), fallback_detail="LLM provider error")
+def test_terminal_exc_tells_a_client_not_to_retry_a_local_fault() -> None:
+    exc = provider_failure_http_exc(KeyError("content"), fallback_detail="LLM provider error")
     assert exc.status_code == 502
     assert exc.detail == "LLM provider error"
     assert exc.headers == _NO_RETRY
 
 
-def test_platform_terminal_exc_keeps_retries_for_an_upstream_outage() -> None:
-    exc = _provider_failure_http_exc(_StatusError(503), fallback_detail="LLM provider error")
+def test_terminal_exc_keeps_retries_for_an_upstream_outage() -> None:
+    exc = provider_failure_http_exc(_StatusError(503), fallback_detail="LLM provider error")
     assert exc.status_code == 502
     assert exc.headers is None
 
@@ -1580,7 +1576,7 @@ def test_a_failure_inside_the_gateway_keeps_the_fixed_detail() -> None:
 
 def test_the_502_keeps_its_retry_behavior() -> None:
     """Only the detail changed: a provider 5xx still carries no x-should-retry, so a client retries it."""
-    answer = _provider_failure_http_exc(_StatusError(500), fallback_detail="LLM provider error")
+    answer = provider_failure_http_exc(_StatusError(500), fallback_detail="LLM provider error")
     assert answer.status_code == 502
     assert answer.detail == "The provider failed the request with HTTP 500"
     assert SHOULD_RETRY_HEADER not in (answer.headers or {})

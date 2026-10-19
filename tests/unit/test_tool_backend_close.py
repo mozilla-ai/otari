@@ -5,18 +5,18 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AsyncExitStack
-from typing import cast
+from types import SimpleNamespace
+from typing import Any, cast
 
-import anyio
 import pytest
 
 from gateway.api.routes._pipeline import (
     _close_tool_backend,
+    _eager_backend_stream,
     _held_tool_backend,
-    _stream_with_stack_cleanup,
+    _OpenedTools,
     _ToolBackendKind,
 )
-from gateway.streaming import OPENAI_STREAM_FORMAT, streaming_generator
 
 
 async def _raise(exc: BaseException) -> None:
@@ -129,9 +129,33 @@ async def test_a_held_backend_is_closed_cleanly_after_a_block_that_finished() ->
     assert backend.closed_with is None
 
 
-async def _two_chunks() -> AsyncIterator[str]:
-    yield "first"
-    yield "second"
+class _TwoChunkAdapter:
+    """A format adapter whose tool loop streams two chunks."""
+
+    name = "chat"
+
+    def inject_hints(self, kwargs: dict[str, Any], hints: object, *, header: str | None) -> dict[str, Any]:
+        return kwargs
+
+    async def open_tool_loop_stream(self, *args: object, **kwargs: object) -> AsyncIterator[str]:
+        yield "first"
+        yield "second"
+
+
+def _eager_stream(stack: AsyncExitStack) -> AsyncIterator[str]:
+    """The stream over backends entered on ``stack``, as ``open_stream`` builds it."""
+    tool_ctx = SimpleNamespace(
+        mcp_server_configs=[object()],
+        use_sandbox=False,
+        use_web_search=False,
+        use_web_fetch=False,
+        tools_header=None,
+        max_tool_iterations=10,
+        use_budget=None,
+        native_tools=lambda _name: frozenset(),
+    )
+    opened = _OpenedTools(pool=cast(Any, SimpleNamespace(purpose_hints=lambda: [])), sandbox=None)
+    return _eager_backend_stream(cast(Any, _TwoChunkAdapter()), {}, opened, stack, cast(Any, tool_ctx))
 
 
 @pytest.mark.asyncio
@@ -139,7 +163,7 @@ async def test_a_stream_the_client_left_closes_its_backends_with_that_exit() -> 
     backend = _Backend()
     stack = AsyncExitStack()
     await stack.enter_async_context(backend)
-    stream = cast(AsyncGenerator[str], _stream_with_stack_cleanup(_two_chunks(), stack, _ToolBackendKind.MCP))
+    stream = cast(AsyncGenerator[str], _eager_stream(stack))
 
     assert await anext(stream) == "first"
     await stream.aclose()
@@ -153,81 +177,6 @@ async def test_a_stream_that_finished_closes_its_backends_cleanly() -> None:
     stack = AsyncExitStack()
     await stack.enter_async_context(backend)
 
-    assert [chunk async for chunk in _stream_with_stack_cleanup(_two_chunks(), stack, _ToolBackendKind.MCP)] == [
-        "first",
-        "second",
-    ]
+    assert [chunk async for chunk in _eager_stream(stack)] == ["first", "second"]
     assert backend.closed
     assert backend.closed_with is None
-
-
-class _ProviderStream:
-    """An endless provider stream recording whether its tool backend was still open when it was closed."""
-
-    def __init__(self, backend: _Backend) -> None:
-        self.backend = backend
-        self.closed_before_backend: bool | None = None
-
-    def __aiter__(self) -> _ProviderStream:
-        return self
-
-    async def __anext__(self) -> str:
-        await asyncio.sleep(0)
-        return "chunk"
-
-    async def aclose(self) -> None:
-        await asyncio.sleep(0)
-        self.closed_before_backend = not self.backend.closed
-
-
-async def _wrapped_provider_stream() -> tuple[_ProviderStream, AsyncGenerator[str], _Backend]:
-    backend = _Backend()
-    stack = AsyncExitStack()
-    await stack.enter_async_context(backend)
-    source = _ProviderStream(backend)
-    return source, cast(AsyncGenerator[str], _stream_with_stack_cleanup(source, stack, _ToolBackendKind.MCP)), backend
-
-
-@pytest.mark.asyncio
-async def test_a_stream_the_client_left_closes_what_it_wraps_before_its_backends() -> None:
-    source, stream, backend = await _wrapped_provider_stream()
-
-    assert await anext(stream) == "chunk"
-    await stream.aclose()
-
-    assert source.closed_before_backend is True
-    assert backend.closed
-
-
-async def _unused_settlement(*_: object) -> None:
-    pytest.fail("a stream the client left settles through on_incomplete alone")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("keepalive_interval", [0.0, 0.01], ids=["direct", "keepalive"])
-async def test_a_stream_canceled_mid_read_closes_what_it_wraps_before_its_backends(keepalive_interval: float) -> None:
-    """Starlette answers a disconnect by canceling the response's task group, which cancels every later await.
-
-    With keepalives on, the response reads the stream in a task of its own, where the stream's cleanup then runs.
-    """
-    source, stream, backend = await _wrapped_provider_stream()
-    events = streaming_generator(
-        stream=stream,
-        format_chunk=str,
-        extract_usage=lambda _: None,
-        fmt=OPENAI_STREAM_FORMAT,
-        on_complete=_unused_settlement,
-        on_error=_unused_settlement,
-        label="test:model",
-        keepalive_interval_seconds=keepalive_interval,
-    )
-
-    async def read(scope: anyio.CancelScope) -> None:
-        async for _event in events:
-            scope.cancel()
-
-    async with anyio.create_task_group() as task_group:
-        task_group.start_soon(read, task_group.cancel_scope)
-
-    assert source.closed_before_backend is True
-    assert backend.closed

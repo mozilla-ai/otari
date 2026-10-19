@@ -27,7 +27,6 @@ from gateway.api.routes import (
     hooks,
     hosted_mode,
     hosted_providers,
-    hybrid_mode,
     identity,
     images,
     invitations,
@@ -66,7 +65,6 @@ from gateway.api.routes import (
     tools,
     usage,
     users,
-    web_search_backend,
     web_search_keys,
     workspace_activation,
     workspace_code_execution_policy,
@@ -85,7 +83,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     """Mount Otari's own routers, then whatever the bootstrap contributed.
 
     One aggregate router carries the API, so its mount prefix has one owner.
-    Mount order on that router matters. The hybrid and hosted stubs are
+    Mount order on that router matters. The hosted stubs are
     ``{path:path}`` catch-alls and the first matching route wins, so the
     stubs go last. A stub mounted earlier would answer a path that a
     contributed router serves.
@@ -94,9 +92,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     deployment = deployment_for(config)
     _register_core_routers(api, config, app.state.enabled_features)
     _register_contributed_routers(api, app.state.container)
-    if not deployment.supports(Plane.CONTROL):
-        api.include_router(hybrid_mode.router)
-    elif not deployment.supports(Plane.DATA):
+    if not deployment.supports(Plane.DATA):
         # A hosted control plane holds no data plane, so the inference prefixes
         # get catch-all stubs. A contributed route still wins: an overlay that
         # adds one has made a choice, and a fallback does not overrule it.
@@ -104,10 +100,8 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(api)
     # OTLP is a sibling namespace, not a child of the API root: OTel owns the
     # /v1/{traces,logs,metrics} tail, so an exporter pointed at `{origin}/otlp`
-    # appends it unaided. Standalone and hosted only, like the rest of the
-    # management surface; a hybrid data plane stores no telemetry.
-    if deployment.supports(Plane.CONTROL):
-        app.include_router(otlp.router, prefix=OTLP_ROOT)
+    # appends it unaided.
+    app.include_router(otlp.router, prefix=OTLP_ROOT)
 
 
 def _register_contributed_routers(api: APIRouter, container: Container) -> None:
@@ -132,26 +126,14 @@ def _register_contributed_routers(api: APIRouter, container: Container) -> None:
 # for it to answer. Order is load-bearing in places: where two routers share a
 # prefix, the one whose path could sit behind the other's catch-all goes first,
 # and the comments below say which.
-#
-# ``Plane.DATA`` alone is a data-plane route a hybrid gateway answers.
-# ``Plane.DATA | Plane.CONTROL`` is one that also reads a local control plane,
-# so a hybrid gateway does not answer it.
 _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(chat.router, Plane.DATA),
     RouterMount(health.router),
     # A browser learns which deployment it reached from this, so every
     # deployment answers it.
     RouterMount(bootstrap.router),
-    # Absent rather than refusing where the deployment holds neither a search
-    # credential nor a token to recognize its own gateway by.
-    RouterMount(
-        web_search_backend.router,
-        when=lambda config: config.web_search_provider_configured() and bool(config.web_search_backend_token),
-    ),
     RouterMount(messages.router, Plane.DATA),
     RouterMount(responses.router, Plane.DATA),
-    # Stateless: a hybrid gateway authenticates through the platform's MCP
-    # resolver rather than a local database.
     RouterMount(mcp.router, Plane.DATA),
     # Evaluates only the policy and evidence the caller sent in the same
     # request, so it needs no tenancy, no provider and no database.
@@ -167,16 +149,13 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # ceremony route that answers 503 still says passkeys exist here.
     RouterMount(auth_webauthn.router, Plane.CONTROL, when=lambda config: config.passkeys_enabled),
     RouterMount(auth_oauth.router, Plane.CONTROL),
-    # The pass-through routes: on a hybrid gateway ``run_passthrough`` asks the
-    # control plane for credentials and reports usage back, as completions do.
     RouterMount(embeddings.router, Plane.DATA),
     RouterMount(images.router, Plane.DATA),
     RouterMount(audio.router, Plane.DATA),
     RouterMount(rerank.router, Plane.DATA),
     RouterMount(moderations.router, Plane.DATA),
-    # Data-plane routes that also read a local control plane, because none of
-    # them has hybrid handling. ``files`` is among them because an upload exists
-    # to be referenced from a completion or a batch.
+    # ``files`` serves the data plane because an upload exists to be referenced
+    # from a completion or a batch.
     RouterMount(files.router, Plane.DATA | Plane.CONTROL),
     RouterMount(decisions.router, Plane.DATA | Plane.CONTROL),
     # One decision call, billed here like a decisions call, so it needs both
@@ -189,16 +168,12 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # operator router goes first: its /discoverable and /metadata would
     # otherwise sit behind the catalog router's {model_id:path} catch-all.
     RouterMount(models.operator_router, Plane.CONTROL),
-    # A hybrid gateway has no catalog of its own, so it relays the control
-    # plane's list for the caller's key on the data plane.
-    RouterMount(models.hybrid_router, Plane.DATA, when=lambda config: config.is_hybrid_mode),
     RouterMount(models.catalog_router, Plane.CONTROL),
     # The same merged catalog, folded by model for a chooser rather than
     # listed flat for an SDK.
     RouterMount(catalog.router, Plane.CONTROL),
     RouterMount(catalog.operator_router, Plane.CONTROL),
-    # Reads the management surface and dispatches a completion, so it needs a
-    # session a hybrid gateway cannot offer. A hosted control plane forwards
+    # Reads the management surface and dispatches a completion. A hosted control plane forwards
     # the completion to ``data_plane_url``, which is why this prefix is absent
     # from ``hosted_mode.DATA_PLANE_PREFIXES``: a stub there would shadow it.
     RouterMount(playground.router, Plane.CONTROL),

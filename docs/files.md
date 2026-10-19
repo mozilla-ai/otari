@@ -9,11 +9,6 @@ This works the same way Otari's other "frontier capabilities" do: it
 inspects the request, decides what to do per attachment, and only does work the
 target model actually needs.
 
-> Standalone mode only. Hybrid mode routes to frontier providers that already
-> understand documents/images, so attachments pass through untouched.
-
-
-
 ## Uploading a file
 
 ```bash

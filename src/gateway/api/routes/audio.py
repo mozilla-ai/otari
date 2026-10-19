@@ -81,7 +81,6 @@ async def create_transcription(
     """
 
     async def call_provider(resolved: ResolvedProvider) -> Transcription:
-        # A hybrid gateway calls this once per attempt it falls back through.
         await file.seek(0)
         file_bytes = await file.read()
         if len(file_bytes) > _MAX_AUDIO_UPLOAD_BYTES:

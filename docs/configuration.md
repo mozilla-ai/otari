@@ -86,7 +86,7 @@ the corresponding startup value after the database is available.
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
-| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
+| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone only. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
@@ -107,7 +107,7 @@ the corresponding startup value after the database is available.
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
-| `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |
+| `mode` | `standalone` or `hosted`. See [Modes](modes.md). |
 
 For every field, its current default, validation, and description live on
 `GatewayConfig` in `src/gateway/core/config.py`, or in the per-domain module
@@ -214,8 +214,7 @@ a dashboard session), and `per: user` does not limit one billed to no user. A re
 that does not is refused with a 429 naming the rule and the limit it hit, counted by none of them,
 and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
 across replicas. They apply to chat completions, messages, responses and search, after
-`rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to
-start with `rate_limits` set.
+`rate_limit_rpm`.
 
 `per: model` limits each model in `models`, written as `instance:model` (the
 provider instance it is called through, then the model). One count is kept per
@@ -263,9 +262,7 @@ allow-list.
 A deployment can declare its budgets and API keys in config.yml instead of
 creating them through the management API. Each start creates the ones missing
 from the database and writes back the ones whose entry changed, so a service that calls Otari needs only this file and one secret
-that both sides read from the environment. Standalone and hosted mode only: a
-hybrid gateway holds no budgets or keys of its own, so it refuses to start with
-either section set.
+that both sides read from the environment.
 
 ```yaml
 budgets:
@@ -504,9 +501,7 @@ for every non-Anthropic model.
 The setting covers `/v1/messages` traffic only, and only where the instance's
 provider has a Responses API; an instance whose provider has none keeps the
 default and logs a warning once. Any other value fails at startup. It is read
-from the `providers:` block of the gateway's own config, so it applies in
-standalone mode; a hybrid gateway's instances come from the platform and keep
-the default.
+from the `providers:` block of the gateway's own config.
 
 ### Bedrock read timeout
 
@@ -638,8 +633,7 @@ in no catalog; they come back if the entry does, and the next catalog sweep on
 the Hosted providers page (`POST /api/v1/hosted-providers/refresh`) deletes
 them and their prices, naming the provider in `orphaned_rosters`. Where no
 hosted provider offers a model at all, the sweep deletes those models and leaves
-every price in place. A hybrid
-gateway ignores the block.
+every price in place.
 
 ### Provider copies
 
@@ -654,7 +648,7 @@ by default, and the pepper is unset, shorter than 32 characters, or equal to the
 master key or an `OTARI_SECRET_KEY` key. Generate one with
 `otari gen-provider-account-pepper` or `openssl rand -base64 32`, and keep it in
 your secret store. Rotating it costs nothing but a fresh copy of each file the
-next time a request uses it. Hybrid mode makes no copies and needs no pepper.
+next time a request uses it.
 
 ### End-user identifiers
 
@@ -698,11 +692,6 @@ is unkeyed, so the same workspace id and user give the same identifier on any
 deployment, and Otari logs a warning at startup. Otari refuses to start when the
 key equals the master key or an `OTARI_SECRET_KEY` key. Rotating it gives every
 user a new identifier.
-
-In hybrid mode the workspace and user come from otari.ai's resolve response,
-and Otari refuses a request with a `502` when it names no workspace, or no user
-for a caller that sent no tag, rather than send it unscoped. See
-[End-user identifier](hybrid-mode-protocol.md#end-user-identifier).
 
 ## Pricing
 
@@ -807,8 +796,7 @@ instances and any hosted models the deployment serves to every organization,
 priced at the deployment's rates, and never a hosted provider restricted to one
 organization, an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
-served as that caller, valid or not. The setting is off by default, off in
-hybrid mode, and can be changed at runtime.
+served as that caller, valid or not. The setting is off by default and can be changed at runtime.
 
 Anonymous reads are throttled per client address by
 `public_catalog_rate_limit_per_minute`, sixty a minute by default and its own
@@ -1285,14 +1273,6 @@ Supply the origin or path prefix without a trailing slash or `/api/v1`. Credenti
 query strings, and fragments are refused because `GET /api/v1/bootstrap` publishes
 this value without authentication.
 
-## otari.ai variables
-
-Hybrid mode requires `OTARI_AI_TOKEN`. Optional platform settings control the
-platform API URL, management URL, health-probe path, resolution timeout,
-usage-report timeout and retries, and first-chunk fallback timeout. See
-[Modes](modes.md) and the normative
-[hybrid-mode protocol](hybrid-mode-protocol.md).
-
 ## Extending Otari with a bootstrap module
 
 `bootstrap` or `OTARI_BOOTSTRAP` names a trusted `module:callable` loaded
@@ -1322,8 +1302,7 @@ logging or tracing you configure.
 
 Feedback is on by default. To turn it off, set `feedback_enabled: false` in
 YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
-mounted and the Feedback entry is hidden. Standalone and hosted deployments
-offer it; hybrid gateways never do. This setting is visible in Settings but
+mounted and the Feedback entry is hidden. This setting is visible in Settings but
 cannot be changed there at runtime.
 
 Each signed-in person (and the master key) can send five messages every ten

@@ -325,8 +325,7 @@ class SynthesizedSearchInstance:
 
     It is not in either map, so it cannot be named by a default or by the direct
     endpoint's path, and it is priced under ``otari:web_search``. Its name is
-    its provider's. Whether a ``searxng`` one at the platform's origin is the
-    hosted hop is the resolver's question, not this one's.
+    its provider's.
     """
 
     provider: str
@@ -394,20 +393,7 @@ class ToolSettings(BaseModel):
     )
     web_search_provider_api_key: Annotated[str | None, SECRET] = Field(
         default=None,
-        description=(
-            "Credential for web_search_provider. Held by whichever process runs the search: on a "
-            "hosted deployment that is the control plane, never the data plane."
-        ),
-    )
-    web_search_backend_token: Annotated[str | None, SECRET] = Field(
-        default=None,
-        description=(
-            "Shared secret GET /api/v1/web-search/search requires as X-Gateway-Token. Set on a hosted "
-            "control plane so its data-plane gateway can search through it; without it the route "
-            "is not served, because it spends the deployment's own search quota. The gateway "
-            "presents its platform token (OTARI_AI_TOKEN) and nothing else, so this must be that "
-            "token, and rotating it stops web search for that data plane until both are updated."
-        ),
+        description=("Credential for web_search_provider."),
     )
     web_search_purpose_hint: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
@@ -567,10 +553,6 @@ class ToolSettings(BaseModel):
     def warn_about_half_configured_web_search(self) -> None:
         """Say so when a search provider was named but cannot be used.
 
-        Also when ``web_search_backend_token`` was set without one: the token
-        exists to gate the backend route, and that route is not mounted without
-        a provider to serve it, so the setting silently does nothing.
-
         A warning rather than a refusal, for the reason
         :meth:`GatewayConfig.warn_about_half_configured_oauth` gives: web search
         is one optional tool, and refusing to boot would take a gateway offline
@@ -584,12 +566,6 @@ class ToolSettings(BaseModel):
         it would need no URL answers every ``otari_web_search`` request with the
         not-configured 400 and says nowhere why.
         """
-        if self.web_search_backend_token and not self.web_search_provider_configured():
-            logger.warning(
-                "web_search_backend_token is set but no web-search provider is configured, so "
-                "GET /api/v1/web-search/search is not served. Set web_search_provider and "
-                "web_search_provider_api_key on the process that holds the search key."
-            )
         if bool(self.web_search_provider) == bool(self.web_search_provider_api_key):
             return
         missing, present = (

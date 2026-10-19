@@ -77,12 +77,11 @@ the old shape.
 
 The behavior for each deployment mode belongs in a binding chosen where the app
 is wired, not in a branch on the mode. The check refuses a read of
-`configured_mode`, `effective_mode`, `is_hosted_mode` or `is_hybrid_mode`, or a
+`configured_mode`, `effective_mode` or `is_hosted_mode`, or a
 call to `deployment_for`, under `services/`. It does not catch the cases below.
 
 - Flag a service that branches on the mode another way, such as on
-  `config.mode`, on whether `config.platform_token` is set, or on the
-  `OTARI_AI_TOKEN` or `OTARI_MODE` environment variable.
+  `config.mode` or on the `OTARI_MODE` environment variable.
 - Flag a PR that makes a builder in `api/deps.py` or a factory in
   `container.py` read the mode and pass the answer to a service as an argument,
   such as `on_by_default=config.is_hosted_mode`. The service then branches on

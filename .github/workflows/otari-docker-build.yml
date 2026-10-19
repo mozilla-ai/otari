@@ -43,7 +43,6 @@ on:
       - 'any-fetch/src/**'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
-      - 'scripts/hybrid_edition_smoke.py'
       - 'scripts/oss_edition_smoke.py'
       - '.github/workflows/otari-docker-build.yml'
   workflow_dispatch:
@@ -84,25 +83,18 @@ jobs:
         run: ./scripts/docker_liveness_check.sh otari-pr:${{ github.sha }}
 
       # Liveness proves the container answers its health probes. This proves it
-      # can serve a request: the same hybrid walk as otari-oss-edition.yml, run
-      # against the image a deployment actually pulls rather than a source
-      # checkout. The image pins OTARI_HOST/OTARI_PORT as environment variables,
-      # which beat a mounted config file, so an image that boots but cannot
-      # serve is a break only this step sees.
+      # can serve a request: the same walk as otari-oss-edition.yml, run against
+      # the image a deployment actually pulls rather than a source checkout, on
+      # a SQLite file inside the container. The image pins OTARI_HOST/OTARI_PORT
+      # as environment variables, which beat a mounted config file, so an image
+      # that boots but cannot serve is a break only this step sees.
       - name: Install the smoke's environment
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.14"
 
-      - name: Smoke the container in hybrid mode
-        run: |
-          uv sync --frozen --no-dev
-          uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py \
-            --image otari-pr:${{ github.sha }}
-
-      # The standalone walk against the same image, on a SQLite file inside the
-      # container: the image path under test is the same whatever the database.
       - name: Smoke the container as the OSS edition
         run: |
+          uv sync --frozen --no-dev
           uv run --frozen --no-dev python scripts/oss_edition_smoke.py \
             --image otari-pr:${{ github.sha }}

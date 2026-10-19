@@ -50,9 +50,8 @@ export function RoutingPage() {
     canEdit,
     writeWorkspaceId,
   } = useRoutingRows()
-  // Only a gateway that serves requests itself compiles a policy. A hybrid one
-  // takes its attempt plan from its control plane, and a hosted control plane
-  // serves no requests, so a policy stored there is not consulted.
+  // Only a gateway that serves requests itself compiles a policy. A hosted
+  // control plane serves none, so a policy stored there is not consulted.
   const { deployment_type } = useDeployment()
   const isStandalone = deployment_type === "standalone"
   const deletePolicy = useDeleteRoutingPolicy()
@@ -265,8 +264,7 @@ export function RoutingPage() {
       {isStandalone ? null : (
         <InfoBanner>
           Policies are a standalone feature: they apply only on a gateway that
-          serves requests itself. A hybrid gateway receives its attempt plan
-          from the connected control plane.
+          serves requests itself.
         </InfoBanner>
       )}
 

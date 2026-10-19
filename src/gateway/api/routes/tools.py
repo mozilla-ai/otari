@@ -12,11 +12,6 @@ unavailable rather than hidden (a client seeing ``available: false`` learns the
 tool exists and the operator has not configured it, which is the actionable
 distinction).
 
-Standalone-only, like every other non-completion router. Hybrid mode could not
-answer this honestly: there the platform owns the per-workspace tool policy
-(``WebSearchPolicyPort``), so a tool this gateway has configured may
-still be refused with a 403 for the caller asking. Reporting ``available: true``
-from local config alone would be worse than not answering.
 """
 
 from typing import Annotated, Any, Literal

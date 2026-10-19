@@ -7,7 +7,7 @@ and, where safe, control runtime behavior. Two layers:
   operator should see, grouped, each marked ``settable`` (hot-changeable) or not
   (startup-only, display only). Secrets (master key, provider credentials) and
   the complex catalog fields managed on their own pages (providers, pricing,
-  aliases, model capabilities, the platform block) are deliberately omitted.
+  aliases, model capabilities) are deliberately omitted.
 * The writable subset (see ``runtime_settings_service.SETTABLE_KEYS``), persisted
   so a change survives a restart and applied to the running worker immediately.
 """

@@ -5,8 +5,8 @@ description: Guidelines for the otari admin dashboard (`web/`), React 19 + TypeS
 
 # Frontend Standards: otari dashboard (`web/`)
 
-`web/` is the dashboard shared by standalone, hosted, and hybrid deployments. It renders the
-management UI or hybrid landing page from `/v1/bootstrap` and uses an HttpOnly session for
+`web/` is the dashboard shared by standalone and hosted deployments. It renders the
+management UI from `/v1/bootstrap` and uses an HttpOnly session for
 management calls. It is an operator tool, not a marketing surface. The base tracker under
 `src/shared/telemetry/` is a no-op seam an overlay may replace; do not give it an analytics
 implementation in this repository.

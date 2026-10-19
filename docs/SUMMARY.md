@@ -42,5 +42,4 @@
 
 ## For platform builders
 
-* [Hybrid-mode protocol](hybrid-mode-protocol.md)
 * [Code-execution protocol](code-execution-protocol.md)

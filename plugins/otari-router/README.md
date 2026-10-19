@@ -56,8 +56,7 @@ Each spawn leaves a dim transcript line such as
   [decision provider](../../docs/configuration.md#decision-providers)
   configured, and the recommendation is one decision-model call billed to the
   key above; on otari.ai a managed recommender answers, with nothing to
-  configure. A hybrid gateway does not serve the route, so the plugin would
-  fall back on every spawn. See [Use with Claude Code](../../docs/use-with-claude-code.md#let-otari-choose-a-subagents-model)
+  configure. See [Use with Claude Code](../../docs/use-with-claude-code.md#let-otari-choose-a-subagents-model)
   for what the gateway does with the request.
 - A Claude Code build with the mods API, which hooks modules run on.
 

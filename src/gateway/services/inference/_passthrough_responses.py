@@ -24,19 +24,16 @@ def rerank_response(
     *,
     pricing: ResolvedPricing | None,
     cost: Decimal | None,
-    inline_cost: InlineCost | None = None,
 ) -> RerankResponse:
     """The rerank response for ``result``, with what the request was metered at and cost.
 
     ``pricing`` is the rate found for the request and ``cost`` the amount
-    written to its usage row. ``inline_cost``, when given, is a cost settled
-    elsewhere (a hybrid gateway's control plane) and is carried as it is.
-    ``meta`` is the provider's billing report as it sent it; ``usage`` reports
+    written to its usage row. ``meta`` is the provider's billing report as it sent it; ``usage`` reports
     the provider's tokens, the search units billed when the model is priced per
     request, and the inline cost.
     """
     billed_units = result.meta.billed_units if result.meta else None
-    cost_fields = inline_cost or _inline_cost(cost, pricing)
+    cost_fields = _inline_cost(cost, pricing)
     return RerankResponse(
         id=result.id,
         model=result.model,
@@ -56,14 +53,13 @@ def embeddings_response(
     *,
     pricing: ResolvedPricing | None,
     cost: Decimal | None,
-    inline_cost: InlineCost | None = None,
 ) -> EmbeddingResponse:
     """The embeddings response for ``result``, in OpenAI's shape with the inline cost on ``usage``.
 
-    ``pricing``, ``cost`` and ``inline_cost`` are as for :func:`rerank_response`. A provider that
+    ``pricing`` and ``cost`` are as for :func:`rerank_response`. A provider that
     reported no usage gets none back, and so no inline cost.
     """
-    cost_fields = inline_cost or _inline_cost(cost, pricing)
+    cost_fields = _inline_cost(cost, pricing)
     return EmbeddingResponse(
         data=[EmbeddingData(index=item.index, embedding=item.embedding) for item in result.data],
         model=result.model,

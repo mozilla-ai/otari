@@ -37,18 +37,15 @@ def _operations(app: FastAPI) -> Operations:
 def _standalone() -> GatewayConfig:
     """A config that does not read the machine it runs on.
 
-    A bare ``GatewayConfig()`` takes four routing decisions from the ambient
-    environment: the mode (three routers or sixty), whether a search provider
-    and a gateway token mount the web-search backend, and whether a bootstrap
-    contributes routers. Both sides of the comparisons below shift together
-    under each of those, so the test stays green while covering a different
+    A bare ``GatewayConfig()`` takes routing decisions from the ambient
+    environment: the mode, and whether a bootstrap contributes routers. Both sides
+    of the comparisons below shift together under each of those, so the test stays green while covering a different
     surface than it names, which is worse than failing.
     """
     return GatewayConfig(
         mode="standalone",
         bootstrap=None,
         web_search_provider=None,
-        web_search_backend_token=None,
     )
 
 
@@ -119,8 +116,8 @@ def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:
 
     An overlay that contributes a route under a stubbed prefix has made a
     choice, and a fallback must not overrule it. Move the stub above the
-    contributed routers and every such route answers "manage this via the
-    platform" instead, with the suite still green.
+    contributed routers and every such route answers with the stub's 404
+    instead, with the suite still green.
     """
     contributed = APIRouter()
 

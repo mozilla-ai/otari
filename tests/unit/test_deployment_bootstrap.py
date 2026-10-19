@@ -1,7 +1,7 @@
 """Unit tests for the deployment bootstrap the dashboard shell renders from.
 
 The shell fetches this before it renders anything, so it decides whether a
-sign-in screen, a management dashboard, or a data-plane landing page is the
+sign-in screen or a management dashboard is the
 right thing to show, and which credential that sign-in screen should ask for.
 Unit rather than integration because the one database read the route makes runs
 on the SQLite file each test stands up, so there is no PostgreSQL to wait for.
@@ -26,7 +26,6 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 
-PLATFORM_TOKEN = "gw_test_token"
 MASTER_KEY = "sk-master-not-in-the-bootstrap"
 
 
@@ -81,18 +80,6 @@ def _hosted(
     )
 
 
-def _hybrid(
-    *, docs_url: str | None = None, terms_url: str | None = None, privacy_url: str | None = None, **platform: str
-) -> GatewayConfig:
-    return GatewayConfig(
-        mode="hybrid",
-        platform={"base_url": "http://localhost:8100/api/v1", **platform},
-        docs_url=docs_url,
-        terms_url=terms_url,
-        privacy_url=privacy_url,
-    )
-
-
 def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: Path) -> None:
     app = create_app(_standalone(tmp_path))
 
@@ -107,7 +94,6 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         # while they are on.
         "surfaces": sorted({*STANDALONE_SURFACES, "health_checks", "traces"}),
         "sign_in_methods": ["master_key"],
-        "management_url": None,
         "data_plane_url": None,
         "docs_url": None,
         "terms_url": None,
@@ -443,7 +429,7 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
 
 
 def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:
-    """Hosted mode is standalone's multi-tenant sibling, not a third data plane.
+    """Hosted mode is standalone's multi-tenant sibling, not a second runtime.
 
     It owns its own database and mints its own sessions, so a change to hosted
     mode that also changed how somebody signs in, or whether the deployment is
@@ -464,91 +450,15 @@ def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp
     assert differ == {"deployment_type", "surfaces"}
 
 
-def test_hosted_mode_refuses_a_platform_token(tmp_path: Path) -> None:
-    """The same conflict standalone already refuses, for the same reason.
-
-    A deployment that holds its own management API is not also a data plane
-    reporting to somebody else's control plane, so the two settings cannot both
-    be meant.
-    """
-    config = _hosted(tmp_path)
-    config._platform_token = PLATFORM_TOKEN
-    config._platform_token_resolved = True
-
-    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
-        config.validate_mode_selection()
-
-
-def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    app = create_app(_hybrid())
-
-    with TestClient(app) as client:
-        response = client.get(f"{API_ROOT}/bootstrap")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "deployment_type": "hybrid",
-        "session_type": "none",
-        "surfaces": [],
-        "sign_in_methods": [],
-        "management_url": "https://otari.ai",
-        "data_plane_url": None,
-        "docs_url": None,
-        "terms_url": None,
-        "privacy_url": None,
-        "site_url": None,
-        "maintenance_mode": False,
-        "passkeys_enabled": False,
-        "passkeys_ready": False,
-        "oauth_providers": [],
-        "feedback_enabled": False,
-        "mail_ready": False,
-        "public_catalog": False,
-        "open_signup": False,
-    }
-
-
-def test_hybrid_bootstrap_leaks_no_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The one route a hybrid gateway serves to an unauthenticated browser."""
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    app = create_app(_hybrid())
-
-    with TestClient(app) as client:
-        body = client.get(f"{API_ROOT}/bootstrap").text
-
-    assert PLATFORM_TOKEN not in body
-
-
-def test_management_url_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An operator on a staging platform links at that platform, not otari.ai."""
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    app = create_app(_hybrid(management_url="https://staging.otari.example/"))
-
-    with TestClient(app) as client:
-        response = client.get(f"{API_ROOT}/bootstrap")
-
-    assert response.json()["management_url"] == "https://staging.otari.example/"
-
-
-@pytest.mark.parametrize("configured", ["javascript:alert(1)", "otari.ai", ""])
-def test_a_management_url_that_is_not_an_http_link_fails_at_startup(
-    monkeypatch: pytest.MonkeyPatch, configured: str
+@pytest.mark.parametrize("build", [_standalone, _hosted], ids=["standalone", "hosted"])
+def test_a_leftover_hybrid_token_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, build: Callable[[Path], GatewayConfig]
 ) -> None:
-    """The browser turns this into an anchor, so a bad scheme is a startup error.
+    """OTARI_AI_TOKEN selected hybrid mode, which is gone, so it fails startup rather than being ignored."""
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
-    The empty string falls back to the default rather than failing, so it is here
-    to prove that: a blank override is an unset override, not a broken one.
-    """
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-
-    if configured:
-        with pytest.raises(ValueError, match="management_url"):
-            create_app(_hybrid(management_url=configured))
-    else:
-        app = create_app(_hybrid(management_url=configured))
-        with TestClient(app) as client:
-            assert client.get(f"{API_ROOT}/bootstrap").json()["management_url"] == "https://otari.ai"
+    with pytest.raises(ValueError, match="hybrid mode has been removed"):
+        build(tmp_path).validate_mode_selection()
 
 
 def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Path) -> None:
@@ -564,26 +474,10 @@ def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Pat
 def test_docs_url_is_published_to_a_standalone_dashboard(tmp_path: Path) -> None:
     """The retargeted Documentation link, published exactly as configured.
 
-    No trailing slash is trimmed and no path is appended: unlike ``management_url``,
-    which the dashboard suffixes to reach ``/terms``, this is the whole
+    No trailing slash is trimmed and no path is appended: this is the whole
     destination, and a docs site can need its trailing slash to resolve.
     """
     app = create_app(_standalone(tmp_path, docs_url="https://docs.otari.ai/en/"))
-
-    with TestClient(app) as client:
-        response = client.get(f"{API_ROOT}/bootstrap")
-
-    assert response.json()["docs_url"] == "https://docs.otari.ai/en/"
-
-
-def test_a_hybrid_gateway_carries_the_hosted_docs_link_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The setting is deployment-wide, not standalone-only.
-
-    A gateway attached to otari.ai serves the same shell, and its operator reads
-    the hosted documentation rather than the guide bundled for a self-hosted one.
-    """
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    app = create_app(_hybrid(docs_url="https://docs.otari.ai/en/"))
 
     with TestClient(app) as client:
         response = client.get(f"{API_ROOT}/bootstrap")
@@ -602,9 +496,8 @@ def test_docs_url_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch, 
 def test_a_docs_url_that_is_not_an_http_link_is_refused_at_load(configured: str) -> None:
     """The browser turns this into an anchor, so a bad scheme is a config error.
 
-    Refused where the config is built rather than where the app is, which is the
-    one difference from ``platform.management_url``: that one is a key inside a
-    free-form dict, while this is a field of its own and pydantic can validate it.
+    Refused where the config is built rather than where the app is: it is a
+    field of its own, so pydantic can validate it.
     """
     with pytest.raises(ValidationError, match="docs_url"):
         GatewayConfig(docs_url=configured)
@@ -637,8 +530,7 @@ def test_a_hosted_deployment_publishes_the_legal_pages_on_its_own_site(tmp_path:
 
     A hosted control plane serves its dashboard beside a marketing site that owns
     the notice and the terms, and it publishes both addresses so the account menu
-    can name them. Nothing else could: ``management_url`` is null here, since
-    this deployment *is* the control plane.
+    can name them.
     """
     app = create_app(
         _hosted(
@@ -651,19 +543,7 @@ def test_a_hosted_deployment_publishes_the_legal_pages_on_its_own_site(tmp_path:
     with TestClient(app) as client:
         body = client.get(f"{API_ROOT}/bootstrap").json()
 
-    assert body["management_url"] is None
-    assert body["terms_url"] == "https://otari.ai/terms"
-    assert body["privacy_url"] == "https://otari.ai/privacy"
-
-
-def test_a_hybrid_gateway_carries_its_own_legal_pages_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Deployment-wide, like ``docs_url``: whoever runs the gateway may have terms of their own."""
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    app = create_app(_hybrid(terms_url="https://otari.ai/terms", privacy_url="https://otari.ai/privacy"))
-
-    with TestClient(app) as client:
-        body = client.get(f"{API_ROOT}/bootstrap").json()
-
+    assert "management_url" not in body
     assert body["terms_url"] == "https://otari.ai/terms"
     assert body["privacy_url"] == "https://otari.ai/privacy"
 
@@ -801,17 +681,6 @@ def test_standalone_never_publishes_a_data_plane_url(tmp_path: Path) -> None:
     assert response.json()["data_plane_url"] is None
 
 
-def test_a_hybrid_gateway_never_publishes_a_data_plane_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A gateway attached to otari.ai *is* the data plane, so it names no other."""
-    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    app = create_app(_hybrid())
-
-    with TestClient(app) as client:
-        response = client.get(f"{API_ROOT}/bootstrap")
-
-    assert response.json()["data_plane_url"] is None
-
-
 def test_data_plane_url_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """OTARI_DATA_PLANE_URL is the whole configuration surface a container needs."""
     monkeypatch.setenv("OTARI_DATA_PLANE_URL", "https://gateway.otari.ai")
@@ -825,8 +694,7 @@ def test_a_data_plane_url_that_is_not_an_http_link_is_refused_at_load(configured
     """A typo here is a curl command an operator copies and cannot explain.
 
     Refused where the config is built, the way ``docs_url`` is: both are fields
-    of their own rather than keys inside the free-form ``platform`` dict, so
-    pydantic can validate them.
+    of their own, so pydantic can validate them.
     """
     with pytest.raises(ValidationError, match="data_plane_url"):
         GatewayConfig(data_plane_url=configured)

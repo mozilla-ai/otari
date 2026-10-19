@@ -253,7 +253,7 @@ async def release_session(session: AsyncSession | None) -> bool:
     commit leaves it unusable and the settlement writes after dispatch would
     otherwise raise ``PendingRollbackError`` on it.
 
-    ``None`` is accepted for hybrid mode, which is handed no session at all.
+    ``None`` is accepted for a caller that holds no session.
     """
     if session is None:
         return False

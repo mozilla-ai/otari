@@ -29,11 +29,11 @@ type promises, so `App` completes the payload once through
 to the bootstrap and that module stops compiling until it is given a default.
 The two fields naming the deployment take none, for the reason above.
 
-The bootstrap selects standalone, hosted, or hybrid presentation and publishes:
+The bootstrap selects standalone or hosted presentation and publishes:
 
 - sign-in methods and configured OAuth providers
 - management surfaces hosted by this process
-- the control-plane or data-plane URL
+- the data-plane URL
 - documentation, mail, passkey, and maintenance state
 
 Features read this through `useDeployment()` and `useSurfaces()`. Page
@@ -48,8 +48,8 @@ Public auth and invitation flows render ahead of the authenticated router in
 `DeploymentRoot`. Their URLs are backend contracts used by email and OAuth
 redirects, so changing one requires changing the producer and its tests.
 
-Request snippets use `shared/helpers/requestSnippets.ts`. Standalone and
-hybrid use the browser origin; hosted uses the bootstrap's `data_plane_url`.
+Request snippets use `shared/helpers/requestSnippets.ts`. Standalone uses the
+browser origin; hosted uses the bootstrap's `data_plane_url`.
 A missing hosted data-plane URL renders no runnable snippet.
 
 ## Source layers

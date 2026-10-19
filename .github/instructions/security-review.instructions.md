@@ -84,9 +84,8 @@ and reject unknown values during config loading.
 
 ### Respect deployment mode
 
-Standalone serves both planes, hosted serves only the control plane, and hybrid
-serves the data plane without a local management database. Check new behavior in
-all applicable modes and avoid reporting or charging the same usage twice.
+Standalone serves both planes and hosted serves only the control plane. Check new
+behavior in both modes and avoid reporting or charging the same usage twice.
 
 Keep the status contract stable: 402 is insufficient funds or missing pricing;
 403 is forbidden, blocked, or over budget; 404 hides absent or foreign

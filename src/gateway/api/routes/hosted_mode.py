@@ -1,23 +1,17 @@
 """Data-plane stubs for a hosted control plane, which serves management only.
 
-The mirror image of :mod:`gateway.api.routes.hybrid_mode`. There, a gateway
-attached to otari.ai holds no management plane and stubs those prefixes; here, a
-hosted control plane holds no data plane and stubs these. Both say the same
-thing from opposite ends: this process does not host that plane, and here is the
-one that does.
+This process does not host the data plane, and the stubs say which one does.
 
 Hosted mode owns organizations, wallets and credentials for many tenants. The
-inference itself belongs on a data-plane gateway running in hybrid mode, which
-resolves this control plane's credentials per request and reports its usage
-back, and that report is what debits the wallet. A request served here would
-skip the report and so run unbilled, which is what otari#822 found live.
+inference itself belongs on a separate data-plane gateway, and a request served
+here would skip the wallet debit and so run unbilled, which is what otari#822
+found live.
 
-Stubbed rather than simply left unmounted for the reason the hybrid stubs are:
-a bare 404 tells whoever hit it nothing, and the two audiences for one both need
-more than that. A customer who pointed an SDK at the control plane host needs to
-learn that the host is wrong, not that the endpoint is gone; an operator who
-mis-set ``OTARI_MODE`` on a box meant to serve inference needs to learn that the
-mode is why.
+Stubbed rather than simply left unmounted because a bare 404 tells whoever hit
+it nothing, and the two audiences for one both need more than that. A customer
+who pointed an SDK at the control plane host needs to learn that the host is
+wrong, not that the endpoint is gone; an operator who mis-set ``OTARI_MODE`` on
+a box meant to serve inference needs to learn that the mode is why.
 
 Naming the address is the other half of that. "Send it to your Otari gateway" is
 what the caller already believed they were doing, so where the deployment knows
@@ -25,9 +19,8 @@ its data plane (``data_plane_url``, the same value ``GET /api/v1/bootstrap`` han
 the dashboard) the refusal says which host to use. Left unset it falls back to
 the generic sentence, matching what bootstrap already treats as unconfigured.
 
-The status stays 404 to match the hybrid stubs, because it is the same fact
-being reported. It is not an authorization decision, so 403 would invite a retry
-with a different key that cannot help, and Otari does implement these endpoints,
+The status is 404 because this is not an authorization decision: 403 would
+invite a retry with a different key that cannot help, and Otari does implement these endpoints,
 so 501 would misreport a deployment posture as a missing feature.
 
 The refusal covers the reads and deletes, not only the calls that dispatch. A
@@ -132,7 +125,7 @@ def _register(prefix: str) -> None:
     async def refuse(config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_detail(config.data_plane_url))
 
-    # A distinct name per prefix, so the routing table reads like hybrid_mode's.
+    # A distinct name per prefix, so the routing table names each one.
     refuse.__name__ = f"{prefix.removeprefix('/').replace('/', '_')}_disabled"
     for path in (prefix, f"{prefix}/{{path:path}}"):
         router.api_route(path, methods=_METHODS)(refuse)

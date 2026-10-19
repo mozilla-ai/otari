@@ -46,7 +46,6 @@ describe("normalizeBootstrap", () => {
         "passkeys_ready",
         "maintenance_mode",
         "docs_url",
-        "management_url",
         "data_plane_url",
         "terms_url",
         "privacy_url",
@@ -58,7 +57,6 @@ describe("normalizeBootstrap", () => {
     expect(completed.passkeys_ready).toBe(false)
     expect(completed.maintenance_mode).toBe(false)
     expect(completed.docs_url).toBeNull()
-    expect(completed.management_url).toBeNull()
     expect(completed.data_plane_url).toBeNull()
     expect(completed.terms_url).toBeNull()
     expect(completed.privacy_url).toBeNull()

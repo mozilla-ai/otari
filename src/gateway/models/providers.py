@@ -89,7 +89,6 @@ class ProviderCredential(Base):
     ``provider_store_service``), with the stored row winning on an instance-name
     collision. The API key is held encrypted (``secret_box``); ``last4`` is kept
     in clear only so the UI can show which key is set without ever decrypting.
-    Standalone mode only, never used in the hybrid platform path.
     """
 
     __tablename__ = "provider_credentials"

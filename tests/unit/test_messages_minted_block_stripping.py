@@ -111,7 +111,6 @@ def _tool_ctx(config: GatewayConfig) -> ToolContext:
         use_web_search=False,
         web_search_tool_entry=None,
         web_search_url=config.web_search_url,
-        web_search_auth_token=None,
         remaining_user_tools=None,
         max_tool_iterations=10,
         tools_header=None,

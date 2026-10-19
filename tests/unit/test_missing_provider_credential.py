@@ -10,7 +10,7 @@ from any_llm import LLMProvider
 from any_llm.exceptions import MissingApiKeyError
 
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
-from gateway.api.routes._platform import get_shared_rejection
+from gateway.api.routes._attempts import get_shared_rejection
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import (
     ERROR_CODE_HEADER,

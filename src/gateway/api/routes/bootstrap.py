@@ -2,21 +2,19 @@
 
 One server-derived payload that selects the runtime context: which deployment is
 serving this URL, what kind of session it issues, which management surfaces it
-offers, and, for a hybrid gateway, where its control plane actually lives. The
+offers. The
 shell reads it once and gates navigation on it, so no page component has to ask
 which mode the gateway is in.
 
-Registered in both modes, and unauthenticated by necessity: this is what tells a
+Registered in every mode, and unauthenticated by necessity: this is what tells a
 browser whether a sign-in screen is even the right thing to show. It therefore
-carries no secret. In particular it never carries the platform token, and
-``management_url``, ``data_plane_url``, ``docs_url``, ``terms_url``,
+carries no secret: ``data_plane_url``, ``docs_url``, ``terms_url``,
 ``privacy_url`` and ``site_url`` are addresses an operator configured, not
 credentials.
 
 The contract is shared with otari.ai, which serves the same shape for its hosted
-deployment (mozilla-ai/otari-ai#1591). ``deployment_type`` and ``session_type``
-name three values each, and this server produces all three of the first and two
-of the second: ``hosted_user`` is a session minted by somebody else's account
+deployment (mozilla-ai/otari-ai#1591). ``session_type`` names three values, and
+this server produces two of them: ``hosted_user`` is a session minted by somebody else's account
 system, which no build here does. The enum is the contract, not this
 deployment's inventory.
 """
@@ -60,15 +58,15 @@ from gateway.services.tenancy.webauthn_service import has_any_credential
 
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
-DeploymentType = Literal["standalone", "hosted", "hybrid"]
+DeploymentType = Literal["standalone", "hosted"]
 SessionType = Literal["local_operator", "hosted_user", "none"]
 # How a caller may sign in to this deployment. ``master_key`` is the first-boot
 # credential and ``password`` the steady-state one, and a standalone gateway
 # offers exactly one of them: the master key until the operator claims the
 # deployment with a password, and the password from then on
 # (mozilla-ai/otari-ai#1716). A list rather than a single value because #651 and
-# #652 add methods that coexist with the password rather than replacing it, and
-# because a hybrid gateway offers none. "passkey" is the first of those to land,
+# #652 add methods that coexist with the password rather than replacing it.
+# "passkey" is the first of those to land,
 # and it is genuinely additive: it appears beside whichever of the two
 # credentials is current, never instead of one.
 #
@@ -108,11 +106,8 @@ def published_surfaces(config: GatewayConfig, enabled_features: tuple[CoreFeatur
     """The surfaces this deployment publishes, sorted.
 
     Covers the fixed set and each enabled feature's surface.
-    Empty for hybrid, which hosts none, and one row short on a hosted deployment
-    with no data plane configured; see below.
+    One row short on a hosted deployment with no data plane configured; see below.
     """
-    if config.is_hybrid_mode:
-        return []
     featured = [feature.surface for feature in enabled_features if feature.surface is not None]
     surfaces = (*_DECLARED_SURFACES, *featured)
     if config.is_hosted_mode:
@@ -139,8 +134,7 @@ class DeploymentBootstrap(BaseModel):
             "Which deployment serves this URL. 'standalone' owns its own data and serves one "
             "tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment "
             "run as a control plane), which is why its management surfaces are the "
-            "per-organization ones; 'hybrid' is a gateway attached to otari.ai, which is "
-            "data-plane only and holds no management surface of its own."
+            "per-organization ones."
         )
     )
     session_type: SessionType = Field(
@@ -155,25 +149,16 @@ class DeploymentBootstrap(BaseModel):
         description=(
             "Management API groups this deployment serves, sorted, which is what its dashboard "
             "pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for "
-            "the entitlement (licensing) axis, and this is the deployment (topology) axis. "
-            "Empty for a hybrid gateway."
-        )
-    )
-    management_url: str | None = Field(
-        description=(
-            "Where the authoritative control plane lives when it is not this deployment. "
-            "Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise."
+            "the entitlement (licensing) axis, and this is the deployment (topology) axis."
         )
     )
     data_plane_url: str | None = Field(
         description=(
             "Where this deployment's inference traffic belongs, when it is not served here. "
-            "The mirror of management_url: that one says where management lives when this "
-            "deployment is not the control plane, this one says where the data plane is when "
-            "this deployment is not it. Set only by a hosted control plane, which serves the "
-            "dashboard but not inference (otari#822); null for standalone and hybrid, both of "
-            "which serve inference at the address that reached this page. Not a human link "
-            "target like management_url: it is the gateway's bare address, which the dashboard "
+            "Set only by a hosted control plane, which serves the "
+            "dashboard but not inference (otari#822); null for standalone, which "
+            "serves inference at the address that reached this page. Not a human link "
+            "target: it is the gateway's bare address, which the dashboard "
             "suffixes with the API root to build its request snippets. So it must carry no API "
             f"root anywhere (a value ending in {API_ROOT}, or a whole endpoint like "
             f"{API_ROOT}/chat/completions, renders that path twice) and no credential, since this "
@@ -229,9 +214,8 @@ class DeploymentBootstrap(BaseModel):
             "later half of it: a member can hold a password on a deployment whose operator never "
             "claimed it, so both typed credentials can appear together. 'passkey' appears "
             "alongside either when this deployment is configured for WebAuthn and holds at least "
-            "one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, "
-            "which issues no session. The login page renders from this rather than trying a "
-            "credential to find out."
+            "one passkey that its current relying-party ID can assert. The login page renders "
+            "from this rather than trying a credential to find out."
         )
     )
     maintenance_mode: bool = Field(
@@ -239,7 +223,7 @@ class DeploymentBootstrap(BaseModel):
             "Whether this deployment is refusing new dashboard sign-ins while an operator "
             "redeploys it. The sign-in screen says so rather than presenting a form whose only "
             "outcome is a 503. Sessions already issued keep working, and the management API and "
-            "the data plane are unaffected. False for a hybrid gateway, which issues no session."
+            "the data plane are unaffected."
         )
     )
     passkeys_enabled: bool = Field(
@@ -248,7 +232,7 @@ class DeploymentBootstrap(BaseModel):
             "means the passkey routes are not mounted and the dashboard hides its passkey page, "
             "which is a different answer from passkeys_ready: a deployment that merely has not "
             "configured a relying party is ready for nobody yet but still shows the page that says "
-            "so. False for a hybrid gateway, which issues no session of its own."
+            "so."
         )
     )
     passkeys_ready: bool = Field(
@@ -257,8 +241,7 @@ class DeploymentBootstrap(BaseModel):
             "(webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. "
             "Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a "
             "registered passkey could sign somebody in *right now*: an operator with none yet needs "
-            "this one, or the page that registers the first would be hidden from them. False for a "
-            "hybrid gateway, which issues no session of its own."
+            "this one, or the page that registers the first would be hidden from them."
         )
     )
     oauth_providers: list[str] = Field(
@@ -268,16 +251,14 @@ class DeploymentBootstrap(BaseModel):
             "URI from. The sign-in screen renders a button per entry and none at all when the list "
             "is empty, so a provider nobody configured is absent rather than offered and then "
             "refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists "
-            "with whichever typed credential is current, the way a passkey does. Empty for a hybrid "
-            "gateway, which issues no session."
+            "with whichever typed credential is current, the way a passkey does."
         )
     )
     public_catalog: bool = Field(
         default=False,
         description=(
             "Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models "
-            "answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid "
-            "gateway, which serves no catalog of its own."
+            "answers anonymously and the dashboard renders Models ahead of sign-in."
         ),
     )
     open_signup: bool = Field(
@@ -286,7 +267,7 @@ class DeploymentBootstrap(BaseModel):
             "added yet, each with an organization of its own, or only lets an address an admin "
             "already put on the roster set its password. The signup page reads as registration "
             "or as claiming an invitation accordingly, and the sign-in screen links to it with "
-            "the wording that matches. False for a hybrid gateway, which holds no identities."
+            "the wording that matches."
         )
     )
     feedback_enabled: bool = Field(description="Whether this deployment accepts deliberate feedback submissions.")
@@ -298,8 +279,7 @@ class DeploymentBootstrap(BaseModel):
             "public URL to put in one. Lets the dashboard disable or hide a mail-dependent "
             "affordance instead of offering one that would fail at send time. Every "
             "message this control plane sends carries such a link, which is why this is "
-            "one flag and not one per feature. False for a hybrid gateway, whose control "
-            "plane is otari.ai and which sends no mail of its own."
+            "one flag and not one per feature."
         )
     )
 
@@ -319,32 +299,9 @@ async def get_bootstrap(
 
     The database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``
     marker, and the identity it names, to answer whether *that* identity holds a
-    password (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,
-    and ``get_db_if_needed`` hands it no session to read one from.
+    password (#702).
     """
-    if config.is_hybrid_mode:
-        return DeploymentBootstrap(
-            deployment_type="hybrid",
-            session_type="none",
-            surfaces=published_surfaces(config, enabled_features),
-            sign_in_methods=[],
-            management_url=config.platform_management_url,
-            # This gateway *is* the data plane, so the address that reached this
-            # page is the address that reaches the API.
-            data_plane_url=None,
-            docs_url=config.docs_url,
-            terms_url=config.terms_url,
-            privacy_url=config.privacy_url,
-            site_url=config.site_url,
-            maintenance_mode=False,
-            passkeys_enabled=False,
-            passkeys_ready=False,
-            oauth_providers=[],
-            feedback_enabled=False,
-            mail_ready=False,
-            open_signup=False,
-        )
-    assert db is not None  # get_db_if_needed yields a session outside hybrid mode
+    assert db is not None  # get_db_if_needed yields a session in every mode
     # Hosted is standalone's multi-tenant sibling and differs here in exactly two
     # fields. Everything below them is answered identically, because a hosted
     # deployment holds its own database, mounts the same management API and mints
@@ -357,7 +314,6 @@ async def get_bootstrap(
         session_type="local_operator",
         surfaces=published_surfaces(config, enabled_features),
         sign_in_methods=await _sign_in_methods(db, config),
-        management_url=None,
         # Standalone is its own data plane and answers null; a hosted control
         # plane is not, and publishes wherever its operator says the gateway is.
         data_plane_url=config.data_plane_url if hosted else None,
@@ -366,7 +322,7 @@ async def get_bootstrap(
         privacy_url=config.privacy_url,
         site_url=config.site_url,
         maintenance_mode=await _maintenance_mode(db),
-        public_catalog=bool(config.public_catalog) and not config.is_hybrid_mode,
+        public_catalog=bool(config.public_catalog),
         passkeys_enabled=config.passkeys_enabled,
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),

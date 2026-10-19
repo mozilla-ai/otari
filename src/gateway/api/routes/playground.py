@@ -43,11 +43,6 @@ presented to ``config.data_plane_url`` as an API key that never leaves this
 process, and the gateway there runs the pipeline and reports the usage that
 debits the wallet. Everything else on this router is management traffic and is
 served locally either way, so the page is whole rather than half-mounted.
-
-Hybrid mode is the one deployment that serves none of this. It has no dashboard
-session and no local tenancy to resolve one against, so
-``main._register_core_routers`` mounts the router for standalone and hosted and
-not for hybrid.
 """
 
 import uuid
@@ -58,7 +53,6 @@ import httpx
 from any_llm.types.completion import ChatCompletion
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     File,
     HTTPException,
@@ -194,7 +188,6 @@ class PlaygroundToolsResponse(BaseModel):
 async def playground_chat_completions(
     raw_request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     request: ChatCompletionRequest,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -249,7 +242,6 @@ async def playground_chat_completions(
         tool_ports=tool_ports,
         raw_request=raw_request,
         response=response,
-        background_tasks=background_tasks,
         request=request,
         db=db,
         uow=uow,

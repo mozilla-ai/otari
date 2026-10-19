@@ -229,11 +229,6 @@ def get_enabled_features(request: Request) -> tuple[CoreFeature, ...]:
 def extract_credential_token(request: Request) -> str:
     """Extract the caller's credential token from the request headers.
 
-    Every mode reads the same headers through this one helper, so which
-    deployment a caller talks to never changes how their key is presented;
-    only who verifies the token differs (hybrid forwards it to the platform,
-    the other modes check the local database).
-
     The canonical Otari-Key header carries the token directly. A ``Bearer ``
     prefix is accepted and stripped for back-compat, but is not required: a header
     named for the key holds the raw token, matching the ``x-api-key`` convention
@@ -535,9 +530,8 @@ async def get_session_identity(
 
     ``SameSite=Strict`` on the cookie is the primary CSRF control; the
     Sec-Fetch-Site check is belt-and-braces for clients that send the header.
-    Standalone-only: hybrid mode has no dashboard or management API.
     """
-    if config.is_hybrid_mode or _header_credentials_present(request):
+    if _header_credentials_present(request):
         return None
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
@@ -563,8 +557,7 @@ def refuse_ended_session(request: Request, config: GatewayConfig) -> None:
     expired, or its account deactivated). A cookie refused for being cross-site is left to the usual answer.
     """
     if (
-        config.is_hybrid_mode
-        or _header_credentials_present(request)
+        _header_credentials_present(request)
         or not request.cookies.get(SESSION_COOKIE_NAME)
         or not cookie_may_authenticate(request, config)
     ):
@@ -896,14 +889,12 @@ async def verify_catalog_reader_or_public(
     return None
 
 
-async def get_db_if_needed(
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> AsyncGenerator[AsyncSession | None, None]:
-    """Get a database session in standalone mode, otherwise return None."""
-    if config.is_hybrid_mode:
-        yield None
-        return
+async def get_db_if_needed() -> AsyncGenerator[AsyncSession | None, None]:
+    """Get a database session.
 
+    Typed optional for the routes that still handle a missing session; every
+    deployment has a database, so one is always yielded.
+    """
     # A bare ``async for`` leaves ``get_db`` open when an error or cancellation
     # is thrown in at teardown, so its session would hold a pooled connection
     # until garbage collection.
@@ -917,12 +908,7 @@ async def verify_api_key_or_master_key_if_needed(
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> tuple[APIKey | None, bool] | None:
-    """Verify the caller's key in standalone mode, otherwise return ``None``.
-
-    The counterpart of ``verify_api_key_or_master_key`` for a data-plane route
-    that serves both modes: a hybrid gateway forwards the key to the control
-    plane, which verifies it while resolving the request.
-    """
+    """Verify the caller's key, or return ``None`` where the request has no session."""
     if db is None:
         return None
     return await verify_api_key_or_master_key(request, db, config)
@@ -945,8 +931,7 @@ def build_trace_service(uow: UnitOfWork) -> TraceService:
 def _file_backends(request: Request) -> FileBackends | None:
     """The backends this build bound for files, or ``None`` where it has none.
 
-    Hybrid mode binds none, and a standalone deployment with files off starts
-    without a store it could not build.
+    A deployment with files off starts without a store it could not build.
     """
     storage: FileStoragePort | None = getattr(request.app.state, "file_store", None)
     provider_files: ProviderFilePort | None = getattr(request.app.state, "provider_files", None)
@@ -975,7 +960,7 @@ def build_sandbox_file_bridge(
     """The file bridge a completion request's sandbox session gets, or ``None``.
 
     Built by the route once the billed user and workspace are resolved, on the request's own Unit of Work.
-    It is ``None`` when files are disabled, and in hybrid mode, which has no local database or file store.
+    It is ``None`` when files are disabled.
     Produced files are announced under ``public_base_url`` where the deployment knows its address,
     and otherwise under the one the request arrived on.
     """
@@ -1004,9 +989,8 @@ def build_sandbox_container_registry(
 ) -> SandboxContainerRegistry | None:
     """The registry a completion request's sandbox session is held in, or ``None``.
 
-    ``None`` is every case in which a sandbox cannot outlive its request: hybrid
-    mode, which has no local database to remember a lease in; a deployment with
-    no sandbox at all; and one that turned reuse off with a zero idle TTL. The
+    ``None`` is every case in which a sandbox cannot outlive its request: a
+    deployment with no sandbox at all; and one that turned reuse off with a zero idle TTL. The
     lease is scoped to the billed user and workspace, and to the adapter this
     build runs, so a deployment that changes providers starts fresh.
     """
@@ -1033,7 +1017,6 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 
     Gotcha: the rest of the request writes to this same session.
     A block's commit also stores what that code staged outside a block, and its rollback discards it.
-    Standalone and hosted only: a hybrid gateway has no local database, so it has no Unit of Work.
     """
     return UnitOfWork(db)
 
@@ -1041,10 +1024,9 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 def get_unit_of_work_if_needed(
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
 ) -> UnitOfWork | None:
-    """Return the request's Unit of Work in standalone mode, otherwise ``None``.
+    """Return the request's Unit of Work, or ``None`` where the request has no session.
 
-    The counterpart of ``get_db_if_needed``, for a route that serves both modes.
-    It is over the session that dependency yields.
+    The counterpart of ``get_db_if_needed``. It is over the session that dependency yields.
 
     NOTE: a route must take its session from ``get_db_if_needed`` as well.
     ``get_db`` opens a session of its own, so a route that mixes the two gets two sessions and two Units of Work.
@@ -1239,9 +1221,7 @@ def get_container(request: Request) -> Container:
 
 
 ContainerDep = Annotated[Container, Depends(get_container)]
-# ``get_db_if_needed`` and not ``get_db``: hybrid mode runs with no local
-# database at all, so a port resolved on a hybrid request gets ``None`` rather
-# than a session that cannot be opened. Every core adapter ignores it.
+# ``get_db_if_needed`` and not ``get_db``.
 #
 # The consequence to know before an adapter writes anything: FastAPI caches a
 # dependency per callable, so this shares one session with a route that also
@@ -1356,8 +1336,7 @@ def get_model_provider_port(
 ) -> ModelProviderPort:
     """Resolve the model-provider adapter this build bound at startup.
 
-    On the request's session and Unit of Work, both ``None`` in hybrid mode:
-    the core adapter reads the hosted-providers store through a block on it.
+    On the request's session and Unit of Work: the core adapter reads the hosted-providers store through a block on it.
     """
     return container.resolve(ModelProviderPort, db, uow=uow)
 
@@ -1962,11 +1941,9 @@ def get_file_service_if_needed(
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
 ) -> FileService | None:
-    """Return the request's files service in standalone mode, otherwise ``None``.
+    """Return the request's files service, or ``None`` where files are unavailable.
 
-    The counterpart of ``get_file_service``, for a completion route that serves both
-    modes. Hybrid mode has no local database and no blob store, so a stored
-    ``file_id`` cannot be resolved there at all.
+    The counterpart of ``get_file_service``, for a completion route.
 
     NOTE: a route must take its session from ``get_db_if_needed`` as well, for the
     reason ``get_unit_of_work_if_needed`` gives.

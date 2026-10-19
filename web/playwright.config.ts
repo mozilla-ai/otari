@@ -1,7 +1,5 @@
 import { defineConfig, devices } from "@playwright/test"
 
-import { HYBRID_BASE_URL } from "./e2e/hybrid"
-
 // End-to-end tests for the dashboard, run against a real gateway serving the
 // built bundle (booted by `webServer` below). Component behavior is covered by
 // Vitest; this exercises the multi-page flows a browser actually walks.
@@ -129,8 +127,6 @@ export default defineConfig({
   // serve.sh leaves behind (it asserts the first-run screens), so anything that
   // writes usage has to come after it; the parity specs in turn all read one
   // seeded fixture, so they hang off the seed rather than each re-creating it.
-  // A fourth, `hybrid`, stands apart from all three: it has a gateway of its own
-  // (see `webServer` below), so it shares neither the database nor the order.
   projects: [
     {
       name: "onboarding",
@@ -151,38 +147,12 @@ export default defineConfig({
       // dropped from the run silently, with no warning and a green exit.
       // The screenshot suite is excluded because it has its own six projects
       // below; without this it would also run here, once, unthemed.
-      // The hybrid spec is excluded because it belongs to a different
-      // deployment: collected here it would run against the standalone gateway,
-      // where every one of its assertions is false.
-      testIgnore: [
-        /dashboard\.spec\.ts/,
-        /screenshots\//,
-        /parity\.hybrid\.spec\.ts/,
-      ],
+      testIgnore: [/dashboard\.spec\.ts/, /screenshots\//],
       dependencies: ["seed"],
       use: { ...devices["Desktop Chrome"] },
     },
-    {
-      // The same dashboard bundle, served by a gateway attached to a control
-      // plane rather than owning its own data. What a hybrid deployment may
-      // show an operator is decided by the server, so asserting it needs a
-      // second deployment and not a second page: hence its own gateway, its own
-      // base URL, and no dependency on the three projects above (it has no
-      // database to seed and shares none of their state).
-      name: "hybrid",
-      testMatch: /parity\.hybrid\.spec\.ts/,
-      // Read-only, unlike the behavioral projects that mutate one shared
-      // database, so a retry is safe here for the same reason it is on the
-      // screenshot projects, and absorbs CI contention.
-      retries: process.env.CI ? 1 : 0,
-      use: { ...devices["Desktop Chrome"], baseURL: HYBRID_BASE_URL },
-    },
     ...screenshotProjects,
   ],
-  // Two gateways, both booted before any project runs. The screenshot projects
-  // use the hybrid one only for their hybrid landing registry; it opens no database
-  // and costs a process, which is cheaper than making its lifetime conditional on
-  // which projects were selected.
   webServer: [
     {
       command: "bash e2e/serve.sh",
@@ -191,17 +161,6 @@ export default defineConfig({
       // DB), so a stray server already on :8000 can't silently skip the reset and
       // leave the serial flows running against dirty state. Set
       // PLAYWRIGHT_REUSE_SERVER=1 for fast local iteration against a running one.
-      reuseExistingServer: !!process.env.PLAYWRIGHT_REUSE_SERVER,
-      timeout: 120_000,
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-    {
-      command: "bash e2e/serve-hybrid.sh",
-      url: `${HYBRID_BASE_URL}/api/v1/health`,
-      // Same opt-in as above, for consistency rather than for the reset: this
-      // gateway holds no state to leave dirty, but a stray process on :8010 in a
-      // mode of its own would be a confusing thing to run against.
       reuseExistingServer: !!process.env.PLAYWRIGHT_REUSE_SERVER,
       timeout: 120_000,
       stdout: "pipe",

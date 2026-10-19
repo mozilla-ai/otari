@@ -432,10 +432,8 @@ async def _declare(
     )
 
 
-def _claims(
-    declared: DeclaredCodeExecution, providers: Sequence[str | None], *, follow_head: bool = False
-) -> list[bool]:
-    declaration = declared.provider_declaration(follow_head=follow_head)
+def _claims(declared: DeclaredCodeExecution, providers: Sequence[str | None]) -> list[bool]:
+    declaration = declared.provider_declaration()
     if declaration is None:
         return [False for _ in providers]
     decided = decide_candidate_tools([declaration], providers=providers, dialect=Dialect.MESSAGES)
@@ -487,14 +485,9 @@ async def test_otaris_auto_container_is_left_out_beside_the_sandbox_and_refused_
 
 
 @pytest.mark.asyncio
-async def test_following_the_head_or_beside_the_explicit_type_every_candidate_runs_alike() -> None:
-    hybrid = await _declare([ANTHROPIC_DATED])
-    assert _claims(hybrid, ["anthropic", "vertexai"], follow_head=True) == [False, False]
-    assert _claims(hybrid, ["vertexai", "anthropic"], follow_head=True) == [True, True]
-
+async def test_beside_the_explicit_type_every_candidate_runs_alike() -> None:
     explicit = await _declare([{"type": "otari_code_execution"}, ANTHROPIC_DATED])
     assert _claims(explicit, ["anthropic", "vertexai"]) == [True, True]
-    assert _claims(explicit, ["anthropic", "vertexai"], follow_head=True) == [True, True]
     assert (await explicit.admit(claimed=True, beside_sandbox=True)).use_sandbox
 
 

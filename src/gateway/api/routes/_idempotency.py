@@ -4,10 +4,9 @@ A non-streaming completion that carries the header claims it before the budget
 is reserved. A retry with the same key and body is answered with the stored
 response (and its original request ID and cost) without calling the provider or
 billing again, or is answered 409 while the request holding the key still runs.
-Streaming requests and hybrid mode ignore the header: a stream the client
-dropped left no complete response to replay (it is billed only for the tokens
-the provider reported), and a hybrid gateway has no database to hold the key
-in. So does a deployment without ``OTARI_SECRET_KEY``, since the stored
+Streaming requests ignore the header: a stream the client dropped left no
+complete response to replay (it is billed only for the tokens the provider
+reported). So does a deployment without ``OTARI_SECRET_KEY``, since the stored
 response is encrypted with it.
 """
 
@@ -234,7 +233,7 @@ async def get_idempotency_guard(
                 "A retry with the same key and body returns the original response, request ID and "
                 "cost without calling the provider or billing again. A retry while the original is still "
                 "running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. "
-                "Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, "
+                "Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, "
                 "which encrypts the stored response."
             ),
         ),

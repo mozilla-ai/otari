@@ -321,7 +321,7 @@ async def _dispatch_search(
     # result ceiling and the organization key apply here.
     try:
         policy = await web_search_policy.resolve(
-            WebSearchPolicyScope(workspace_id=usage_workspace_id, user_token=None), [WebTool.SEARCH]
+            WebSearchPolicyScope(workspace_id=usage_workspace_id), [WebTool.SEARCH]
         )
     except WebSearchPolicyResolutionFailedError as exc:
         await log_rejection(

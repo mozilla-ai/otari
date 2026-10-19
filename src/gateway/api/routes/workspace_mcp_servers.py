@@ -6,10 +6,6 @@ Thin composition over
 router, plus the caller's tenancy identity for the per-workspace role check
 the service runs. A request reaches these servers by naming their ids in
 ``mcp_server_ids``; see `docs/mcp.md`.
-
-Hybrid mode does not mount this router. There the same rows live on the
-platform and are managed from otari.ai, which is also what resolves them for a
-request.
 """
 
 import uuid
