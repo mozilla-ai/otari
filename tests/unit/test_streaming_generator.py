@@ -850,7 +850,7 @@ async def _consume_hanging_up_after(gen: AsyncIterator[str], hang_up: str) -> No
     """Read ``gen`` as Starlette does, cancelling the task scope once ``hang_up`` is read.
 
     A disconnect cancels the scope the response is streamed in, and anyio then cancels
-    every await left inside it, so whatever the generator still has to do runs cancelled.
+    every await left inside it, including whatever the generator still has to do.
     """
 
     async def _send() -> None:
