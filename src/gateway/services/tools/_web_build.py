@@ -1,10 +1,11 @@
-"""One request's web tool backends, for a request whose search runs on the libraries (design H).
+"""One request's web tool backends on the libraries (design H).
 
 The search backend, and the fetch backend when the request declared the fetch
 tool, share the request's call allowance and open as two members of the
 request's pool, so each rendering reads the backend that ran its call. A
 request whose search runs on the old backend, or that declared only the fetch
-tool, keeps the old backend's own builder.
+tool, keeps the old backend's own builder, which takes its fetch backend from
+:func:`build_web_fetch_backend`.
 """
 
 from __future__ import annotations
@@ -12,8 +13,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from gateway.core.env import otari_env
-from gateway.services.tools._web_fetch import WebFetchBackend, build_web_fetch_backend
-from gateway.services.tools._web_search import WebSearchBackend
+from gateway.services.tools._web_fetch import WebFetchBackend
+from gateway.services.tools._web_search import WebSearchBackend, builtin_fetch_resolved, resolve_fetch
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_domain_rules
 
@@ -23,8 +24,10 @@ if TYPE_CHECKING:
     import httpx
 
     from gateway.core.config import GatewayConfig
+    from gateway.core.settings.tools import ToolSettings
     from gateway.services.tool_usage import ToolUsageTally
-    from gateway.services.tools._web_search import InLoopSearch, WebToolCallCap
+    from gateway.services.tools._web_call_cap import WebToolCallCap
+    from gateway.services.tools._web_search import InLoopSearch
     from gateway.services.traces import RequestTrace
 
 
@@ -78,6 +81,36 @@ def build_web_search_backends(
             )
         )
     return backends
+
+
+def build_web_fetch_backend(
+    config: ToolSettings | None,
+    *,
+    policy: DomainPolicy | None,
+    trust_env_proxy: bool,
+    web_provider_client: httpx.AsyncClient | None = None,
+    tally: ToolUsageTally | None = None,
+    trace: RequestTrace | None = None,
+    cap: WebToolCallCap | None = None,
+) -> WebFetchBackend:
+    """One request's fetch tool, on the fetch instance the resolver chooses, or on ``builtin_fetch`` without a config.
+
+    No workspace policy is passed to the resolver yet, so no fetch credential serves the call.
+    ``cap`` is the request's shared search and fetch allowance, ``None`` where the old
+    backend claims its own counter before delegating.
+    """
+    resolved = (
+        resolve_fetch(config, None, requested=None, for_search=None) if config is not None else builtin_fetch_resolved()
+    )
+    return WebFetchBackend(
+        resolved,
+        policy=policy,
+        trust_env_proxy=trust_env_proxy,
+        web_provider_client=web_provider_client,
+        tally=tally,
+        trace=trace,
+        cap=cap,
+    )
 
 
 def _max_results(config: GatewayConfig, entry: Mapping[str, Any], resolved: int | None) -> int:

@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Self
 from any_fetch import FetchedPage
 from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
 from gateway.services.tool_usage import is_tool_error
+from gateway.services.tools._web_call_cap import FETCH_CALL_LIMIT_TEXT
 from gateway.services.tools._web_display import fetched_url
 from gateway.services.tools._web_fetch._builtin import (
     CONTENT_TYPE_TAG,
@@ -50,10 +51,6 @@ from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     web_fetch_tool_definition,
 )
-
-# From the modules rather than the package, which imports the search backend, which imports this package.
-from gateway.services.tools._web_search._cap import FETCH_CALL_LIMIT_TEXT, WebToolCallCap
-from gateway.services.tools._web_search._resolve import ResolvedFetch, builtin_fetch_resolved, resolve_fetch
 from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy
@@ -63,8 +60,9 @@ if TYPE_CHECKING:
 
     import httpx
 
-    from gateway.core.settings.tools import ToolSettings
     from gateway.services.tool_usage import ToolUsageTally
+    from gateway.services.tools._web_call_cap import WebToolCallCap
+    from gateway.services.tools._web_search import ResolvedFetch
     from gateway.services.traces import RequestTrace
 
 _PURPOSE_HINT = (
@@ -89,36 +87,6 @@ _BUILTIN_TEXTS = {
     NETWORK_TAG: "[tool error] Web Fetch network failure",
 }
 _BUILTIN_FAILED_TEXT = "[tool error] Web Fetch failed"
-
-
-def build_web_fetch_backend(
-    config: ToolSettings | None,
-    *,
-    policy: DomainPolicy | None,
-    trust_env_proxy: bool,
-    web_provider_client: httpx.AsyncClient | None = None,
-    tally: ToolUsageTally | None = None,
-    trace: RequestTrace | None = None,
-    cap: WebToolCallCap | None = None,
-) -> WebFetchBackend:
-    """One request's fetch tool, on the fetch instance the resolver chooses, or on ``builtin_fetch`` without a config.
-
-    No workspace policy is passed to the resolver yet, so no fetch credential serves the call.
-    ``cap`` is the request's shared search and fetch allowance, ``None`` where the old
-    backend claims its own counter before delegating.
-    """
-    resolved = (
-        resolve_fetch(config, None, requested=None, for_search=None) if config is not None else builtin_fetch_resolved()
-    )
-    return WebFetchBackend(
-        resolved,
-        policy=policy,
-        trust_env_proxy=trust_env_proxy,
-        web_provider_client=web_provider_client,
-        tally=tally,
-        trace=trace,
-        cap=cap,
-    )
 
 
 class WebFetchBackend:

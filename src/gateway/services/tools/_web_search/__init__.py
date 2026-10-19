@@ -1,7 +1,6 @@
 """Web search on the libraries: the resolver, the in-loop backend, and the direct endpoint's rules and mapping."""
 
 from gateway.services.tools._web_search._backend import WebSearchBackend
-from gateway.services.tools._web_search._cap import WebToolCallCap
 from gateway.services.tools._web_search._direct import (
     DirectSearch,
     DirectSearchResult,
@@ -38,7 +37,6 @@ __all__ = [
     "ResolvedSearch",
     "SearchQuery",
     "WebSearchBackend",
-    "WebToolCallCap",
     "builtin_fetch_resolved",
     "filter_hits_by_domain",
     "page_budget_chars",

@@ -46,7 +46,7 @@ from gateway.services.web_retrieval_policy import (
 if TYPE_CHECKING:
     import httpx
 
-    from gateway.services.tools._web_search._resolve import ResolvedFetch
+    from gateway.services.tools._web_search import ResolvedFetch
 
 
 @dataclass(frozen=True)

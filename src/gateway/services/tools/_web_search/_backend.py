@@ -46,18 +46,15 @@ from any_fetch import FetchedPage
 from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
 from gateway.log_config import logger
 from gateway.services.tool_usage import is_tool_error
+from gateway.services.tools._web_call_cap import SEARCH_CALL_LIMIT_TEXT, WebToolCallCap
 from gateway.services.tools._web_display import published_date
-
-# From the modules rather than the package, which imports the fetch backend, which imports this package.
-from gateway.services.tools._web_fetch._builtin import retrieval_client
-from gateway.services.tools._web_fetch._fetch_page import FetchFailure, fetch_page
+from gateway.services.tools._web_fetch import FetchFailure, fetch_page, retrieval_client
 from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_PURPOSE_HINT,
     WEB_SEARCH_TOOL_NAME,
     web_search_tool_definition,
 )
-from gateway.services.tools._web_search._cap import SEARCH_CALL_LIMIT_TEXT, WebToolCallCap
 from gateway.services.tools._web_tool_failure import (
     CALL_LIMIT_TAG,
     INTERNAL_ERROR_TAG,

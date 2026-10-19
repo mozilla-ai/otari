@@ -102,14 +102,15 @@ from gateway.services.tools._web_admission import (
     read_web_search_max_uses,
     validate_web_declarations,
 )
-from gateway.services.tools._web_build import build_web_search_backends
+from gateway.services.tools._web_build import build_web_fetch_backend, build_web_search_backends
+from gateway.services.tools._web_call_cap import WebToolCallCap
 from gateway.services.tools._web_declarations import (
     WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
     web_search_declaration_forms,
     web_search_intercept_enabled,
 )
-from gateway.services.tools._web_fetch import WebFetchBackend, build_web_fetch_backend, register_builtin_fetcher
+from gateway.services.tools._web_fetch import WebFetchBackend, register_builtin_fetcher
 from gateway.services.tools._web_names import (
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
@@ -131,7 +132,6 @@ from gateway.services.tools._web_search import (
     ResolvedSearch,
     SearchQuery,
     WebSearchBackend,
-    WebToolCallCap,
     builtin_fetch_resolved,
     filter_hits_by_domain,
     page_budget_chars,
