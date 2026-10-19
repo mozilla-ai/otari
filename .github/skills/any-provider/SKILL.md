@@ -232,7 +232,9 @@ provider with no empty page.
   back with the title as its text.
 - A provider can have no recency parameter but a query operator: DeepSeek's `after:YYYY-MM-DD`,
   which counts toward its 128-character query limit, so a long query with a `time_range` is
-  refused. Check the operator live (it filtered to the week asked for).
+  refused. Check the operator live, its boundary included: DeepSeek's `after:D` takes in day D
+  from midnight UTC+8, which a probe shows as the earliest hit dated D-1 16:00 UTC, so a start
+  day computed in UTC covers at least the span.
 - A search provider can return URLs with tracking parameters or fragments
   (`?spm=a2c6h`, `#1`); the adapter passes them as they are.
 - Fixture recipes: an empty search with `site:` set to a domain that does not exist; a refused

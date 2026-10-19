@@ -9,9 +9,11 @@ DeepSeek returns its default of 10. Each hit's snippet is DeepSeek's
 page text comes back only with ``need_content``.
 
 DeepSeek has no recency parameter, so ``time_range`` becomes its ``after:``
-query operator, the day the range starts on, appended to the query. The
-operator counts toward DeepSeek's 128-character limit on the query, so a query
-near that limit is refused with a 400.
+query operator, the day the range starts on, appended to the query. DeepSeek
+counts that day in from midnight China Standard Time (UTC+8), eight hours
+before the UTC day, so the range covers at least its span. The operator counts
+toward DeepSeek's 128-character limit on the query, so a query near that limit
+is refused with a 400.
 
 DeepSeek signals every failure with an HTTP status and an OpenAI-shaped body.
 Its ``error.type`` becomes the tag (``authentication_error`` for a refused key,
