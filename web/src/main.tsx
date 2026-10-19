@@ -49,7 +49,7 @@ const root = createRoot(container)
 void startDeployment(
   prepareRequests,
   loadBootstrap,
-  keptBootstrapAt(() => requestPolicy().origin),
+  () => keptBootstrapAt(requestPolicy().origin),
   (bootstrap) => {
     root.render(
       <StrictMode>

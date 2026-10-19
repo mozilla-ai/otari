@@ -24,7 +24,8 @@ foundations, components with their states, and the page archetypes as artboards.
 React. Do not guess a deployment when that request fails. The one exception to
 waiting is a hosted deployment's bootstrap kept from the previous load
 (`app/boot.ts`): it renders while the current one is read, and the current one
-replaces it, or renders as unreachable when it never arrives.
+replaces it when it differs. When the current one never arrives the kept one
+stays for that load and is forgotten, so the next load renders as unreachable.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through

@@ -10,9 +10,9 @@
  * not guess a deployment when that request fails).
  *
  * A bootstrap kept from an earlier load renders first, while the current one is
- * read. The current one always has the last word: it renders again when it
- * differs, and `null` when it never arrives, so a kept answer never outlives
- * the deployment's own.
+ * read, and the current one renders again when it differs. One that never
+ * arrives leaves the kept answer on screen, where the shell reports the gateway
+ * unreachable, and forgets it, so the next load waits and says so.
  *
  * Separate from `main.tsx` so the order is a function a test can call; that
  * file renders on import.
@@ -28,7 +28,7 @@ export interface KeptBootstrap {
 export async function startDeployment(
   prepare: () => Promise<void>,
   load: () => Promise<WireBootstrap | null>,
-  kept: KeptBootstrap,
+  keep: () => KeptBootstrap,
   render: (bootstrap: WireBootstrap | null) => void,
 ): Promise<void> {
   try {
@@ -37,14 +37,17 @@ export async function startDeployment(
     render(null)
     return
   }
+  // Taken before the request goes out, so the answer is kept under the origin
+  // it was read from even if the request policy moves while it is in flight.
+  const kept = keep()
   const current = load()
   const earlier = kept.read()
   if (earlier) render(earlier)
   const bootstrap = await current
   kept.write(bootstrap)
-  if (!earlier || JSON.stringify(bootstrap) !== JSON.stringify(earlier)) {
-    render(bootstrap)
-  }
+  const replaces =
+    bootstrap !== null && JSON.stringify(bootstrap) !== JSON.stringify(earlier)
+  if (!earlier || replaces) render(bootstrap)
 }
 
 const KEPT_BOOTSTRAP_KEY = "otari.dashboard.bootstrap"
@@ -57,14 +60,14 @@ const KEPT_BOOTSTRAP_KEY = "otari.dashboard.bootstrap"
  * same address. A local gateway restarted in another mode would otherwise
  * paint the previous mode's screen first.
  */
-export function keptBootstrapAt(origin: () => string): KeptBootstrap {
+export function keptBootstrapAt(origin: string): KeptBootstrap {
   return {
     read() {
       try {
         const kept = JSON.parse(
           window.localStorage.getItem(KEPT_BOOTSTRAP_KEY) ?? "null",
         ) as { origin?: unknown; bootstrap?: WireBootstrap } | null
-        return kept?.origin === origin() &&
+        return kept?.origin === origin &&
           kept.bootstrap?.deployment_type === "hosted"
           ? kept.bootstrap
           : null
@@ -77,7 +80,7 @@ export function keptBootstrapAt(origin: () => string): KeptBootstrap {
         if (bootstrap?.deployment_type === "hosted") {
           window.localStorage.setItem(
             KEPT_BOOTSTRAP_KEY,
-            JSON.stringify({ origin: origin(), bootstrap }),
+            JSON.stringify({ origin, bootstrap }),
           )
         } else {
           window.localStorage.removeItem(KEPT_BOOTSTRAP_KEY)
