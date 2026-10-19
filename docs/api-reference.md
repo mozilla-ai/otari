@@ -240,8 +240,8 @@ nested form, `"metadata": {"spend_logs_metadata": {...}}`, is read as well, so a
 client moving off a LiteLLM proxy keeps its attribution unchanged; a nested key
 wins over a flat one of the same name. The limits are OpenAI's: up to 16 string
 pairs, keys up to 64 characters and values up to 512. A null value is ignored,
-and anything else is refused with a 422. Tags are stored as sent, so never put
-a secret in one.
+and anything else is refused with a 422. Tags are stored without redaction, so
+never put a secret in one.
 
 A client that can add a header but not a body field, such as Claude Code (see
 [Use with Claude Code](use-with-claude-code.md#tag-claude-code-traffic)), sends
