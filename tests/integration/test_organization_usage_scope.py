@@ -456,6 +456,21 @@ def test_the_series_splits_only_the_callers_own_rows(client: TestClient, world: 
     assert keys == set(_ALPHA_ONE_MODELS)
 
 
+def test_a_standalone_deployment_publishes_and_scopes_the_surface(client: TestClient, world: _World) -> None:
+    """The shared config is standalone, so every test here is the several-organization standalone case.
+
+    Pinned explicitly because the surface used to be hosted only: the dashboard
+    gates its page on the bootstrap, and the reads behind it must keep each of the
+    deployment's organizations to its own rows.
+    """
+    answered = client.get(f"{API_ROOT}/bootstrap").json()
+    assert answered["deployment_type"] == "standalone"
+    assert "organization_usage" in answered["surfaces"]
+
+    assert _models_listed(client, world, "alpha_member") == set(_ALPHA_ONE_MODELS)
+    assert _models_listed(client, world, "beta_owner") == set(_BETA_MODELS)
+
+
 # =============================================================================
 # Controls: the deployment-wide route is untouched
 # =============================================================================

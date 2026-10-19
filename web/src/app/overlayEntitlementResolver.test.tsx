@@ -13,7 +13,11 @@ import {
   EntitlementProvider,
   useEntitlements,
 } from "@/shared/hooks/useEntitlements"
-import { bootstrap, organizationContext } from "@/tests/fixtures"
+import {
+  bootstrap,
+  organizationContext,
+  STANDALONE_SURFACES,
+} from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 // Through `vi.hoisted`, because a `vi.mock` factory is hoisted above every
@@ -155,7 +159,11 @@ describe("the shell's mount point", () => {
    * only answer available is the one the seam resolves, so a provider here would
    * be the test supplying what it is meant to be observing.
    */
-  async function renderShell(page: ReactElement, url?: string) {
+  async function renderShell(
+    page: ReactElement,
+    url?: string,
+    deployment = bootstrap(),
+  ) {
     // The shell reads the organization context for its switcher and for the way
     // into the organization rail.
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
@@ -165,7 +173,7 @@ describe("the shell's mount point", () => {
       url,
       shell: (
         <Provider>
-          <DeploymentProvider value={bootstrap()}>
+          <DeploymentProvider value={deployment}>
             <SelectedWorkspaceProvider>
               <AppShell />
             </SelectedWorkspaceProvider>
@@ -224,12 +232,19 @@ describe("the shell's mount point", () => {
     // the surfaces before the page rendered, so a destination this deployment
     // does not host is answerable now and no entitlement query can change it.
     // Waiting on one would hold back a panel that is already correct.
-    // `/organization/usage` is gated on `organization_usage`, which
-    // `STANDALONE_SURFACES` does not report, so the base registry gates it off
-    // in this build with no overlay contribution involved. Not
-    // `/organization/provider-keys`, which standalone does publish.
+    // `/organization/usage` is gated on `organization_usage`, which this
+    // bootstrap leaves out, so the base registry gates it off with no overlay
+    // contribution involved.
     resolved.value = { capabilities: [], isLoading: true }
-    await renderShell(<p>ORGANIZATION USAGE</p>, "/organization/usage")
+    await renderShell(
+      <p>ORGANIZATION USAGE</p>,
+      "/organization/usage",
+      bootstrap({
+        surfaces: STANDALONE_SURFACES.filter(
+          (surface) => surface !== "organization_usage",
+        ),
+      }),
+    )
 
     expect(await screen.findByText(/is not available here/)).toBeInTheDocument()
     expect(screen.queryByRole("status")).not.toBeInTheDocument()

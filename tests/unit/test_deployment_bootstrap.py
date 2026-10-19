@@ -328,6 +328,22 @@ def test_both_editions_publish_the_organization_guardrail_surface(tmp_path: Path
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrail-definitions") for path in mounted)
 
 
+@pytest.mark.parametrize("build", [_standalone, _hosted], ids=["standalone", "hosted"])
+def test_both_editions_publish_the_organization_usage_surface(
+    tmp_path: Path, build: Callable[[Path], GatewayConfig]
+) -> None:
+    """The organization-wide Usage page, which no other page answers on either edition.
+
+    ``/usage`` reads the workspace the sidebar selected, so a standalone
+    deployment serving several organizations needs this page as much as a hosted
+    one does.
+    """
+    with TestClient(create_app(build(tmp_path))) as client:
+        answered = client.get(f"{API_ROOT}/bootstrap").json()
+
+    assert "organization_usage" in answered["surfaces"]
+
+
 @pytest.mark.parametrize(
     ("build", "surfaces"),
     [(_standalone, STANDALONE_SURFACES), (_hosted, HOSTED_SURFACES)],
@@ -369,9 +385,9 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     ``organization_providers`` is published by both topologies, because the page
     behind it is where an organization's models are offered, priced and switched,
     which is a tenant's question whether or not the deployment has more than one
-    tenant. ``organization_usage`` is the row that exists only where tenants do:
-    standalone's organization is the deployment, so ``/usage`` already answers it
-    whole (otari-ai#1963).
+    tenant. ``organization_usage`` is on both for the same reason: the ``/usage``
+    page reads the sidebar's selected workspace, so neither edition has another
+    page answering for the organization as a whole.
 
     ``playground`` is the one row withheld for a reason that is not about
     credentials or scope at all, and not about the topology either: the page
@@ -395,7 +411,6 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "organization_usage",
         "playground",
         "providers",
         "traces",
@@ -420,7 +435,6 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
     # The rest of the hosted set is unchanged by the address: this is one row's
     # availability, not a different edition.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "organization_usage",
         "providers",
         "traces",
     }
