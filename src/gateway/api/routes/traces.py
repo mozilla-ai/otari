@@ -110,7 +110,8 @@ def build_trace_router(router: APIRouter, scope_dependency: Callable[..., Any]) 
         """Count sessions per bucket of their start, split by whether they failed.
 
         A session failed when it holds an unrecovered error other than a tool's. A tool's error
-        goes back to the model, so a session whose only errors are tools' counts as succeeded.
+        goes back to the model, an MCP tool's included, so a session whose only errors are tools'
+        counts as succeeded.
         """
         return series_public(bucket, await traces.series(scope, filters, bucket=bucket))
 

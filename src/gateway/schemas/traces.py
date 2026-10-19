@@ -51,7 +51,7 @@ class TraceBucketPublic(BaseModel):
     succeeded: int = Field(description="Sessions that started in the bucket and did not fail.")
     failed: int = Field(
         description="Sessions that started in the bucket and hold an unrecovered error other than a tool's. "
-        "A tool's error goes back to the model, so it alone does not fail a session."
+        "A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session."
     )
 
 

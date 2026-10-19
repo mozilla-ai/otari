@@ -1,7 +1,8 @@
 """The session series on SQLite: which sessions it counts as failed.
 
 A tool's error goes back to the model, which carries on, so a session whose only
-errors are its tools' succeeded; an error of the session's own requests fails it.
+errors are its tools' succeeded, MCP tools' included; an error of the session's
+own requests, or a failed connection to an MCP server, fails it.
 Both stay counted in the session's ``error_count``.
 """
 
@@ -96,3 +97,17 @@ async def test_an_unrecovered_error_of_the_session_itself_fails_it(store: TraceS
     series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="hour")
 
     assert [(point.succeeded, point.failed) for point in series] == [(1, 2)]
+
+
+async def test_an_mcp_tool_error_is_a_tools_and_a_failed_mcp_connection_is_not(store: TraceService) -> None:
+    # MCPClient records a tool call that failed, in transport or with ``isError``, as a ``tool`` span.
+    await store.write(
+        (
+            _write("mcp-tool-failed", _span("req-1"), _span("mcp-1", kind="tool", outcome="error")),
+            _write("mcp-unreachable", _span("req-1"), _span("connect-1", kind="mcp_connect", outcome="error")),
+        )
+    )
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="hour")
+
+    assert [(point.succeeded, point.failed) for point in series] == [(1, 1)]

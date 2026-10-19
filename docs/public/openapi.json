@@ -19785,7 +19785,7 @@
             "type": "string"
           },
           "failed": {
-            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error goes back to the model, so it alone does not fail a session.",
+            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
             "title": "Failed",
             "type": "integer"
           },
@@ -36359,7 +36359,7 @@
     },
     "/api/v1/organizations/me/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, so a session whose only errors are tools' counts as succeeded.",
+        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
         "operationId": "organization-traces-trace_series",
         "parameters": [
           {
@@ -43744,7 +43744,7 @@
     },
     "/api/v1/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, so a session whose only errors are tools' counts as succeeded.",
+        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
         "operationId": "traces-trace_series",
         "parameters": [
           {
