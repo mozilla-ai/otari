@@ -15,7 +15,7 @@ from any_llm.types.messages import (
     MessageStreamEvent,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -245,6 +245,26 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
     metadata: AnthropicRequestMetadata = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_output_config(cls, data: Any) -> Any:
+        """Read Anthropic's ``output_config`` as the ``output_format`` any-llm forwards.
+
+        ``output_config`` (``effort``, ``format``) is the Messages API's wire name, and
+        what Claude Code and the Anthropic SDK send; any-llm takes the same object as
+        ``output_format`` and sends it on as ``output_config``. Unread, the field was
+        dropped as unknown, so a client's effort never reached the provider.
+        """
+        if not isinstance(data, dict) or "output_config" not in data:
+            return data
+        if data.get("output_format") is not None:
+            raise ValueError("Send output_config or output_format, not both.")
+        data = dict(data)
+        output_config = data.pop("output_config")
+        if output_config is not None:
+            data["output_format"] = output_config
+        return data
 
 
 class CountTokensRequest(BaseModel):
