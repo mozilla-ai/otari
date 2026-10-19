@@ -1222,7 +1222,7 @@ def test_a_searxng_tools_reported_cost_is_none_so_its_rate_bills(
 
 
 # --------------------------------------------------------------------------- #
-# require_pricing (decision 70)
+# require_pricing
 # --------------------------------------------------------------------------- #
 
 
@@ -1284,7 +1284,7 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
     # The deployment pays for the search, so only its operator's price counts.
     assert "operator has not priced" in detail
     assert f"POST {API_ROOT}/pricing" in detail
-    # The dashboard prices no instance's row yet.
+    # The dashboard can set only otari:web_search, not an instance's row.
     assert "Tools & Guardrails" not in detail
     run.assert_not_called()
     (row,) = _search_rows(strict_client, master_key_header, "unpriced-search")
@@ -1355,7 +1355,7 @@ def test_only_the_operators_override_prices_an_instances_search(
     origin: str,
     status_code: int,
 ) -> None:
-    """The deployment pays for a search on its instance, so an organization's own rate does not price it (unit 7)."""
+    """The deployment pays for a search on its instance, so only an override the operator set prices it."""
     headers = _keyed(strict_client, master_key_header, "override-search")
     _override(strict_client, master_key_header, db_session, "fake:fake-fast", origin=origin)
 
@@ -1372,7 +1372,7 @@ def test_an_organizations_own_override_does_not_bill_an_instances_search(
     origin: str,
     cost: float,
 ) -> None:
-    """With ``require_pricing`` off too: settlement reads the same rate the gate does."""
+    """With ``require_pricing`` off, an override the organization wrote does not bill the search either."""
     headers = _keyed(client, master_key_header, "override-billed")
     _override(client, master_key_header, db_session, "fake:fake-fast", origin=origin)
 
@@ -1391,7 +1391,7 @@ def strict_default_tool_client(test_config: GatewayConfig, _secret_key: None) ->
 def test_a_search_the_workspaces_own_key_serves_needs_the_web_search_row(
     strict_default_tool_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """The tool's own row does not price it: the organization's key is priced under otari:web_search (design L)."""
+    """A search the organization's own key serves is priced under ``otari:web_search``, not the tool's row."""
     client = strict_default_tool_client
     headers = _keyed(client, master_key_header, "org-key-unpriced")
     _add_org_search_key(client, master_key_header, "tvly-org-secret")

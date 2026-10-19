@@ -37,14 +37,14 @@ own logs.
 
 Billing: search is priced per request, not per token, so a usage row carries
 zero tokens and a cost taken from the provider's own reported charge when it
-reports one. Otherwise the cost is the flat per-request rate configured for
-``<provider>:<tool>``, which only the operator's price or override sets, since
-the deployment pays for the call; or, for a search a workspace's organization
-key served, the ``otari:web_search`` rate, since a deployment cannot price a
-tenant's key. Unlike moderations and audio, search is subject to
-``require_pricing``, as a model is: with it on, a search whose row is missing
-is refused with a 402 once the budget checks pass, even from a provider that
-reports its own cost, and a key exempt from budgets is not refused.
+reports one, else the call's flat per-request rate. A search on an instance is
+priced under ``<provider>:<tool>``, which only the operator's price or override
+sets, since the deployment pays for the call. A search a workspace's
+organization key served is priced under ``otari:web_search``, which the
+organization's own override may set, since a deployment cannot price a tenant's
+key. With ``require_pricing`` on, a search whose row is missing is refused with
+a 402 after the budget checks, even from a provider that reports its own cost;
+a key exempt from budgets is still served.
 """
 
 import time
@@ -376,7 +376,8 @@ async def _dispatch_search(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
 
-    # The lookup settlement uses (design L): the call's label decides whose overrides price it.
+    # The rate the reservation holds and the settlement falls back to. The call's
+    # label decides whose overrides count.
     rate = await resolve_tool_rate(
         db,
         search.resolved.rate_keys,
@@ -415,15 +416,14 @@ async def _dispatch_search(
         # so the scope carries the tool's provider as the narrowing axis.
         scope=BudgetScopeRequest(api_key=api_key, provider_instance=tool.provider),
     )
-    # Where the models' gate sits: after the budget checks, so a missing or
-    # exhausted budget still answers first.
+    # After the budget checks, so a missing or exhausted budget answers first.
     try:
         refuse_unpriced_direct_search(
             search, priced=rate is not None, require_pricing=config.require_pricing, budget_exempt=budget_exempt
         )
     except DirectSearchPricingRequiredError as exc:
         await refund_reservation(db, reservation)
-        # Logged after the refund, so an operator who turned require_pricing on sees the traffic it drops.
+        # The rejection row shows an operator the searches require_pricing turns away.
         await log_rejection(exc.message, row_model=tool.name, row_provider=tool.provider, status_code=exc.status_code)
         raise HTTPException(
             status_code=exc.status_code, detail=exc.message, headers=error_headers(exc.error_code)

@@ -403,9 +403,10 @@ class DirectSearchFailedError(TenancyError):
 
 
 class DirectSearchPricingRequiredError(TenancyError):
-    """``require_pricing`` refuses a direct search whose rate keys found no pricing row (decision 70).
+    """A direct search refused because ``require_pricing`` is on and no pricing row prices it.
 
-    ``message`` names the row to add, for the caller and the usage row alike.
+    ``message`` names the row to add; the route returns it to the caller and
+    writes it on the usage row.
     """
 
     status_code = status.HTTP_402_PAYMENT_REQUIRED
