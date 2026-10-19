@@ -13,7 +13,7 @@ from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.providers import HostedProvider, HostedProviderModel
+from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderCredential
 from gateway.repositories.base_repository import BaseRepository
 
 # An operator adds hosted providers by hand, so a full listing stays small
@@ -128,6 +128,27 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         return row
 
     async def delete_row(self, row: HostedProvider) -> None:
+        await self.db.delete(row)
+        await self.db.flush()
+
+    # The deployment providers stored through the dashboard (``provider_credentials``)
+    # are what moves onto hosted providers, so the move reads and removes them
+    # here. The table goes once the move has run everywhere; until then the
+    # runtime overlay still reads it through ``services/provider_store_service.py``.
+
+    async def list_deployment_providers(self) -> Sequence[ProviderCredential]:
+        """Every deployment provider stored through the dashboard, by instance name, bounded."""
+        result = await self.db.execute(
+            select(ProviderCredential).order_by(ProviderCredential.instance).limit(_ALL_PROVIDERS)
+        )
+        return result.scalars().all()
+
+    async def get_deployment_provider(self, instance: str) -> ProviderCredential | None:
+        """One stored deployment provider by instance name, or None."""
+        return await self.db.get(ProviderCredential, instance)
+
+    async def delete_deployment_provider(self, row: ProviderCredential) -> None:
+        """Remove one stored deployment provider, flushed so the caller's block sees it gone."""
         await self.db.delete(row)
         await self.db.flush()
 

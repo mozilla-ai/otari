@@ -49,7 +49,6 @@ from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
     OrgProviderKeyModelRepository,
-    ProviderCredentialRepository,
     ProviderEndpointRepository,
 )
 from gateway.repositories.rate_limits import RateLimitRuleRepository
@@ -1744,7 +1743,6 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
-        deployment_providers=ProviderCredentialRepository(uow),
     )
 
 

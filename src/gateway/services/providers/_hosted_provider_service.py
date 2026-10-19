@@ -48,7 +48,6 @@ from gateway.repositories.providers import (
     HostedProviderConflict,
     HostedProviderModelRepository,
     HostedProviderRepository,
-    ProviderCredentialRepository,
     ProviderEndpointRepository,
 )
 from gateway.schemas.providers import (
@@ -130,7 +129,6 @@ class HostedProviderService:
         pricing: DeploymentPricingService,
         live_byo_pairs: LiveByoPairs,
         organization_exists: OrganizationExists,
-        deployment_providers: ProviderCredentialRepository,
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
 
@@ -141,13 +139,11 @@ class HostedProviderService:
         organizations hold a live key for each of the given providers, and
         ``organization_exists`` whether the deployment holds an organization a
         restriction names; callables, because the rows they read are another
-        domain's. ``deployment_providers`` holds the deployment providers stored
-        through the dashboard, which this service moves onto hosted providers.
+        domain's.
         """
         self.uow = uow
         self.config = config
         self.providers = providers
-        self.deployment_providers = deployment_providers
         self.models = models
         self.organization_exists = organization_exists
         self.sources = sources
@@ -552,7 +548,7 @@ class HostedProviderService:
         """
         async with self.uow:
             hosted_names = {row.name for row in await self.providers.list_all()}
-            stored = list(await self.deployment_providers.list_all())
+            stored = list(await self.providers.list_deployment_providers())
         configured = set(config_file_instances(self.config))
         plans = [plan_move(row, hosted_names=hosted_names, configured_instances=configured) for row in stored]
         if apply:
@@ -595,14 +591,14 @@ class HostedProviderService:
                     "hosted provider, then remove the deployment provider."
                 )
                 return False
-            source = await self.deployment_providers.get(row.instance)
+            source = await self.providers.get_deployment_provider(row.instance)
             if source is None or source.updated_at != plan.updated_at:
                 row.notes.append(
                     "The deployment provider changed while it was migrated, so it is kept. Compare the two, then "
                     "remove one."
                 )
                 return False
-            await self.deployment_providers.delete_row(source)
+            await self.providers.delete_deployment_provider(source)
         row.source_removed = True
         return True
 

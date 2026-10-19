@@ -42,7 +42,6 @@ from gateway.repositories.pricing import ModelPricingRepository, OrganizationMod
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
-    ProviderCredentialRepository,
     ProviderEndpointRepository,
 )
 from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository, WorkspaceRepository
@@ -91,7 +90,6 @@ def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedPro
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
-        deployment_providers=ProviderCredentialRepository(uow),
     )
 
 
