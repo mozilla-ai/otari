@@ -33,6 +33,7 @@ Running and managing a gateway.
 - [Configuration](configuration.md): configuration sources, precedence, and common settings.
 - [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
+- [Workload identity](workload-identity.md): a backend on Google Cloud authenticates with its platform identity token instead of a key's secret.
 - [Models](models.md): selectors, providers, discovery, aliases, and capabilities.
 - [Provider endpoints](provider-endpoints.md): model servers a workspace or a user brings, reached by name and kept out of budgets.
 - [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
@@ -65,10 +66,10 @@ Calling the gateway from your own code.
 ### For platform builders
 
 - [Hybrid-mode protocol](hybrid-mode-protocol.md): the Otari/platform wire contract, for building a platform that Otari connects to.
-- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.28.0/docs/public/code-execution-openapi.yaml).
+- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.29.0/docs/public/code-execution-openapi.yaml).
 
 ### For contributors
 
-- [Architecture](https://github.com/mozilla-ai/otari/blob/v0.28.0/ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
-- [Backend domains](https://github.com/mozilla-ai/otari/blob/v0.28.0/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
-- [Load test](https://github.com/mozilla-ai/otari/blob/v0.28.0/loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.
+- [Architecture](https://github.com/mozilla-ai/otari/blob/v0.29.0/ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
+- [Backend domains](https://github.com/mozilla-ai/otari/blob/v0.29.0/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
+- [Load test](https://github.com/mozilla-ai/otari/blob/v0.29.0/loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.

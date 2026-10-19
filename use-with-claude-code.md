@@ -18,11 +18,18 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
+Claude Code puts a telemetry value in `metadata.user_id`. An otari.ai key
+needs no setting for it, because a hybrid gateway does not check that field
+against the key's owner.
+
 ### Standalone
 
-Claude Code sends a telemetry value in the request's `user` field. It is not an
+Claude Code sends a telemetry value in `metadata.user_id`. It is not an
 Otari user ID, so create or update its API key with
-`reject_user_mismatch: false`. Spend still binds to the key's user.
+`reject_user_mismatch: false`, or pick **Always accept** for "Mismatched `user`
+field" under the dashboard key form's **Advanced** section. Spend still binds
+to the key's user; see
+[Mismatched `user` fields](access-control.md#mismatched-user-fields).
 
 ```bash
 curl "$OTARI_URL/api/v1/keys" \
@@ -49,6 +56,15 @@ in both modes. `ANTHROPIC_API_KEY` uses `x-api-key`; standalone Otari accepts
 it, but hybrid authentication does not.
 
 The same values can go in the `env` block of Claude Code's settings file.
+
+A workload on Google Cloud, or behind another OpenID Connect issuer, can skip
+the key altogether: Claude Code's own workload identity
+(`ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and
+`ANTHROPIC_IDENTITY_TOKEN_FILE`) works against a standalone Otari that trusts
+the issuer. Unset `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` when you switch:
+either one, when set, takes precedence and the federation variables are
+ignored. See
+[Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks).
 
 ## Tag Claude Code traffic
 
@@ -79,6 +95,26 @@ prompt caching, or tool semantics. Claude Code's beta flags and its
 no Anthropic Messages API of its own, so Anthropic's server-side context editing
 never runs there; Claude Code's own compaction still does.
 Test the actual agent workflow before making one a default.
+
+### OpenAI models
+
+By default an OpenAI model is served as a chat completion, which has no way to
+send a reasoning model's reasoning back, so each turn of an agent loop starts
+its reasoning over, and models OpenAI serves only on the Responses API (the
+codex and pro variants) are out of reach. Set `messages_api: responses` on the
+OpenAI instance to serve Claude Code through the Responses API instead:
+
+```yaml
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    messages_api: responses
+```
+
+Claude Code then receives the model's reasoning as thinking blocks and sends them
+back on the next turn, which is what lets the reasoning carry over. See
+[Messages through the Responses API](configuration.md#messages-through-the-responses-api)
+for how fields translate.
 
 ## Let Otari choose a subagent's model
 
@@ -161,7 +197,7 @@ travels in a header, and it must point at a standalone gateway: a hybrid one
 does not serve the route, so every spawn would fall back. The plugin is
 active from then on, in that session and
 every one after. The
-[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.28.0/plugins/otari-router/README.md) has the options, the
+[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.29.0/plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 The plugin hooks `agent.spawn`, sends the request above, and passes the

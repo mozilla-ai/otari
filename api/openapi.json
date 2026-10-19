@@ -7173,6 +7173,234 @@
         "title": "FallbackOfferingPublic",
         "type": "object"
       },
+      "FederationRuleCreate": {
+        "additionalProperties": false,
+        "description": "An OpenID Connect identity that may authenticate as the key, in place of its secret.\n\nA token matches when it is signed by ``issuer``, names ``audience`` among its audiences, and carries each of\n``subject`` and ``email`` that the rule sets; an email matches only when the token marks it verified. At least\none of the two is required.",
+        "example": {
+          "audience": "https://otari.example.com",
+          "email": "hackbot-api@my-project.iam.gserviceaccount.com",
+          "issuer": "https://accounts.google.com"
+        },
+        "properties": {
+          "audience": {
+            "description": "A value the token's 'aud' must contain.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Audience",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token's verified 'email', when the rule names one. Compared without regard to case.",
+            "title": "Email"
+          },
+          "issuer": {
+            "description": "The token's 'iss', one of the deployment's federation_issuers.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token's 'sub', when the rule names one.",
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "issuer",
+          "audience"
+        ],
+        "title": "FederationRuleCreate",
+        "type": "object"
+      },
+      "FederationRulePublic": {
+        "description": "A federation rule of an API key.",
+        "properties": {
+          "api_key_id": {
+            "title": "Api Key Id",
+            "type": "string"
+          },
+          "audience": {
+            "title": "Audience",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "id",
+          "api_key_id",
+          "issuer",
+          "audience",
+          "subject",
+          "email",
+          "created_at"
+        ],
+        "title": "FederationRulePublic",
+        "type": "object"
+      },
+      "FederationTokenRequest": {
+        "description": "An RFC 7523 ``jwt-bearer`` token request, as the Anthropic SDKs and Claude Code send it.\n\nEvery field is optional here so that a missing one is answered in the RFC 6749 error shape rather than as a\nvalidation error. Fields the request does not use are ignored.",
+        "example": {
+          "assertion": "<identity token>",
+          "federation_rule_id": "7d0c7a52-9a2e-4b55-8f3a-2f1f6c0d2a11",
+          "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+          "organization_id": "5b3f8e0e-1c2d-4e7f-9a8b-0c1d2e3f4a5b"
+        },
+        "properties": {
+          "assertion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The identity token.",
+            "title": "Assertion"
+          },
+          "federation_rule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The id of the federation rule the identity token must match.",
+            "title": "Federation Rule Id"
+          },
+          "grant_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "title": "Grant Type"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the UUID of the organization of the rule's key.",
+            "title": "Organization Id"
+          },
+          "service_account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the id of the rule's key.",
+            "title": "Service Account Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the UUID of the rule's key's workspace.",
+            "title": "Workspace Id"
+          }
+        },
+        "title": "FederationTokenRequest",
+        "type": "object"
+      },
+      "FederationTokenResponse": {
+        "description": "An access token, as RFC 6749 section 5.1 shapes it. Present it as a bearer token in place of the key.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "Seconds until the access token expires.",
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token_type": {
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_in"
+        ],
+        "title": "FederationTokenResponse",
+        "type": "object"
+      },
       "GateResultResponse": {
         "properties": {
           "detail": {
@@ -10601,6 +10829,26 @@
           "state"
         ],
         "title": "OAuthCallbackRequest",
+        "type": "object"
+      },
+      "OAuthErrorResponse": {
+        "description": "A refused token request, as RFC 6749 section 5.2 shapes it.",
+        "properties": {
+          "error": {
+            "description": "invalid_request, unsupported_grant_type, invalid_grant or temporarily_unavailable",
+            "title": "Error",
+            "type": "string"
+          },
+          "error_description": {
+            "title": "Error Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "error_description"
+        ],
+        "title": "OAuthErrorResponse",
         "type": "object"
       },
       "OAuthSessionResponse": {
@@ -17433,6 +17681,18 @@
             "description": "Fetch: true when the provider runs a page's JavaScript before reading it.",
             "title": "Renders Javascript"
           },
+          "reports_final_url": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.",
+            "title": "Reports Final Url"
+          },
           "requires_api_base": {
             "description": "True when this provider has no endpoint of its own, so the tool must say where the backend is.",
             "title": "Requires Api Base",
@@ -18971,6 +19231,53 @@
           "cost"
         ],
         "title": "TokenChargeLine",
+        "type": "object"
+      },
+      "ToolChargeLine": {
+        "additionalProperties": true,
+        "description": "A gateway-run tool's charge line, one per tool and label.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.",
+        "properties": {
+          "cost": {
+            "description": "USD charged for this line.",
+            "title": "Cost",
+            "type": "number"
+          },
+          "label": {
+            "description": "What served the calls: '<provider>:<instance>' for a search or fetch instance, 'builtin:builtin_fetch' for the built-in fetcher, 'org:<provider>' for an organization's own key, or 'otari:<tool>' for any other gateway-run tool.",
+            "title": "Label",
+            "type": "string"
+          },
+          "meter": {
+            "description": "What was metered, e.g. 'request' or 'web_search_calls'.",
+            "title": "Meter",
+            "type": "string"
+          },
+          "unit_rate": {
+            "description": "USD per call.",
+            "title": "Unit Rate",
+            "type": "number"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Calls billed on this meter.",
+            "title": "Units"
+          }
+        },
+        "required": [
+          "meter",
+          "units",
+          "unit_rate",
+          "cost",
+          "label"
+        ],
+        "title": "ToolChargeLine",
         "type": "object"
       },
       "ToolMeter": {
@@ -20946,6 +21253,9 @@
               {
                 "items": {
                   "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ToolChargeLine"
+                    },
                     {
                       "$ref": "#/components/schemas/TokenChargeLine"
                     },
@@ -23983,7 +24293,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
     "title": "otari",
-    "version": "0.28.0"
+    "version": "0.29.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -29965,6 +30275,173 @@
         ]
       }
     },
+    "/api/v1/keys/{key_id}/federation-rules": {
+      "get": {
+        "description": "List the identities that may authenticate as this key, oldest first.",
+        "operationId": "keys-list_federation_rules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FederationRulePublic"
+                  },
+                  "title": "Response Keys-List Federation Rules",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Federation Rules",
+        "tags": [
+          "keys"
+        ]
+      },
+      "post": {
+        "description": "Let an OpenID Connect identity token authenticate as this key, in place of its secret.\n\nThe issuer must be one of the deployment's ``federation_issuers``, else 400. A token authenticates when it is\nsigned by that issuer, its ``aud`` contains ``audience``, and it carries the rule's ``subject`` and verified\n``email``, whichever the rule sets. A rule naming the identity of an existing rule answers 409: the same issuer,\naudience, subject and email on this key, or on another key the same issuer and audience with a subject or email\nin common and no contradicting value.",
+        "operationId": "keys-create_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Federation Rule",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/federation-rules/{rule_id}": {
+      "delete": {
+        "description": "Remove a federation rule. Tokens it matched stop authenticating with the next request.",
+        "operationId": "keys-delete_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Federation Rule",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
     "/api/v1/keys/{key_id}/rotate": {
       "post": {
         "description": "Rotate an API key's secret in place, within the caller's organization.\n\nRequires master key authentication.\n\nGenerates a new secret for the same key row (id, user, name, expiry, and\nmetadata are preserved) and returns the new raw key once, using the same\nresponse shape as key creation. The previous secret stops authenticating\nimmediately; there is no grace window.",
@@ -30708,6 +31185,86 @@
         "summary": "Create Moderation",
         "tags": [
           "moderations"
+        ]
+      }
+    },
+    "/api/v1/oauth/token": {
+      "post": {
+        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must verify against an issuer on ``federation_issuers`` and match the federation rule\n``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must\nbe the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as\nthat key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+        "operationId": "oauth-exchange_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_request or unsupported_grant_type"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_grant"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "temporarily_unavailable"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Exchange Token",
+        "tags": [
+          "oauth"
         ]
       }
     },
@@ -41483,7 +42040,7 @@
     },
     "/api/v1/search-tools/{name}/test": {
       "post": {
-        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test\nyet, and answers a 400.",
+        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in\nfetcher, fetches as a fetch tool call does, with no domain policy.",
         "operationId": "search-tools-test_search_tool",
         "parameters": [
           {

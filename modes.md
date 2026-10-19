@@ -176,7 +176,12 @@ charged.
 
 Today this covers Chat Completions, Messages, Responses and the Playground for a
 plain model or a single-target alias or policy. A routing policy with fallback
-candidates and the pass-through endpoints never reach `ModelProviderPort`.
+candidates, the pass-through endpoints (embeddings, images, audio, rerank,
+moderations) and batches never serve on a deployment-owned credential. A model
+the deployment offers the organization only that way is refused there with `424`
+(`managed_credential_unsupported`) rather than `provider_not_configured`, before
+anything is sent upstream. A routing policy skips such a candidate as it skips
+one with no credential, and answers with that code only when no candidate served.
 
 ## Internal protocol
 

@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.28.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.29.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -95,6 +95,9 @@ the corresponding startup value after the database is available.
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
+| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
+| `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
+| `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
@@ -433,6 +436,66 @@ it. A retry setting in an instance's `client_args` (`max_retries`, or
 `http_options.retry_options` for Google) wins over both values. Neither value
 reaches an [owned provider endpoint](provider-endpoints.md), which keeps its
 SDK's default outside a policy that can fall over.
+
+### Messages through the Responses API
+
+A request to `/v1/messages` for a model with no Anthropic Messages API of its
+own is served as a chat completion by default. An OpenAI instance (or any
+instance whose provider has a Responses API, such as Azure OpenAI) can serve it
+through the Responses API instead:
+
+```yaml
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    messages_api: responses   # default: completions
+```
+
+This reaches models OpenAI serves only on the Responses API (the codex and pro
+variants), and it keeps a reasoning model's reasoning across turns: each
+reasoning item comes back as a `thinking` block whose signature carries the
+item's encrypted content, and when a client such as Claude Code sends that block
+back on the next turn, Otari hands the reasoning back to the provider. The
+reasoning is encrypted for the provider account that produced it, so the
+signature also names the instance that served it: only that instance gets the
+reasoning back, and any model it serves can use it. A thinking block signed this
+way is dropped before a call to any other instance or provider, and another
+provider's thinking blocks are dropped before a Responses call. When the block it
+drops opened an assistant turn whose tool calls the request answers, `thinking`
+is also left off that call, because Anthropic refuses a tool-use turn continued
+under thinking without one; a route that falls back from such an instance to an
+Anthropic model mid-loop therefore answers that one turn without extended
+thinking.
+
+Reasoning fields are sent only to a model whose name looks like a reasoning
+model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5*` except its
+`-chat` variants, and anything with `codex` in it), whether or not the client
+asked for thinking, because any other model fails the call over them. An Azure
+OpenAI deployment is called by its deployment name, so name a reasoning
+deployment after its model (`gpt-5-mini`, not `prod-reasoner`) or its reasoning
+is neither requested nor carried across turns.
+
+Every call is sent with `store: false`, so nothing is kept upstream. A Messages
+`thinking` budget becomes a Responses `reasoning.effort`: up to 2,048 tokens is
+`low`, up to 16,384 is `medium`, and more is `high`. An `output_config.effort`
+takes precedence (`max` becomes `high`). Reasoning summaries are requested unless
+thinking is disabled. `stop_sequences` is refused with a 400, because the
+Responses API has no equivalent; `top_k`, `cache_control` and `metadata` are
+dropped (OpenAI caches prompts on its own). When the caller sends no
+`prompt_cache_key`, the request's session keys the provider's prompt cache, so the
+turns of one conversation land on the same cache: `Otari-Conversation-Id`, or the
+session id Claude Code sends on every request. The key is scoped to the caller
+like any prompt cache key, so the session id itself never reaches the provider.
+Anthropic's server tools are not
+forwarded: Otari's own web search, web fetch and code execution serve them, as
+for every non-Anthropic model.
+
+The setting covers `/v1/messages` traffic only, and only where the instance's
+provider has a Responses API; an instance whose provider has none keeps the
+default and logs a warning once. Any other value fails at startup. It is read
+from the `providers:` block of the gateway's own config, so it applies in
+standalone mode; a hybrid gateway's instances come from the platform and keep
+the default.
 
 ### Bedrock read timeout
 
@@ -789,6 +852,12 @@ search a workspace's organization search key served is priced under
 `otari:web_search` instead, since the deployment cannot price the organization's
 own provider account.
 
+A fetch instance's rate is keyed the same way (`tabstack:tabstack` for an
+instance named `tabstack` backed by `tabstack`), and so is the built-in
+fetcher's, `builtin:builtin_fetch`; their providers need no entry under
+`providers:` either. They price the fetch tool's calls on that instance, ahead
+of `otari:web_fetch`.
+
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
 search unit (one query over up to 100 documents, a long document counting as
@@ -889,8 +958,8 @@ Rules for instances:
   (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
 - `options` are checked against the provider's options. A search instance may also
   set `max_results` and `time_range`, and a fetch instance `max_chars`, which every
-  provider of that tool takes. Not in effect yet: they apply once the instances
-  serve requests through the libraries.
+  provider of that tool takes. A fetch instance's `max_chars` cuts what each fetch
+  tool call returns; in-loop search does not read the search ones yet.
 - A `search_tools` entry that breaks the name rules, or whose `options` carry a key
   the provider does not know or a value it refuses, still loads, with a warning
   that names the entry and the problem. Fix it: a later release refuses it, and
@@ -908,7 +977,9 @@ wins over the configuration file until it is cleared.
 `POST /api/v1/search-tools/test` runs one search or one fetch on an instance before
 it is saved, and `POST /api/v1/search-tools/{name}/test` on one that exists. Each
 says whether the call worked, the error's tag when it did not, and how many hits or
-characters came back, never the content. `builtin_fetch` has no test yet.
+characters came back, never the content. `builtin_fetch` is tested as a fetch tool
+call runs it: through the built-in fetcher, with no domain policy and no private
+hosts.
 
 The defaults and the call limit are runtime settings, also set from Tools or
 `/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
@@ -931,11 +1002,11 @@ A default that names no instance, set in the file or earlier at runtime, is trea
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
 In this release `web_search_default_tool` picks the tool for a direct
-`POST /api/v1/search` that names none, and no other request uses these settings
-yet. The rest take effect in later releases: `web_fetch_default_tool` when web
-fetch moves onto the fetch instances, and the in-loop parts of
-`web_search_default_tool` and `web_search_max_calls`, with a search instance's
-`fetch_tool`, when in-loop search does.
+`POST /api/v1/search` that names none, and `web_fetch_default_tool` the fetch
+instance every fetch tool call runs on. The rest take effect when in-loop search
+moves onto the search instances: the in-loop parts of `web_search_default_tool`
+and `web_search_max_calls`, and the fetch instance that enriches search results,
+a search instance's `fetch_tool` or else `web_fetch_default_tool`.
 
 After that, the old in-loop backend still serves some requests until it is
 removed. In that period `web_fetch_default_tool` governs every fetch tool call,
@@ -1186,7 +1257,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.28.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.29.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

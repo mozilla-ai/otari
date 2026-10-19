@@ -317,8 +317,12 @@ Otari must know whether the target model is natively multimodal. It uses,
 in order:
 
 1. `model_capabilities` **config override**: authoritative.
-2. **any-llm provider metadata**: trusted only for hosted providers.
-3. **Default: extract**, safe, since a needless extraction still yields a
+2. **Known model exceptions**: a hosted model its provider's flag over-reports
+  and that drops the file silently rather than refusing it. Today that is
+  DeepSeek's `deepseek-v4-pro`, which answers as if no image came, while its
+  provider takes images on `deepseek-flash`; its images are read as text.
+3. **any-llm provider metadata**: trusted only for hosted providers.
+4. **Default: extract**, safe, since a needless extraction still yields a
   correct answer while a wrong passthrough silently drops the file.
 
 > any-llm's capability flags are set per provider *class*, so they over-report
@@ -339,7 +343,7 @@ as text instead, set `supports_image: false` for it in `model_capabilities`.
 
 ## Configuration
 
-See [config.example.yml](https://github.com/mozilla-ai/otari/blob/v0.28.0/config.example.yml) for the full list. Key knobs:
+See [config.example.yml](https://github.com/mozilla-ai/otari/blob/v0.29.0/config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
 upload storage (see [Storage backends](#storage-backends)). With `files_enabled`
