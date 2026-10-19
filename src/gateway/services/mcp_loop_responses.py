@@ -245,12 +245,16 @@ def _compaction_items(output: list[Any]) -> list[Any]:
 
 
 def _replay_items(output: list[Any], owned: list[Any]) -> list[Any]:
-    """Keep compaction and owned function calls in provider output order."""
+    """Keep compaction, reasoning and owned function calls in provider output order.
+
+    A reasoning model's function call is replayed with its id, and OpenAI refuses
+    that id without the reasoning item the call came from.
+    """
     owned_call_ids = {getattr(item, "call_id", None) for item in owned}
     return [
         item
         for item in output
-        if getattr(item, "type", None) == "compaction"
+        if getattr(item, "type", None) in ("compaction", "reasoning")
         or (getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in owned_call_ids)
     ]
 
@@ -462,8 +466,8 @@ class _ResponsesToolLoopStrategy:
         pool: ToolBackend,
         acc: dict[str, Any] | None = None,
     ) -> None:
-        # All-owned: continue. Replay compaction items and the assistant's
-        # function calls in their original output order, then append matching
+        # All-owned: continue. Replay compaction and reasoning items and the
+        # assistant's function calls in their original output order, then append matching
         # function_call_output items. Stateless compaction requires the opaque
         # compaction item on every continuation.
         output = list(result.output or [])

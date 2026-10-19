@@ -24,6 +24,7 @@ from openai.types.responses import (
     ResponseOutputItemDoneEvent,
     ResponseOutputMessage,
     ResponseOutputText,
+    ResponseReasoningItem,
     ResponseTextDeltaEvent,
     ResponseUsage,
 )
@@ -304,6 +305,35 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
     item = cast(Any, announced[0])
     assert item.action.query == "first"
     assert item.id.startswith(WEB_SEARCH_CALL_ID_PREFIX)
+
+
+@pytest.mark.asyncio
+async def test_loop_replays_the_reasoning_a_function_call_came_from(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OpenAI refuses a reasoning model's replayed function call without the reasoning item before it."""
+    reasoning = ResponseReasoningItem(id="rs_1", type="reasoning", summary=[])
+    responses = iter(
+        [
+            _response(output=[reasoning, _function_call("call_1", "fetch_url", "{}")]),
+            _response(output=[], status="completed"),
+        ]
+    )
+    captured_inputs: list[list[Any]] = []
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+        max_iterations=5,
+    )
+
+    replay = captured_inputs[1][-3:]
+    assert [item["type"] for item in replay] == ["reasoning", "function_call", "function_call_output"]
+    assert replay[0]["id"] == "rs_1"
 
 
 @pytest.mark.asyncio
