@@ -15,6 +15,7 @@ from sqlmodel import col
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.env import otari_env
+from gateway.core.error_codes import error_headers
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
@@ -29,6 +30,7 @@ from gateway.services.workspace_scope import default_workspace_id
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
     from gateway.db import APIKey
+    from gateway.services.provider_kwargs import MissingCredential
 
 
 GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
@@ -444,6 +446,11 @@ def database_error(operation: str, exc: BaseException) -> HTTPException:
     """
     logger.error("%s failed: %s", operation, describe_database_error(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+
+
+def missing_credential_error(missing: MissingCredential) -> HTTPException:
+    """The answer for a call refused because no credential resolved for its provider."""
+    return HTTPException(status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code))
 
 
 # The OpenAI and Anthropic SDKs read this header before their own retry rule

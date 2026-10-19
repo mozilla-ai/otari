@@ -52,7 +52,7 @@ from gateway.api.deps import (
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempt_metrics import record_attempt
 from gateway.api.routes._attempts import classify_local_attempt_error
-from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
+from gateway.api.routes._helpers import missing_credential_error, resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -804,10 +804,7 @@ async def run_passthrough(
         missing = missing_credential(e)
         if missing is not None:
             logger.warning("No credential configured for %s:%s", resolved.provider, resolved.model)
-            public = missing.behind_alias(resolved.alias)
-            raise HTTPException(
-                status_code=public.status_code, detail=public.detail, headers=error_headers(public.code)
-            ) from e
+            raise missing_credential_error(missing.behind_alias(resolved.alias)) from e
 
         mapped = map_provider_error(e) if map_provider_error else None
         if mapped is not None:
