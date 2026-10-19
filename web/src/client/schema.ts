@@ -3957,7 +3957,10 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether any span failed unrecovered.
+         * @description Count sessions per bucket of their start, split by whether they failed.
+         *
+         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
+         *     goes back to the model, so a session whose only errors are tools' counts as succeeded.
          */
         get: operations["organization-traces-trace_series"];
         put?: never;
@@ -6081,7 +6084,10 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether any span failed unrecovered.
+         * @description Count sessions per bucket of their start, split by whether they failed.
+         *
+         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
+         *     goes back to the model, so a session whose only errors are tools' counts as succeeded.
          */
         get: operations["traces-trace_series"];
         put?: never;
