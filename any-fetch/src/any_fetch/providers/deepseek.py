@@ -28,8 +28,9 @@ breaks nothing.
 
 API: https://api-docs.deepseek.com/api/fetch and
 https://api-docs.deepseek.com/guides/search. Pricing, read 2026-10-18: $0.75
-per 1,000 successful fetches, free until 00:00 Beijing time on 2026-11-01; 5
-fetches a second per account, and a per-domain limit DeepSeek does not state.
+per 1,000 successful fetches; 5 fetches a second per account, and a per-domain
+limit DeepSeek does not state. DeepSeek's free period covers only calls made
+through its Harness, Claude Code or Codex, not this adapter's.
 """
 
 import re

@@ -560,8 +560,9 @@ runs on fetch instances yet, so the built-in fetcher above still does both;
 - **DeepSeek** (`deepseek`) needs an API key, read from the instance's `api_key`,
   such as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too, and reports
   no cost. DeepSeek's [pricing](https://api-docs.deepseek.com/guides/search),
-  read 2026-10-18, is $0.75 per 1,000 successful fetches, free until 00:00
-  Beijing time on 2026-11-01, with at most 5 fetches a second per account. A
+  read 2026-10-18, is $0.75 per 1,000 successful fetches, with at most 5
+  fetches a second per account; its free period covers only calls through
+  DeepSeek's own Harness, Claude Code or Codex, not Otari's. A
   page it cannot turn into markdown, a missing one or a PDF included, fails the
   fetch.
 - **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
@@ -755,8 +756,9 @@ The request, the response and the errors are in the
   `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no cost, so a
   search is billed at the tool's rate, `deepseek:<search-tool-name>`. DeepSeek's
   [pricing](https://api-docs.deepseek.com/guides/search), read 2026-10-18, is $0.75
-  per 1,000 successful searches, whatever the number of results, free until 00:00
-  Beijing time on 2026-11-01, with at most 5 searches a second per account. A search
+  per 1,000 successful searches, whatever the number of results, with at most 5
+  searches a second per account; its free period covers only calls through
+  DeepSeek's own Harness, Claude Code or Codex, not Otari's. A search
   returns at most 50 results, and its hits carry a snippet; page text only with the
   `need_content` option.
 - **Exa** (`exa`) needs an API key, read from the tool's `api_key`, such as

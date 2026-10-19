@@ -29,8 +29,9 @@ read are ignored, so a field DeepSeek adds breaks nothing.
 
 API: https://api-docs.deepseek.com/api/search and
 https://api-docs.deepseek.com/guides/search. Pricing, read 2026-10-18: $0.75
-per 1,000 successful searches, whatever ``count`` is, free until 00:00 Beijing
-time on 2026-11-01; 5 searches a second per account.
+per 1,000 successful searches, whatever ``count`` is; 5 searches a second per
+account. DeepSeek's free period covers only calls made through its Harness,
+Claude Code or Codex, not this adapter's.
 """
 
 import re
