@@ -33,6 +33,7 @@ from gateway.api.routes.organizations import Message
 from gateway.core.surface import Surface
 from gateway.schemas.providers import (
     DeploymentProviderMigrationPublic,
+    DeploymentProviderMigrationRequest,
     HostedAvailableModelsPublic,
     HostedCatalogRefreshPublic,
     HostedModelCreateRequest,
@@ -126,15 +127,16 @@ async def preview_deployment_provider_migration(
 
 @router.post("/migration")
 async def apply_deployment_provider_migration(
-    service: HostedProviderServiceDep,
+    service: HostedProviderServiceDep, body: DeploymentProviderMigrationRequest | None = None
 ) -> DeploymentProviderMigrationPublic:
     """Move the deployment providers stored through the dashboard onto hosted providers of the same name.
 
     Each is created as a hosted provider, offering what it lists as a create
     does, and the deployment provider is removed once the hosted one offers a
-    model. One that cannot move is reported and left in place.
+    model. One that cannot move is reported and left in place. ``instances``
+    limits the move to the rows of the preview the caller reviewed.
     """
-    return await service.migrate_deployment_providers(apply=True)
+    return await service.migrate_deployment_providers(apply=True, instances=None if body is None else body.instances)
 
 
 @router.get("/refresh/preview")

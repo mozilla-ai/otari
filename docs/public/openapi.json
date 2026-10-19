@@ -6016,6 +6016,32 @@
         "title": "DeploymentProviderMigrationPublic",
         "type": "object"
       },
+      "DeploymentProviderMigrationRequest": {
+        "description": "Which deployment providers to move: the ones the caller reviewed.\n\n``instances`` names the rows of the preview the caller saw; a row the\npreview did not show is left where it is, so nothing moves that nobody\nreviewed. Omitted, every row that can move does.",
+        "example": {
+          "instances": [
+            "openai-eu"
+          ]
+        },
+        "properties": {
+          "instances": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instances"
+          }
+        },
+        "title": "DeploymentProviderMigrationRequest",
+        "type": "object"
+      },
       "DeploymentProviderMigrationRowPublic": {
         "description": "What moving one deployment provider onto a hosted provider does, or did.\n\n``instance`` is the deployment provider's name, which the hosted provider\nkeeps, so ``instance:model`` selectors keep working. ``outcome`` is\n``migrate`` in a preview and ``migrated`` once applied; ``conflict``,\n``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with\n``detail`` saying why. ``source_removed`` says whether the deployment\nprovider was removed: it is kept while the hosted provider offers no model,\nso nothing it serves stops being served. ``notes`` are what an operator\nshould check afterwards.",
         "properties": {
@@ -29115,8 +29141,25 @@
         ]
       },
       "post": {
-        "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place.",
+        "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``instances``\nlimits the move to the rows of the preview the caller reviewed.",
         "operationId": "hosted-providers-apply_deployment_provider_migration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DeploymentProviderMigrationRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -29127,6 +29170,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

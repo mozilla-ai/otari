@@ -210,6 +210,22 @@ def test_a_row_moved_twice_is_a_conflict_the_second_time(
     assert row["outcome"] == "conflict"
 
 
+def test_a_row_the_reviewed_preview_did_not_show_is_left_where_it_is(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+) -> None:
+    """Another operator's row added after the preview loaded is not moved under this one's confirm."""
+    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111")
+    _deployment_provider(client, master_key_header, "groq", api_key="sk-groq-3333")
+
+    rows = _rows(client.post(PATH, json={"instances": ["openai"]}, headers=master_key_header))
+
+    assert (rows["openai"]["outcome"], rows["openai"]["source_removed"]) == ("migrated", True)
+    assert rows["groq"]["outcome"] == "migrate"
+    assert "not in the reviewed preview" in rows["groq"]["detail"]
+    db_session.expire_all()
+    assert [row.instance for row in db_session.execute(select(ProviderCredential)).scalars()] == ["groq"]
+
+
 def test_the_migration_is_operator_only(client: TestClient, api_key_header: dict[str, str]) -> None:
     response = client.post(PATH, headers=api_key_header)
 

@@ -1606,7 +1606,8 @@ export interface paths {
          *
          *     Each is created as a hosted provider, offering what it lists as a create
          *     does, and the deployment provider is removed once the hosted one offers a
-         *     model. One that cannot move is reported and left in place.
+         *     model. One that cannot move is reported and left in place. ``instances``
+         *     limits the move to the rows of the preview the caller reviewed.
          */
         post: operations["hosted-providers-apply_deployment_provider_migration"];
         delete?: never;
@@ -9743,6 +9744,23 @@ export interface components {
         DeploymentProviderMigrationPublic: {
             /** Rows */
             rows: components["schemas"]["DeploymentProviderMigrationRowPublic"][];
+        };
+        /**
+         * DeploymentProviderMigrationRequest
+         * @description Which deployment providers to move: the ones the caller reviewed.
+         *
+         *     ``instances`` names the rows of the preview the caller saw; a row the
+         *     preview did not show is left where it is, so nothing moves that nobody
+         *     reviewed. Omitted, every row that can move does.
+         * @example {
+         *       "instances": [
+         *         "openai-eu"
+         *       ]
+         *     }
+         */
+        DeploymentProviderMigrationRequest: {
+            /** Instances */
+            instances?: string[] | null;
         };
         /**
          * DeploymentProviderMigrationRowPublic
@@ -20611,7 +20629,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DeploymentProviderMigrationRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -20620,6 +20642,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentProviderMigrationPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

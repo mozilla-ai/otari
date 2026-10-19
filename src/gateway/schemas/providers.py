@@ -574,6 +574,19 @@ class DeploymentProviderMigrationRowPublic(SQLModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class DeploymentProviderMigrationRequest(SQLModel):
+    """Which deployment providers to move: the ones the caller reviewed.
+
+    ``instances`` names the rows of the preview the caller saw; a row the
+    preview did not show is left where it is, so nothing moves that nobody
+    reviewed. Omitted, every row that can move does.
+    """
+
+    model_config = {"json_schema_extra": {"example": {"instances": ["openai-eu"]}}}
+
+    instances: list[str] | None = None
+
+
 class DeploymentProviderMigrationPublic(SQLModel):
     """The deployment providers stored through the dashboard, and how each moves onto a hosted provider."""
 
@@ -816,6 +829,7 @@ class HostedAvailableModelsPublic(SQLModel):
 __all__ = [
     "DeploymentProviderMigrationOutcome",
     "DeploymentProviderMigrationPublic",
+    "DeploymentProviderMigrationRequest",
     "DeploymentProviderMigrationRowPublic",
     "HostedAvailableModelsPublic",
     "HostedCatalogKeptGroupPublic",

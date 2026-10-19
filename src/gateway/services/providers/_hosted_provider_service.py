@@ -19,7 +19,7 @@ writes in another.
 import dataclasses
 import functools
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 
 from any_llm.types.model import Model
@@ -536,7 +536,9 @@ class HostedProviderService:
         get_model_cache().clear()
         return HostedProvidersReencryptPublic(reencrypted=reencrypted_count, unreadable=unreadable, skipped=skipped)
 
-    async def migrate_deployment_providers(self, *, apply: bool) -> DeploymentProviderMigrationPublic:
+    async def migrate_deployment_providers(
+        self, *, apply: bool, instances: Collection[str] | None = None
+    ) -> DeploymentProviderMigrationPublic:
         """Move the deployment providers stored through the dashboard onto hosted providers, or preview it.
 
         Each becomes a hosted provider of the same name, its models discovered
@@ -545,6 +547,9 @@ class HostedProviderService:
         it did until the operator adds its models. One that cannot move (a
         name a hosted provider already holds, a key no configured key reads)
         is reported and left where it is; so is one edited while this ran.
+
+        ``instances`` binds an apply to the preview the caller reviewed: a row
+        it does not name is reported and left where it is.
         """
         async with self.uow:
             hosted_names = {row.name for row in await self.providers.list_all()}
@@ -554,6 +559,9 @@ class HostedProviderService:
         if apply:
             removed: set[str] = set()
             for plan in plans:
+                if instances is not None and plan.row.instance not in instances and plan.create is not None:
+                    plan.row.detail = "It was not in the reviewed preview, so it was not moved. Review the move again."
+                    continue
                 if await self._move(plan):
                     removed.add(plan.row.instance)
             if removed:
