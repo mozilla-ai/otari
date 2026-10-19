@@ -24,6 +24,7 @@ on:
     paths:
       - 'src/gateway/**'
       - 'scripts/hybrid_edition_smoke.py'
+      - 'scripts/oss_edition_smoke.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-live-providers.yml'
@@ -78,3 +79,38 @@ jobs:
         OTARI_SMOKE_OPENAI_MODEL: ${{ vars.OTARI_SMOKE_OPENAI_MODEL }}
         OTARI_SMOKE_ANTHROPIC_MODEL: ${{ vars.OTARI_SMOKE_ANTHROPIC_MODEL }}
       run: uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py --live
+
+  # The standalone smoke (scripts/oss_edition_smoke.py --live) against DeepSeek:
+  # who runs a provider-named web search on each of its APIs, which Otari decides
+  # from what DeepSeek does rather than from its documentation. Its own job, so it
+  # runs without the hybrid job's keys, and is skipped without its own.
+  standalone-deepseek:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAS_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
+    steps:
+    - name: Say so when the key is absent
+      if: env.HAS_KEY != 'true'
+      run: echo "::notice::The DEEPSEEK_API_KEY secret is not set; the standalone DeepSeek smoke is skipped."
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      if: env.HAS_KEY == 'true'
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      if: env.HAS_KEY == 'true'
+      with:
+        python-version: "3.14"
+
+    - name: Install the OSS edition
+      if: env.HAS_KEY == 'true'
+      run: uv sync --frozen --no-dev
+
+    - name: Boot the standalone gateway and check DeepSeek's web search
+      if: env.HAS_KEY == 'true'
+      env:
+        # The same secret keys the any-search and any-fetch live tests.
+        OTARI_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      run: uv run --frozen --no-dev python scripts/oss_edition_smoke.py --live

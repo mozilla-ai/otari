@@ -105,7 +105,10 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   Anthropic APIs (`OTARI_SMOKE_*_API_KEY`, Tavily optional) and runs from
   `otari-live-providers.yml` on pushes to `main`, the commit the otari.ai dev
   gateway deploys; it is not a PR gate, because forks carry no secrets and a real
-  model is not deterministic enough to block a merge on.
+  model is not deterministic enough to block a merge on. The OSS smoke's own
+  `--live` (`OTARI_SMOKE_DEEPSEEK_API_KEY`) adds one step from the same workflow:
+  who runs a provider-named web search on DeepSeek, a fake SearXNG counting the
+  searches Otari runs itself.
 - `integrations/` holds `pydantic-ai-otari` and `langchain-otari`, published to PyPI on their own versions ([RELEASE.md](RELEASE.md#integration-package-releases)) and not workspace members. `make test-frameworks` runs their tests and every Python block on `docs/use-with-pydantic-ai.md`, `docs/use-with-langchain.md` and `docs/use-with-langgraph.md` against a real Otari, so a block there must run on its own and print. The frameworks are locked in `integrations/e2e/uv.lock`, never `uv.lock`.
 - `tests/integration/test_mcp_dependency_ceiling.py::test_mcp_constraint_resolves_to_an_importable_version` needs network egress, to install `mcp` fresh from PyPI into a throwaway venv. A missing egress fails it hard after burning both `@pytest.mark.flaky` reruns. It also skips outright (not fails) when `uv` is not on `PATH`.
 - `tests/unit/test_url_safety.py` and `tests/unit/test_web_search_backend.py` need DNS, which fails with a different signature: the code under test resolves a hostname to an IP to decide whether an address is safe, so with no resolver it gets the hostname back and the failure reads `ValueError: 'example.com' does not appear to be an IPv4 or IPv6 address`. Six tests across the two files, all passing where DNS is available. Nothing about the address checks is wrong; confirm with `python -c "import socket; socket.gethostbyname('example.com')"` before treating one as a regression.

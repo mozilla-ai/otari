@@ -44,6 +44,15 @@ runtime-only environment (``uv sync --frozen --no-dev``), so an enterprise-only
 or dev-only import that reached an OSS code path fails here rather than passing
 on a developer machine that happens to have it installed.
 
+``--live`` adds one step against a real provider, DeepSeek, keyed from
+``OTARI_SMOKE_DEEPSEEK_API_KEY``: who runs a provider-named web search on each of
+its APIs, which is DeepSeek's behavior rather than its documentation.
+``web_search`` on Responses runs on DeepSeek with ``deepseek-v4-pro`` and on Otari
+with ``deepseek-flash``, which ignores it there, and Anthropic's dated keyword on
+Messages runs on DeepSeek with ``deepseek-flash``. Otari's own search goes to a
+fake SearXNG this script runs, so a query reaching it is Otari running the
+search. It runs from ``otari-live-providers.yml``, never as a PR gate.
+
 ``--image`` runs the same walk against a built container instead of the source
 checkout, as ``scripts/hybrid_edition_smoke.py --image`` does: the image's own
 filesystem, entrypoint and baked environment. The container migrates on start,
@@ -55,6 +64,7 @@ Usage:
     uv run --frozen --no-dev python scripts/oss_edition_smoke.py
     uv run --frozen --no-dev python scripts/oss_edition_smoke.py --database-url postgresql://...
     uv run --frozen --no-dev python scripts/oss_edition_smoke.py --image otari:pr-sha
+    uv run --frozen --no-dev python scripts/oss_edition_smoke.py --live
 """
 
 from __future__ import annotations
@@ -74,7 +84,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -113,6 +123,16 @@ HEALTH_TIMEOUT_SECONDS = 90
 # A bound on each docker call, so a daemon that stops answering cannot hang the smoke.
 DOCKER_TIMEOUT_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 60
+
+# The --live step: the key, the DeepSeek model that runs web_search on Responses,
+# and the one that ignores it there.
+LIVE_DEEPSEEK_KEY_ENV = "OTARI_SMOKE_DEEPSEEK_API_KEY"
+DEEPSEEK_SEARCH_MODEL = "deepseek-v4-pro"
+DEEPSEEK_NO_RESPONSES_SEARCH_MODEL = "deepseek-flash"
+# A DeepSeek model that searches runs several searches before it answers.
+LIVE_DEEPSEEK_TIMEOUT_SECONDS = 240
+SEARCH_URL = "https://example.com/oss-edition-smoke"
+SEARCH_TITLE = "OSS edition smoke result"
 
 # Where the mock provider binds, and the host the gateway reaches it on. They
 # differ only for a container run, whose loopback is its own.
@@ -271,7 +291,56 @@ def _completion_payload() -> dict[str, Any]:
     }
 
 
-def peer_base_url(server: _MockProviderServer, bind_host: str) -> str:
+class _FakeSearchServer(ThreadingHTTPServer):
+    """A SearXNG search service for the --live step, counting the queries Otari sends it."""
+
+    daemon_threads = True
+
+    def __init__(self, address: tuple[str, int]) -> None:
+        super().__init__(address, _FakeSearchHandler)
+        self.queries = 0
+        self._lock = threading.Lock()
+
+    def record_query(self) -> None:
+        with self._lock:
+            self.queries += 1
+
+
+class _FakeSearchHandler(BaseHTTPRequestHandler):
+    server: _FakeSearchServer
+
+    def do_GET(self) -> None:  # noqa: N802
+        if not self.path.startswith("/search"):
+            self._respond(404, {"detail": f"fake search service has no GET {self.path}"})
+            return
+        self.server.record_query()
+        self._respond(200, {"results": [{"url": SEARCH_URL, "title": SEARCH_TITLE, "content": "snippet"}]})
+
+    def _respond(self, status: int, payload: dict[str, Any]) -> None:
+        data = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        pass
+
+
+@contextmanager
+def fake_search(bind_host: str = LOOPBACK) -> Iterator[_FakeSearchServer]:
+    server = _FakeSearchServer((bind_host, 0))
+    thread = threading.Thread(target=server.serve_forever, name="fake-search", daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def peer_base_url(server: ThreadingHTTPServer, bind_host: str) -> str:
     """The URL the gateway dials to reach the mock provider bound on ``bind_host``."""
     host = CONTAINER_HOST_ALIAS if bind_host == ALL_INTERFACES else LOOPBACK
     return f"http://{host}:{server.server_address[1]}"
@@ -317,13 +386,16 @@ def oss_edition_env(base_env: dict[str, str], secret_key: str, pepper: str) -> d
     return env
 
 
-def oss_edition_config(*, database_url: str, port: int | None, mock_base_url: str, names: Names) -> dict[str, Any]:
+def oss_edition_config(
+    *, database_url: str, port: int | None, mock_base_url: str, names: Names, search_base_url: str | None = None
+) -> dict[str, Any]:
     """Return the config file contents for the OSS edition under smoke.
 
     No ``mode``, no ``platform`` block, and no provider anyone has to hold a key
     for: this is the config a self-hoster could write on day one. A ``port`` of
     ``None`` leaves out ``host`` and ``port``, for a container whose environment
-    sets its listen address, as the published image does.
+    sets its listen address, as the published image does. ``search_base_url``, for
+    the --live step, is where Otari's own web search goes.
     """
     config: dict[str, Any] = {
         "database_url": database_url,
@@ -341,6 +413,8 @@ def oss_edition_config(*, database_url: str, port: int | None, mock_base_url: st
             }
         },
     }
+    if search_base_url is not None:
+        config["web_search_url"] = search_base_url
     if port is not None:
         config["host"] = LOOPBACK
         config["port"] = port
@@ -367,6 +441,7 @@ def _request(
     *,
     headers: dict[str, str] | None = None,
     payload: dict[str, Any] | None = None,
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
 ) -> tuple[int, Any]:
     """Send one request and return its status and decoded body (None if not JSON)."""
     body = json.dumps(payload).encode() if payload is not None else None
@@ -378,7 +453,7 @@ def _request(
         request.add_header(name, value)
 
     try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, _decode(response.read())
     except urllib.error.HTTPError as error:
         return error.code, _decode(error.read())
@@ -785,7 +860,92 @@ def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> 
     log("Usage for the completion is readable back")
 
 
-def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, names: Names) -> None:
+def run_deepseek_web_search(
+    base_url: str, admin: dict[str, str], key: str, deepseek_key: str, search: _FakeSearchServer
+) -> None:
+    """Who runs a provider-named web search on DeepSeek: DeepSeek where it does, Otari where it does not.
+
+    Each call asks for ``auto``. Otari's own search goes to the fake SearXNG, so a
+    query reaching it is Otari running the search.
+    """
+    status, body = _request(
+        "POST",
+        f"{base_url}{API_ROOT}/provider-credentials",
+        headers=admin,
+        payload={"instance": "deepseek", "provider_type": "deepseek", "api_key": deepseek_key},
+    )
+    _expect(status, 201, f"POST {API_ROOT}/provider-credentials for DeepSeek", body)
+    prompt = "Use web search to look up the latest stable Python release. Then answer in one sentence."
+
+    def call(route: str, payload: dict[str, Any], what: str) -> tuple[dict[str, Any], bool]:
+        queries_before = search.queries
+        status, body = _request(
+            "POST",
+            f"{base_url}{API_ROOT}/{route}",
+            headers={KEY_HEADER: key, "Otari-Web-Search": "auto"},
+            payload=payload,
+            timeout=LIVE_DEEPSEEK_TIMEOUT_SECONDS,
+        )
+        _expect(status, 200, what, body)
+        return body, search.queries > queries_before
+
+    body, ran_on_otari = call(
+        "responses",
+        {"model": f"deepseek:{DEEPSEEK_SEARCH_MODEL}", "input": prompt, "tools": [{"type": "web_search"}]},
+        f"web_search on Responses with {DEEPSEEK_SEARCH_MODEL}",
+    )
+    if ran_on_otari:
+        raise SmokeFailure(f"Otari ran the search that {DEEPSEEK_SEARCH_MODEL} runs itself on Responses")
+    types = [item.get("type") for item in body.get("output") or [] if isinstance(item, dict)]
+    if "web_search_call" not in types:
+        raise SmokeFailure(f"{DEEPSEEK_SEARCH_MODEL} returned no web_search_call item: {types!r}")
+
+    _, ran_on_otari = call(
+        "responses",
+        {
+            "model": f"deepseek:{DEEPSEEK_NO_RESPONSES_SEARCH_MODEL}",
+            "input": prompt,
+            "tools": [{"type": "web_search"}],
+            # Forced, so the model calls the search Otari gives it on turn one.
+            "tool_choice": {"type": "web_search"},
+        },
+        f"web_search on Responses with {DEEPSEEK_NO_RESPONSES_SEARCH_MODEL}",
+    )
+    if not ran_on_otari:
+        raise SmokeFailure(
+            f"{DEEPSEEK_NO_RESPONSES_SEARCH_MODEL} ignores web_search on Responses, "
+            "but Otari did not run the search for it"
+        )
+
+    body, ran_on_otari = call(
+        "messages",
+        {
+            "model": f"deepseek:{DEEPSEEK_NO_RESPONSES_SEARCH_MODEL}",
+            "max_tokens": 2048,
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}],
+        },
+        f"web_search_20250305 on Messages with {DEEPSEEK_NO_RESPONSES_SEARCH_MODEL}",
+    )
+    if ran_on_otari:
+        raise SmokeFailure(f"Otari ran the search that {DEEPSEEK_NO_RESPONSES_SEARCH_MODEL} runs itself on Messages")
+    types = [block.get("type") for block in body.get("content") or [] if isinstance(block, dict)]
+    if "web_search_tool_result" not in types:
+        raise SmokeFailure(f"DeepSeek returned no web_search_tool_result block: {types!r}")
+    log(
+        f"DeepSeek ran web search itself on Responses with {DEEPSEEK_SEARCH_MODEL} and on Messages, "
+        f"and Otari ran it for {DEEPSEEK_NO_RESPONSES_SEARCH_MODEL} on Responses"
+    )
+
+
+def smoke(
+    base_url: str,
+    provider: _MockProviderServer,
+    mock_base_url: str,
+    names: Names,
+    live: tuple[str, _FakeSearchServer] | None = None,
+) -> None:
+    """Walk the self-hoster's day; ``live``, the DeepSeek key and the fake search, adds the --live step."""
     admin = {KEY_HEADER: MASTER_KEY}
     check_health(base_url)
     check_bootstrap(base_url)
@@ -795,6 +955,8 @@ def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, name
     run_completion(base_url, key, provider, names)
     check_usage_recorded(base_url, admin, names)
     check_mail_is_honestly_unavailable(base_url, admin)
+    if live is not None:
+        run_deepseek_web_search(base_url, admin, key, *live)
 
 
 # --------------------------------------------------------------------------- #
@@ -815,11 +977,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Run this container image instead of the source checkout's CLI, as a deployment does.",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help=f"Also check who runs DeepSeek's web search against the real API, keyed from {LIVE_DEEPSEEK_KEY_ENV}.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    deepseek_key = os.environ.get(LIVE_DEEPSEEK_KEY_ENV) if args.live else None
+    if args.live and not deepseek_key:
+        log(f"OSS-edition smoke FAILED: --live needs {LIVE_DEEPSEEK_KEY_ENV} in the environment")
+        return 1
 
     with tempfile.TemporaryDirectory(prefix="otari-oss-smoke-") as workdir_name:
         workdir = Path(workdir_name)
@@ -838,8 +1009,9 @@ def main(argv: list[str] | None = None) -> int:
         pepper = secrets.token_urlsafe(32)
 
         try:
-            with mock_provider(names.byo_key, bind_host) as provider:
+            with mock_provider(names.byo_key, bind_host) as provider, ExitStack() as stack:
                 mock_base_url = peer_base_url(provider, bind_host)
+                search = stack.enter_context(fake_search(bind_host)) if deepseek_key else None
                 write_config(
                     config_path,
                     oss_edition_config(
@@ -847,6 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
                         port=None if args.image else port,
                         mock_base_url=mock_base_url,
                         names=names,
+                        search_base_url=peer_base_url(search, bind_host) if search else None,
                     ),
                 )
                 if args.image:
@@ -859,7 +1032,8 @@ def main(argv: list[str] | None = None) -> int:
                     env = oss_edition_env(dict(os.environ), secret_key, pepper)
                     run_gateway = gateway(config_path, env, base_url, log_path)
                 with run_gateway:
-                    smoke(base_url, provider, mock_base_url, names)
+                    live = (deepseek_key, search) if deepseek_key and search else None
+                    smoke(base_url, provider, mock_base_url, names, live)
         except SmokeFailure as failure:
             # Every failure prints the gateway's own log, not just the ones raised
             # while starting it: a step that fails against a running gateway is
@@ -870,7 +1044,8 @@ def main(argv: list[str] | None = None) -> int:
             log(f"\nOSS-edition smoke FAILED: {type(error).__name__}: {error}\n\n{_tail(log_path)}")
             return 1
 
-    log("\nOSS-edition smoke passed" + (" in the container." if args.image else "."))
+    where = [w for w, on in (("in the container", args.image), ("against DeepSeek", args.live)) if on]
+    log("\nOSS-edition smoke passed" + (f" {' and '.join(where)}." if where else "."))
     return 0
 
 

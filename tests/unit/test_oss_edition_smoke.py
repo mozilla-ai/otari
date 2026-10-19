@@ -234,3 +234,51 @@ def test_mock_is_dialed_through_the_host_alias_when_bound_for_a_container() -> N
     with smoke.mock_provider("key", smoke.ALL_INTERFACES) as server:
         url = smoke.peer_base_url(server, smoke.ALL_INTERFACES)
         assert url == f"http://{smoke.CONTAINER_HOST_ALIAS}:{server.server_address[1]}"
+
+
+# --------------------------------------------------------------------------- #
+# The live mode
+# --------------------------------------------------------------------------- #
+
+
+def test_live_is_off_by_default() -> None:
+    assert smoke.parse_args([]).live is False
+    assert smoke.parse_args(["--live"]).live is True
+
+
+def test_live_needs_the_deepseek_key_and_names_it(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    """A live run without its key fails up front rather than passing on the mock alone."""
+    monkeypatch.delenv(smoke.LIVE_DEEPSEEK_KEY_ENV, raising=False)
+    assert smoke.main(["--live"]) == 1
+    assert smoke.LIVE_DEEPSEEK_KEY_ENV in capsys.readouterr().out
+
+
+def test_only_a_live_config_points_web_search_at_the_fake() -> None:
+    names = smoke.Names.for_run("abcd1234")
+    base = {
+        "database_url": "sqlite:///smoke.db",
+        "port": 8123,
+        "mock_base_url": "http://127.0.0.1:9000",
+        "names": names,
+    }
+    assert "web_search_url" not in smoke.oss_edition_config(**base)
+    live = smoke.oss_edition_config(**base, search_base_url="http://127.0.0.1:9100")
+    assert live["web_search_url"] == "http://127.0.0.1:9100"
+
+
+def test_fake_search_answers_searxng_and_counts_each_query() -> None:
+    with smoke.fake_search() as server:
+        url = f"{smoke.peer_base_url(server, smoke.LOOPBACK)}/search?q=python&format=json"
+        for expected in (1, 2):
+            with urllib.request.urlopen(url, timeout=5) as response:
+                body = json.loads(response.read())
+            assert body["results"][0]["url"] == smoke.SEARCH_URL
+            assert server.queries == expected
+
+
+def test_fake_search_counts_no_other_route() -> None:
+    with smoke.fake_search() as server:
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(f"{smoke.peer_base_url(server, smoke.LOOPBACK)}/other", timeout=5)
+        assert raised.value.code == 404
+        assert server.queries == 0
