@@ -263,8 +263,7 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
 
         ``output_config`` (``effort``, ``format``) is the Messages API's wire name, and
         what Claude Code and the Anthropic SDK send; any-llm takes the same object as
-        ``output_format`` and sends it on as ``output_config``. Unread, the field was
-        dropped as unknown, so a client's effort never reached the provider.
+        ``output_format`` and sends it on as ``output_config``.
         """
         if not isinstance(data, dict) or "output_config" not in data:
             return data
