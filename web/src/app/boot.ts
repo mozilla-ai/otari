@@ -11,8 +11,8 @@
  *
  * A bootstrap kept from an earlier load renders first, while the current one is
  * read, and the current one renders again when it differs. One that never
- * arrives leaves the kept answer on screen, where the shell reports the gateway
- * unreachable, and forgets it, so the next load waits and says so.
+ * arrives leaves the kept answer on screen, where each page's own requests
+ * report their failure, and forgets it, so the next load waits and says so.
  *
  * Separate from `main.tsx` so the order is a function a test can call; that
  * file renders on import.
