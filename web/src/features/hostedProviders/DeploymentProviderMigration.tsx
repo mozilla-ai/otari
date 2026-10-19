@@ -82,7 +82,10 @@ export function DeploymentProviderMigration() {
   const rows = preview.data?.rows ?? []
   const reviewed = rows
     .filter((row) => row.outcome === "migrate")
-    .map((row) => row.instance)
+    .map((row) => ({
+      instance: row.instance,
+      updated_at: row.updated_at ?? null,
+    }))
   const movable = reviewed.length
   // Read again on opening, and confirmed only against that read, so the rows
   // sent are the rows on screen rather than ones another operator has since

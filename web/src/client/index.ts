@@ -389,6 +389,8 @@ export type DeploymentProviderMigration =
   Schemas["DeploymentProviderMigrationPublic"]
 export type DeploymentProviderMigrationRow =
   Schemas["DeploymentProviderMigrationRowPublic"]
+export type DeploymentProviderMigrationReviewedRow =
+  Schemas["DeploymentProviderMigrationReviewedRow"]
 
 // ---------------------------------------------------------------------------
 // Routing

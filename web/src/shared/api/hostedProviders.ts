@@ -4,6 +4,7 @@ import type {
   CreateHostedModelRequest,
   CreateHostedProviderRequest,
   DeploymentProviderMigration,
+  DeploymentProviderMigrationReviewedRow,
   HostedAvailableModels,
   HostedCatalogRefresh,
   HostedModel,
@@ -300,17 +301,18 @@ export function useDeploymentProviderMigrationPreview(enabled: boolean) {
 
 /**
  * Moves the deployment providers named, the rows of the preview the operator
- * reviewed; a row the preview did not show is left where it is. Each move asks
+ * reviewed at the versions shown; a row the preview did not show, or one
+ * changed since, is left where it is. Each move asks
  * the provider what it serves, as a create does.
  */
 export function useApplyDeploymentProviderMigration() {
   const queryClient = useQueryClient()
   const invalidate = useInvalidateHosted()
   return useMutation({
-    mutationFn: (instances: string[]) =>
+    mutationFn: (rows: DeploymentProviderMigrationReviewedRow[]) =>
       apiFetch<DeploymentProviderMigration>("/hosted-providers/migration", {
         method: "POST",
-        body: JSON.stringify({ instances }),
+        body: JSON.stringify({ rows }),
         signal: longRequestSignal(),
       }),
     onSuccess: () => {

@@ -1095,7 +1095,7 @@ describe("HostedProvidersPage, named providers and the move", () => {
     )
     // Only what the preview offered to move, so nothing unreviewed moves.
     expect(moves.map((request) => request.body)).toEqual([
-      { instances: ["openai-eu"] },
+      { rows: [{ instance: "openai-eu", updated_at: null }] },
     ])
   })
 })
