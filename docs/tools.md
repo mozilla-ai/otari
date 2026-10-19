@@ -164,8 +164,7 @@ The dashboard accepts dollars per call. The pricing API stores the value in
 With `require_pricing: true`, an unpriced gateway-run tool is refused before the
 model call. For web fetch that check still reads only the `otari:web_fetch` row,
 whichever fetch instance serves the calls. A failed tool invocation is recorded
-but not charged. Charges settle
-on the final usage row alongside model tokens.
+but not charged. Charges settle on the final usage row alongside model tokens.
 
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what
@@ -194,8 +193,10 @@ override.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none. Search instances do not serve the
-in-loop tool yet, and it runs organization keys on the older backend, so today's
-search lines are labeled `otari:web_search`.
+in-loop tool yet, and it runs organization keys on the older backend, so the
+gateway's own search lines are labeled `otari:web_search` for now. Searches a
+model's provider runs itself carry the provider's label, as the next section
+says.
 
 ### Searches a provider runs itself
 
