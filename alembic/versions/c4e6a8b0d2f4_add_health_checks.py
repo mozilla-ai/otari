@@ -5,7 +5,7 @@ replica's worker polls; the conditional update that moves its ``next_run_at``
 forward is what lets exactly one replica start a run.
 
 Revision ID: c4e6a8b0d2f4
-Revises: c7e1a3f5b9d2
+Revises: cc92a10774d8
 Create Date: 2026-10-16
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c4e6a8b0d2f4"
-down_revision: str | Sequence[str] | None = "c7e1a3f5b9d2"
+down_revision: str | Sequence[str] | None = "cc92a10774d8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
