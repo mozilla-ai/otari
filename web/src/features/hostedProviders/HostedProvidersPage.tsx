@@ -28,7 +28,7 @@ import {
   useHostedProviders,
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
-import { useProviderHealth } from "@/shared/api/providers"
+import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { UnavailableHere } from "@/shared/components/access/UnavailableHere"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
@@ -193,6 +193,7 @@ function HostedProvidersContent() {
   const isGranted = access.data === true
   const providers = useHostedProviders(isGranted)
   const health = useProviderHealth(isGranted)
+  const configured = useProviders(isGranted)
   const update = useUpdateHostedProvider()
   const remove = useDeleteHostedProvider()
   const sweep = useHostedCatalogRefresh()
@@ -256,9 +257,19 @@ function HostedProvidersContent() {
   const deleting = rows.find((row) => row.name === pendingDelete)
   const editing = rows.find((row) => row.name === editingProvider)
   const expanded = rows.find((row) => row.name === modelsFor)
+  // Health is keyed by name, and a configured instance of the same name is the
+  // one dialed under it, so its status would read as this row's. Such a row,
+  // and every row while the configured names are unknown, shows none.
+  const configuredNames = configured.isSuccess
+    ? new Set(configured.data.providers.map((row) => row.instance))
+    : undefined
   const healthByName = new Map<string, ProviderHealth>(
     (health.data?.providers ?? []).map((row) => [row.instance, row]),
   )
+  const healthOf = (name: string) =>
+    configuredNames === undefined || configuredNames.has(name)
+      ? undefined
+      : healthByName.get(name)
   // A failed list is not an empty one: rendering "none configured" over a 500
   // would tell an operator their live providers are gone.
   const isEmpty = !providers.error && !providers.isPending && rows.length === 0
@@ -302,7 +313,7 @@ function HostedProvidersContent() {
       header: "Status",
       cell: (row) =>
         row.enabled ? (
-          <HealthPill health={healthByName.get(row.name)} />
+          <HealthPill health={healthOf(row.name)} />
         ) : (
           <span className="text-caption">Switched off</span>
         ),

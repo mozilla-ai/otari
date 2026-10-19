@@ -508,6 +508,30 @@ describe("SettingsPage", () => {
     ).toBe(true)
   })
 
+  it("does not report the rotation complete while the hosted provider keys failed to re-encrypt", async () => {
+    const fetchMock = mockApi(SETTINGS, [storedProvider("openai", "1234")])
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes(`${API_ROOT}/hosted-providers/reencrypt`)) {
+        return new Response(JSON.stringify({ detail: "boom" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+    const user = userEvent.setup()
+
+    renderWithClient(<SettingsPage />)
+    await screen.findByText("Credential security")
+    await user.click(
+      screen.getByRole("button", { name: "Re-encrypt provider keys" }),
+    )
+
+    expect(await screen.findByText("boom")).toBeInTheDocument()
+    expect(screen.queryByText(/Re-encrypted \d+ provider key/)).toBeNull()
+  })
+
   it("shows unreadable provider key recovery guidance in the Credential security category", async () => {
     mockApi(SETTINGS, [storedProvider("openai", "1234", false)])
 

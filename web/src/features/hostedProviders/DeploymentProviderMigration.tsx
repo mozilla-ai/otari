@@ -3,6 +3,7 @@ import { useState } from "react"
 import type { DeploymentProviderMigrationRow } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import {
   useApplyDeploymentProviderMigration,
@@ -14,6 +15,9 @@ import {
 // read whenever the page is open, because it reads the stored rows only; the
 // banner appears only while there is something to move. Applying asks each
 // provider what it serves, as adding one does, so the confirm can take a while.
+// The last move's report stays beside the banner, which the refreshed preview
+// keeps offering while any deployment provider is left, so one that failed can
+// be moved again once its cause is fixed.
 
 const OUTCOME_LABELS: Record<
   DeploymentProviderMigrationRow["outcome"],
@@ -74,6 +78,7 @@ export function DeploymentProviderMigration() {
 
   return (
     <>
+      <ErrorBanner error={preview.error} />
       {apply.data ? (
         <InfoBanner tone="info">
           <p role="status">
@@ -85,7 +90,8 @@ export function DeploymentProviderMigration() {
             <MigrationRows rows={apply.data.rows} />
           </div>
         </InfoBanner>
-      ) : rows.length > 0 ? (
+      ) : null}
+      {rows.length > 0 ? (
         <InfoBanner tone="info">
           <p className="flex flex-wrap items-center gap-2">
             <span>

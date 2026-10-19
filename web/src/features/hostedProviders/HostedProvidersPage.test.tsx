@@ -706,6 +706,79 @@ describe("HostedProvidersPage", () => {
 })
 
 describe("HostedProvidersPage, named providers and the move", () => {
+  it("keeps offering the move after one that left a provider behind", async () => {
+    mockApi({
+      migration: [
+        {
+          instance: "groq",
+          provider: "groq",
+          api_base: null,
+          outcome: "failed",
+          detail: "The endpoint was refused.",
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+        {
+          instance: "openai-eu",
+          provider: "openai",
+          api_base: null,
+          outcome: "migrate",
+          detail: null,
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Review the move" }),
+    )
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Move 1 provider",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/Moved 1 of 2 deployment providers/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Review the move" }),
+    ).toBeInTheDocument()
+  })
+
+  it("says the move could not be previewed rather than hiding it", async () => {
+    mockApi()
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/hosted-providers/migration")) {
+        return jsonResponse({ detail: "Preview unavailable" }, 500)
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+    await renderPage()
+
+    expect(await screen.findByText("Preview unavailable")).toBeInTheDocument()
+  })
+
+  it("shows no status for a hosted provider a configured instance of its name is dialed under", async () => {
+    mockApi({
+      providers: [hostedProvider({ name: "openai" })],
+      configured: [providerInfo("openai", "config")],
+    })
+    await renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    await screen.findByRole("grid", { name: "Configured providers" })
+    expect(within(table).queryByText("Reachable")).toBeNull()
+    expect(within(table).getByText("—")).toBeInTheDocument()
+  })
+
   it("names a provider of its own and tests it before saving", async () => {
     const requests = mockApi({ providers: [] })
     const user = userEvent.setup()

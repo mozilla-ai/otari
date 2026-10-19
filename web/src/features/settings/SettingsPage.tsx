@@ -539,14 +539,17 @@ function SecretKeyRow() {
       .length + storedHosted.filter((provider) => !provider.decryptable).length
   const hasStoredKeys = storedCount > 0
   const isPending = reencrypt.isPending || reencryptHosted.isPending
-  const results = [reencrypt.data, reencryptHosted.data].filter(
-    (result) => result !== undefined,
-  )
+  // Complete only once every store this deployment holds keys in has answered:
+  // a message saying all keys moved while one store failed would invite
+  // removing the old key from under it. A failure shows in the error banner.
+  const hostedResult = hostsHosted
+    ? reencryptHosted.data
+    : { reencrypted: 0, unreadable: 0, skipped: 0 }
   const result =
-    results.length > 0 && !isPending
+    reencrypt.data && hostedResult && !isPending
       ? {
-          reencrypted: results.reduce((sum, r) => sum + r.reencrypted, 0),
-          unreadable: results.reduce((sum, r) => sum + r.unreadable, 0),
+          reencrypted: reencrypt.data.reencrypted + hostedResult.reencrypted,
+          unreadable: reencrypt.data.unreadable + hostedResult.unreadable,
         }
       : undefined
 
