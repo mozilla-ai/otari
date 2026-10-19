@@ -157,6 +157,9 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
     async def mark_declared(self, budget_ids: Collection[str]) -> None:
         """Mark these budgets as declared in config.yml, and clear the mark from every other budget.
 
+        A budget losing the mark loses its digest too, so declaring it again writes
+        the entry back over whatever the API did to it meanwhile.
+
         Only rows whose mark changes are written, so a restart with nothing changed locks none.
         """
         declared = list(budget_ids)
@@ -173,6 +176,6 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         await self.db.execute(
             update(Budget)
             .where(Budget.origin == BUDGET_ORIGIN_CONFIG, Budget.budget_id.not_in(declared))
-            .values(origin=None)
+            .values(origin=None, declared_digest=None)
             .execution_options(synchronize_session=False)
         )

@@ -246,6 +246,23 @@ def test_a_declaration_removed_from_config_is_kept_and_no_longer_marked(test_con
         assert _authenticates(client, SECRET)
 
 
+def test_a_declaration_restored_to_config_is_written_back_over_the_api_change(test_config: GatewayConfig) -> None:
+    config = _config(test_config, mlpa=_key())
+    with _boot(config) as client:
+        (key,) = _declared_keys(client)
+
+    with _boot(test_config) as client:
+        client.patch(f"{API_ROOT}/budgets/mlpa-global", json={"max_budget": 0}, headers=MASTER)
+        client.patch(f"{API_ROOT}/keys/{key['id']}", json={"is_active": False}, headers=MASTER)
+
+    with _boot(config) as client:
+        budget = client.get(f"{API_ROOT}/budgets/mlpa-global", headers=MASTER).json()
+        assert budget["max_budget"] == 100
+        assert budget["origin"] == "config"
+        assert client.get(f"{API_ROOT}/keys/{key['id']}", headers=MASTER).json()["is_active"] is True
+        assert _authenticates(client, SECRET)
+
+
 def test_a_key_naming_a_missing_budget_stops_the_start_and_writes_nothing(test_config: GatewayConfig) -> None:
     config = _config(test_config, mlpa=_key(ceiling="no-such-budget"))
 

@@ -260,8 +260,8 @@ allow-list.
 ## Budgets and API keys in config
 
 A deployment can declare its budgets and API keys in config.yml instead of
-creating them through the management API. Each start writes them to the
-database, so a service that calls Otari needs only this file and one secret
+creating them through the management API. Each start creates the ones missing
+from the database and writes back the ones whose entry changed, so a service that calls Otari needs only this file and one secret
 that both sides read from the environment. Standalone and hosted mode only: a
 hybrid gateway holds no budgets or keys of its own, so it refuses to start with
 either section set.
@@ -357,7 +357,8 @@ entry back whenever the entry changed:
   as every start used to.
 - Nothing is deleted. A budget or key removed from config stays as it is and
   stops being marked as declared, so it can then be changed or deleted through
-  the API. A key deleted through the API while config still declares it is
+  the API. Declaring it again writes the entry back over it at the next start,
+  even an entry unchanged from before. A key deleted through the API while config still declares it is
   created again at the next start.
 
 `GET /api/v1/budgets` reports `origin: config` on a declared budget, and
