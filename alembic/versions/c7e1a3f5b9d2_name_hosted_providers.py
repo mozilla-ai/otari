@@ -7,8 +7,9 @@ every existing provider keeps its name, and ``provider`` stays the
 implementation without being unique. ``encrypted_api_key`` becomes nullable
 for a backend called without a key.
 
-The downgrade refuses while two rows share an implementation, or while a row
-holds no key, because neither fits the old table.
+The downgrade refuses while a row is named otherwise than its implementation,
+or holds no key, because neither fits the old table: the old code finds a
+roster and a price under the implementation's name only.
 
 Revision ID: c7e1a3f5b9d2
 Revises: 557fc0f5bfda
@@ -72,13 +73,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    shared = bind.execute(
-        sa.text(f"SELECT provider FROM {_TABLE} GROUP BY provider HAVING COUNT(*) > 1")  # noqa: S608
-    ).first()
+    renamed = bind.execute(sa.text(f"SELECT name FROM {_TABLE} WHERE name <> provider")).first()  # noqa: S608
     keyless = bind.execute(sa.text(f"SELECT name FROM {_TABLE} WHERE encrypted_api_key IS NULL")).first()  # noqa: S608
-    if shared is not None or keyless is not None:
+    if renamed is not None or keyless is not None:
         msg = (
-            "Cannot downgrade: remove the hosted providers that share an implementation with another, "
+            "Cannot downgrade: remove the hosted providers named otherwise than their implementation, "
             "and those that hold no key, first."
         )
         raise RuntimeError(msg)

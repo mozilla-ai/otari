@@ -81,7 +81,18 @@ def test_the_downgrade_refuses_rows_the_old_table_cannot_hold(chain: tuple[Confi
         connection.execute(_INSERT_NAMED, {"id": "1", "name": "openai", "provider": "openai", "key": "c"})
         connection.execute(_INSERT_NAMED, {"id": "2", "name": "openai-eu", "provider": "openai", "key": "c"})
 
-    with pytest.raises(RuntimeError, match="share an implementation"):
+    with pytest.raises(RuntimeError, match="named otherwise than their implementation"):
+        command.downgrade(config, _BEFORE)
+
+
+def test_the_downgrade_refuses_a_lone_renamed_provider(chain: tuple[Config, Engine]) -> None:
+    """Its roster and prices are keyed on the name, which the old code never looks up."""
+    config, engine = chain
+    command.upgrade(config, _REVISION)
+    with engine.begin() as connection:
+        connection.execute(_INSERT_NAMED, {"id": "1", "name": "openai-eu", "provider": "openai", "key": "c"})
+
+    with pytest.raises(RuntimeError, match="named otherwise than their implementation"):
         command.downgrade(config, _BEFORE)
 
 

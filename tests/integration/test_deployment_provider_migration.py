@@ -13,13 +13,21 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.providers import HostedProvider, ProviderCredential
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
 
+from .conftest import shared_test_config
+
 PATH = f"{API_ROOT}/hosted-providers/migration"
 DIAL = "gateway.services.providers._hosted_provider_service.test_provider_credentials"
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """config.yml declares one provider, ``anthropic``, so a stored row can shadow it."""
+    return shared_test_config(postgres_url, {"anthropic": {"api_key": "sk-config-7777"}})
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +106,34 @@ def test_the_preview_plans_each_row_and_writes_nothing(
 def test_applying_moves_each_row_under_its_name_and_removes_it(
     client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
 ) -> None:
+    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111", api_base="https://eu.test/v1")
+    _deployment_provider(client, master_key_header, "vllm", api_base="http://vllm.test/v1", client_args={"timeout": 9})
+
+    rows = _rows(client.post(PATH, headers=master_key_header))
+
+    assert {instance: (row["outcome"], row["source_removed"], row["models"]) for instance, row in rows.items()} == {
+        "openai": ("migrated", True, 1),
+        "vllm": ("migrated", True, 1),
+    }
+    db_session.expire_all()
+    assert db_session.execute(select(ProviderCredential)).scalars().all() == []
+    hosted = {row.name: row for row in db_session.execute(select(HostedProvider)).scalars().all()}
+    assert {name: (row.provider, row.api_base) for name, row in hosted.items()} == {
+        "openai": ("openai", "https://eu.test/v1"),
+        "vllm": ("vllm", "http://vllm.test/v1"),
+    }
+    assert decrypt_secret(hosted["openai"].encrypted_api_key or "") == "sk-openai-1111"
+    assert hosted["vllm"].encrypted_api_key is None
+    assert decrypt_secret(hosted["vllm"].encrypted_client_args or "") == '{"timeout": 9}'
+    # The overlay forgets the moved rows at once, so dispatch stops serving them as deployment providers.
+    listed = client.get(f"{API_ROOT}/providers", headers=master_key_header).json()["providers"]
+    assert {row["instance"] for row in listed}.isdisjoint({"openai", "vllm"})
+
+
+def test_a_renamed_provider_is_copied_and_keeps_serving_as_a_deployment_provider(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+) -> None:
+    """No request reaches a hosted provider by a name of its own yet, so the deployment provider stays."""
     _deployment_provider(
         client,
         master_key_header,
@@ -106,55 +142,44 @@ def test_applying_moves_each_row_under_its_name_and_removes_it(
         api_key="sk-eu-2222",
         api_base="https://eu.test/v1",
     )
-    _deployment_provider(
-        client,
-        master_key_header,
-        "my-vllm",
-        provider_type="openai-compatible",
-        api_base="http://vllm.test/v1",
-        client_args={"timeout": 9},
-    )
 
-    rows = _rows(client.post(PATH, headers=master_key_header))
+    [row] = _rows(client.post(PATH, headers=master_key_header)).values()
 
-    assert {instance: (row["outcome"], row["source_removed"], row["models"]) for instance, row in rows.items()} == {
-        "my-vllm": ("migrated", True, 1),
-        "openai-eu": ("migrated", True, 1),
-    }
+    assert (row["outcome"], row["source_removed"], row["models"]) == ("migrated", False, 1)
     db_session.expire_all()
-    assert db_session.execute(select(ProviderCredential)).scalars().all() == []
-    hosted = {row.name: row for row in db_session.execute(select(HostedProvider)).scalars().all()}
-    assert {name: (row.provider, row.api_base) for name, row in hosted.items()} == {
-        "my-vllm": ("openai", "http://vllm.test/v1"),
-        "openai-eu": ("openai", "https://eu.test/v1"),
-    }
-    assert decrypt_secret(hosted["openai-eu"].encrypted_api_key or "") == "sk-eu-2222"
-    assert hosted["my-vllm"].encrypted_api_key is None
-    assert decrypt_secret(hosted["my-vllm"].encrypted_client_args or "") == '{"timeout": 9}'
-    # The overlay forgets the moved rows at once, so dispatch stops serving them as deployment providers.
-    listed = client.get(f"{API_ROOT}/providers", headers=master_key_header).json()["providers"]
-    assert {row["instance"] for row in listed}.isdisjoint({"openai-eu", "my-vllm"})
+    assert [credential.instance for credential in db_session.execute(select(ProviderCredential)).scalars()] == [
+        "openai-eu"
+    ]
+    hosted = db_session.execute(select(HostedProvider)).scalar_one()
+    assert (hosted.name, hosted.provider) == ("openai-eu", "openai")
+
+
+def test_a_row_that_shadows_a_config_entry_says_the_entry_serves_again(
+    client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]]
+) -> None:
+    """Once the row goes, config.yml's entry of the same name answers ahead of the hosted provider."""
+    _deployment_provider(client, master_key_header, "anthropic", api_key="sk-stored-6666")
+
+    [row] = _rows(client.get(PATH, headers=master_key_header)).values()
+
+    assert row["outcome"] == "migrate"
+    assert any("config.yml declares a provider of the same name" in note for note in row["notes"])
 
 
 def test_a_provider_that_lists_nothing_keeps_its_deployment_provider(
     client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
 ) -> None:
-    _deployment_provider(
-        client,
-        master_key_header,
-        "quiet",
-        provider_type="openai",
-        api_key="sk-quiet-5555",
-        api_base="https://silent.test",
-    )
+    _deployment_provider(client, master_key_header, "openai", api_key="sk-quiet-5555", api_base="https://silent.test")
 
     [row] = _rows(client.post(PATH, headers=master_key_header)).values()
 
     assert (row["outcome"], row["source_removed"], row["models"]) == ("migrated", False, 0)
     assert "listed no models" in row["notes"][-1]
     db_session.expire_all()
-    assert [credential.instance for credential in db_session.execute(select(ProviderCredential)).scalars()] == ["quiet"]
-    assert [provider.name for provider in db_session.execute(select(HostedProvider)).scalars()] == ["quiet"]
+    assert [credential.instance for credential in db_session.execute(select(ProviderCredential)).scalars()] == [
+        "openai"
+    ]
+    assert [provider.name for provider in db_session.execute(select(HostedProvider)).scalars()] == ["openai"]
 
 
 def test_a_row_no_configured_key_reads_is_left_where_it_is(
@@ -177,14 +202,7 @@ def test_a_row_no_configured_key_reads_is_left_where_it_is(
 def test_a_row_moved_twice_is_a_conflict_the_second_time(
     client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]]
 ) -> None:
-    _deployment_provider(
-        client,
-        master_key_header,
-        "quiet",
-        provider_type="openai",
-        api_key="sk-quiet-5555",
-        api_base="https://silent.test",
-    )
+    _deployment_provider(client, master_key_header, "openai", api_key="sk-quiet-5555", api_base="https://silent.test")
     client.post(PATH, headers=master_key_header)
 
     [row] = _rows(client.post(PATH, headers=master_key_header)).values()

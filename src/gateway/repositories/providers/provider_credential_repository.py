@@ -1,5 +1,8 @@
 """Data access for the deployment providers stored through the dashboard (``provider_credentials``).
 
+The providers domain's own table: DOMAINS.md gives it "instances configured at
+runtime", so its service, ``HostedProviderService``, receives this repository.
+
 Read and removed here by the move onto hosted providers. The runtime overlay
 that merges these rows over ``config.providers`` still reads them through
 ``services/provider_store_service.py``.
@@ -34,5 +37,6 @@ class ProviderCredentialRepository(BaseRepository[ProviderCredential, Never, Nev
         return result.scalars().all()
 
     async def delete_row(self, row: ProviderCredential) -> None:
+        """Remove one stored deployment provider, flushed so the caller's block sees it gone."""
         await self.db.delete(row)
         await self.db.flush()

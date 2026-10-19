@@ -123,6 +123,12 @@ def apply_to_config(config: GatewayConfig) -> set[str]:
     return set(baseline) & set(_cache)
 
 
+def config_file_instances(config: GatewayConfig) -> frozenset[str]:
+    """The ``providers:`` instances the configuration declares, before the dashboard overlay."""
+    baseline = config._provider_baseline
+    return frozenset(config.providers if baseline is None else baseline)
+
+
 def stored_instances() -> frozenset[str]:
     """The instance names this worker's overlay holds, the ones the dashboard stored."""
     return frozenset(_cache)

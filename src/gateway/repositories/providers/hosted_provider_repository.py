@@ -52,6 +52,7 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         super().__init__(uow, HostedProvider)
 
     async def get_by_name(self, name: str) -> HostedProvider | None:
+        """One stored hosted provider by its name, or None."""
         result = await self.db.execute(select(HostedProvider).where(HostedProvider.name == name))
         return result.scalar_one_or_none()
 

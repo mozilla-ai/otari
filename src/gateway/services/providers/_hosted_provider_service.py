@@ -75,7 +75,7 @@ from gateway.services.model_discovery_service import (
     test_provider_credentials,
 )
 from gateway.services.pricing import DeploymentPricingService
-from gateway.services.provider_store_service import forget_stored_providers, stored_instances
+from gateway.services.provider_store_service import config_file_instances, forget_stored_providers
 from gateway.services.providers._deployment_provider_move import PlannedMove, plan_move
 from gateway.services.providers._hosted_catalog_sweep import UNDECRYPTABLE, HostedCatalogSweep, LiveByoPairs
 from gateway.services.providers._hosted_credentials import (
@@ -553,7 +553,7 @@ class HostedProviderService:
         async with self.uow:
             hosted_names = {row.name for row in await self.providers.list_all()}
             stored = list(await self.deployment_providers.list_all())
-        configured = set(self.config.providers) - stored_instances()
+        configured = set(config_file_instances(self.config))
         plans = [plan_move(row, hosted_names=hosted_names, configured_instances=configured) for row in stored]
         if apply:
             removed: set[str] = set()
@@ -580,6 +580,15 @@ class HostedProviderService:
         row.outcome = "migrated"
         async with self.uow:
             row.models = len(await self.models.names_for_provider(plan.name))
+            if plan.create.name is not None:
+                # Named otherwise than its implementation: no request reaches a
+                # hosted provider by such a name yet, so the deployment provider
+                # keeps serving ``instance:model`` until one does.
+                row.notes.append(
+                    "Requests cannot reach a hosted provider by a name of its own yet, so the deployment "
+                    "provider is kept and keeps serving. Run the move again once they can."
+                )
+                return False
             if row.models == 0:
                 row.notes.append(
                     "The provider listed no models, so the deployment provider is kept. Add its models on the "
