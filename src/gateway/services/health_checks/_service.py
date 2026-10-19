@@ -1,5 +1,6 @@
 """The scheduled health checks: their settings, a run, and what the Health page shows."""
 
+import asyncio
 import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
@@ -264,10 +265,10 @@ class HealthCheckService:
             outcomes = await probe_all(
                 targets, prompt=prompt, max_tokens=max_tokens, reasoning_max_tokens=reasoning_max_tokens
             )
-        except Exception:
+        except BaseException:
             # Left in place, the run would read as running, and hold the next one back, for ABANDONED_AFTER.
-            async with self._uow:
-                await self._runs.delete_ids([run_id])
+            # A shutdown cancels the run mid-probe too, so the delete is shielded from that cancellation.
+            await asyncio.shield(self._forget_run(run_id))
             raise
 
         finished = self._clock()
@@ -306,6 +307,10 @@ class HealthCheckService:
 
         await self._alert(run_id, outcomes, {offering.selector for offering in offerings}, finished)
         return public
+
+    async def _forget_run(self, run_id: uuid.UUID) -> None:
+        async with self._uow:
+            await self._runs.delete_ids([run_id])
 
     async def _streaks(
         self, selectors: set[str], now: datetime, *, before: uuid.UUID | None = None

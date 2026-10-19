@@ -284,6 +284,38 @@ describe("HealthChecksPage", () => {
     expect(await screen.findByText("Saved")).toBeInTheDocument()
   })
 
+  it.each([
+    ["", "Enter a whole number."],
+    ["30m", "Enter a whole number."],
+    ["5", "Between 15 and 1440."],
+  ])("refuses to save a schedule interval of %j", async (value, problem) => {
+    const requests = mockApi(status())
+    await renderPage()
+
+    const interval = await screen.findByLabelText("Minutes between runs")
+    await userEvent.clear(interval)
+    if (value) await userEvent.type(interval, value)
+
+    expect(await screen.findByText(problem)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(requests.some((r) => r.method === "PATCH")).toBe(false)
+  })
+
+  it("stops saying saved once the schedule is edited again", async () => {
+    mockApi(status())
+    await renderPage()
+
+    const interval = await screen.findByLabelText("Minutes between runs")
+    await userEvent.clear(interval)
+    await userEvent.type(interval, "30")
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    expect(await screen.findByText("Saved")).toBeInTheDocument()
+
+    await userEvent.type(interval, "0")
+
+    expect(screen.queryByText("Saved")).toBeNull()
+  })
+
   it("says so before the first run", async () => {
     mockApi(status({ last_run: null, providers: [], results: [] }))
     await renderPage()

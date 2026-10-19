@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import or_, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -20,12 +21,22 @@ class HealthCheckSettingsRepository(
         super().__init__(db, HealthCheckSettings)
 
     async def get_or_create(self) -> HealthCheckSettings:
-        """The settings row, created with its defaults the first time it is read."""
+        """The settings row, created with its defaults the first time it is read.
+
+        Every replica's poll and a page load can find no row at once. The insert
+        runs in a SAVEPOINT, so the one that loses the race rolls back its row
+        alone and reads the winner's.
+        """
         row = await self.db.get(HealthCheckSettings, SETTINGS_ROW_ID, populate_existing=True)
         if row is None:
-            row = HealthCheckSettings(id=SETTINGS_ROW_ID)
-            self.db.add(row)
-            await self.db.flush()
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(HealthCheckSettings(id=SETTINGS_ROW_ID))
+            except IntegrityError:
+                pass
+            row = await self.db.get(HealthCheckSettings, SETTINGS_ROW_ID, populate_existing=True)
+            if row is None:
+                raise LookupError("the health check settings row is missing after its insert")
             await self.db.refresh(row)
         return row
 

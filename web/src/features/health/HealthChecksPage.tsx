@@ -205,9 +205,23 @@ function RunSummary({ status }: { status: HealthCheckStatus }) {
   )
 }
 
-function parseCount(value: string): number | undefined {
-  const parsed = Number.parseInt(value, 10)
-  return Number.isNaN(parsed) ? undefined : parsed
+// The server's bounds on each count, so a value it would refuse, or one a
+// lenient parse would quietly shorten ("30m"), is refused here before a save.
+const COUNT_RANGES = {
+  interval: [15, 1440],
+  maxTokens: [1, 4096],
+  reasoningMaxTokens: [1, 8192],
+  reasoningEvery: [0, 48],
+} as const
+
+type CountField = keyof typeof COUNT_RANGES
+
+function countProblem(field: CountField, value: string): string | undefined {
+  const [min, max] = COUNT_RANGES[field]
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) return "Enter a whole number."
+  const count = Number(trimmed)
+  return count < min || count > max ? `Between ${min} and ${max}.` : undefined
 }
 
 function SettingsCard({ settings }: { settings: HealthCheckSettings }) {
@@ -219,8 +233,24 @@ function SettingsCard({ settings }: { settings: HealthCheckSettings }) {
     reasoningMaxTokens: String(settings.reasoning_max_tokens),
     reasoningEvery: String(settings.reasoning_every_runs),
   })
-  const set = (field: keyof typeof draft) => (value: string) =>
+  const set = (field: keyof typeof draft) => (value: string) => {
+    // "Saved" describes the values that were sent, not an edit made since.
+    update.reset()
     setDraft((current) => ({ ...current, [field]: value }))
+  }
+  const problems = {
+    interval: countProblem("interval", draft.interval),
+    maxTokens: countProblem("maxTokens", draft.maxTokens),
+    reasoningMaxTokens: countProblem(
+      "reasoningMaxTokens",
+      draft.reasoningMaxTokens,
+    ),
+    reasoningEvery: countProblem("reasoningEvery", draft.reasoningEvery),
+    prompt: draft.prompt.trim() === "" ? "Enter a prompt." : undefined,
+  }
+  const invalid = Object.values(problems).some(
+    (problem) => problem !== undefined,
+  )
 
   return (
     <SettingsGroup
@@ -250,37 +280,51 @@ function SettingsCard({ settings }: { settings: HealthCheckSettings }) {
             value={draft.interval}
             onChange={set("interval")}
             description="15 to 1440."
+            isInvalid={problems.interval !== undefined}
+            errorMessage={problems.interval}
           />
           <Field
             label="Include reasoning models every Nth run"
             value={draft.reasoningEvery}
             onChange={set("reasoningEvery")}
             description="They cost the most. 0 leaves them out."
+            isInvalid={problems.reasoningEvery !== undefined}
+            errorMessage={problems.reasoningEvery}
           />
           <Field
             label="Max output tokens"
             value={draft.maxTokens}
             onChange={set("maxTokens")}
+            isInvalid={problems.maxTokens !== undefined}
+            errorMessage={problems.maxTokens}
           />
           <Field
             label="Max output tokens for reasoning models"
             value={draft.reasoningMaxTokens}
             onChange={set("reasoningMaxTokens")}
             description="They spend tokens thinking before they answer."
+            isInvalid={problems.reasoningMaxTokens !== undefined}
+            errorMessage={problems.reasoningMaxTokens}
           />
         </div>
-        <Field label="Prompt" value={draft.prompt} onChange={set("prompt")} />
+        <Field
+          label="Prompt"
+          value={draft.prompt}
+          onChange={set("prompt")}
+          isInvalid={problems.prompt !== undefined}
+          errorMessage={problems.prompt}
+        />
         <div>
           <Button
             size="sm"
-            isDisabled={update.isPending}
+            isDisabled={invalid || update.isPending}
             onPress={() =>
               update.mutate({
-                interval_minutes: parseCount(draft.interval),
+                interval_minutes: Number(draft.interval.trim()),
                 prompt: draft.prompt,
-                max_tokens: parseCount(draft.maxTokens),
-                reasoning_max_tokens: parseCount(draft.reasoningMaxTokens),
-                reasoning_every_runs: parseCount(draft.reasoningEvery),
+                max_tokens: Number(draft.maxTokens.trim()),
+                reasoning_max_tokens: Number(draft.reasoningMaxTokens.trim()),
+                reasoning_every_runs: Number(draft.reasoningEvery.trim()),
               })
             }
           >

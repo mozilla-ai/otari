@@ -1,5 +1,6 @@
 """``/api/v1/health-checks`` and the run the worker carries out: settings, the claim, and the results by provider."""
 
+import asyncio
 import uuid
 from collections import defaultdict
 from collections.abc import Collection, Mapping, Sequence
@@ -636,3 +637,42 @@ def test_switched_off_the_page_and_its_routes_are_gone(test_config: GatewayConfi
 
 def test_switched_on_the_page_is_published(client: TestClient) -> None:
     assert "health_checks" in client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_run_does_not_stay_running(async_db: AsyncSession, test_config: GatewayConfig) -> None:
+    """A shutdown mid-run must not hold every replica's next run back for an hour."""
+    service = _service(async_db, test_config, _Clock())
+    await service.request_run()
+
+    async def cancelled() -> Sequence[HealthCheckOffering]:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.run_if_due(cancelled)
+
+    assert (await service.get_status()).running is None
+
+
+@pytest.mark.asyncio
+async def test_the_settings_row_survives_a_lost_insert_race(async_db: AsyncSession) -> None:
+    """Two first reads at once both find no row; the one whose insert loses reads the other's."""
+    uow = UnitOfWork(async_db)
+    settings = HealthCheckSettingsRepository(uow)
+    async with uow:
+        await settings.get_or_create()
+
+    real_get = async_db.get
+    calls = 0
+
+    async def first_read_misses(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return None if calls == 1 else await real_get(*args, **kwargs)
+
+    with patch.object(async_db, "get", new=first_read_misses):
+        async with uow:
+            row = await settings.get_or_create()
+
+    assert row.id == 1
+    assert calls == 2

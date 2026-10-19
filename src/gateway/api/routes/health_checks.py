@@ -1,4 +1,4 @@
-"""The scheduled health checks, from the operator's Health page (``/api/v1/health-checks``).
+"""The scheduled health checks, from the operator's Health page (``/health-checks``).
 
 Every model the deployment's hosted providers serve is sent one small
 completion on a schedule, and what each answered is kept for 48 hours. Not
