@@ -18,7 +18,10 @@ from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.tool_usage import ToolUsageTally
-from gateway.services.tools import web_search_max_results_baseline
+from gateway.services.tools import (
+    build_web_fetch_backend,
+    web_search_max_results_baseline,
+)
 from gateway.services.traces import RequestTrace
 from gateway.services.web_retrieval_backend import (
     WEB_SEARCH_TOOL_NAME,
@@ -28,6 +31,8 @@ from gateway.services.web_retrieval_backend import (
 from gateway.services.web_retrieval_policy import DomainPolicy
 
 if TYPE_CHECKING:
+    import httpx
+
     from gateway.core.config import GatewayConfig
     from gateway.models.tools import WebSearchCredential
 
@@ -154,6 +159,7 @@ def _build_web_retrieval_backend(
     config: GatewayConfig | None = None,
     tally: ToolUsageTally | None = None,
     trace: RequestTrace | None = None,
+    web_provider_client: httpx.AsyncClient | None = None,
 ) -> WebRetrievalBackend:
     """Construct a WebRetrievalBackend honoring env-level + per-tool config.
 
@@ -169,6 +175,10 @@ def _build_web_retrieval_backend(
 
     ``base_url`` may be ``None`` when the deployment configured a licensed
     search provider instead, which the backend then calls directly.
+
+    A declared fetch tool runs on the fetch backend the tools domain builds,
+    which the old backend delegates its fetch calls to; a provider instance
+    sends through ``web_provider_client``, the app's.
     """
     kwargs: dict[str, Any] = {
         "base_url": base_url,
@@ -238,7 +248,15 @@ def _build_web_retrieval_backend(
 
     kwargs["enable_search"] = search_tool_entry is not None
     kwargs["enable_fetch"] = fetch_tool_entry is not None
-    kwargs["fetch_policy"] = fetch_policy
     kwargs["counter"] = counter
+    if fetch_tool_entry is not None:
+        kwargs["fetch_backend"] = build_web_fetch_backend(
+            config,
+            policy=fetch_policy,
+            trust_env_proxy=kwargs["trust_env_proxy"],
+            web_provider_client=web_provider_client,
+            tally=tally,
+            trace=trace,
+        )
 
     return WebRetrievalBackend(**kwargs)

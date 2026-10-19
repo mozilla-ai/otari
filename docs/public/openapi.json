@@ -17681,6 +17681,18 @@
             "description": "Fetch: true when the provider runs a page's JavaScript before reading it.",
             "title": "Renders Javascript"
           },
+          "reports_final_url": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.",
+            "title": "Reports Final Url"
+          },
           "requires_api_base": {
             "description": "True when this provider has no endpoint of its own, so the tool must say where the backend is.",
             "title": "Requires Api Base",
@@ -42028,7 +42040,7 @@
     },
     "/api/v1/search-tools/{name}/test": {
       "post": {
-        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test\nyet, and answers a 400.",
+        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in\nfetcher, fetches as a fetch tool call does, with no domain policy.",
         "operationId": "search-tools-test_search_tool",
         "parameters": [
           {

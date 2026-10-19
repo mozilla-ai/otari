@@ -15,6 +15,7 @@ from gateway.log_config import logger
 from gateway.models.pricing import OPERATOR_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.services.pricing import (
+    PROVIDER_TOOL_LIST_PRICES,
     ModelsDevPrice,
     ToolCharges,
     ToolRate,
@@ -885,6 +886,11 @@ def _first_tool_rate(
         stored = next((deployment[form] for form in forms if form in deployment), None)
         if stored is not None:
             return ToolRate(rate_key, flat_request_cost(stored), "deployment")
+    if default_pricing_enabled():
+        for rate_key in lookup.rate_keys:
+            list_price = PROVIDER_TOOL_LIST_PRICES.get(rate_key)
+            if list_price is not None:
+                return ToolRate(rate_key, list_price, "defaults")
     return None
 
 

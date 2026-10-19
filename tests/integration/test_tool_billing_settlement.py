@@ -6,7 +6,7 @@ These tests assert ``users.spend`` and not only the usage row.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -26,12 +26,17 @@ from sqlalchemy.orm import Session
 
 from gateway.api.routes.chat import log_usage
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.settings.pricing import PricingConfig
+from gateway.core.usage import GatewayUsage
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE, ToolUsageTally
+from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
+from gateway.services.web_retrieval_policy import canonicalize_web_url
 
-from .conftest import MODEL_NAME
+from .conftest import MODEL_NAME, build_test_client, declared_test_providers
 
 # Reuse the fail-closed client from the require_pricing suite: the tool gate has the
 # same posture and there is no reason to stand up a second one.
@@ -40,6 +45,7 @@ from .test_require_pricing import strict_pricing_client as strict_pricing_client
 # $0.01 per call, in the per-million-requests convention ``flat_request_cost`` uses.
 _SEARCH_RATE_PER_MILLION = 10_000.0
 _SEARCH_UNIT_COST = 0.01
+_FAKE_FETCH = "fake-fetch"
 
 
 def _completion(
@@ -110,6 +116,13 @@ def _fetch_batch_completion(count: int) -> ChatCompletion:
         ],
         usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
     )
+
+
+def _serve_fetch_on_fake(monkeypatch: pytest.MonkeyPatch, config: GatewayConfig, **options: Any) -> None:
+    """Serve the fetch tool on a ``fake`` fetch instance, named in ``web_fetch_default_tool``, with these options."""
+    monkeypatch.setattr(config, "web_fetch_enabled", True)
+    monkeypatch.setattr(config, "fetch_tools", {_FAKE_FETCH: {"provider": "fake", "options": options}})
+    monkeypatch.setattr(config, "web_fetch_default_tool", _FAKE_FETCH)
 
 
 @pytest.fixture
@@ -408,7 +421,7 @@ async def test_fetch_call_is_metered_priced_and_spent(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    _serve_fetch_on_fake(monkeypatch, test_config)
     user_id = api_key_obj["user_id"]
     before = _spend(db_session_factory, user_id)
     responses = [
@@ -416,13 +429,7 @@ async def test_fetch_call_is_metered_priced_and_spent(
         _completion(tool_call=False),
     ]
 
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
-        patch(
-            "gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool",
-            new=AsyncMock(return_value="Source: https://example.com/\nContent-Type: text/html\n\ncontent"),
-        ),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)):
         response = client.post(
             f"{API_ROOT}/chat/completions",
             json={
@@ -439,10 +446,152 @@ async def test_fetch_call_is_metered_priced_and_spent(
     assert tools["web_fetch"]["billed"] == 1
     assert tools["web_fetch"]["errors"] == 0
     line = next(entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_fetch_calls")
+    # Labeled by the instance, which has no row of its own, so the tool's row prices it.
+    assert line["label"] == f"fake:{_FAKE_FETCH}"
     assert line["units"] == 1
     assert line["cost"] == pytest.approx(_SEARCH_UNIT_COST)
     after = _spend(db_session_factory, user_id)
     assert after - before == pytest.approx(float(row.cost or 0), rel=1e-6)
+
+
+def _fetch_once(client: TestClient, headers: dict[str, str]) -> None:
+    """One chat request whose model fetches one page, then answers."""
+    responses = [
+        _completion(tool_call=True, tool_name="web_fetch", arguments='{"url":"https://example.com"}'),
+        _completion(tool_call=False),
+    ]
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "read it"}],
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            headers=headers,
+        )
+    assert response.status_code == 200, response.text
+
+
+def _fetch_line(db_session_factory: Callable[[], Session], user_id: str) -> dict[str, Any]:
+    row = _latest_row(db_session_factory, user_id)
+    [line] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_fetch_calls"]
+    return dict(line)
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_on_an_instance_is_priced_at_the_instances_own_row(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    model_pricing: dict[str, Any],
+    fetch_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """``fake:<instance>`` wins over ``otari:web_fetch``, which is also priced (design L)."""
+    _serve_fetch_on_fake(monkeypatch, test_config)
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": f"fake:{_FAKE_FETCH}", "input_price_per_million": 4_000.0, "output_price_per_million": 0.0},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+
+    _fetch_once(client, api_key_header)
+
+    line = _fetch_line(db_session_factory, api_key_obj["user_id"])
+    assert (line["label"], line["units"]) == (f"fake:{_FAKE_FETCH}", 1)
+    assert line["cost"] == pytest.approx(0.004)
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_whose_provider_reports_its_cost_is_billed_that_cost(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    model_pricing: dict[str, Any],
+    fetch_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    _serve_fetch_on_fake(monkeypatch, test_config, cost=0.002)
+
+    _fetch_once(client, api_key_header)
+
+    line = _fetch_line(db_session_factory, api_key_obj["user_id"])
+    assert (line["label"], line["units"]) == (f"fake:{_FAKE_FETCH}", 1)
+    assert line["cost"] == pytest.approx(0.002), "the reported cost, not the otari:web_fetch rate"
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_fetch_is_labeled_builtin_fetch_and_priced_under_otari_web_fetch(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    model_pricing: dict[str, Any],
+    fetch_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    url = canonicalize_web_url("https://example.com")
+    page = WebFetchResult(
+        text="page", content_type="text/plain", content_kind="text", requested_url=url, final_url=url, redirect_count=0
+    )
+
+    with patch.object(WebFetchService, "fetch", new=AsyncMock(return_value=page)):
+        _fetch_once(client, api_key_header)
+
+    line = _fetch_line(db_session_factory, api_key_obj["user_id"])
+    assert (line["label"], line["units"]) == ("builtin:builtin_fetch", 1)
+    assert line["cost"] == pytest.approx(_SEARCH_UNIT_COST)
+
+
+@pytest.fixture
+def configured_fetch_price_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """A gateway whose configuration file serves fetch on a ``fake`` instance and prices it.
+
+    Built rather than copied from ``test_config``: a copy keeps the shared config's
+    baseline of fetch instances, which the startup overlay restores.
+    """
+    config = GatewayConfig(
+        database_url=test_config.database_url,
+        master_key=test_config.master_key,
+        auto_migrate=False,
+        require_pricing=False,
+        providers=declared_test_providers(),
+        web_fetch_enabled=True,
+        fetch_tools={_FAKE_FETCH: {"provider": "fake"}},
+        web_fetch_default_tool=_FAKE_FETCH,
+        pricing={
+            f"fake:{_FAKE_FETCH}": PricingConfig(input_price_per_million=3_000.0, output_price_per_million=0.0),
+            MODEL_NAME: PricingConfig(input_price_per_million=1.0, output_price_per_million=1.0),
+        },
+    )
+    yield from build_test_client(config)
+
+
+@pytest.mark.asyncio
+async def test_a_configuration_file_price_prices_a_fetch_instance(
+    configured_fetch_price_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    client = configured_fetch_price_client
+    key = client.post(f"{API_ROOT}/keys", json={"key_name": "fetch-price"}, headers=master_key_header).json()
+
+    # The instance serves the fetch, so the built-in fetcher, which would reach the network, is never called.
+    with patch.object(WebFetchService, "fetch", new=AsyncMock(side_effect=AssertionError("builtin_fetch ran"))):
+        _fetch_once(client, {API_KEY_HEADER: f"Bearer {key['key']}"})
+
+    line = _fetch_line(db_session_factory, key["user_id"])
+    assert (line["label"], line["units"]) == (f"fake:{_FAKE_FETCH}", 1)
+    assert line["cost"] == pytest.approx(0.003)
 
 
 @pytest.mark.asyncio
@@ -456,18 +605,12 @@ async def test_failed_fetch_is_counted_but_not_billed(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    _serve_fetch_on_fake(monkeypatch, test_config, error="rate_limit", error_status=429)
     responses = [
         _completion(tool_call=True, tool_name="web_fetch", arguments='{"url":"https://example.com"}'),
         _completion(tool_call=False),
     ]
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
-        patch(
-            "gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool",
-            new=AsyncMock(return_value="[tool error] Web Fetch failed"),
-        ),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)):
         response = client.post(
             f"{API_ROOT}/chat/completions",
             json={
@@ -489,16 +632,14 @@ async def test_failed_fetch_is_counted_but_not_billed(
 async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
     client: TestClient,
     api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    _serve_fetch_on_fake(monkeypatch, test_config)
     provider = AsyncMock(return_value=_fetch_batch_completion(11))
-    fetch = AsyncMock(return_value="bounded content")
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=provider),
-        patch("gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool", new=fetch),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=provider):
         response = client.post(
             f"{API_ROOT}/chat/completions",
             json={
@@ -511,7 +652,9 @@ async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
 
     assert response.status_code == 422, response.text
     assert "10 calls per request" in response.json()["detail"]
-    assert fetch.await_count == 10
+    row = _latest_row(db_session_factory, api_key_obj["user_id"])
+    fetches = (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_fetch"]
+    assert (fetches["billed"], fetches["errors"]) == (10, 0), "the eleventh call never reached the fetch instance"
 
 
 @pytest.mark.asyncio
@@ -584,3 +727,86 @@ async def test_unpriced_fetch_is_refused_before_the_provider_call(
     assert response.status_code == 402, response.text
     assert "otari:web_fetch" in response.json()["detail"]
     provider.assert_not_called()
+
+
+def _searched_usage(searches: int) -> GatewayUsage:
+    """What a Messages call reports when Anthropic ran its own web search ``searches`` times."""
+    return GatewayUsage(
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        cache_tokens_in_prompt=False,
+        provider_web_searches=searches,
+    )
+
+
+async def _settle_provider_searches(async_db: AsyncSession, searches: int) -> UsageLog:
+    writer = _Writer()
+    await log_usage(
+        db=async_db,
+        log_writer=writer,
+        api_key_id=None,
+        model="claude-haiku-4-5",
+        provider="anthropic",
+        provider_type="anthropic",
+        endpoint="/v1/messages",
+        usage_override=_searched_usage(searches),
+    )
+    [row] = writer.logs
+    return row
+
+
+def _search_line(row: UsageLog) -> dict[str, Any]:
+    [line] = [entry for entry in row.pricing_breakdown or [] if entry.get("label") == "anthropic:web_search"]
+    return line
+
+
+@pytest.mark.asyncio
+async def test_searches_the_provider_ran_are_billed_at_its_list_price(async_db: AsyncSession) -> None:
+    """Anthropic bills its own web search per search; default pricing prices it at the published $10 per 1,000."""
+    configure_default_pricing(True)
+
+    row = await _settle_provider_searches(async_db, 2)
+
+    assert _search_line(row) == {
+        "meter": "web_search_calls",
+        "label": "anthropic:web_search",
+        "units": 2,
+        "unit_rate": 0.01,
+        "cost": 0.02,
+    }
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 2
+    assert row.cost is not None
+    assert row.cost >= Decimal("0.02")
+
+
+@pytest.mark.asyncio
+async def test_an_operator_rate_wins_over_the_list_price(async_db: AsyncSession) -> None:
+    configure_default_pricing(True)
+    async_db.add(
+        ModelPricing(model_key="anthropic:web_search", input_price_per_million=5_000.0, output_price_per_million=0.0)
+    )
+    await async_db.commit()
+
+    row = await _settle_provider_searches(async_db, 3)
+
+    assert _search_line(row)["unit_rate"] == pytest.approx(0.005)
+    assert _search_line(row)["cost"] == pytest.approx(0.015)
+
+
+@pytest.mark.asyncio
+async def test_without_default_pricing_or_a_rate_the_searches_stay_on_the_row_unpriced(async_db: AsyncSession) -> None:
+    row = await _settle_provider_searches(async_db, 1)
+
+    assert _search_line(row)["cost"] == 0.0
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_call_with_no_provider_search_adds_no_tool_line(async_db: AsyncSession) -> None:
+    configure_default_pricing(True)
+
+    row = await _settle_provider_searches(async_db, 0)
+
+    assert TOOL_METER_NAMESPACE not in (row.billing_meters or {})
+    assert not any(entry.get("label") == "anthropic:web_search" for entry in row.pricing_breakdown or [])

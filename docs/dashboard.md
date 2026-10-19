@@ -96,7 +96,7 @@ The workspace view contains day-to-day gateway operations:
 
 The organization view contains tenant-wide administration:
 
-- Organization-wide usage, in hosted mode
+- Organization-wide usage
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
 - Spend and budgets

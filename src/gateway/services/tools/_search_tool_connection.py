@@ -3,8 +3,10 @@
 An instance is tested as the resolver will call it: a provider any-search or
 any-fetch serves through the library, and a ``searxng`` instance, until
 any-search has its adapter, through the direct endpoint's old client, both on
-the app's web provider client. The answer says whether the call worked, the
-error's tag when it did not, and how many hits or characters came back.
+the app's web provider client. ``builtin_fetch`` fetches as a fetch tool call
+does: through any-fetch, on the built-in fetcher's own retrieval client, with
+no domain policy and no private hosts. The answer says whether the call worked,
+the error's tag when it did not, and how many hits or characters came back.
 """
 
 from collections.abc import Mapping
@@ -16,7 +18,7 @@ import any_fetch
 import any_search
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import (
-    BUILTIN_FETCH,
+    BUILTIN_FETCH_PROVIDER,
     SEARCH_PROVIDERS_WITHOUT_ADAPTER,
     ToolInstance,
     ToolKind,
@@ -28,26 +30,25 @@ from gateway.exceptions.tools_exceptions import (
     SearchToolMisconfiguredError,
     SearchToolNotFoundError,
     SearchToolRefusedError,
-    SearchToolUntestableError,
 )
 from gateway.log_config import logger
 from gateway.schemas.tools import SearchToolTestResponse
 from gateway.services.tools._search_tool_writes import check_tool_entry, check_tool_name_is_free, check_tool_write
+from gateway.services.tools._web_fetch import retrieval_client
 from gateway.services.tools._web_search import SearchQuery, resolve_search
+from gateway.services.web_retrieval_policy import DomainPolicy
 
 
 def instance_to_test(config: GatewayConfig, name: str) -> tuple[ToolInstance, Mapping[str, Any]]:
     """The configured or stored instance called ``name``, and its entry.
 
-    A search instance wins, as it does in the maps; ``builtin_fetch`` has no
-    test yet.
+    A search instance wins, as it does in the maps. ``builtin_fetch``, which no
+    entry declares, comes with an empty one.
     """
     if (search := effective_search_instances(config).get(name)) is not None:
         return search, config.search_tools[name]
-    if name == BUILTIN_FETCH:
-        raise SearchToolUntestableError(name)
     if (fetch := effective_fetch_instances(config).get(name)) is not None:
-        return fetch, config.fetch_tools[name]
+        return fetch, config.fetch_tools.get(name, {})
     raise SearchToolNotFoundError(name)
 
 
@@ -123,6 +124,19 @@ async def _test_with_library(
         raise SearchToolRefusedError(str(exc)) from None
 
 
+async def _test_builtin_fetch(config: GatewayConfig, url: str) -> SearchToolTestResponse:
+    """One fetch through otari's own fetcher, on a retrieval client like a fetch tool call's, opened for it."""
+    async with retrieval_client(trust_env_proxy=config.web_retrieval_trust_env_proxy) as client:
+        try:
+            async with any_fetch.AnyFetch.create(
+                BUILTIN_FETCH_PROVIDER, client=client, policy=DomainPolicy()
+            ) as fetcher:
+                page = await fetcher.fetch(url)
+        except any_fetch.ProviderError as exc:
+            return SearchToolTestResponse(ok=False, error=exc.tag)
+    return SearchToolTestResponse(ok=True, characters=len(page.text))
+
+
 async def _test_with_old_client(
     config: GatewayConfig, name: str, entry: Mapping[str, Any], query: str, client: httpx.AsyncClient
 ) -> SearchToolTestResponse:
@@ -156,9 +170,14 @@ async def run_connection_test(
     url: str | None,
     client: httpx.AsyncClient,
 ) -> SearchToolTestResponse:
-    """Run one search or one fetch on ``instance`` through ``client`` and say how it went, never what came back."""
+    """Run one search or one fetch on ``instance`` and say how it went, never what came back.
+
+    A provider is called through ``client``, the app's; ``builtin_fetch`` through its own retrieval client.
+    """
     if instance.kind == "search" and instance.provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
         response = await _test_with_old_client(config, instance.name, entry, str(query), client)
+    elif instance.provider == BUILTIN_FETCH_PROVIDER:
+        response = await _test_builtin_fetch(config, str(url))
     else:
         response = await _test_with_library(instance, query=query, url=url, client=client)
     logger.info(

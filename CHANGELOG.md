@@ -4,6 +4,33 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.29.0](https://github.com/mozilla-ai/otari/releases/tag/v0.29.0) - 2026-10-19
+
+
+
+### Bug Fixes
+
+- **auth:** Refuse a nonce mismatch as a failed sign-in, not an outage in [#2408](https://github.com/mozilla-ai/otari/pull/2408) by [@daavoo](https://github.com/daavoo) ([`b9ff5c3`](https://github.com/mozilla-ai/otari/commit/b9ff5c3cae21ec75cd9721e98eac972c22698421))
+- **usage:** Bill the searches a provider runs itself in [#2414](https://github.com/mozilla-ai/otari/pull/2414) by [@daavoo](https://github.com/daavoo) ([`bec3a12`](https://github.com/mozilla-ai/otari/commit/bec3a120d8e2f9f531c0b453663a9c9928e2f44b))
+
+
+### Features
+
+- **messages:** Serve Messages requests through the Responses API on opt-in in [#2409](https://github.com/mozilla-ai/otari/pull/2409) by [@daavoo](https://github.com/daavoo) ([`69be470`](https://github.com/mozilla-ai/otari/commit/69be470c6b1f8d16d45784f08e63b0c4ed234051))
+- **auth:** Authenticate a backend with a workload identity token in [#2354](https://github.com/mozilla-ai/otari/pull/2354) by [@daavoo](https://github.com/daavoo) ([`431450d`](https://github.com/mozilla-ai/otari/commit/431450d92bba822732bef6b4d6e98422c6ae8ffe))
+- **tools:** Price tool calls by label with reported cost first in [#2398](https://github.com/mozilla-ai/otari/pull/2398) by [@aittalam](https://github.com/aittalam) ([`a002cb6`](https://github.com/mozilla-ai/otari/commit/a002cb6421f0f23c59deffa73b1c91e7810d36fc))
+- **providers:** Refuse managed models clearly where managed credentials are not served in [#2410](https://github.com/mozilla-ai/otari/pull/2410) by [@daavoo](https://github.com/daavoo) ([`b50e388`](https://github.com/mozilla-ai/otari/commit/b50e388fe228c9d607b67b75d49ed5264ca1a003))
+- **tools:** Route web fetch through any-fetch on fetch instances in [#2422](https://github.com/mozilla-ai/otari/pull/2422) by [@aittalam](https://github.com/aittalam) ([`d53e2bb`](https://github.com/mozilla-ai/otari/commit/d53e2bb2f87455b48edd0388867c58001618006a))
+- **tools:** Leave web search with DeepSeek where it runs it, on any-llm 1.37.1 in [#2438](https://github.com/mozilla-ai/otari/pull/2438) by [@daavoo](https://github.com/daavoo) ([`4420d69`](https://github.com/mozilla-ai/otari/commit/4420d69ee9647323d210d6c1558eada11ca746b3))
+- **dashboard:** Publish organization usage on standalone deployments in [#2439](https://github.com/mozilla-ai/otari/pull/2439) by [@daavoo](https://github.com/daavoo) ([`84b6a29`](https://github.com/mozilla-ai/otari/commit/84b6a2914e270a57e9880fa08a31c8a5016ca8c5))
+
+
+
+### New Contributors
+
+- [@tomron](https://github.com/tomron) made their first contribution in [#2423](https://github.com/mozilla-ai/otari/pull/2423)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.28.0...v0.29.0
 ## [0.28.0](https://github.com/mozilla-ai/otari/releases/tag/v0.28.0) - 2026-10-16
 
 

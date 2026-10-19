@@ -126,7 +126,8 @@ may also define:
 - budget exemption
 - a budget of its own: a spend ceiling on the key, which its owner's budget does
   not replace (both apply)
-- whether mismatched client `user` fields are accepted
+- whether mismatched client `user` fields are accepted (see
+  [Mismatched `user` fields](#mismatched-user-fields))
 - whether content-free agent telemetry is captured
 - whether it is a service key, which may name end users
 - application metadata
@@ -152,6 +153,45 @@ deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than
 accepting one, mints only into a workspace the caller may see, and never issues
 a budget-exempt key.
+
+### Mismatched `user` fields
+
+A request can name a user: `user` on Chat Completions, Responses and the
+pass-through routes, `metadata.user_id` on Messages. On an ordinary key that
+value may only be the key's own user; anything else is refused with `403`. A
+key's `reject_user_mismatch` changes that for the key alone:
+
+| Value | Dashboard choice | A request naming another user |
+| --- | --- | --- |
+| `null` (default) | Use the deployment setting | Follows the deployment-wide `reject_user_mismatch`, which rejects unless changed |
+| `true` | Always reject (403) | Rejected, even where the deployment accepts |
+| `false` | Always accept | Accepted, and billed to the key's user |
+
+Spend binds to the key's own user whichever value applies, so accepting a
+mismatch never lets a key charge someone else.
+
+Accept mismatches on a key whose client puts something other than an Otari
+user ID in that field. Claude Code sends a telemetry value there (see
+[Use with Claude Code](use-with-claude-code.md)). So does an application that
+sends every request on one key and passes its own end user's ID. That
+application has two choices:
+
+- Accept mismatches, and every request bills the key's user: one budget for
+  the whole application.
+- Make the key a [service key](#service-keys-and-end-users), and each ID
+  becomes an end user with spend and a budget of its own.
+
+Set the value in the dashboard's key form (under **Advanced** when creating a
+key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
+`/api/v1/keys` and `/api/v1/organizations/me/keys`, or on a key declared in
+config.yml. The deployment-wide default is a runtime setting, changed on the
+Settings page or with `PATCH /api/v1/settings`.
+
+The check is a standalone one. A hybrid gateway, such as otari.ai's, does not
+compare the field with the key's owner, so a key there needs no setting: the
+value only feeds the
+[end-user identifier](hybrid-mode-protocol.md#end-user-identifier) sent to the
+provider.
 
 ## Service keys and end users
 

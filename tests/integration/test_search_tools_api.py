@@ -36,6 +36,13 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.search_tool_store_service import refresh_tool_instances, reset_search_tool_cache
 from gateway.services.secret_box import generate_secret_key
+from gateway.services.web_fetch_service import WebFetchHTTPStatusError, WebFetchResult, WebFetchService
+from gateway.services.web_retrieval_network import (
+    ContentDecodingError,
+    PinnedAsyncHTTPTransport,
+    TrustedProxyAsyncHTTPTransport,
+)
+from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_web_url
 
 from .conftest import build_test_client
 
@@ -343,6 +350,9 @@ def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_h
     assert exa["max_urls_per_call"] == metadata.max_urls_per_call
     assert exa["renders_javascript"] is False
     assert exa["formats"] == metadata.formats
+    # Exa answers with the URL as asked even after a redirect, as Tabstack does.
+    assert exa["reports_final_url"] is False
+    assert catalog["tabstack"]["reports_final_url"] is False
     assert exa["options"] == [option.model_dump() for option in metadata.options]
     assert exa["instances"] == ["exa-fetch"]
     assert exa["max_results"] is None
@@ -789,13 +799,60 @@ def test_a_stored_instance_is_tested_by_name(client: TestClient, master_key_head
     assert resp.json() == {"ok": False, "error": "timeout", "hits": None, "characters": None}
 
 
-def test_builtin_fetch_has_no_test_yet(client: TestClient, master_key_header: dict[str, str]) -> None:
-    resp = client.post(
-        f"{API_ROOT}/search-tools/builtin_fetch/test", json={"url": "https://a"}, headers=master_key_header
-    )
-    assert resp.status_code == 400
-    assert "no connection test yet" in resp.json()["detail"]
+@pytest.mark.parametrize("trusted", [False, True])
+def test_builtin_fetch_is_tested_with_one_fetch_as_a_fetch_tool_call_makes(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    trusted: bool,
+) -> None:
+    """The built-in fetcher, on the retrieval client the proxy setting picks, with no domain policy or private host.
+
+    The fetch itself is stubbed: the pinned client refuses the private hosts a local server would have.
+    """
+    monkeypatch.setattr(test_config, "web_retrieval_trust_env_proxy", trusted)
+    url = canonicalize_web_url("https://example.com/a")
+    seen: list[tuple[type[httpx.AsyncBaseTransport], dict[str, Any]]] = []
+
+    async def fetch(self: WebFetchService, requested: str, **kwargs: Any) -> WebFetchResult:
+        seen.append((type(self._client._transport), kwargs))
+        return WebFetchResult(
+            text="hello",
+            content_type="text/plain",
+            content_kind="text",
+            requested_url=url,
+            final_url=url,
+            redirect_count=0,
+        )
+
+    with patch.object(WebFetchService, "fetch", new=fetch):
+        resp = client.post(
+            f"{API_ROOT}/search-tools/builtin_fetch/test",
+            json={"url": "https://example.com/a"},
+            headers=master_key_header,
+        )
+
+    assert resp.json() == {"ok": True, "error": None, "hits": None, "characters": 5}
+    transport = TrustedProxyAsyncHTTPTransport if trusted else PinnedAsyncHTTPTransport
+    assert seen == [(transport, {"policy": DomainPolicy(), "allow_private": False})]
     assert client.delete(f"{API_ROOT}/search-tools/builtin_fetch", headers=master_key_header).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("raised", "tag"), [(WebFetchHTTPStatusError(404), "http_status"), (ContentDecodingError("x"), "content_decoding")]
+)
+def test_a_failed_builtin_fetch_test_reports_the_fetchers_tag(
+    client: TestClient, master_key_header: dict[str, str], raised: Exception, tag: str
+) -> None:
+    with patch.object(WebFetchService, "fetch", new=AsyncMock(side_effect=raised)):
+        resp = client.post(
+            f"{API_ROOT}/search-tools/builtin_fetch/test",
+            json={"url": "https://example.com/a"},
+            headers=master_key_header,
+        )
+
+    assert resp.json() == {"ok": False, "error": tag, "hits": None, "characters": None}
 
 
 def test_testing_an_unknown_instance_is_404(client: TestClient, master_key_header: dict[str, str]) -> None:

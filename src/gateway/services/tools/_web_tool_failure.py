@@ -4,13 +4,14 @@ Only fields the logging rule lets an error carry (design section 7): the
 provider, its HTTP status, a tag, and whether a retry may help; never a body,
 a URL or exception text. The direct endpoint's 502 carries them as headers,
 and a failed entry in Chat Completions' ``otari_tool_calls`` carries them as its
-``error`` when the call's backend kept them. Today only a call refused past its
-use cap does; the in-loop web backends do not keep a failure yet.
+``error`` when the call's backend kept them: the fetch backend does, and the
+old search backend does not.
 """
 
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import any_fetch
 import any_search
 from gateway.core.error_codes import (
     ERROR_PROVIDER_HEADER,
@@ -50,8 +51,8 @@ class WebToolFailure:
         return cls(provider=provider, status=status, tag=tag, retryable=retryable)
 
     @classmethod
-    def from_provider_error(cls, error: any_search.ProviderError) -> "WebToolFailure":
-        """The failure any-search raised: its provider, status and tag."""
+    def from_provider_error(cls, error: any_search.ProviderError | any_fetch.ProviderError) -> "WebToolFailure":
+        """The failure either library raised: its provider, status and tag."""
         return cls.of(error.provider, error.status, error.tag)
 
     def as_dict(self) -> dict[str, Any]:

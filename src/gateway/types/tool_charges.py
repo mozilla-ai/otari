@@ -9,7 +9,14 @@ importing each other.
 from dataclasses import dataclass
 from decimal import Decimal
 
-__all__ = ["GATEWAY_TOOL_PRICING_PROVIDER", "ORGANIZATION_KEY_LABEL_PREFIX", "LabelCalls", "gateway_tool_pricing_key"]
+__all__ = [
+    "GATEWAY_TOOL_PRICING_PROVIDER",
+    "ORGANIZATION_KEY_LABEL_PREFIX",
+    "PROVIDER_WEB_SEARCH_TOOL",
+    "LabelCalls",
+    "gateway_tool_pricing_key",
+    "provider_web_search_label",
+]
 
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"
 
@@ -19,6 +26,15 @@ GATEWAY_TOOL_PRICING_PROVIDER = "otari"
 # organization's own key from one the deployment pays for, so both take it from
 # here.
 ORGANIZATION_KEY_LABEL_PREFIX = "org:"
+
+
+# The tool a provider-run search is counted under, beside the gateway's own searches.
+PROVIDER_WEB_SEARCH_TOOL = "web_search"
+
+
+def provider_web_search_label(provider: str) -> str:
+    """The label, and the rate key, of searches a model's provider ran itself (``anthropic:web_search``)."""
+    return f"{provider}:{PROVIDER_WEB_SEARCH_TOOL}"
 
 
 def gateway_tool_pricing_key(tool: str) -> str:
@@ -42,7 +58,8 @@ class LabelCalls:
     tool's own ``otari:<tool>`` row; an empty ``rate_keys`` prices nothing.
     ``reported_cost`` sums the costs providers reported, over ``calls`` minus
     ``unreported_calls``, and ``enrichment_cost`` what a search's enrichment
-    fetches reported.
+    fetches reported. ``deployment_paid`` says whose account ran the calls when the
+    label cannot: ``None`` reads it off the label.
     """
 
     tool: str
@@ -52,3 +69,4 @@ class LabelCalls:
     unreported_calls: int
     reported_cost: Decimal
     enrichment_cost: Decimal
+    deployment_paid: bool | None = None

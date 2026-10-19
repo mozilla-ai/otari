@@ -46,6 +46,7 @@ import any_fetch
 import any_search
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
+    BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
     PROVIDER_DEFAULT_OPTIONS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
@@ -212,6 +213,11 @@ def resolve_fetch(
         if (on_key := _fetch_on_credential(policy.fetch_credential)) is not None:
             return on_key
     return _fetch_on_instance(instances.get(configured_fetch_default(config)) or instances[BUILTIN_FETCH])
+
+
+def builtin_fetch_resolved() -> ResolvedFetch:
+    """``builtin_fetch`` as :func:`resolve_fetch` answers it, for code that holds no config."""
+    return _fetch_on_instance(BUILTIN_FETCH_INSTANCE)
 
 
 def _fetch_instances(config: ToolSettings) -> dict[str, ToolInstance]:

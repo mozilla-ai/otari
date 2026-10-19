@@ -51,6 +51,7 @@ from functools import reduce
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
 from urllib.parse import ParseResult, urlparse
 
+import httpx
 from any_llm import LLMProvider
 from any_llm.exceptions import (
     AnyLLMError,
@@ -158,6 +159,7 @@ from gateway.core.usage import (
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
     provider_latency_ms_of,
+    provider_web_searches_of,
     reasoning_tokens_of,
 )
 from gateway.exceptions import TenancyError
@@ -300,7 +302,12 @@ from gateway.services.provider_kwargs import (
     resolve_provider_selector,
     with_failover_retries,
 )
-from gateway.services.providers import owned_endpoint_http_client, unpriced_model_refusal
+from gateway.services.providers import (
+    managed_only_candidates,
+    owned_endpoint_http_client,
+    refuse_managed_candidate,
+    unpriced_model_refusal,
+)
 from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
@@ -1328,6 +1335,10 @@ class RequestContext:
         # check; callers fall back to `resolve_provider_selector` themselves
         # in that case, same as before this field existed.
         self.resolved_provider = resolved_provider
+        # The ``(instance, model)`` candidates of a multi-candidate plan that only
+        # the deployment's managed credentials would serve, which the walk
+        # refuses by name; set in ``_prepare_for_dispatch``.
+        self.managed_only: frozenset[tuple[str, str]] = frozenset()
         # Standalone-only: the workspace's code-execution policy, read in the
         # preamble when the request declares code execution on a deployment with
         # a sandbox, so the staging decision and admission read one row once.
@@ -1533,6 +1544,14 @@ async def _prepare_for_dispatch(
     port: ModelProviderPort,
     billing: BillingPort,
 ) -> ResolvedProvider:
+    if ctx.plan is not None and len(ctx.plan.attempts) > 1:
+        try:
+            ctx.managed_only = await managed_only_candidates(
+                ctx.config, ctx.plan.attempts, hosted=lambda: port, organization_id=ctx.organization_id
+            )
+        except asyncio.CancelledError:
+            await release_reservation(ctx)
+            raise
     if resolved.owned_endpoint is not None:
         # The client re-checks and pins the endpoint's address on every request
         # and follows no redirect; see ``services/providers``.
@@ -3224,6 +3243,7 @@ class ToolContext:
         web_fetch_policy: DomainPolicy | None = None,
         sandbox_files: SandboxFileBridge | None = None,
         shared: SharedToolUse | None = None,
+        web_provider_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.config = config
         self.mcp_server_configs = mcp_server_configs
@@ -3266,6 +3286,9 @@ class ToolContext:
         self.use_web_fetch = use_web_fetch
         self.web_fetch_tool_entry = web_fetch_tool_entry
         self.web_fetch_policy = web_fetch_policy or DomainPolicy()
+        # The app's client, which a provider fetch instance is called through. None outside
+        # a route, where a provider opens its own for each call.
+        self.web_provider_client = web_provider_client
         self.remaining_user_tools = remaining_user_tools
         self.max_tool_iterations = max_tool_iterations
         self.tools_header = tools_header
@@ -3287,33 +3310,35 @@ class ToolContext:
         self.use_budget: ToolUseBudget | None = shared.use_budget
         # Search and Fetch share a separate attempted-call cap across routing attempts.
         self.web_retrieval_counter: WebRetrievalCounter = shared.web_retrieval_counter
-        # Each candidate's tools by its provider, where the request's candidates are not all dispatched alike.
-        self.candidate_variants: dict[str | None, CandidateVariant] = {}
+        # Each candidate's tools by its provider and model, where the request's candidates are not all dispatched alike.
+        self.candidate_variants: dict[tuple[str | None, str | None], CandidateVariant] = {}
         # The built-in tool names no MCP server may expose: those any attempt of the request runs here.
         self.reserved_tool_names: frozenset[str] = frozenset(self.declared_gateway_tools)
 
-    def for_candidate(self, provider: str | None) -> ToolContext:
-        """The tools the candidate on ``provider`` is dispatched with: these, or its variant's.
+    def for_candidate(self, provider: str | None, model: str | None) -> ToolContext:
+        """The tools the candidate on ``provider`` and ``model`` is dispatched with: these, or its variant's.
 
         Raises:
             CandidateCannotServe: the candidate's tools were refused.
         """
-        variant = self.candidate_variants.get(provider)
+        variant = self.candidate_variants.get((provider, model))
         if variant is None:
             return self
         if isinstance(variant.tools, HTTPException):
             raise CandidateCannotServe(variant.tools)
         return variant.tools
 
-    def request_fields_for(self, provider: str | None, base_fields: dict[str, Any]) -> dict[str, Any]:
-        """What the candidate on ``provider`` is sent: ``base_fields``, built from these tools, or its variant's own.
+    def request_fields_for(
+        self, provider: str | None, model: str | None, base_fields: dict[str, Any]
+    ) -> dict[str, Any]:
+        """What the candidate on ``provider`` and ``model`` is sent: ``base_fields``, or its variant's own.
 
         Raises:
             CandidateCannotServe: as :meth:`for_candidate` does.
         """
-        if self.for_candidate(provider) is self:
+        if self.for_candidate(provider, model) is self:
             return base_fields
-        request_fields = self.candidate_variants[provider].request_fields
+        request_fields = self.candidate_variants[(provider, model)].request_fields
         assert request_fields is not None  # built by ``build_request_fields`` before any candidate is dispatched
         return request_fields
 
@@ -3461,6 +3486,7 @@ class ToolContext:
             config=self.config,
             tally=self.tally,
             trace=self.trace,
+            web_provider_client=self.web_provider_client,
         )
 
 
@@ -3839,6 +3865,7 @@ async def prepare_gateway_tools(
             trace=ctx.trace,
             sandbox_files=backends.sandbox_files,
             shared=shared,
+            web_provider_client=backends.ports.web_provider_client,
         )
 
     contexts = {claimed: _tool_context(answer) for claimed, answer in admitted.items()}
@@ -3854,8 +3881,7 @@ async def prepare_gateway_tools(
             for claimed, answer in answers.items()
         }
         tool_ctx.candidate_variants = {
-            provider: variants[candidate.claimed]
-            for provider, candidate in zip(_candidate_provider_names(ctx), candidates, strict=True)
+            key: variants[candidate.claimed] for key, candidate in zip(_candidates(ctx), candidates, strict=True)
         }
     return tool_ctx
 
@@ -3893,9 +3919,11 @@ def _decide_for_candidates(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declarations: Iterable[ProviderToolDeclaration | None]
 ) -> list[CandidateTools]:
     """What each candidate of the request is sent for ``declarations``, head first."""
+    candidates = _candidates(ctx)
     return decide_candidate_tools(
         [declaration for declaration in declarations if declaration is not None],
-        providers=_candidate_provider_names(ctx),
+        providers=[provider for provider, _ in candidates],
+        models=[model for _, model in candidates],
         dialect=adapter.name,
     )
 
@@ -4216,17 +4244,26 @@ def _dispatch_provider_name(ctx: RequestContext) -> str | None:
     return None
 
 
-def _candidate_provider_names(ctx: RequestContext) -> list[str | None]:
-    """The any-llm provider of every candidate the request may dispatch to, head first.
+def _dispatch_model(ctx: RequestContext) -> str | None:
+    """The bare model the request's first attempt dispatches to, found as :func:`_dispatch_provider_name` is."""
+    if ctx.resolved_provider is not None:
+        return ctx.resolved_provider.model
+    if ctx.route is not None and ctx.route.attempts:
+        return ctx.route.attempts[0].model
+    return None
+
+
+def _candidates(ctx: RequestContext) -> list[tuple[str | None, str | None]]:
+    """The any-llm provider and bare model of every candidate the request may dispatch to, head first.
 
     A standalone routing plan's attempts or the platform's, which the dispatch
-    walks on failure; otherwise just :func:`_dispatch_provider_name`.
+    walks on failure; otherwise just :func:`_dispatch_provider_name` and :func:`_dispatch_model`.
     """
     if ctx.plan is not None and len(ctx.plan.attempts) > 1:
-        return [attempt.provider.value for attempt in ctx.plan.attempts]
+        return [(attempt.provider.value, attempt.model) for attempt in ctx.plan.attempts]
     if ctx.route is not None and len(ctx.route.attempts) > 1:
-        return [attempt.provider for attempt in ctx.route.attempts]
-    return [_dispatch_provider_name(ctx)]
+        return [(attempt.provider, attempt.model) for attempt in ctx.route.attempts]
+    return [(_dispatch_provider_name(ctx), _dispatch_model(ctx))]
 
 
 async def _resolve_code_execution_policy(
@@ -4646,6 +4683,13 @@ async def record_usage(
         usage_log.pricing_source = None
         usage_log.pricing_reference = None
         usage_log.pricing_effective_at = None
+
+    provider_searches = provider_web_searches_of(usage_data) if usage_data else 0
+    if provider_searches and provider:
+        tool_tally = tool_tally if tool_tally is not None else ToolUsageTally()
+        tool_tally.record_provider_searches(
+            provider_type or provider_key(provider), provider_searches, deployment_paid=deployment_paid
+        )
 
     # Gateway-run tool calls are a separate charge from the model's tokens, so they
     # are folded in last: after the token branch (which may not have run at all) and
@@ -5890,19 +5934,22 @@ def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
 
 
 def _failover_kwargs(
-    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, config: GatewayConfig
+    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, ctx: RequestContext
 ) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
     """Builds each candidate's kwargs for a plan that can fall over, from the request fields its tools need.
 
     Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
     so the walk skips it before admitting it, and any-llm's ``MissingApiKeyError`` for a
     candidate nothing declares a credential for, so the walk passes it over as it does
-    any candidate missing a key.
+    any candidate missing a key, or its ``ManagedCredentialUnsupportedError`` for one in
+    ``ctx.managed_only``, which the final answer names.
     """
+    config = ctx.config
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
+        refuse_managed_candidate(ctx.managed_only, attempt)
         require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
-        fields = tool_ctx.request_fields_for(attempt.provider.value, base_request_fields)
+        fields = tool_ctx.request_fields_for(attempt.provider.value, attempt.model, base_request_fields)
         return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
 
     return _build
@@ -6000,7 +6047,7 @@ async def run_single_attempt_stream(
                 nonlocal served_tools
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
-                served_tools = tool_ctx.for_candidate(attempt.provider.value)
+                served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
                 return await open_stream(adapter=adapter, tool_ctx=served_tools, call_kwargs=attempt_kwargs)
 
             absorbed_rows: list[asyncio.Task[None]] = []
@@ -6026,7 +6073,7 @@ async def run_single_attempt_stream(
                     run_attempt=_open_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx.config),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
@@ -6204,10 +6251,12 @@ async def run_streaming_with_fallback(
     when that attempt is reached. Each retried attempt starts with a clean
     conversation slate, and each attempt's own tools set its first-chunk budget.
     """
-    head_tools = tool_ctx.for_candidate(route.attempts[0].provider) if route.attempts else tool_ctx
+    head_tools = (
+        tool_ctx.for_candidate(route.attempts[0].provider, route.attempts[0].model) if route.attempts else tool_ctx
+    )
 
     def _tools_for(attempt: ResolvedAttempt) -> ToolContext:
-        return tool_ctx.for_candidate(attempt.provider)
+        return tool_ctx.for_candidate(attempt.provider, attempt.model)
 
     def _first_chunk_timeouts_of(tools: ToolContext) -> tuple[float, float]:
         return (
@@ -6247,7 +6296,9 @@ async def run_streaming_with_fallback(
     async def _build_for_attempt(attempt: ResolvedAttempt) -> AsyncIterator[ChunkT]:
         tools = _tools_for(attempt)
         completion_kwargs = adapter.prepare_stream_kwargs(
-            adapter.attempt_kwargs(attempt, tool_ctx.request_fields_for(attempt.provider, base_request_fields)),
+            adapter.attempt_kwargs(
+                attempt, tool_ctx.request_fields_for(attempt.provider, attempt.model, base_request_fields)
+            ),
             require_usage=True,
         )
         pool_for_loop = await _pool_for(tools)
@@ -6468,8 +6519,8 @@ async def run_platform_non_stream(
 
     def _prepare_attempt(attempt: ResolvedAttempt) -> dict[str, Any]:
         nonlocal attempt_tools
-        attempt_tools = tool_ctx.for_candidate(attempt.provider)
-        return tool_ctx.request_fields_for(attempt.provider, base_request_fields)
+        attempt_tools = tool_ctx.for_candidate(attempt.provider, attempt.model)
+        return tool_ctx.request_fields_for(attempt.provider, attempt.model, base_request_fields)
 
     async def _run_attempt(
         completion_kwargs: dict[str, Any],
@@ -6817,7 +6868,7 @@ async def run_standalone_non_stream(
                 nonlocal served_tools
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
-                served_tools = tool_ctx.for_candidate(attempt.provider.value)
+                served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
                 return await dispatch_non_stream(
                     adapter=adapter,
                     tool_ctx=served_tools,
@@ -6848,7 +6899,7 @@ async def run_standalone_non_stream(
                     run_attempt=_run_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx.config),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,

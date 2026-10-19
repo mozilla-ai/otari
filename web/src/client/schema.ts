@@ -5448,8 +5448,8 @@ export interface paths {
          * @description Test a configured or stored instance with one search or one fetch.
          *
          *     Takes ``query`` for a search instance or ``url`` for a fetch instance, and
-         *     answers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test
-         *     yet, and answers a 400.
+         *     answers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in
+         *     fetcher, fetches as a fetch tool call does, with no domain policy.
          */
         post: operations["search-tools-test_search_tool"];
         delete?: never;
@@ -15334,6 +15334,11 @@ export interface components {
              * @description Fetch: true when the provider runs a page's JavaScript before reading it.
              */
             renders_javascript?: boolean | null;
+            /**
+             * Reports Final Url
+             * @description Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.
+             */
+            reports_final_url?: boolean | null;
             /**
              * Requires Api Base
              * @description True when this provider has no endpoint of its own, so the tool must say where the backend is.
