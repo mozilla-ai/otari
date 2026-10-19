@@ -1,4 +1,4 @@
-"""The direct endpoint's rules: which instance, which key, which count, and the call itself (design J).
+"""The direct endpoint's rules: which instance, which key, which count, which price, and the call itself (design J).
 
 ``POST /api/v1/search`` reads the request and its dependencies, then asks
 these. The instance comes from the path, else the body's
@@ -8,7 +8,8 @@ rules, the timeout, the usage row's names and the response's ``search_tool``.
 A named call runs on that instance with its own key. An unnamed one runs on
 the organization key the workspace's policy carries, when it has one, on the
 key's own provider and options, priced under ``otari:web_search`` (decisions
-33 and 51). Of the workspace's policy, only the on/off switch, which the
+33 and 51). With ``require_pricing`` on, a call no pricing row prices is
+refused (decision 70). Of the workspace's policy, only the on/off switch, which the
 route applies, and the ``max_results`` ceiling apply here; its provider
 options do not (design G). The call runs on any-search, or on an old client
 for a provider any-search has no adapter for yet.
@@ -31,6 +32,7 @@ from gateway.core.settings.tools import (
 from gateway.exceptions.tools_exceptions import (
     DirectSearchFailedError,
     DirectSearchFieldRefusedError,
+    DirectSearchPricingRequiredError,
     SearchToolMisconfiguredError,
     SearchToolSelectionError,
 )
@@ -59,16 +61,6 @@ class DirectSearch:
     query: SearchQuery
     credential: WebSearchCredential | None
     include_raw: bool
-
-    @property
-    def price_key(self) -> tuple[str, str]:
-        """The provider and model of the pricing row that prices the call (design L).
-
-        The instance's ``<provider>:<instance>``, or ``otari:web_search`` for an
-        organization key, whose own provider a deployment cannot price.
-        """
-        provider, _, model = self.resolved.rate_keys[0].partition(":")
-        return provider, model
 
 
 @dataclass(frozen=True)
@@ -189,6 +181,48 @@ def resolve_direct_search(
         query=replace(asked, max_results=count),
         credential=organization_key if resolved.on_credential else None,
         include_raw=request.include_raw,
+    )
+
+
+def refuse_unpriced_direct_search(
+    search: DirectSearch, *, priced: bool, require_pricing: bool, budget_exempt: bool
+) -> None:
+    """Refuse a direct search ``require_pricing`` cannot bill, as it refuses an unpriced model (decision 70).
+
+    ``priced`` says one of the call's rate keys found a pricing row, through the
+    lookup settlement uses (design L): only the operator's price or override for
+    an instance's ``<provider>:<instance>``, since the deployment pays for the
+    call, and any of the organization's own for ``otari:web_search``. A provider
+    that reports its cost is refused all the same, and a zero rate is a price. A
+    budget-exempt key is never debited, so the gate does not apply to it, as it
+    does not for a model. Nor does it to a call with no rate keys, which is
+    settled upstream rather than here (design K). Raises
+    :class:`DirectSearchPricingRequiredError` naming the row to add.
+    """
+    rate_keys = search.resolved.rate_keys
+    if priced or not require_pricing or budget_exempt or not rate_keys:
+        return
+    raise DirectSearchPricingRequiredError(
+        _unpriced_detail(search.instance.name, rate_keys[0], organization_key=search.resolved.on_credential)
+    )
+
+
+def _unpriced_detail(tool: str, rate_key: str, *, organization_key: bool) -> str:
+    # The dashboard prices otari:web_search on its Tools & Guardrails screen, and no instance's row yet.
+    if organization_key:
+        missing = "which has no pricing"
+        where = (
+            f"POST {API_ROOT}/pricing, the pricing section of config.yml, or the dashboard's Tools & Guardrails screen"
+        )
+    else:
+        # The deployment pays for the call, so an organization's own override does not count.
+        missing = "which the deployment's operator has not priced"
+        where = f"POST {API_ROOT}/pricing or the pricing section of config.yml"
+    return (
+        f"A search on '{tool}' is priced under '{rate_key}', {missing}, and require_pricing is on, "
+        "so the gateway will not run a search it cannot bill. "
+        f"Set a per-request price for model_key '{rate_key}' ({where}); a zero rate is valid. "
+        "Or set require_pricing to false to serve searches unpriced."
     )
 
 

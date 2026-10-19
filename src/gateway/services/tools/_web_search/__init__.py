@@ -5,6 +5,7 @@ from gateway.services.tools._web_search._direct import (
     DirectSearch,
     DirectSearchResult,
     pick_direct_search_instance,
+    refuse_unpriced_direct_search,
     resolve_direct_search,
     run_direct_search,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "filter_hits_by_domain",
     "page_budget_chars",
     "pick_direct_search_instance",
+    "refuse_unpriced_direct_search",
     "resolve_direct_search",
     "resolve_fetch",
     "resolve_in_loop_search",

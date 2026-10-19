@@ -234,10 +234,49 @@ label of what served it in Otari (see
 
 Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
-without a model tool loop. A search a workspace's
-[organization search key](#organization-search-keys) served is priced under
-`otari:web_search` instead, since the deployment cannot price the organization's
-own provider account. A provider's reported cost, when it reports one, comes first.
+without a model tool loop. The deployment pays for that search, so only its own
+price, or an override the deployment operator set, prices it. A search a
+workspace's [organization search key](#organization-search-keys) served is
+priced under `otari:web_search` instead, since the deployment cannot price the
+organization's own provider account, and the organization's own override
+applies to it. A provider's reported cost, when it reports one, comes first.
+
+With `require_pricing: true`, the default, a direct search whose row is missing
+is refused with a `402` and the code `pricing_required`, its detail naming the
+row to add, as an unpriced model is. That holds for a provider that reports its
+charge too, such as Exa, and a zero rate is a valid row. A key exempt from
+budgets is not refused.
+
+**Upgrading from 0.29.** Direct searches were exempt from `require_pricing`, so
+where it is on, a search on a tool with no row of its own now answers `402`. Add
+a row for each search tool, and `otari:web_search` if workspaces search on an
+organization search key. With the master key:
+
+```bash
+curl http://localhost:8000/api/v1/pricing \
+  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model_key": "exa:exa-search", "input_price_per_million": 5000, "output_price_per_million": 0}'
+```
+
+or in `config.yml`:
+
+```yaml
+pricing:
+  exa:exa-search:
+    input_price_per_million: 5000   # $0.005 per search
+    output_price_per_million: 0
+```
+
+Set the rate at about what one search costs: it is what a search holds against
+the caller's budget before it runs, and it is billed when the provider reports
+no charge of its own. A provider's reported charge still comes first. A zero
+rate is valid too and bills as before, but holds nothing. The dashboard cannot
+price a tool's own row yet, so use the API or the configuration file;
+`otari:web_search` can also be set on the dashboard's Tools & Guardrails screen.
+`require_pricing: false` serves unpriced searches again, and unpriced models with
+them. And whether `require_pricing` is on or not, an organization's own pricing
+override no longer prices a search on one of the deployment's tools.
 
 ## What clients receive
 

@@ -881,19 +881,21 @@ image's size and quality, or an audio file's length. Set it at the dearest
 option you allow.
 
 An unpriced request on audio or moderations is served at zero cost. Image
-generation, embeddings and rerank are subject to `require_pricing`, which also
-refuses a rate that cannot price the endpoint, such as an `images` rate on
-embeddings, rather than serving it unpriced.
+generation, embeddings, rerank and direct search are subject to
+`require_pricing`, which also refuses a rate that cannot price the endpoint,
+such as an `images` rate on embeddings, rather than serving it unpriced.
 
 A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
 `exa-search` backed by `exa`), and its provider needs no entry under
 `providers:`. That rate is what a search reserves against the caller's budget
-before it runs; without one no dollars are held, though the search still holds
-one request against a request-count budget. A successful search settles at the
-provider's reported charge when it reports one, and at the rate otherwise. A
-search a workspace's organization search key served is priced under
-`otari:web_search` instead, since the deployment cannot price the organization's
-own provider account.
+before it runs. A successful search settles at the provider's reported charge
+when it reports one, and at the rate otherwise. A search a workspace's
+organization search key served is priced under `otari:web_search` instead, since
+the deployment cannot price the organization's own provider account. With
+`require_pricing` on, a direct search whose row is missing is refused with a
+402 naming it, even on a provider that reports its charge; a zero rate is a
+valid row. With it off, such a search holds no dollars, though it still holds
+one request against a request-count budget.
 
 A fetch instance's rate is keyed the same way (`tabstack:tabstack` for an
 instance named `tabstack` backed by `tabstack`), and so is the built-in
