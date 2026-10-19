@@ -386,8 +386,8 @@ def test_a_search_on_an_instance_is_narrowed_as_one_on_the_old_backend(
 ) -> None:
     """The ceiling and the block list reach the search backend on any-search, as they reach the old one.
 
-    The workspace's and the request's options reach the resolver merged, so a key the
-    provider does not take is dropped with a warning rather than refused.
+    A workspace option the provider does not take is dropped with a warning, and the
+    request's own options are layered over the instance's.
     """
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     monkeypatch.setattr(test_config, "search_tools", {"fake-search": {"provider": "fake"}})

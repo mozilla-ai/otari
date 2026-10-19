@@ -652,7 +652,11 @@ exactly one (see [Search tools](configuration.md#search-tools)).
 On a search instance, the search runs on the instance's
 [provider](#search-providers), key, options and `timeout`, and asks for the
 request's result count, which the workspace's `max_results` may lower and nothing
-else caps: Exa returns up to 100. A provider's failure reaches the model as
+else caps: Exa returns up to 100. The declaration's `provider_options` are checked
+against the provider, as on [direct search](#direct-search): a key it does not
+take, or takes only from the deployment, is refused with a 400 before the model is
+called, while a workspace's such key is left out with a warning. A provider's
+failure reaches the model as
 `[tool error] <provider> search failed (<tag>)`, with the HTTP status when there
 is one, and never with the provider's own message; a Chat Completions client sees
 the same fields in `otari_tool_calls`. Results are numbered across a request's

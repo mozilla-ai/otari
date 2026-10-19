@@ -146,13 +146,16 @@ class InLoopSearch:
     enrichment: ResolvedFetch
 
 
-def resolve_in_loop_search(config: ToolSettings, policy: ResolvedWebSearchConfig | None) -> InLoopSearch | None:
+def resolve_in_loop_search(
+    config: ToolSettings, policy: ResolvedWebSearchConfig | None, *, request_options: Mapping[str, Any] | None = None
+) -> InLoopSearch | None:
     """The in-loop search on the libraries, or ``None`` when the old backend serves it or nothing does.
 
-    Raises what :func:`resolve_search` and :func:`resolve_fetch` raise for a
-    credential they cannot use.
+    Raises what :func:`resolve_search` raises for a request option the provider
+    does not take, and what it and :func:`resolve_fetch` raise for a credential
+    they cannot use.
     """
-    search = resolve_search(config, policy, requested=None, request_options=None)
+    search = resolve_search(config, policy, requested=None, request_options=request_options)
     if search is None or search.runner != "library":
         return None
     return InLoopSearch(search, resolve_fetch(config, policy, requested=None, for_search=search))

@@ -236,6 +236,19 @@ def test_a_messages_search_on_the_instance_is_cited_with_its_dates(
     ]
 
 
+def test_a_request_option_the_provider_does_not_take_is_refused_before_the_model_is_called(
+    client: TestClient, api_key_header: dict[str, str], instance: dict[str, Any]
+) -> None:
+    """As on direct search: the request's ``provider_options`` are checked against the instance's provider."""
+    tools = [{"type": "otari_web_search", "provider_options": {"no_such_option": 1}}]
+    with _scripted("gateway.services.mcp_loop.acompletion", [_completion(0)]) as sent:
+        response = _chat(client, api_key_header, tools=tools)
+
+    assert response.status_code == 400, response.text
+    assert "no_such_option" in response.text
+    assert sent == []
+
+
 class _PolicyWithKey:
     """A workspace policy that hands the search a key its provider's client cannot use."""
 

@@ -21,6 +21,8 @@ from any_fetch.providers.fake import FakeProvider as FakeFetchProvider
 from any_search.providers.fake import FakeProvider as FakeSearchProvider
 from gateway.api.routes._pipeline import ToolContext
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.tools_exceptions import WebSearchOptionRefusedError
+from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools import (
     WEB_FETCH_TOOL_NAME,
@@ -632,6 +634,25 @@ def test_the_in_loop_search_carries_the_fetch_that_enriches_it() -> None:
 
     assert (by_instance.search.label, by_instance.enrichment.name) == (_LABEL, _FETCH)
     assert by_default.enrichment.name == "builtin_fetch"
+
+
+def test_a_request_option_the_provider_does_not_take_is_refused_and_a_workspace_one_dropped() -> None:
+    config = _config()
+    workspace = ResolvedWebSearchConfig(
+        enabled=True,
+        max_results=None,
+        purpose_hint=None,
+        allowed_domains=None,
+        blocked_domains=None,
+        provider_options={"no_such_option": 1},
+        authorized_tools=None,
+    )
+
+    with pytest.raises(WebSearchOptionRefusedError, match="no_such_option"):
+        resolve_in_loop_search(config, None, request_options={"no_such_option": 1})
+    search = resolve_in_loop_search(config, workspace, request_options={"cost": 0.01})
+    assert search is not None
+    assert dict(search.search.options) == {"hits": _HITS, "cost": 0.01}
 
 
 def test_the_legacy_settings_resolve_to_no_in_loop_search_on_the_libraries() -> None:

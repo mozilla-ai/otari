@@ -185,6 +185,7 @@ from gateway.exceptions.tools_exceptions import (
     WebAccessRefusedError,
     WebSearchCredentialRefusedError,
     WebSearchInterceptedError,
+    WebSearchOptionRefusedError,
     WebSearchPolicyResolutionFailedError,
     WebSearchPolicyResolutionFailure,
     WebToolDeclarationError,
@@ -4293,7 +4294,7 @@ async def _admit_web_access(
         raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
         raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
-    except (WebSearchCredentialRefusedError, SearchToolMisconfiguredError) as exc:
+    except (WebSearchOptionRefusedError, WebSearchCredentialRefusedError, SearchToolMisconfiguredError) as exc:
         raise domain_error(adapter, exc) from exc
     return _AdmittedWebAccess(
         fetch_policy=grant.fetch_policy,
