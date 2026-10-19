@@ -24,6 +24,11 @@ HOSTED_NAME_INDEX_TTL_SECONDS = 30.0
 
 # name -> any-llm implementation, for each hosted provider named otherwise than its implementation
 _names: dict[str, str] = {}
+# Writes this worker made, numbered, so a refresh whose read began before one
+# replays it rather than overwriting it with an older snapshot. name ->
+# (write number, implementation, or None for a name removed).
+_write_count = 0
+_recent_writes: dict[str, tuple[int, str | None]] = {}
 
 
 def hosted_implementation(name: str) -> str | None:
@@ -31,36 +36,56 @@ def hosted_implementation(name: str) -> str | None:
     return _names.get(name)
 
 
+def _record_write(name: str, implementation: str | None) -> None:
+    global _write_count  # noqa: PLW0603
+
+    _write_count += 1
+    _recent_writes[name] = (_write_count, implementation)
+    if implementation is None:
+        _names.pop(name, None)
+    else:
+        _names[name] = implementation
+
+
 def remember_hosted_name(name: str, implementation: str) -> None:
     """Record a hosted provider this worker just created."""
-    if name != implementation:
-        _names[name] = implementation
+    _record_write(name, implementation if name != implementation else None)
 
 
 def forget_hosted_name(name: str) -> None:
     """Drop a hosted provider this worker just removed."""
-    _names.pop(name, None)
+    _record_write(name, None)
 
 
 async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> None:
     """Reload the names from the rows and the ``hosted_providers:`` block, and swap the map in one step.
 
-    A row wins over an entry of the same name, as everywhere else.
+    A row wins over an entry of the same name, as everywhere else. A write
+    this worker made while the read was in flight is newer than what the read
+    saw, so it is replayed over the snapshot rather than lost.
     """
-    global _names  # noqa: PLW0603
+    global _names, _recent_writes  # noqa: PLW0603
 
+    read_from = _write_count
     async with uow:
         rows = await HostedProviderRepository(uow).list_all()
     names = {name: entry.provider for name, entry in config.hosted_provider_entries().items()}
     names.update({row.name: row.provider for row in rows})
-    _names = {name: implementation for name, implementation in names.items() if name != implementation}
+    fresh = {name: implementation for name, implementation in names.items() if name != implementation}
+    newer = {name: write for name, write in _recent_writes.items() if write[0] > read_from}
+    for name, (_, implementation) in newer.items():
+        if implementation is None:
+            fresh.pop(name, None)
+        else:
+            fresh[name] = implementation
+    _names, _recent_writes = fresh, newer
 
 
 def reset_hosted_name_index() -> None:
     """Drop the map so the next load starts clean (startup and tests)."""
-    global _names  # noqa: PLW0603
+    global _names, _recent_writes  # noqa: PLW0603
 
-    _names = {}
+    _names, _recent_writes = {}, {}
 
 
 async def _refresh_on_a_session_of_its_own(config: GatewayConfig) -> None:
