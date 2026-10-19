@@ -9,7 +9,7 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -85,7 +85,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
     reports_tool_activity,
 )
-from gateway.services.provider_kwargs import apply_endpoint_defaults
+from gateway.services.provider_kwargs import apply_endpoint_defaults, with_request_fields
 from gateway.services.providers import acompletion
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
@@ -131,6 +131,11 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     unchanged to document it (``max_completion_tokens``), which is only worth
     doing where the wire contract is not guessable from the field itself.
     """
+
+    # A field beyond the ones below is kept rather than dropped, but goes to the
+    # provider only when its instance lists it in ``request_fields``; see
+    # ``with_request_fields``. Every other one is dropped before dispatch, as before.
+    model_config = ConfigDict(extra="allow")
 
     messages: list[dict[str, Any]] = Field(min_length=1)
     # any-llm types this as ``dict | type | None``; the wire body only ever
@@ -617,6 +622,7 @@ async def run_chat_completion(
         )
     except IdempotentReplay as replay:
         return replay.response()
+    ctx.request_extras = dict(request.model_extra or {})
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
@@ -656,7 +662,7 @@ async def run_chat_completion(
 
     def _request_fields(tools: ToolContext) -> dict[str, Any]:
         fields = _strip_gateway_fields(
-            request.model_dump(exclude_unset=True),
+            request.model_dump(exclude_unset=True, exclude=set(request.model_extra or {})),
             tools_extracted=tools.tools_extracted,
             remaining_user_tools=tools.remaining_user_tools,
             web_search_declared_name=tools.web_search_declared_name,
@@ -720,7 +726,12 @@ async def run_chat_completion(
             ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
         call_kwargs = apply_endpoint_defaults(
-            {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+            {
+                **resolved.kwargs,
+                **with_request_fields(config, resolved.instance, request_fields, ctx.request_extras),
+                "model": resolved.dispatch_model,
+            },
+            resolved,
         )
         return await run_single_attempt_stream(
             adapter=adapter,
@@ -763,7 +774,12 @@ async def run_chat_completion(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
     call_kwargs = apply_endpoint_defaults(
-        {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+        {
+            **resolved.kwargs,
+            **with_request_fields(config, resolved.instance, request_fields, ctx.request_extras),
+            "model": resolved.dispatch_model,
+        },
+        resolved,
     )
     result = await run_standalone_non_stream(
         adapter=adapter,

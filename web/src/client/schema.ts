@@ -8871,6 +8871,8 @@ export interface components {
             top_p?: number | null;
             /** User */
             user?: string | null;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * CheckVerdictRequest

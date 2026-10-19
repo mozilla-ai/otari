@@ -437,6 +437,32 @@ it. A retry setting in an instance's `client_args` (`max_retries`, or
 reaches an [owned provider endpoint](provider-endpoints.md), which keeps its
 SDK's default outside a policy that can fall over.
 
+### Provider-specific request fields
+
+A chat completion request field that Otari does not know is dropped before the
+call, so a parameter only one provider takes never reaches it. An instance can
+let named fields through with `request_fields`. Exa's chat endpoint, for
+example, takes `text` to return the full text of its sources:
+
+```yaml
+providers:
+  exa:
+    provider_type: openai
+    api_base: https://api.exa.ai
+    api_key: ${EXA_API_KEY}
+    request_fields: [text]
+```
+
+A request reaching that instance with `"text": true` sends it to Exa in
+`extra_body`, which the OpenAI SDK, and the OpenAI-compatible providers built
+on it, merge into the request body. A field the instance does not list is
+dropped as before, and so is every listed field on a request another instance
+serves, including a routing policy's other candidates. A name the request
+already carries (`temperature`, `user`, ...), that shapes it (`model`,
+`messages`, `stream`) or that Otari sets itself (a credential, `api_base`,
+`extra_body`) cannot be listed, so a caller can never override the gateway's
+own values through it. Chat completions only.
+
 ### Messages through the Responses API
 
 A request to `/v1/messages` for a model with no Anthropic Messages API of its

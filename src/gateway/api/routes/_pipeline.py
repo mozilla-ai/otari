@@ -303,6 +303,7 @@ from gateway.services.provider_kwargs import (
     require_declared_credential,
     resolve_provider_selector,
     with_failover_retries,
+    with_request_fields,
 )
 from gateway.services.providers import (
     hosted_credential_for,
@@ -1349,6 +1350,9 @@ class RequestContext:
         # Monotonic clock reading taken at the very start of the handler
         # preamble; used to compute the usage log's latency_ms at settlement.
         self.started_at = started_at
+        # The request's fields beyond its schema's, forwarded only to a provider
+        # instance whose ``request_fields`` lists them (``with_request_fields``).
+        self.request_extras: dict[str, Any] = {}
         # Standalone-only: the provider selector resolved once for the
         # pricing/budget gate in `resolve_request_context`. Route handlers
         # reuse this for dispatch instead of calling `resolve_provider_selector`
@@ -5999,6 +6003,7 @@ def _failover_kwargs(
         refuse_managed_candidate(ctx.managed_only, attempt)
         require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
         fields = tool_ctx.request_fields_for(attempt.provider.value, attempt.model, base_request_fields)
+        fields = with_request_fields(config, attempt.instance, fields, ctx.request_extras)
         return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
 
     return _build
