@@ -232,7 +232,8 @@ def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> Tra
         steps=sum(1 for span in spans if span.kind == "step"),
         spans=len(spans),
         errors=len(errors),
-        tool_errors=sum(1 for span in errors if span.kind == "tool"),
+        # A tool's error goes back to the model, which usually carries on, so it does not fail the session.
+        failing_errors=sum(1 for span in errors if span.kind != "tool"),
         input_tokens=sum(span.input_tokens or 0 for span in llm),
         output_tokens=sum(span.output_tokens or 0 for span in llm),
         cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),
