@@ -1,9 +1,13 @@
 import { Chip, type ChipTone } from "@/design-system/indicators/Chip"
+import { formatCost, formatNumber } from "@/shared/helpers/format"
 import { GATE_KIND, GATE_MOMENT, says } from "./gateWords"
 import type { GuardrailVerdict } from "./gateway"
-import type { GateCheck } from "./types"
+import type { GateCheck, JudgeCalls } from "./types"
 
-const VERDICT: Record<GuardrailVerdict, { word: string; tone: ChipTone }> = {
+export const VERDICT: Record<
+  GuardrailVerdict,
+  { word: string; tone: ChipTone }
+> = {
   passed: { word: "Passed", tone: "success" },
   blocked: { word: "Blocked", tone: "warning" },
   flagged: { word: "Flagged", tone: "warning" },
@@ -37,6 +41,35 @@ function Read({ title, text }: { title: string; text: string }) {
       <pre className="whitespace-pre-wrap break-words bg-surface-subtle px-3 py-2 text-mono-caption">
         {text}
       </pre>
+    </section>
+  )
+}
+
+function judgeTokens(judge: JudgeCalls): string {
+  const cached = []
+  if (judge.cacheReadTokens > 0) {
+    cached.push(`${formatNumber(judge.cacheReadTokens)} read from the cache`)
+  }
+  if (judge.cacheWriteTokens > 0) {
+    cached.push(`${formatNumber(judge.cacheWriteTokens)} written to the cache`)
+  }
+  const input = `${formatNumber(judge.inputTokens)} input`
+  return `${cached.length > 0 ? `${input} (${cached.join(", ")})` : input}, ${formatNumber(judge.outputTokens)} output`
+}
+
+function JudgeFacts({ judge }: { judge: JudgeCalls }) {
+  return (
+    <section className="flex flex-col gap-1.5">
+      <h3 className="text-overline">Its model calls</h3>
+      <dl className="flex flex-col gap-2">
+        <Fact term="Model">{judge.model}</Fact>
+        <Fact term="Tokens">{judgeTokens(judge)}</Fact>
+        <Fact term="Cost">
+          {judge.cost != null
+            ? `${formatCost(judge.cost)}, in the session's cost`
+            : "Not priced"}
+        </Fact>
+      </dl>
     </section>
   )
 }
@@ -94,6 +127,8 @@ export function GateCard({ gate }: { gate: GateCheck }) {
           <Fact term="Guardrail version">{gate.digest}</Fact>
         ) : null}
       </dl>
+
+      {gate.judge ? <JudgeFacts judge={gate.judge} /> : null}
 
       {gate.evidence ? (
         <Read title="What it checked" text={gate.evidence} />

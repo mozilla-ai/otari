@@ -4,12 +4,22 @@ import { useApiKeyCeiling } from "@/shared/api/budgets"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { formatCost, formatPct, formatUsd } from "@/shared/helpers/format"
 
+import { CostByTool } from "./CostByTool"
 import { formatRelativeTime } from "./format"
+import { SessionAtAGlance } from "./SessionAtAGlance"
 import type { Trace } from "./types"
 
 type Gateway = NonNullable<Trace["gateway"]>
 
-function Spend({ cost, apiKeyId }: { cost: number; apiKeyId: string }) {
+function Spend({
+  cost,
+  apiKeyId,
+  isAtApiPrices,
+}: {
+  cost: number
+  apiKeyId: string
+  isAtApiPrices: boolean
+}) {
   // The ceilings read is deployment-wide, so only an operator asks for it.
   const { isOperator } = useDeploymentOperator()
   const ceiling = useApiKeyCeiling(apiKeyId, isOperator)
@@ -18,7 +28,9 @@ function Spend({ cost, apiKeyId }: { cost: number; apiKeyId: string }) {
     <section className="flex flex-col gap-1.5">
       <h3 className="text-overline">Spend</h3>
       <p className="text-body">
-        This session cost {formatCost(cost)}.
+        {isAtApiPrices
+          ? `At API prices, this session cost ${formatCost(cost)}. The agent reported its requests rather than sending them through Otari, so on a subscription plan this is what they are worth, not what was charged.`
+          : `This session cost ${formatCost(cost)}.`}
         {ceiling.data && limit !== null
           ? ` That is ${formatPct(limit > 0 ? cost / limit : 0)} of this key's ${formatUsd(limit)} ceiling, which has ${formatUsd(ceiling.data.current_spend)} spent this period.`
           : ceiling.isSuccess && !ceiling.data
@@ -52,7 +64,19 @@ export function GatewayPanel({
   const start = Date.parse(startedAt)
   return (
     <>
-      <Spend cost={gateway.cost} apiKeyId={gateway.apiKeyId} />
+      <SessionAtAGlance stats={gateway.stats} />
+      <Spend
+        cost={gateway.cost}
+        apiKeyId={gateway.apiKeyId}
+        isAtApiPrices={gateway.isAtApiPrices}
+      />
+      {gateway.toolCosts ? (
+        <CostByTool
+          breakdown={gateway.toolCosts}
+          total={gateway.cost}
+          onSelect={onSelect}
+        />
+      ) : null}
       <section className="flex flex-col gap-1.5">
         <h3 className="text-overline">Where the gateway stepped in</h3>
         {gateway.events.length === 0 ? (

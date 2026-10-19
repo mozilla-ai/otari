@@ -16954,6 +16954,56 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * ToolCostPublic
+         * @description An estimate of what one tool call cost, from the model requests either side of it.
+         */
+        ToolCostPublic: {
+            /**
+             * Calling
+             * @description Its share of the output of the request that called it.
+             */
+            calling: number;
+            /**
+             * Calls Sharing Request
+             * @description Tool calls the request that called it made, sharing its output.
+             */
+            calls_sharing_request: number;
+            /**
+             * Calls Sharing Result
+             * @description Tool calls whose results arrived together, sharing that growth.
+             */
+            calls_sharing_result: number;
+            /**
+             * Later Requests
+             * @description The later requests that read its result again.
+             */
+            later_requests: number;
+            /**
+             * Rereading
+             * @description Reading its result again in later requests, until the context was compacted.
+             */
+            rereading: number;
+            /**
+             * Result Tokens
+             * @description About how many tokens its result added to the context.
+             */
+            result_tokens: number;
+            /** Span Id */
+            span_id: string;
+            /**
+             * Subagent
+             * @description What a subagent the call ran cost, exactly.
+             */
+            subagent: number | null;
+            /** Total */
+            total: number;
+            /**
+             * Writing
+             * @description Writing its result into the context, on the next request.
+             */
+            writing: number;
+        };
+        /**
          * ToolMeter
          * @description One gateway-run tool's call counts on a request.
          *
@@ -17059,6 +17109,11 @@ export interface components {
              */
             state: "active" | "idle";
             summary: components["schemas"]["TraceSummaryPublic"];
+            /**
+             * Tool Costs
+             * @description An estimate for each tool call between two priced model requests, in the order they were made.
+             */
+            tool_costs: components["schemas"]["ToolCostPublic"][];
             /**
              * Truncated
              * @description True when the session holds more spans than one read returns.

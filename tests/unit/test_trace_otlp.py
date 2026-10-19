@@ -2,16 +2,17 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValue
 
 from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
-from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
+from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, TraceWriter, project_otlp_spans
 from gateway.services.traces._collector import call_id_digest
-from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
+from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, record_priced_requests
 from gateway.services.traces._reading import _gate_summaries
 from gateway.types.traces import TraceWrite, is_identifier
 
@@ -696,3 +697,51 @@ def test_a_prompt_claude_code_redacted_is_not_content() -> None:
     ).writes
 
     assert not write.spans[0].content
+
+
+def test_a_claude_code_model_request_keeps_its_request_id_though_it_looks_like_a_credential() -> None:
+    [write] = _project(_claude("l1", "llm_request", request_id="req_011CgBfeQi6uhNCE3aH5jmr3"))
+
+    assert write.spans[0].request_id == "req_011CgBfeQi6uhNCE3aH5jmr3"
+
+
+class _Writer:
+    def __init__(self) -> None:
+        self.writes: list[TraceWrite] = []
+
+    def submit(self, write: TraceWrite) -> None:
+        self.writes.append(write)
+
+
+@pytest.mark.parametrize(("budget_exempt", "written"), [(True, 1), (False, 0)])
+def test_a_priced_request_reaches_its_session_only_for_a_key_that_may_import(budget_exempt: bool, written: int) -> None:
+    writer = _Writer()
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [PricedRequest("req_1", "session-1", datetime.now(UTC), Decimal("0.01"), "claude_code")],
+        budget_exempt=budget_exempt,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id=None,
+        retention=timedelta(days=30),
+    )
+
+    assert len(writer.writes) == written
+
+
+@pytest.mark.parametrize(("source", "written"), [("claude_code", 1), ("otari-hook", 1), ("codex", 0), ("otel", 0)])
+def test_a_priced_request_reaches_a_session_only_from_a_source_the_trace_store_has(source: str, written: int) -> None:
+    writer = _Writer()
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [PricedRequest("req_1", "session-1", datetime.now(UTC), Decimal("0.01"), source)],
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id=None,
+        retention=timedelta(days=30),
+    )
+
+    assert len(writer.writes) == written

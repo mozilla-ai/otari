@@ -26,6 +26,7 @@ from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
     TRACE_BUCKET_DURATION,
+    USAGE_OPERATION,
     GuardrailDefinition,
     SpanRecord,
     TraceBucket,
@@ -293,7 +294,8 @@ def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> Tra
         workspace_id=key[0],
         trace_id=key[1],
         steps=sum(1 for span in spans if span.kind == "step"),
-        spans=len(spans),
+        # A span that only carries a request's cost is not one a person reads.
+        spans=sum(1 for span in spans if span.operation != USAGE_OPERATION),
         errors=len(errors),
         # A tool's error goes back to the model, which usually carries on, so it does not fail the session.
         # An MCP tool's too, a transport failure included; a failed MCP connection is not a tool's and does.

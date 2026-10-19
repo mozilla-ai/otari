@@ -20623,6 +20623,80 @@
         "title": "ToolChargeLine",
         "type": "object"
       },
+      "ToolCostPublic": {
+        "description": "An estimate of what one tool call cost, from the model requests either side of it.",
+        "properties": {
+          "calling": {
+            "description": "Its share of the output of the request that called it.",
+            "title": "Calling",
+            "type": "number"
+          },
+          "calls_sharing_request": {
+            "description": "Tool calls the request that called it made, sharing its output.",
+            "title": "Calls Sharing Request",
+            "type": "integer"
+          },
+          "calls_sharing_result": {
+            "description": "Tool calls whose results arrived together, sharing that growth.",
+            "title": "Calls Sharing Result",
+            "type": "integer"
+          },
+          "later_requests": {
+            "description": "The later requests that read its result again.",
+            "title": "Later Requests",
+            "type": "integer"
+          },
+          "rereading": {
+            "description": "Reading its result again in later requests, until the context was compacted.",
+            "title": "Rereading",
+            "type": "number"
+          },
+          "result_tokens": {
+            "description": "About how many tokens its result added to the context.",
+            "title": "Result Tokens",
+            "type": "integer"
+          },
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "subagent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a subagent the call ran cost, exactly.",
+            "title": "Subagent"
+          },
+          "total": {
+            "title": "Total",
+            "type": "number"
+          },
+          "writing": {
+            "description": "Writing its result into the context, on the next request.",
+            "title": "Writing",
+            "type": "number"
+          }
+        },
+        "required": [
+          "span_id",
+          "total",
+          "calling",
+          "writing",
+          "rereading",
+          "result_tokens",
+          "later_requests",
+          "calls_sharing_request",
+          "calls_sharing_result",
+          "subagent"
+        ],
+        "title": "ToolCostPublic",
+        "type": "object"
+      },
       "ToolMeter": {
         "additionalProperties": true,
         "description": "One gateway-run tool's call counts on a request.\n\nA TypedDict rather than a model, and every key optional, so a stored entry\nserializes back as it was written: a model with defaults would put\n``\"unit_rate\": null`` on every tool that has never been priced.",
@@ -20857,6 +20931,14 @@
           "summary": {
             "$ref": "#/components/schemas/TraceSummaryPublic"
           },
+          "tool_costs": {
+            "description": "An estimate for each tool call between two priced model requests, in the order they were made.",
+            "items": {
+              "$ref": "#/components/schemas/ToolCostPublic"
+            },
+            "title": "Tool Costs",
+            "type": "array"
+          },
           "truncated": {
             "description": "True when the session holds more spans than one read returns.",
             "title": "Truncated",
@@ -20876,7 +20958,8 @@
           "turns",
           "spans",
           "truncated",
-          "gates"
+          "gates",
+          "tool_costs"
         ],
         "title": "TraceDetailPublic",
         "type": "object"

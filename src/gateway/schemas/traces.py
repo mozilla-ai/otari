@@ -148,6 +148,21 @@ class GateSummaryPublic(BaseModel):
     )
 
 
+class ToolCostPublic(BaseModel):
+    """An estimate of what one tool call cost, from the model requests either side of it."""
+
+    span_id: str
+    total: float
+    calling: float = Field(description="Its share of the output of the request that called it.")
+    writing: float = Field(description="Writing its result into the context, on the next request.")
+    rereading: float = Field(description="Reading its result again in later requests, until the context was compacted.")
+    result_tokens: int = Field(description="About how many tokens its result added to the context.")
+    later_requests: int = Field(description="The later requests that read its result again.")
+    calls_sharing_request: int = Field(description="Tool calls the request that called it made, sharing its output.")
+    calls_sharing_result: int = Field(description="Tool calls whose results arrived together, sharing that growth.")
+    subagent: float | None = Field(description="What a subagent the call ran cost, exactly.")
+
+
 class TraceDetailPublic(BaseModel):
     summary: TraceSummaryPublic
     state: Literal["active", "idle"]
@@ -156,6 +171,9 @@ class TraceDetailPublic(BaseModel):
     truncated: bool = Field(description="True when the session holds more spans than one read returns.")
     gates: list[GateSummaryPublic] = Field(
         description="Each agent guardrail gate a coding agent's hook reported, the ones that did something first.",
+    )
+    tool_costs: list[ToolCostPublic] = Field(
+        description="An estimate for each tool call between two priced model requests, in the order they were made.",
     )
 
 
@@ -266,6 +284,21 @@ def detail_public(view: TraceView) -> TraceDetailPublic:
                 origin=gate.origin,  # type: ignore[arg-type]
             )
             for gate in view.gates
+        ],
+        tool_costs=[
+            ToolCostPublic(
+                span_id=cost.span_id,
+                total=float(cost.total),
+                calling=float(cost.calling),
+                writing=float(cost.writing),
+                rereading=float(cost.rereading),
+                result_tokens=cost.result_tokens,
+                later_requests=cost.later_requests,
+                calls_sharing_request=cost.calls_sharing_request,
+                calls_sharing_result=cost.calls_sharing_result,
+                subagent=float(cost.subagent) if cost.subagent is not None else None,
+            )
+            for cost in view.tool_costs
         ],
     )
 

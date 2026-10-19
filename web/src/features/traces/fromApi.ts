@@ -20,6 +20,8 @@ import {
   guardrailVerdict,
   mcpServer,
 } from "./gateway"
+import { sessionStats } from "./sessionStats"
+import { toolCostBreakdown } from "./toolCostBreakdown"
 import {
   buildTraceTree,
   type SpanNode,
@@ -195,6 +197,16 @@ function gateCheck(
       (span.otel_trace_id ? checkEvidence.get(span.otel_trace_id) : null) ??
       null,
     detail: span.content["gate.detail"] ?? null,
+    judge: span.model
+      ? {
+          model: span.model,
+          inputTokens: span.input_tokens ?? 0,
+          outputTokens: span.output_tokens ?? 0,
+          cacheReadTokens: span.cache_read_tokens ?? 0,
+          cacheWriteTokens: span.cache_write_tokens ?? 0,
+          cost: span.cost ?? null,
+        }
+      : null,
   }
 }
 
@@ -255,6 +267,8 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           promptTokens: turn.input_tokens,
           completionTokens: turn.output_tokens,
           cachedTokens: turn.cache_read_tokens,
+          cost: turn.cost > 0 ? turn.cost : undefined,
+          isRollup: true,
           metadata: {
             State: turn.state,
             "LLM calls": String(turn.llm_calls),
@@ -265,6 +279,9 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
     }
 
     const byId = new Map(detail.spans.map((span) => [span.span_id, span]))
+    const estimates = new Map(
+      detail.tool_costs.map((cost) => [cost.span_id, cost]),
+    )
     // The gates that stopped each tool call, by the tool call they hang under.
     const blockedBy = new Map<string, string[]>()
     for (const span of detail.spans) {
@@ -362,6 +379,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         cacheWriteTokens: span.cache_write_tokens ?? undefined,
         reasoningTokens: span.reasoning_tokens ?? undefined,
         cost: span.cost ?? undefined,
+        estimate: estimates.get(span.span_id),
         metadata: spanMetadata(span),
       })
       for (const child of node.children) if (!isGate(child)) visit(child)
@@ -411,6 +429,14 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           gates: detail.gates,
           apiKeyId: summary.api_key_id ?? "",
           cost: summary.cost,
+          isAtApiPrices: detail.spans.some(
+            (span) =>
+              span.kind === "llm" &&
+              span.origin === "otlp" &&
+              span.cost != null,
+          ),
+          toolCosts: toolCostBreakdown(detail, summary.cost),
+          stats: sessionStats(summary, detail),
         }
       : undefined,
   }

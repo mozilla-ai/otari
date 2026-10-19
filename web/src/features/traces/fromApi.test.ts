@@ -159,6 +159,58 @@ describe("toTrace", () => {
     })
   })
 
+  it("totals a session's cache tokens and says a cost the agent reported is at API prices", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({
+            span_id: "llm-1",
+            kind: "llm",
+            origin: "otlp",
+            input_tokens: 8510,
+            output_tokens: 2,
+            cache_read_tokens: 8000,
+            cache_write_tokens: 500,
+            cost: 0.25,
+          }),
+        ],
+      }),
+    )
+
+    expect(summarizeTrace(trace)).toMatchObject({
+      promptTokens: 8510,
+      cachedTokens: 8000,
+      cacheWriteTokens: 500,
+      totalCost: 0.25,
+    })
+    expect(trace.gateway?.isAtApiPrices).toBe(true)
+  })
+
+  it("gives a turn its cost without counting it twice in the session's total", () => {
+    const detail = traceDetail()
+    const [first] = detail.turns
+    // Turns are drawn as rows once a session has more than one.
+    const trace = toTrace(traceSummary(), {
+      ...detail,
+      turns: [
+        { ...first, cost: 0.04 },
+        { ...first, index: 1, step_ids: [], cost: 0 },
+      ],
+    })
+
+    expect(trace.observations.find((o) => o.isRollup)?.cost).toBe(0.04)
+    expect(summarizeTrace(trace).totalCost).toBe(
+      detail.spans.reduce((sum, span) => sum + (span.cost ?? 0), 0),
+    )
+  })
+
+  it("does not say a session the gateway served is at API prices", () => {
+    const trace = toTrace(traceSummary(), traceDetail())
+
+    expect(trace.gateway?.isAtApiPrices).toBe(false)
+  })
+
   it("marks a tool call that returned an error as a result the agent read, not an error", () => {
     const trace = toTrace(
       traceSummary(),
@@ -265,6 +317,50 @@ describe("toTrace", () => {
       level: "WARNING",
       statusMessage: "Flagged. The gate is advisory, so the agent went ahead.",
     })
+  })
+
+  it("gives a judge gate's check the model its calls ran on, their tokens and their cost", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({
+            span_id: "judge",
+            kind: "guardrail",
+            origin: "otlp",
+            model: "claude-haiku-4-5-20251001",
+            input_tokens: 6693,
+            output_tokens: 111,
+            cache_write_tokens: 6684,
+            cost: 0.0139,
+            attributes: {
+              "otari.gate.id": "writing-style",
+              "otari.gate.outcome": "pass",
+            },
+          }),
+          traceSpan({
+            span_id: "path",
+            kind: "guardrail",
+            origin: "otlp",
+            attributes: {
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "pass",
+            },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("judge")?.gate?.judge).toEqual({
+      model: "claude-haiku-4-5-20251001",
+      inputTokens: 6693,
+      outputTokens: 111,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 6684,
+      cost: 0.0139,
+    })
+    expect(byId.get("path")?.gate?.judge).toBeNull()
   })
 
   it("shows what a span was about as its input, where content was kept", () => {
