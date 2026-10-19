@@ -254,8 +254,9 @@ async def _ran_on_the_libraries(
             await stack.enter_async_context(backend)
         owner = owning_backend(pool, WEB_SEARCH_TOOL_NAME)
         for _ in range(calls):
-            text = await owner.call_tool(WEB_SEARCH_TOOL_NAME, call.arguments)
-        return _rendering(dialect).ran(replace(call, failed=is_tool_error(text)), owner)
+            text = await owner.call_tool(WEB_SEARCH_TOOL_NAME, dict(call.arguments))
+        ended: list[Any] = _rendering(dialect).ran(replace(call, failed=is_tool_error(text)), owner)
+        return ended
 
 
 @pytest.mark.asyncio

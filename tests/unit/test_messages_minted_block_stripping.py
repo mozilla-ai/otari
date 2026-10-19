@@ -156,7 +156,7 @@ async def test_a_pair_minted_from_a_library_search_is_stripped() -> None:
     assert search is not None
     call = NativeCall(WEB_SEARCH_TOOL_NAME, "toolu_1", {"query": "python"})
     async with WebSearchBackend(search, cap=WebToolCallCap(10), max_results=5) as backend:
-        await backend.call_tool(WEB_SEARCH_TOOL_NAME, call.arguments)
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, dict(call.arguments))
         rendering = native_rendering(WEB_SEARCH_TOOL_NAME, Dialect.MESSAGES)
         assert rendering is not None
         pair = [block.model_dump(exclude_none=True) for block in rendering.ran(call, backend)]

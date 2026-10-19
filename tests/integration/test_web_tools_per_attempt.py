@@ -46,6 +46,9 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
     WEB_SEARCH_TOOL_NAME,
     ToolUseBudget,
+    WebFetchBackend,
+    WebSearchBackend,
+    owning_backend,
 )
 
 from .conftest import declared_test_providers
@@ -213,6 +216,7 @@ class _Seen:
 
     provider_calls: list[dict[str, Any]] = field(default_factory=list)
     loop_calls: list[tuple[dict[str, Any], dict[str, Any]]] = field(default_factory=list)
+    pools: list[Any] = field(default_factory=list)
     web_backends: list[_FakeWebBackend] = field(default_factory=list)
     sandboxes: list[dict[str, Any]] = field(default_factory=list)
 
@@ -266,6 +270,7 @@ def _post_messages(
 
     async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int, **extra: Any) -> MessageResponse:
         seen.loop_calls.append((completion_kwargs, extra))
+        seen.pools.append(pool)
         if loop_fails and len(seen.loop_calls) == 1:
             raise _unavailable()
         return _reply("via-otari")
@@ -650,6 +655,35 @@ def test_caps_are_shared_by_attempts_that_run_different_tools(
     assert fallback_extra["use_budget"] is budget
     assert budget.exhausted(WEB_FETCH_TOOL_NAME), "the fetch cap only the fallback declares is not on the budget"
     assert not budget.exhausted(WEB_SEARCH_TOOL_NAME)
+
+
+def test_attempts_searching_on_an_instance_share_one_call_allowance(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig
+) -> None:
+    """Each attempt opens its own search and fetch backends, all on the request's one ``web_search_max_calls``.
+
+    A request locks in to its attempt once it has answered or reported a call, so a
+    search never runs on two attempts in a row; what holds the cap is that they share it.
+    """
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setattr(test_config, "search_tools", {"fake-search": {"provider": "fake"}})
+    monkeypatch.setattr(test_config, "web_search_default_tool", "fake-search")
+    headers = {**api_key_header, WEB_SEARCH_HEADER: "otari", WEB_FETCH_HEADER: "otari"}
+
+    response, seen = _post_messages(
+        client, headers, _messages_body("claude-then-vertex", _SEARCH, _FETCH), loop_fails=True
+    )
+
+    assert response.status_code == 200, response.text
+    head, fallback = seen.pools
+    assert head is not fallback
+    caps = set()
+    for pool in seen.pools:
+        search, fetch = owning_backend(pool, WEB_SEARCH_TOOL_NAME), owning_backend(pool, WEB_FETCH_TOOL_NAME)
+        assert isinstance(search, WebSearchBackend) and isinstance(fetch, WebFetchBackend)
+        caps |= {id(search._cap), id(fetch._cap)}
+    assert len(caps) == 1, "every attempt's search and fetch draw on one allowance"
+    assert seen.web_backends == [], "the old backend served none of them"
 
 
 def test_gateway_minted_blocks_are_dropped_and_native_ones_forwarded_to_each_attempt(
