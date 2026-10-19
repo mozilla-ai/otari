@@ -210,6 +210,7 @@ export function AddHostedProviderForm({
         errors={credentialErrors}
       />
       <ClientArgsField
+        isEncryptedAtRest
         value={draft.clientArgs}
         onChange={(clientArgs) => setDraft({ ...draft, clientArgs })}
         error={parsedClientArgs.ok ? null : parsedClientArgs.error}

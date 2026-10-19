@@ -850,6 +850,22 @@ describe("HostedProvidersPage, named providers and the move", () => {
     )
   })
 
+  it("says the client options are encrypted at rest, as the hosted store keeps them", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+
+    expect(
+      within(dialog).getByText(/Encrypted at rest, and an option/),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByText(/nothing here is encrypted/)).toBeNull()
+  })
+
   it("holds the save until a key is typed for a provider that needs one", async () => {
     mockApi({ providers: [] })
     const user = userEvent.setup()
