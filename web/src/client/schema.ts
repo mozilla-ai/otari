@@ -3960,7 +3960,8 @@ export interface paths {
          * @description Count sessions per bucket of their start, split by whether they failed.
          *
          *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, so a session whose only errors are tools' counts as succeeded.
+         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
+         *     counts as succeeded.
          */
         get: operations["organization-traces-trace_series"];
         put?: never;
@@ -6087,7 +6088,8 @@ export interface paths {
          * @description Count sessions per bucket of their start, split by whether they failed.
          *
          *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, so a session whose only errors are tools' counts as succeeded.
+         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
+         *     counts as succeeded.
          */
         get: operations["traces-trace_series"];
         put?: never;
@@ -16795,7 +16797,7 @@ export interface components {
             bucket: string;
             /**
              * Failed
-             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error goes back to the model, so it alone does not fail a session.
+             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
              */
             failed: number;
             /**
