@@ -88,7 +88,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          changed=$(git diff --cached --name-only)
+          changed=$(git diff --cached --name-only --no-renames)
           if [ "$SAME_REPO" = "true" ] && [[ "$HEAD_REF" == release/v* ]] && [ "$changed" = "CHANGELOG.md" ]; then
             echo "only_changelog=true" >> "$GITHUB_OUTPUT"
             echo "::notice title=Guardrails check skipped::A release pull request that regenerates CHANGELOG.md alone."
