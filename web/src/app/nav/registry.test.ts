@@ -337,15 +337,11 @@ describe("nav registry", () => {
   })
 
   it("gates every organization destination on a surface standalone reports", () => {
-    // The organization rail used to declare one row a standalone gateway did
-    // not serve, Usage, gated on `organization_usage` while that surface was
-    // hosted only. Both topologies publish it now, because the workspace rail's
-    // Usage reads one workspace at a time and a standalone deployment can serve
-    // several organizations. Pinned as the whole rail, because the failure mode
-    // is silent in both directions: a missing gate ships a link to a page that
-    // cannot work, and a gate on a surface the bootstrap does not report hides
-    // a page that can. A typo in a surface name is silent the same way, since
-    // `NavItemBase.surface` is a bare string.
+    // Pinned as the whole rail, because the failure mode is silent in both
+    // directions: a missing gate ships a link to a page that cannot work, and a
+    // gate on a surface the bootstrap does not report hides a page that can. A
+    // typo in a surface name is silent the same way, since `NavItemBase.surface`
+    // is a bare string.
     const standalone = [
       "admin",
       "budgets",

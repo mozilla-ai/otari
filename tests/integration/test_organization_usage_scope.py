@@ -459,9 +459,9 @@ def test_the_series_splits_only_the_callers_own_rows(client: TestClient, world: 
 def test_a_standalone_deployment_publishes_and_scopes_the_surface(client: TestClient, world: _World) -> None:
     """The shared config is standalone, so every test here is the several-organization standalone case.
 
-    Pinned explicitly because the surface used to be hosted only: the dashboard
-    gates its page on the bootstrap, and the reads behind it must keep each of the
-    deployment's organizations to its own rows.
+    The dashboard gates its page on the bootstrap, so both the published surface
+    and the reads behind it are pinned: each of the deployment's organizations
+    sees only its own rows.
     """
     answered = client.get(f"{API_ROOT}/bootstrap").json()
     assert answered["deployment_type"] == "standalone"
