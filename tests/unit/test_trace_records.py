@@ -132,7 +132,17 @@ def test_a_span_keeps_the_attributes_it_was_checked_with() -> None:
 
 @pytest.mark.parametrize(
     "value",
-    ["alice@example.com", "/Users/alice/notes.txt", "src/secret/notes.txt", "~/x", "sk-ant-api03-abc", "ghp_abc123"],
+    [
+        "alice@example.com",
+        "/Users/alice/notes.txt",
+        "src/secret/notes.txt",
+        "~/x",
+        "sk-ant-api03-abc",
+        "ghp_abc123",
+        "api-key-123456",
+        "api_key_123456",
+        "apikey-123456",
+    ],
 )
 def test_a_name_shaped_like_personal_data_or_a_credential_is_refused(value: str) -> None:
     with pytest.raises(InvalidSpanError, match="tool_name"):

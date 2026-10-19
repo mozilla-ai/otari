@@ -77,7 +77,9 @@ _NOT_A_NAME = (
     re.compile(r"[^@]+@[^@]+\.[A-Za-z]{2,}$"),
     re.compile(r"^[/~.]|//"),
     re.compile(r"/[^/]*\.[A-Za-z][A-Za-z0-9]{0,4}$"),
-    re.compile(r"^(sk|pk|rk|tk|ak)[-_]|^(ghp|gho|ghs|ghu|github_pat|glpat|xox[abposr])[-_]|^AKIA[0-9A-Z]{8}|^AIza"),
+    re.compile(
+        r"^(sk|pk|rk|tk|ak|api[-_]?key)[-_]|^(ghp|gho|ghs|ghu|github_pat|glpat|xox[abposr])[-_]|^AKIA[0-9A-Z]{8}|^AIza"
+    ),
     re.compile(r"(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{24,}"),
 )
 
