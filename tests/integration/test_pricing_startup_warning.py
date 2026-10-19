@@ -55,6 +55,35 @@ async def test_warning_when_default_pricing_disabled_and_no_rows(
     assert _WARNING_MARKER in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_warning_when_only_tools_are_priced(async_db: AsyncSession, caplog: pytest.LogCaptureFixture) -> None:
+    """A search tool's or the built-in fetcher's rate prices no model, so every model request is still refused."""
+    for key in ("exa:exa-search", "builtin:builtin_fetch"):
+        async_db.add(
+            ModelPricing(
+                model_key=key,
+                effective_at=datetime(2020, 1, 1, tzinfo=UTC),
+                input_price_per_million=5000.0,
+                output_price_per_million=0.0,
+            )
+        )
+    await async_db.commit()
+    config = GatewayConfig(
+        master_key="k",
+        require_pricing=True,
+        default_pricing=False,
+        search_tools={"exa-search": {"provider": "exa", "api_key": "k"}},
+    )
+
+    _capture_gateway_logs(caplog)
+    try:
+        await warn_if_require_pricing_without_pricing(config, async_db)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert _WARNING_MARKER in caplog.text
+
+
 _SEARCH_WARNING_MARKER = "No flat per-request rate is configured for search tool(s)"
 
 

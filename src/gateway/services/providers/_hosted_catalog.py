@@ -113,10 +113,7 @@ def classify_priced_keys(
     deployment with ``search_tools:`` configured loses the rate ``POST
     /v1/search`` reserves against. A fetch instance is keyed the same way off
     the fetch instances, the built-in fetcher's ``builtin:builtin_fetch``
-    among them, so ``fetch_tool_keys`` has to be passed too. Both are matched
-    whole: a search provider can share its name with a model provider, as
-    DeepSeek does, and a prefix match would keep that provider's unoffered
-    models as tool rates, so serve them hosted.
+    among them, so ``fetch_tool_keys`` has to be passed too.
 
     NOTE: a provider credentialed from the
     environment alone, with no ``providers:`` entry and no hosted provider, is

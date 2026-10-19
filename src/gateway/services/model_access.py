@@ -140,10 +140,8 @@ def is_model_allowed(allowlist: list[str] | None, canonical_key: str) -> bool:
 def is_tool_allowed(allowlist: list[str] | None, tool_key: str) -> bool:
     """Whether a search tool's ``<provider>:<tool>`` key is permitted.
 
-    Only an entry naming the tool grants it, never a wildcard: a search provider
-    can share its name with a model provider, as DeepSeek does, and
-    ``deepseek:*`` written for that provider's models must not also grant its
-    paid searches. ``None`` and ``[]`` mean what they do for a model.
+    Only an entry naming the tool grants it, never a wildcard, which grants
+    models. ``None`` and ``[]`` mean what they do for a model.
     """
     if allowlist is None:
         return True

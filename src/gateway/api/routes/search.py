@@ -106,7 +106,12 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.model_access import is_tool_allowed, model_not_allowed_detail, resolve_request_allowlist
+from gateway.services.model_access import (
+    is_model_allowed,
+    is_tool_allowed,
+    model_not_allowed_detail,
+    resolve_request_allowlist,
+)
 from gateway.services.pricing_service import find_model_pricing, flat_request_cost
 from gateway.services.tools import pick_direct_search_instance, resolve_direct_search, run_direct_search
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
@@ -360,6 +365,8 @@ async def _dispatch_search(
     key_allowlist = await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None and not is_tool_allowed(key_allowlist, tool_key):
         not_allowed_detail = model_not_allowed_detail(tool_key)
+        if is_model_allowed(key_allowlist, tool_key):
+            not_allowed_detail += f" A wildcard entry allows models only; name '{tool_key}' to allow this search tool."
         await log_rejection(
             not_allowed_detail,
             row_model=tool.name,

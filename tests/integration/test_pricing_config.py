@@ -241,12 +241,15 @@ def test_pricing_for_a_search_tool_provider_is_loaded(postgres_url: str, test_db
         dispose_override()
 
 
-def test_pricing_under_a_search_tools_provider_naming_no_tool_is_skipped(postgres_url: str, test_db: Session) -> None:
+def test_pricing_under_a_search_tools_provider_naming_no_tool_is_skipped(
+    postgres_url: str, test_db: Session, caplog: pytest.LogCaptureFixture
+) -> None:
     """Only the tool's own key is a tool rate.
 
     A search provider can share its name with a model provider, as DeepSeek
     does, and a model's price under that prefix still needs its ``providers``
-    entry, since a stored price is what lists a hosted model.
+    entry, since a stored price is what lists a hosted model. The warning
+    names the tools' keys rather than advising a ``providers`` entry.
     """
     config = GatewayConfig(
         database_url=postgres_url,
@@ -263,12 +266,19 @@ def test_pricing_under_a_search_tools_provider_naming_no_tool_is_skipped(postgre
     app = create_app(config)
     override_get_db, dispose_override = build_async_session_override(postgres_url)
     app.dependency_overrides[get_db] = override_get_db
+    gateway_logger = logging.getLogger("gateway")
+    gateway_logger.addHandler(caplog.handler)
     try:
-        with TestClient(app):
+        with caplog.at_level(logging.WARNING, logger="gateway"), TestClient(app):
             assert test_db.query(ModelPricing).filter(ModelPricing.model_key == "exa:exa-search").first() is not None
             assert test_db.query(ModelPricing).filter(ModelPricing.model_key == "exa:a-model").first() is None
     finally:
+        gateway_logger.removeHandler(caplog.handler)
         dispose_override()
+
+    [skipped] = [record.message for record in caplog.records if "Skipping pricing for 'exa:a-model'" in record.message]
+    assert "priced as exa:exa-search" in skipped
+    assert "Add 'exa' to the providers section" not in skipped
 
 
 def test_pricing_for_a_fetch_instance_provider_is_loaded(postgres_url: str, test_db: Session) -> None:

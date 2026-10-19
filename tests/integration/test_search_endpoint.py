@@ -489,6 +489,8 @@ def test_a_wildcard_entry_does_not_grant_a_search_tool(client: TestClient, maste
 
     denied = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
     assert denied.status_code == 403
+    # The refusal says how to grant the tool, since the wildcard looks as if it should.
+    assert "name 'fake:fake-search'" in denied.json()["detail"]
 
 
 def test_a_key_cannot_name_a_search_tool_its_users_wildcard_does_not_grant(
