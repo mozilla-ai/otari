@@ -20,6 +20,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
     surfaces: [
       "admin",
       "budgets",
+      "health_checks",
       "hosted_providers",
       "keys",
       "models",
