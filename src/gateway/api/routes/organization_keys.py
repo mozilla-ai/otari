@@ -242,7 +242,7 @@ async def create_own_key(
     )
     # A key must not grant more than its user's default, the same narrow-only
     # rule the operator surface enforces; here the user is always the caller.
-    if not is_allowlist_subset(allowed_models, owner.allowed_models):
+    if not is_allowlist_subset(allowed_models, owner.allowed_models, tool_keys=config.search_tool_keys()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
 
     # ``record_activation`` puts first-occurrence detection on the caller, and
@@ -368,7 +368,7 @@ async def update_own_key(
         user_default = (
             await db.execute(select(User.allowed_models).where(User.user_id == owner_user_id))
         ).scalar_one_or_none()
-        if not is_allowlist_subset(new_allowed, user_default):
+        if not is_allowlist_subset(new_allowed, user_default, tool_keys=config.search_tool_keys()):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
         key.allowed_models = new_allowed
     if request.metadata is not None:

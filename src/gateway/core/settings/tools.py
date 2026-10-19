@@ -539,13 +539,21 @@ class ToolSettings(BaseModel):
         """
         return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
 
-    def fetch_tool_providers(self) -> set[str]:
-        """The distinct providers backing the fetch instances, ``builtin`` among them.
+    def search_tool_keys(self) -> set[str]:
+        """The ``<provider>:<tool>`` keys the search tools are priced and allow-listed under.
 
-        The prefixes of the ``<provider>:<instance>`` keys a fetch instance's
-        calls are priced under, ``builtin:builtin_fetch`` included.
+        Matched whole, never by prefix: a search provider can share its name
+        with a model provider, as DeepSeek does, whose models' rates and
+        allow-list entries then carry the same prefix.
         """
-        return {instance.provider for instance in effective_fetch_instances(self).values()}
+        return {f"{entry.get('provider') or name}:{name}" for name, entry in self.search_tools.items()}
+
+    def fetch_tool_keys(self) -> set[str]:
+        """The ``<provider>:<instance>`` keys the fetch instances are priced under, ``builtin:builtin_fetch`` included.
+
+        Matched whole, for the reason :meth:`search_tool_keys` gives.
+        """
+        return {f"{instance.provider}:{name}" for name, instance in effective_fetch_instances(self).items()}
 
     def search_tools_without_backend_url(self) -> list[str]:
         """Search tools whose provider needs an ``api_base`` and has none to inherit.

@@ -58,10 +58,11 @@ class CatalogVerdict(NamedTuple):
 
 def _keep_reason(
     prefix: str | None,
+    canonical: str,
     *,
     deployment_instances: frozenset[str],
-    search_providers: frozenset[str],
-    fetch_providers: frozenset[str],
+    search_tool_keys: frozenset[str],
+    fetch_tool_keys: frozenset[str],
     owned_endpoints: frozenset[str],
 ) -> str | None:
     """What keeps an unoffered key on the catalog, or None when nothing does."""
@@ -69,9 +70,9 @@ def _keep_reason(
         return KEEP_UNATTRIBUTABLE
     if prefix == GATEWAY_TOOL_PRICING_PROVIDER:
         return KEEP_GATEWAY_TOOL
-    if prefix in search_providers:
+    if canonical in search_tool_keys:
         return KEEP_SEARCH_TOOL
-    if prefix in fetch_providers:
+    if canonical in fetch_tool_keys:
         return KEEP_FETCH_TOOL
     if prefix in deployment_instances:
         return KEEP_DEPLOYMENT_INSTANCE
@@ -85,8 +86,8 @@ def classify_priced_keys(
     *,
     offered: frozenset[str],
     deployment_instances: frozenset[str],
-    search_providers: frozenset[str] = frozenset(),
-    fetch_providers: frozenset[str] = frozenset(),
+    search_tool_keys: frozenset[str] = frozenset(),
+    fetch_tool_keys: frozenset[str] = frozenset(),
     owned_endpoints: frozenset[str] = frozenset(),
 ) -> list[CatalogVerdict]:
     """Decide, for each priced key, whether the hosted-providers surface is what lists it.
@@ -108,11 +109,14 @@ def classify_priced_keys(
     NOTE: not every rate on the list prices a model. A gateway-run tool is keyed
     under the reserved ``otari`` provider, and a configured search tool is keyed
     ``<provider>:<tool>`` off ``config.search_tools`` rather than
-    ``config.providers``, so ``search_providers`` has to be passed or a
+    ``config.providers``, so ``search_tool_keys`` has to be passed or a
     deployment with ``search_tools:`` configured loses the rate ``POST
     /v1/search`` reserves against. A fetch instance is keyed the same way off
     the fetch instances, the built-in fetcher's ``builtin:builtin_fetch``
-    among them, so ``fetch_providers`` has to be passed too.
+    among them, so ``fetch_tool_keys`` has to be passed too. Both are matched
+    whole: a search provider can share its name with a model provider, as
+    DeepSeek does, and a prefix match would keep that provider's unoffered
+    models as tool rates, so serve them hosted.
 
     NOTE: a provider credentialed from the
     environment alone, with no ``providers:`` entry and no hosted provider, is
@@ -134,9 +138,10 @@ def classify_priced_keys(
             continue
         reason = _keep_reason(
             prefix,
+            canonical,
             deployment_instances=deployment_instances,
-            search_providers=search_providers,
-            fetch_providers=fetch_providers,
+            search_tool_keys=search_tool_keys,
+            fetch_tool_keys=fetch_tool_keys,
             owned_endpoints=owned_endpoints,
         )
         verdict: Verdict = "removed" if reason is None else "kept"

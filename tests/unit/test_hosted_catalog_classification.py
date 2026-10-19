@@ -20,16 +20,16 @@ def _verdicts(
     priced: list[tuple[str, int]],
     offered: set[str] = set(),  # noqa: B006
     deployment_instances: set[str] = set(),  # noqa: B006
-    search_providers: set[str] = set(),  # noqa: B006
-    fetch_providers: set[str] = set(),  # noqa: B006
+    search_tool_keys: set[str] = set(),  # noqa: B006
+    fetch_tool_keys: set[str] = set(),  # noqa: B006
     owned_endpoints: set[str] = set(),  # noqa: B006
 ) -> dict[str, tuple[str, str | None]]:
     results = classify_priced_keys(
         priced,
         offered=frozenset(offered),
         deployment_instances=frozenset(deployment_instances),
-        search_providers=frozenset(search_providers),
-        fetch_providers=frozenset(fetch_providers),
+        search_tool_keys=frozenset(search_tool_keys),
+        fetch_tool_keys=frozenset(fetch_tool_keys),
         owned_endpoints=frozenset(owned_endpoints),
     )
     return {verdict.model_key: (verdict.verdict, verdict.reason) for verdict in results}
@@ -71,7 +71,7 @@ def test_a_gateway_tool_rate_is_kept_and_says_why() -> None:
 
 
 def test_a_configured_search_tool_rate_is_kept() -> None:
-    verdicts = _verdicts(priced=[("tavily:search", 1)], offered={"openai:gpt-4o"}, search_providers={"tavily"})
+    verdicts = _verdicts(priced=[("tavily:search", 1)], offered={"openai:gpt-4o"}, search_tool_keys={"tavily:search"})
 
     assert verdicts == {"tavily:search": ("kept", KEEP_SEARCH_TOOL)}
 
@@ -81,13 +81,44 @@ def test_a_configured_fetch_tool_rate_is_kept() -> None:
     verdicts = _verdicts(
         priced=[("tabstack:tabstack", 1), ("builtin:builtin_fetch", 1)],
         offered={"openai:gpt-4o"},
-        fetch_providers={"tabstack", "builtin"},
+        fetch_tool_keys={"tabstack:tabstack", "builtin:builtin_fetch"},
     )
 
     assert verdicts == {
         "tabstack:tabstack": ("kept", KEEP_FETCH_TOOL),
         "builtin:builtin_fetch": ("kept", KEEP_FETCH_TOOL),
     }
+
+
+def test_a_model_under_a_search_tools_provider_is_not_kept_as_a_tool_rate() -> None:
+    """DeepSeek searches and serves models under the one prefix; only the tool's own key is a tool rate.
+
+    Kept by prefix, the unoffered model would stay on the price list, and a
+    deployment rate is what serves a model hosted.
+    """
+    verdicts = _verdicts(
+        priced=[("deepseek:deepseek", 1), ("deepseek:deepseek-chat", 1), ("deepseek:deepseek-fetch", 1)],
+        offered={"openai:gpt-4o"},
+        search_tool_keys={"deepseek:deepseek"},
+        fetch_tool_keys={"deepseek:deepseek-fetch"},
+    )
+
+    assert verdicts == {
+        "deepseek:deepseek": ("kept", KEEP_SEARCH_TOOL),
+        "deepseek:deepseek-chat": ("removed", None),
+        "deepseek:deepseek-fetch": ("kept", KEEP_FETCH_TOOL),
+    }
+
+
+def test_a_model_under_a_search_tools_provider_is_kept_by_its_own_instance() -> None:
+    verdicts = _verdicts(
+        priced=[("deepseek:deepseek-chat", 1)],
+        offered={"openai:gpt-4o"},
+        deployment_instances={"deepseek"},
+        search_tool_keys={"deepseek:deepseek"},
+    )
+
+    assert verdicts == {"deepseek:deepseek-chat": ("kept", KEEP_DEPLOYMENT_INSTANCE)}
 
 
 def test_a_model_served_by_a_configured_instance_is_kept() -> None:

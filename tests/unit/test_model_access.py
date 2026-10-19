@@ -11,6 +11,7 @@ from gateway.services.model_access import (
     effective_allowlist,
     is_allowlist_subset,
     is_model_allowed,
+    is_tool_allowed,
     key_model_refusal,
     org_model_refusal,
     validate_allowed_models,
@@ -102,6 +103,24 @@ def test_is_allowlist_subset_concrete_and_wildcards() -> None:
     assert is_allowlist_subset(["openai:gpt-4*"], ["openai:gpt-4o"]) is False
     # Every child entry must be covered.
     assert is_allowlist_subset(["openai:gpt-4o", "anthropic:claude-3"], ["openai:*"]) is False
+
+
+def test_only_an_entry_naming_a_search_tool_grants_it() -> None:
+    """DeepSeek searches and serves models under one prefix; ``deepseek:*`` is for its models."""
+    assert is_tool_allowed(None, "deepseek:deepseek") is True
+    assert is_tool_allowed([], "deepseek:deepseek") is False
+    assert is_tool_allowed(["deepseek:deepseek"], "deepseek:deepseek") is True
+    assert is_tool_allowed(["deepseek:*"], "deepseek:deepseek") is False
+    assert is_tool_allowed(["deepseek:deep*"], "deepseek:deepseek") is False
+
+
+def test_a_key_names_a_search_tool_only_where_its_user_does() -> None:
+    """A wildcard never grants a tool, so it cannot cover a key's entry for one either."""
+    tools = {"deepseek:deepseek"}
+    assert is_allowlist_subset(["deepseek:deepseek"], ["deepseek:*"], tool_keys=tools) is False
+    assert is_allowlist_subset(["deepseek:deepseek"], ["deepseek:deepseek"], tool_keys=tools) is True
+    # A model under the same prefix is still covered by the wildcard.
+    assert is_allowlist_subset(["deepseek:deepseek-chat"], ["deepseek:*"], tool_keys=tools) is True
 
 
 def test_validate_passthrough_and_dedup() -> None:

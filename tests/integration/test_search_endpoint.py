@@ -476,6 +476,39 @@ def test_search_honors_the_keys_model_allowlist(
     assert allowed.status_code == 200
 
 
+def test_a_wildcard_entry_does_not_grant_a_search_tool(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """DeepSeek searches and serves models under one prefix, so ``deepseek:*`` grants its models alone."""
+    client.post(f"{API_ROOT}/users", json={"user_id": "glob-user"}, headers=master_key_header)
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "glob-key", "user_id": "glob-user", "allowed_models": ["fake:*"]},
+        headers=master_key_header,
+    )
+    assert key.status_code == 200, key.text
+    headers = {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+
+    denied = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+    assert denied.status_code == 403
+
+
+def test_a_key_cannot_name_a_search_tool_its_users_wildcard_does_not_grant(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A key may only narrow its user's list, and ``fake:*`` on the user grants no search tool."""
+    user = client.post(
+        f"{API_ROOT}/users", json={"user_id": "glob-capped", "allowed_models": ["fake:*"]}, headers=master_key_header
+    )
+    assert user.status_code == 200, user.text
+
+    resp = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "k", "user_id": "glob-capped", "allowed_models": ["fake:fake-search"]},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 400
+    assert "narrow" in resp.json()["detail"].lower()
+
+
 def test_search_logs_an_unknown_tool_refusal(
     client: TestClient,
     master_key_header: dict[str, str],

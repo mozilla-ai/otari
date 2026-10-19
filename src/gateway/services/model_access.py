@@ -16,6 +16,7 @@ the inference gates and the catalog filter feed it the *same* canonical
 """
 
 import uuid
+from collections.abc import Container
 from dataclasses import dataclass
 from http import HTTPStatus
 
@@ -93,16 +94,20 @@ def _covers(parent: list[str], entry: str) -> bool:
     return False
 
 
-def is_allowlist_subset(child: list[str] | None, parent: list[str] | None) -> bool:
+def is_allowlist_subset(
+    child: list[str] | None, parent: list[str] | None, *, tool_keys: Container[str] = frozenset()
+) -> bool:
     """Whether ``child`` grants no more than ``parent`` (a key vs its user default).
 
     ``child is None`` means the key inherits the parent, so it can never broaden ->
     always a subset. ``parent is None`` is unrestricted, so any child fits. Otherwise
     every child entry must be covered by the parent; an empty child grants nothing.
+    An entry naming a search tool, one of ``tool_keys``, is covered only by the
+    same entry, since no wildcard grants a tool (:func:`is_tool_allowed`).
     """
     if child is None or parent is None:
         return True
-    return all(_covers(parent, entry) for entry in child)
+    return all(entry in parent if entry in tool_keys else _covers(parent, entry) for entry in child)
 
 
 def _entry_matches(entry: str, canonical_key: str) -> bool:
@@ -130,6 +135,19 @@ def is_model_allowed(allowlist: list[str] | None, canonical_key: str) -> bool:
     if allowlist is None:
         return True
     return any(_entry_matches(entry, canonical_key) for entry in allowlist)
+
+
+def is_tool_allowed(allowlist: list[str] | None, tool_key: str) -> bool:
+    """Whether a search tool's ``<provider>:<tool>`` key is permitted.
+
+    Only an entry naming the tool grants it, never a wildcard: a search provider
+    can share its name with a model provider, as DeepSeek does, and
+    ``deepseek:*`` written for that provider's models must not also grant its
+    paid searches. ``None`` and ``[]`` mean what they do for a model.
+    """
+    if allowlist is None:
+        return True
+    return tool_key in allowlist
 
 
 def _known_prefix(config: GatewayConfig, prefix: str) -> bool:

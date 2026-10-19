@@ -341,7 +341,7 @@ async def create_key(
 
     # A key must not grant more than its user's default (a freshly created user
     # has no default, so this only bites when attaching to a restricted user).
-    if not is_allowlist_subset(allowed_models, user.allowed_models):
+    if not is_allowlist_subset(allowed_models, user.allowed_models, tool_keys=config.search_tool_keys()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
 
     # Checked rather than left to the foreign key: an id naming no workspace is
@@ -503,7 +503,7 @@ async def update_key(
             user_default = (
                 await db.execute(select(User.allowed_models).where(User.user_id == key.user_id))
             ).scalar_one_or_none()
-            if not is_allowlist_subset(new_allowed, user_default):
+            if not is_allowlist_subset(new_allowed, user_default, tool_keys=config.search_tool_keys()):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
         key.allowed_models = new_allowed
     if request.is_service_key is not None:

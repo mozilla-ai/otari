@@ -111,7 +111,10 @@ which bills end users that belong to its own user.
 
 A user's `allowed_models` is inherited by newly created keys unless the key
 defines its own list. A missing list allows any model, an empty list allows none,
-and entries may use provider wildcards such as `openai:*`.
+and entries may use provider wildcards such as `openai:*`. A search tool, which
+`POST /api/v1/search` checks as `<provider>:<tool>`, is allowed only by an entry
+that names it: a wildcard allows models, so `deepseek:*` lets a key call
+DeepSeek's models and not its search.
 
 Deleting or deactivating a user prevents future access but preserves historical
 usage.

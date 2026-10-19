@@ -174,8 +174,9 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
 
     # A search or fetch instance's flat rate is keyed ``<provider>:<instance>``, and
-    # its provider is never under ``providers``.
-    tool_providers = config.search_tool_providers() | config.fetch_tool_providers()
+    # its provider is never under ``providers``. Matched whole, because a search
+    # provider can share its name with a model provider, as DeepSeek does.
+    tool_keys = config.search_tool_keys() | config.fetch_tool_keys()
 
     for raw_model_key, pricing_config in config.pricing.items():
         model_key = normalize_pricing_key(config, raw_model_key)
@@ -184,13 +185,14 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         if (
             instance not in config.providers
             and instance not in config.decision_providers
-            and instance not in tool_providers
+            and model_key not in tool_keys
             and instance != GATEWAY_TOOL_PRICING_PROVIDER
         ):
             logger.warning(
                 "Skipping pricing for '%s': provider '%s' is not listed in the providers section. "
                 "The provider may still work if its credentials come from the environment, but its "
-                "pricing is ignored. Add '%s' to the providers section, or remove this pricing entry.",
+                "pricing is ignored. Add '%s' to the providers section, or remove this pricing entry. "
+                "A search or fetch tool's rate is keyed <provider>:<tool name>.",
                 model_key,
                 instance,
                 instance,

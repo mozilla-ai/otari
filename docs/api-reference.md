@@ -445,7 +445,8 @@ for it works against Otari with its base URL changed. `include_raw` and
 the only configured tool. A call that names no tool runs on the workspace's
 [organization search key](tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
-the key allow-list entry (`<provider>:<tool>`), the `rate_limits` rules, the
+the key allow-list entry (`<provider>:<tool>`, which no wildcard such as
+`exa:*` matches), the `rate_limits` rules, the
 timeout and the usage row's model and provider.
 
 **Request.**

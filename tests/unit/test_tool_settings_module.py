@@ -371,14 +371,19 @@ def test_a_fetch_entry_named_like_a_stored_search_tool_is_left_out(caplog: pytes
     )
 
 
-def test_the_fetch_providers_are_the_fetch_instances_own_builtin_included() -> None:
-    """The prefixes of the fetch instances' rate keys, which the configuration's prices may use."""
-    assert GatewayConfig().fetch_tool_providers() == {"builtin"}
+def test_the_fetch_tool_keys_are_the_fetch_instances_rate_keys_builtin_included() -> None:
+    """The keys the configuration's prices for fetch instances are written under."""
+    assert GatewayConfig().fetch_tool_keys() == {"builtin:builtin_fetch"}
     config = GatewayConfig(
         fetch_tools={"tabstack": {"provider": "tabstack", "api_key": "k"}, "exa-fetch": {"provider": "exa"}},
         search_tools={"exa": _EXA},
     )
-    assert config.fetch_tool_providers() == {"builtin", "tabstack", "exa"}
+    assert config.fetch_tool_keys() == {"builtin:builtin_fetch", "tabstack:tabstack", "exa:exa-fetch"}
+
+
+def test_the_search_tool_keys_name_each_tool_under_its_provider() -> None:
+    config = GatewayConfig(search_tools={"exa": _EXA, "exa-search": _EXA})
+    assert config.search_tool_keys() == {"exa:exa", "exa:exa-search"}
 
 
 def test_a_search_entry_named_builtin_fetch_loads_beside_the_implicit_instance(
