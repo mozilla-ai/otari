@@ -27,23 +27,20 @@ date. Fields the adapter does not read are ignored, so a field DeepSeek adds
 breaks nothing.
 
 API: https://api-docs.deepseek.com/api/fetch and
-https://api-docs.deepseek.com/guides/search. Pricing, read 2026-10-18: $0.75
-per 1,000 successful fetches; 5 fetches a second per account, and a per-domain
-limit DeepSeek does not state. DeepSeek's free period covers only calls made
-through its Harness, Claude Code or Codex, not this adapter's.
+https://api-docs.deepseek.com/guides/search. Pricing, read 2026-10-19: $0.75
+per 1,000 successful fetches; 25 fetches a second per account, apart from
+searches, and a per-domain limit DeepSeek does not state. DeepSeek's free
+period covers only calls made through its Harness, Claude Code or Codex, not
+this adapter's.
 """
 
-import re
 from typing import Any
 
 import httpx
 
 from any_fetch._api import AnyFetch
-from any_fetch._errors import ProviderError
+from any_fetch._errors import ProviderError, safe_tag
 from any_fetch._types import FetchedPage, ProviderMetadata
-
-# An error type or code is kept only when it looks like one, so no text from the body reaches an exception.
-_TAG = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 class DeepSeekProvider(AnyFetch):
@@ -95,13 +92,8 @@ def _body(response: httpx.Response) -> dict[str, Any]:
         body = None
     if response.status_code >= 400:
         error = body.get("error") if isinstance(body, dict) else None
-        tag = (_tag(error.get("type")) or _tag(error.get("code"))) if isinstance(error, dict) else None
+        tag = (safe_tag(error.get("type")) or safe_tag(error.get("code"))) if isinstance(error, dict) else None
         raise ProviderError(DeepSeekProvider.METADATA.name, response.status_code, tag or "http_error")
     if not isinstance(body, dict):
         raise ProviderError(DeepSeekProvider.METADATA.name, response.status_code, "invalid_response")
     return body
-
-
-def _tag(value: Any) -> str | None:
-    """An error ``type`` or ``code`` when it looks like one, else ``None``, so no body text reaches an error."""
-    return value if isinstance(value, str) and _TAG.fullmatch(value) else None

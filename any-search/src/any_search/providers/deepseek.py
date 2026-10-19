@@ -2,8 +2,9 @@
 
 DeepSeek's Search API is a search engine of its own, apart from its models.
 DeepSeek publishes no SDK for it, so the adapter sends what its documentation
-shows: the query, ``count`` from ``max_results`` and at most 50, and nothing
-else unless the caller passes a native option. Each hit's snippet is DeepSeek's
+shows: the query, ``count`` when ``max_results`` is passed, at most 50, and
+nothing else unless the caller passes a native option. Without ``max_results``
+DeepSeek returns its default of 10. Each hit's snippet is DeepSeek's
 ``snippet``; its longer ``summary``, written for a model, stays in ``raw``, and
 page text comes back only with ``need_content``.
 
@@ -28,37 +29,27 @@ and ``date`` as an RFC 3339 date-time or null. Anything else raises
 read are ignored, so a field DeepSeek adds breaks nothing.
 
 API: https://api-docs.deepseek.com/api/search and
-https://api-docs.deepseek.com/guides/search. Pricing, read 2026-10-18: $0.75
-per 1,000 successful searches, whatever ``count`` is; 5 searches a second per
-account. DeepSeek's free period covers only calls made through its Harness,
-Claude Code or Codex, not this adapter's.
+https://api-docs.deepseek.com/guides/search. Pricing, read 2026-10-19: $0.75
+per 1,000 successful searches, whatever ``count`` is, and none for a search that
+returns no results; 100 searches a second per account, apart from fetches.
+DeepSeek's free period covers only calls made through its Harness, Claude Code
+or Codex, not this adapter's.
 """
 
-import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
 from any_search._api import AnySearch
-from any_search._errors import ProviderError
-from any_search._types import OptionSpec, ProviderMetadata, SearchHit, SearchResult, TimeRange
+from any_search._errors import ProviderError, safe_tag
+from any_search._types import TIME_RANGE_SPANS, OptionSpec, ProviderMetadata, SearchHit, SearchResult, TimeRange
 
 MAX_RESULTS = 50
 """The most results DeepSeek returns for one search."""
 
-_TIME_RANGE = {
-    "day": timedelta(days=1),
-    "week": timedelta(weeks=1),
-    "month": timedelta(days=30),
-    "year": timedelta(days=365),
-}
-
-# Native options copied into the request as they are. ``count`` has a rule of its own, below.
+# Native options copied into the request as they are.
 _PASSED_THROUGH = ("ori_question", "localization", "need_content")
-
-# An error type or code is kept only when it looks like one, so no text from the body reaches an exception.
-_TAG = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 class DeepSeekProvider(AnySearch):
@@ -77,12 +68,6 @@ class DeepSeekProvider(AnySearch):
         query_in_url=False,
         key_in_url=False,
         options=[
-            OptionSpec(
-                name="count",
-                type="integer",
-                default=10,
-                description="How many results to return, 1 to 50, used only when max_results is not passed.",
-            ),
             OptionSpec(
                 name="ori_question",
                 type="string",
@@ -112,13 +97,9 @@ class DeepSeekProvider(AnySearch):
         options: dict[str, Any],
     ) -> SearchResult:
         payload: dict[str, Any] = {"query": query if time_range is None else f"{query} after:{_since(time_range)}"}
-        count: Any = max_results if max_results is not None else options.get("count")
-        # A count DeepSeek cannot take is sent as it is, for DeepSeek to refuse; only a usable one caps the hits.
-        limit = count if isinstance(count, int) and not isinstance(count, bool) and count >= 1 else None
+        limit = None if max_results is None else min(max_results, MAX_RESULTS)
         if limit is not None:
-            count = limit = min(limit, MAX_RESULTS)
-        if count is not None:
-            payload["count"] = count
+            payload["count"] = limit
         payload.update({name: options[name] for name in _PASSED_THROUGH if options.get(name) is not None})
 
         endpoint = f"{(self._api_base or '').rstrip('/')}/v1/tools/search"
@@ -130,13 +111,13 @@ class DeepSeekProvider(AnySearch):
         if not isinstance(results, list):
             raise _unexpected(response)
         # Only the items the caller gets are read, so only they are checked.
-        hits = [_hit(item, response) for item in (results if limit is None else results[:limit])]
+        hits = [_hit(item, response) for item in results[:limit]]
         return SearchResult(provider=self.METADATA.name, hits=hits, cost_source="none", raw=body)
 
 
 def _since(time_range: TimeRange) -> str:
     """The day the range starts on, in UTC, as the ``YYYY-MM-DD`` DeepSeek's ``after:`` takes."""
-    return (datetime.now(UTC) - _TIME_RANGE[time_range]).date().isoformat()
+    return (datetime.now(UTC) - TIME_RANGE_SPANS[time_range]).date().isoformat()
 
 
 def _body(response: httpx.Response) -> dict[str, Any]:
@@ -147,16 +128,11 @@ def _body(response: httpx.Response) -> dict[str, Any]:
         body = None
     if response.status_code >= 400:
         error = body.get("error") if isinstance(body, dict) else None
-        tag = (_tag(error.get("type")) or _tag(error.get("code"))) if isinstance(error, dict) else None
+        tag = (safe_tag(error.get("type")) or safe_tag(error.get("code"))) if isinstance(error, dict) else None
         raise ProviderError(DeepSeekProvider.METADATA.name, response.status_code, tag or "http_error")
     if not isinstance(body, dict):
         raise ProviderError(DeepSeekProvider.METADATA.name, response.status_code, "invalid_response")
     return body
-
-
-def _tag(value: Any) -> str | None:
-    """An error ``type`` or ``code`` when it looks like one, else ``None``, so no body text reaches an error."""
-    return value if isinstance(value, str) and _TAG.fullmatch(value) else None
 
 
 def _unexpected(response: httpx.Response) -> ProviderError:

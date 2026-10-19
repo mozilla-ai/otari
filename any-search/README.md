@@ -97,7 +97,8 @@ description, then exits without searching.
 `deepseek` calls DeepSeek's [Search API](https://api-docs.deepseek.com/api/search),
 `POST /v1/tools/search`, a search engine of DeepSeek's own, apart from its models, with the key in
 a bearer header, read from `DEEPSEEK_API_KEY` when not passed. DeepSeek publishes no SDK for it, so
-the adapter sends the query and `count` and nothing else unless you pass a native option.
+the adapter sends the query, and `count` when `max_results` is passed, and nothing else unless you
+pass a native option.
 
 | `SearchHit` | From DeepSeek |
 |---|---|
@@ -106,9 +107,9 @@ the adapter sends the query and `count` and nothing else unless you pass a nativ
 | `text` | `content`, which DeepSeek returns only with `need_content=True`; empty counts as none |
 | `published` | `date`, RFC 3339 in UTC, or `null` when DeepSeek does not know it |
 
-DeepSeek reports no cost. `max_results` becomes `count`, at most 50, and wins over the `count`
-option. DeepSeek has no recency parameter, so `time_range` becomes its `after:` query operator, the
-day the range starts on as `YYYY-MM-DD`, appended to the query. The operator counts toward
+DeepSeek reports no cost. `max_results` becomes `count`, at most 50; without it DeepSeek returns
+its default of 10. DeepSeek has no recency parameter, so `time_range` becomes its `after:` query
+operator, the day the range starts on as `YYYY-MM-DD`, appended to the query. The operator counts toward
 DeepSeek's 128-character limit on the query, so a query within 17 characters of that limit is
 refused with a 400 when a `time_range` is passed. The other native options are `ori_question`,
 `localization` (an IP address) and `need_content`; an option set to `None` is not sent.

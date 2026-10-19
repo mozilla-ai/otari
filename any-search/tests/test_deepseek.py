@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from any_search import AnySearch, ProviderError, SearchResult
+from any_search import AnySearch, ProviderError, SearchResult, UnsupportedParameterError
 from any_search.providers.deepseek import MAX_RESULTS
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "deepseek"
@@ -71,7 +71,7 @@ def test_metadata() -> None:
     assert (metadata.tier, metadata.env_key, metadata.requires_api_key) == ("production", "DEEPSEEK_API_KEY", True)
     assert (metadata.query_in_url, metadata.key_in_url) == (False, False)
     assert metadata.max_results == MAX_RESULTS == 50
-    assert [option.name for option in metadata.options] == ["count", "ori_question", "localization", "need_content"]
+    assert [option.name for option in metadata.options] == ["ori_question", "localization", "need_content"]
 
 
 @pytest.mark.asyncio
@@ -97,22 +97,16 @@ async def test_max_results_sets_count_and_cuts_the_hits() -> None:
 
 
 @pytest.mark.asyncio
-async def test_max_results_wins_over_count_and_is_capped_at_deepseeks_limit() -> None:
-    _, request = await _search(_answer(), max_results=80, count=3)
+async def test_max_results_is_capped_at_deepseeks_limit() -> None:
+    _, request = await _search(_answer(), max_results=80)
     assert _payload(request)["count"] == MAX_RESULTS
 
 
 @pytest.mark.asyncio
-async def test_count_stands_in_for_max_results() -> None:
-    result, request = await _search(_answer(_item(), _item()), count=1)
-    assert _payload(request)["count"] == 1
-    assert len(result.hits) == 1
-
-
-@pytest.mark.asyncio
-async def test_a_count_deepseek_cannot_take_is_sent_for_deepseek_to_refuse() -> None:
-    _, request = await _search(_answer(_item()), count=0)
-    assert _payload(request)["count"] == 0
+async def test_deepseeks_own_count_is_not_an_option() -> None:
+    """``max_results`` is the one name for the count."""
+    with pytest.raises(UnsupportedParameterError):
+        await _search(_answer(), count=3)
 
 
 @pytest.mark.asyncio
