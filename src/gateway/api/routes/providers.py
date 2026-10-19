@@ -59,7 +59,6 @@ from gateway.services.provider_store_service import (
     reencrypt_credentials,
     refresh_provider_cache,
     save_credential,
-    stored_instances,
 )
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -129,10 +128,10 @@ class ProvidersResponse(BaseModel):
     providers: list[ProviderInfoSchema]
 
 
-def _to_schema(info: ProviderInfo, stored: frozenset[str]) -> ProviderInfoSchema:
+def _to_schema(info: ProviderInfo) -> ProviderInfoSchema:
     caps = info.capabilities
     return ProviderInfoSchema(
-        source="dashboard" if info.instance in stored else "config",
+        source=info.source,
         instance=info.instance,
         provider_type=info.provider_type,
         name=info.name,
@@ -166,8 +165,7 @@ async def list_providers(
     pricing links, and display name from the bundled any-llm and models.dev
     datasets. No provider is contacted, so this is cheap and always available.
     """
-    stored = stored_instances()
-    return ProvidersResponse(providers=[_to_schema(info, stored) for info in list_provider_info(config)])
+    return ProvidersResponse(providers=[_to_schema(info) for info in list_provider_info(config)])
 
 
 class KnownProviderSummarySchema(BaseModel):
