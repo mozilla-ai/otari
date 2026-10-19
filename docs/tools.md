@@ -266,7 +266,10 @@ runs on the tool it names, and each tool keeps the rules it has alone:
 
 The tools share one loop, so its limit is shared too: `max_tool_iterations`
 bounds the rounds of the whole request, and so does a workspace code policy's
-`max_iterations` when the request runs code on Otari's sandbox.
+`max_iterations` when the request runs code on Otari's sandbox. The last round
+`max_tool_iterations` allows offers none of Otari's tools and tells the model to
+answer from the results it already has, so a model that keeps searching ends with
+an answer rather than a failed request ([MCP](mcp.md) says the same of its loop).
 
 A tool declared in a provider's own words is still [decided per
 attempt](#who-runs-a-tool), so on a fallback chain one attempt may run the

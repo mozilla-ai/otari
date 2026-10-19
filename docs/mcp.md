@@ -21,8 +21,12 @@ When the model emits an MCP tool call, Otari:
 - appends the tool result to the conversation
 - calls the model again
 
-The loop stops when the model returns a normal assistant response or hits
-`max_tool_iterations`.
+The loop stops when the model returns a normal assistant response. Its last
+allowed round, the one `max_tool_iterations` names, offers the model none of
+Otari's tools and tells it to answer from the results it already has, so a model
+that would keep calling tools still ends with an answer. Your own tools stay on
+offer in that round. The request fails only if the model calls one of Otari's
+tools anyway.
 
 ## Caller-orchestrated MCP
 
@@ -415,7 +419,7 @@ are managed there.
 ## Limits and safety
 
 - `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request, as [Combining tools](tools.md#combining-tools) describes. A server tool named like a built-in the request declares (`web_search`, `web_fetch` or `code_execution`) is refused with a `400`
-- `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`
+- `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` too, but a fixed one that repeats neither name, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check
 - MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
