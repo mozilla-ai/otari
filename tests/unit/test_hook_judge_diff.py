@@ -6,21 +6,25 @@ their content is rendered, so a mocked `subprocess.run` would only assert
 that the fixture matches itself.
 """
 
+import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
 import otari_agent.hook as hook_cli
+from otari_agent.domain.policy import parse_policy
+from otari_agent.domain.types import JudgeVerdict, PolicySpec
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs a real git binary")
 
 
 def _repo(root: Path) -> Path:
     """A repository with one committed file, ready for a working-tree change."""
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
     (root / "kept.py").write_text("value = 1\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(
@@ -229,3 +233,227 @@ def test_a_range_ending_at_the_working_tree_starts_at_its_base(tmp_path: Path) -
     assert diff is not None
     assert "+committed = True" in diff
     assert "+untracked = True" in diff
+
+
+def test_stop_range_uses_the_upstream_merge_base_for_committed_and_working_tree_changes(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/feature", base], cwd=repo, check=True)
+    subprocess.run(["git", "switch", "-q", "-c", "feature"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "remote.origin.url", "https://example.invalid/repo.git"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "config", "branch.feature.remote", "origin"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "branch.feature.merge", "refs/heads/feature"], cwd=repo, check=True)
+    (repo / "committed.py").write_text("committed = True\n", encoding="utf-8")
+    _commit(repo)
+    (repo / "uncommitted.py").write_text("uncommitted = True\n", encoding="utf-8")
+
+    diff_range = hook_cli._hook_collect_stop_diff_range(repo)
+    assert diff_range is not None
+    assert diff_range.base == base
+    assert diff_range.description is not None
+    assert "upstream origin/feature merge base" in diff_range.description
+
+    paths = hook_cli._hook_collect_changed_paths(repo, diff_range)
+    assert paths is not None
+    assert paths == ["committed.py", "uncommitted.py"]
+    diff = hook_cli._hook_collect_diff(repo, diff_range)
+    assert diff is not None
+    assert "+committed = True" in diff
+    assert "+uncommitted = True" in diff
+
+
+def test_stop_range_falls_back_to_the_remote_default_branch_without_an_upstream(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", base], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "switch", "-q", "-c", "feature"], cwd=repo, check=True)
+    (repo / "committed.py").write_text("committed = True\n", encoding="utf-8")
+    _commit(repo)
+
+    diff_range = hook_cli._hook_collect_stop_diff_range(repo)
+    assert diff_range is not None
+    assert diff_range.base == base
+    assert diff_range.description is not None
+    assert "default branch refs/remotes/origin/main merge base" in diff_range.description
+
+
+def test_stop_range_falls_back_to_the_default_branch_when_upstream_has_no_common_history(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    unrelated_upstream = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit-tree",
+            tree,
+            "-m",
+            "unrelated upstream",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", base], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/feature", unrelated_upstream], cwd=repo, check=True)
+    subprocess.run(["git", "config", "remote.origin.url", "https://example.invalid/repo.git"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "switch", "-q", "-c", "feature"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "branch.feature.remote", "origin"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "branch.feature.merge", "refs/heads/feature"], cwd=repo, check=True)
+    (repo / "committed.py").write_text("committed = True\n", encoding="utf-8")
+    _commit(repo)
+
+    diff_range = hook_cli._hook_collect_stop_diff_range(repo)
+
+    assert diff_range is not None
+    assert diff_range.base == base
+    assert diff_range.description is not None
+    assert "default branch refs/remotes/origin/main merge base" in diff_range.description
+
+
+def test_stop_range_falls_back_to_head_when_no_upstream_or_default_branch_exists(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    subprocess.run(["git", "switch", "-q", "-c", "topic"], cwd=repo, check=True)
+    subprocess.run(["git", "branch", "-D", "main"], cwd=repo, check=True, capture_output=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (repo / "untracked.py").write_text("untracked = True\n", encoding="utf-8")
+
+    diff_range = hook_cli._hook_collect_stop_diff_range(repo)
+
+    assert diff_range is not None
+    assert diff_range.base == head
+    assert diff_range.description == "HEAD (no upstream or default branch was available)"
+    assert hook_cli._hook_collect_changed_paths(repo, diff_range) == ["untracked.py"]
+    diff = hook_cli._hook_collect_diff(repo, diff_range)
+    assert diff is not None
+    assert "+untracked = True" in diff
+
+
+def test_stop_judge_receives_committed_changes_and_reports_its_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", base], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "switch", "-q", "-c", "feature"], cwd=repo, check=True)
+    (repo / "committed.py").write_text("# TODO: review this\n", encoding="utf-8")
+    _commit(repo)
+    diff_range = hook_cli._hook_collect_stop_diff_range(repo)
+    assert diff_range is not None
+    paths = hook_cli._hook_collect_changed_paths(repo, diff_range)
+    assert paths == ["committed.py"]
+
+    spec = parse_policy(
+        "schema_version: '1.0'\n"
+        "policy:\n  id: test\n"
+        "gates:\n"
+        "  - id: review\n"
+        "    type: judge\n"
+        "    runs: [stop.session]\n"
+        "    enforcement: advisory\n"
+        "    rubric: Find TODO comments.\n",
+        source="test",
+    )
+    seen: list[str] = []
+    monkeypatch.setattr(hook_cli, "_hook_log_judge_call", lambda *args, **kwargs: None)
+
+    def fake_run_judge(rubric: str, diff: str, transcript: str, **kwargs: object) -> tuple[str, str]:
+        seen.append(diff)
+        return "fail", "TODO found"
+
+    monkeypatch.setattr(hook_cli, "_hook_run_judge", fake_run_judge)
+    verdicts = hook_cli._hook_collect_judge_verdicts(
+        spec,
+        hook_cli._JudgedChange(repo, paths or [], diff_range=diff_range),
+        hook_cli._JudgeSettings(max_gates=5),
+    )
+    assert verdicts[0].outcome == "fail"
+    assert "Diff base: default branch refs/remotes/origin/main merge base" in seen[0]
+    assert "+# TODO: review this" in seen[0]
+    assert "Diff base: default branch refs/remotes/origin/main merge base" in verdicts[0].reasoning
+
+
+def test_stop_hook_blocks_a_committed_path_and_sends_the_same_range_to_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", base], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "switch", "-q", "-c", "feature"], cwd=repo, check=True)
+    (repo / "committed.py").write_text("# TODO: review this\n", encoding="utf-8")
+    _commit(repo)
+    (repo / ".otari").mkdir()
+    (repo / ".otari/guardrails.yml").write_text(
+        "schema_version: '1.0'\n"
+        "policy:\n  id: test\n"
+        "gates:\n"
+        "  - id: protected-path\n"
+        "    type: path\n"
+        "    runs: [stop.working_tree]\n"
+        "    enforcement: required\n"
+        "    forbidden: ['committed.py']\n"
+        "    message: committed path must be blocked\n"
+        "  - id: review\n"
+        "    type: judge\n"
+        "    runs: [stop.session]\n"
+        "    enforcement: advisory\n"
+        "    rubric: Find TODO comments.\n"
+        "    message: TODO found\n",
+        encoding="utf-8",
+    )
+
+    judged_changes: list[hook_cli._JudgedChange] = []
+
+    def fake_collect_judges(
+        spec: PolicySpec, change: hook_cli._JudgedChange, settings: hook_cli._JudgeSettings
+    ) -> list[JudgeVerdict]:
+        judged_changes.append(change)
+        return [JudgeVerdict(gate_id="review", outcome="pass", reasoning="clear")]
+
+    monkeypatch.setattr(hook_cli, "_hook_collect_judge_verdicts", fake_collect_judges)
+    result = CliRunner().invoke(
+        hook_cli.hook,
+        input=json.dumps({"hook_event_name": "Stop", "cwd": str(repo)}),
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "committed path must be blocked" in result.output
+    assert len(judged_changes) == 1
+    assert "committed.py" in judged_changes[0].changed_paths
+    assert judged_changes[0].diff_range.base == base

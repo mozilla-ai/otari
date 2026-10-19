@@ -61,8 +61,9 @@ Five commands apply here:
 ## Registering the hook
 
 Run `otari hook setup` from inside the repository being guarded. It requires a
-Git repository: it refuses outside one, and `git status` is where the `Stop`
-event's evidence comes from.
+Git repository: it refuses outside one, and the branch merge-base diff plus
+untracked working-tree paths are where the `Stop` event's path evidence comes
+from.
 
 The hook runs at most five judge gates per `Stop` event, highest `priority` first, and skips the rest. The CI judge job runs up to twenty (see [The CI jobs](#the-ci-jobs)). To run the same judge gates locally, set `OTARI_HOOK_MAX_JUDGES=20` in the environment the harness starts from, such as your shell profile. Each judge gate is one model call, so this raises the cost of a `Stop` event that many gates apply to.
 
@@ -151,9 +152,10 @@ agent reaches the shell often, including immediately after an `Edit` call is
 refused.
 
 `stop.working_tree` covers that. At the end of the turn the same globs are
-checked against `git status --porcelain`, which reports the file whatever wrote
-it. It cannot prevent the write, so the turn is blocked over a file that has
-already changed and the change has to be reverted.
+checked against the branch merge-base diff plus untracked working-tree paths,
+which reports the file whatever wrote it, including a committed change. It
+cannot prevent the write, so the turn is blocked over a file that has already
+changed and the change has to be reverted.
 
 `otari hook setup` registers the `Stop` hook unconditionally, so nothing further
 is installed for this; the gate itself has to name `stop.working_tree`.
@@ -189,9 +191,8 @@ matches are under
 ### Reads have no second moment
 
 A write the shell slips past still lands in the tree, so `stop.working_tree`
-reports it. A read lands nowhere: nothing changes, `git status` has nothing to
-report, and no `Stop` evidence exists or could exist. `cat .env` is refused by a
-`command` gate or not at all.
+reports it. A read lands nowhere: it adds no path to the `Stop` evidence.
+`cat .env` is refused by a `command` gate or not at all.
 
 A rule about secrets is therefore two gates: a `path` gate running at
 `pre_tool_use.read_target`, which refuses the `Read` tool, and a `command` gate
@@ -359,7 +360,7 @@ PreToolUse, Edit/Write: docs/public/openapi.json
   quiet      no-hand-edited-changelog (required)
   ...
 
-Stop, the finished turn: 1 changed path(s), 1 command(s)
+Stop, the finished turn: 1 changed path(s), 1 command(s); judge diff base: the branch merge base with its upstream, falling back to the default branch and then HEAD
   quiet      openapi-changed-needs-postman (required)
   fires      openapi-changed-needs-generator (required)
   would run  no-leftover-conflict-markers (verifier, required)
@@ -378,7 +379,7 @@ Nothing is contacted and no model is called, so a `judge` gate reports
 otari guardrails check --base origin/main
 ```
 
-The change runs from the commit where the branch left `--base` to the working tree, untracked files included. `--head <commit>` ends it at a commit instead, and reads the change from Git alone. `--base` defaults to `HEAD`, which checks the uncommitted change, the way a `Stop` event does.
+The change runs from the commit where the branch left `--base` to the working tree, untracked files included. `--head <commit>` ends it at a commit instead, and reads the change from Git alone. `--base` defaults to `HEAD` for this explicit command. A `Stop` event selects the branch's merge base with its upstream, falls back to the remote default branch when the upstream is unavailable or has no common history, and uses `HEAD` if neither is available. It includes the working tree, so commits made during the session remain in the evidence. `otari guardrails validate --path` prints this Stop base assumption in its preview.
 
 Every gate sees the paths the change touches as `stop.working_tree` evidence. A deleted path counts as changed, and a rename counts as both of its paths.
 
@@ -394,7 +395,7 @@ A `required` gate that fails, errors or gets no result exits 1. A gate the chang
 
 `--type` runs only the gate types it names, and is repeatable. Without it, the report also lists the `command` and `command_if_changed` gates that cannot run. Naming `verifier` together with `--head` is a usage error. `--judge-model`, `--judge-cli` and `--max-judges` choose the judge's model, its CLI and how many judge gates run, as they do for `otari hook`, and read the same environment variables. `--guardrails-from <directory>` reads the guardrail files and the verifier scripts from another checkout instead of the one being checked. A check reads the repository's own guardrail only, and leaves your files in `~/.otari/` out, so it reads the same on every machine.
 
-A verifier that finds what changed through `git status`, as `no-stranded-docblocks.py` does, sees only the uncommitted part of a change. The path and verifier job below stages the whole pull request against its merge base for that reason.
+A verifier that finds what changed through `git status`, as `no-stranded-docblocks.py` does, sees only the uncommitted part of a change. The path and verifier job below stages the whole pull request against its merge base for that reason; the Stop path and judge evidence use that same merge-base range.
 
 ### The CI jobs
 
@@ -493,10 +494,10 @@ window. A gate is evaluated: it either matches the evidence or it does not, and
 a `required` one that matches refuses the call or blocks the turn.
 
 A gate reads what happened rather than what was reported. Its evidence is the
-path a tool call declares, the command a tool call declares, and
-`git status --porcelain` once the turn is over. Where `otari hook` reads the
-session transcript, it reads the tool calls recorded in it, not the agent's
-account of the session.
+path a tool call declares, the command a tool call declares, and the branch
+merge-base diff plus untracked working-tree paths once the turn is over. Where
+`otari hook` reads the session transcript, it reads the tool calls recorded in
+it, not the agent's account of the session.
 
 A `PreToolUse` gate runs before the action, so a refusal leaves nothing to
 undo. CI reports a force-push after the force-push.
