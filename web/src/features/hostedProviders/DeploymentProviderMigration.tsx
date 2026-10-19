@@ -31,6 +31,19 @@ const OUTCOME_LABELS: Record<
   failed: "Not moved: failed",
 }
 
+// A row copied to a hosted provider whose deployment provider was kept, because
+// the copy offers no model yet, is still served from the old page: it reads
+// apart from a completed move, in the caution color.
+function isRetained(row: DeploymentProviderMigrationRow) {
+  return row.outcome === "migrated" && !row.source_removed
+}
+
+function outcomeLabel(row: DeploymentProviderMigrationRow) {
+  return isRetained(row)
+    ? "Copied, still served from the Deployment providers page"
+    : OUTCOME_LABELS[row.outcome]
+}
+
 function MigrationRows({ rows }: { rows: DeploymentProviderMigrationRow[] }) {
   return (
     <ul className="flex max-h-72 flex-col gap-2 overflow-y-auto">
@@ -43,12 +56,13 @@ function MigrationRows({ rows }: { rows: DeploymentProviderMigrationRow[] }) {
             ) : null}
             <span
               className={
-                row.outcome === "migrate" || row.outcome === "migrated"
+                (row.outcome === "migrate" || row.outcome === "migrated") &&
+                !isRetained(row)
                   ? "text-caption text-success"
                   : "text-caption text-warning"
               }
             >
-              {OUTCOME_LABELS[row.outcome]}
+              {outcomeLabel(row)}
               {row.outcome === "migrated" && row.models !== null
                 ? `, ${row.models} ${row.models === 1 ? "model" : "models"}`
                 : ""}
@@ -82,6 +96,9 @@ export function DeploymentProviderMigration() {
   // sent are the rows on screen rather than ones another operator has since
   // changed.
   const isPreviewCurrent = preview.isSuccess && !preview.isFetching
+  const report = apply.data?.rows ?? []
+  const moved = report.filter((row) => row.source_removed).length
+  const retained = report.filter(isRetained).length
 
   return (
     <>
@@ -89,9 +106,10 @@ export function DeploymentProviderMigration() {
       {apply.data ? (
         <InfoBanner tone="info">
           <p role="status">
-            Moved{" "}
-            {apply.data.rows.filter((row) => row.outcome === "migrated").length}{" "}
-            of {apply.data.rows.length} deployment providers.
+            Moved {moved} of {report.length} deployment providers.
+            {retained > 0
+              ? ` ${retained} copied and still served from the Deployment providers page until ${retained === 1 ? "its" : "their"} models are offered here.`
+              : ""}
           </p>
           <div className="mt-2">
             <MigrationRows rows={apply.data.rows} />
@@ -142,7 +160,8 @@ export function DeploymentProviderMigration() {
         confirmVariant="primary"
         isConfirmDisabled={movable === 0 || !isPreviewCurrent}
         isPending={apply.isPending}
-        error={apply.error}
+        // A failed re-read holds the confirm, so its reason shows here too.
+        error={apply.error ?? preview.error}
         onConfirm={() => {
           if (!isPreviewCurrent) return
           apply.mutate(reviewed, { onSuccess: () => setIsOpen(false) })

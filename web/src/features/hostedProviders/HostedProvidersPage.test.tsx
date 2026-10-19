@@ -755,6 +755,105 @@ describe("HostedProvidersPage, named providers and the move", () => {
     ).toBeInTheDocument()
   })
 
+  it("reports a row copied but still served from the old page apart from a completed move", async () => {
+    mockApi({
+      migration: [
+        {
+          instance: "quiet",
+          provider: "openai",
+          api_base: null,
+          outcome: "migrate",
+          detail: null,
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+      ],
+    })
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (
+        String(input).includes("/hosted-providers/migration") &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse({
+          rows: [
+            {
+              instance: "quiet",
+              provider: "openai",
+              api_base: null,
+              outcome: "migrated",
+              detail: null,
+              models: 0,
+              source_removed: false,
+              notes: [],
+            },
+          ],
+        })
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Review the move" }),
+    )
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Move 1 provider",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/Moved 0 of 1 deployment providers\. 1 copied/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /^Copied, still served from the Deployment providers page/,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows inside the dialog why a failed re-read holds the move", async () => {
+    mockApi({
+      migration: [
+        {
+          instance: "openai-eu",
+          provider: "openai",
+          api_base: null,
+          outcome: "migrate",
+          detail: null,
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("button", { name: "Review the move" })
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/hosted-providers/migration")) {
+        return jsonResponse({ detail: "Preview went away" }, 400)
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+
+    await user.click(screen.getByRole("button", { name: "Review the move" }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      await within(dialog).findByText("Preview went away"),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: "Move 1 provider" }),
+    ).toBeDisabled()
+  })
+
   it("says the move could not be previewed rather than hiding it", async () => {
     mockApi()
     const fetchMock = vi.mocked(globalThis.fetch)
