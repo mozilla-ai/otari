@@ -62,7 +62,10 @@ def _filters(
     has_error: Annotated[
         bool | None, Query(description="Only sessions with, or without, an unrecovered error.")
     ] = None,
-    q: Annotated[str | None, Query(max_length=64, description="A trace id, or the start of one.")] = None,
+    q: Annotated[
+        str | None,
+        Query(max_length=128, description="The start of a trace id, or of a session's name (the id its client chose)."),
+    ] = None,
 ) -> TraceFilter:
     return TraceFilter(
         workspace_ids=(workspace_id,) if workspace_id is not None else (),
@@ -73,7 +76,7 @@ def _filters(
         harnesses=tuple(harness or ()),
         session_sources=tuple(session_source or ()),
         has_error=has_error,
-        trace_id_prefix=q or None,
+        search=q or None,
     )
 
 

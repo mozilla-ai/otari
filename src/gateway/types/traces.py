@@ -274,7 +274,8 @@ class TraceFilter:
     harnesses: tuple[str, ...] = ()
     session_sources: tuple[str, ...] = ()
     has_error: bool | None = None
-    trace_id_prefix: str | None = None
+    # Matches the start of a trace's id or of its name.
+    search: str | None = None
 
 
 @dataclass(frozen=True)

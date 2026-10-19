@@ -7191,7 +7191,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -7269,7 +7269,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -7383,7 +7383,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -10867,7 +10867,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -10943,7 +10943,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -11053,7 +11053,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
                   "disabled": true,
                   "key": "q",
                   "value": ""

@@ -296,7 +296,9 @@ def _conditions(query: TraceFilter) -> list[ColumnElement[bool]]:
         conditions.append(Trace.error_count > 0)
     elif query.has_error is False:
         conditions.append(Trace.error_count == 0)
-    if query.trace_id_prefix:
-        escaped = query.trace_id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        conditions.append(Trace.trace_id.like(f"{escaped}%", escape="\\"))
+    if query.search:
+        escaped = query.search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conditions.append(
+            or_(Trace.trace_id.like(f"{escaped}%", escape="\\"), Trace.name.like(f"{escaped}%", escape="\\"))
+        )
     return conditions
