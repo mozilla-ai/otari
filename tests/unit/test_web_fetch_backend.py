@@ -291,7 +291,6 @@ async def test_a_fetched_page_is_billed_and_a_failed_one_is_not(fetcher: AsyncMo
         await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
     assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 1, "errors": 1}}
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: 1}
 
 
 @pytest.mark.asyncio
@@ -938,7 +937,7 @@ async def test_the_old_counter_refuses_the_eleventh_call_before_dispatch() -> No
             await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
     assert counter.count == MAX_WEB_RETRIEVAL_CALLS
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: MAX_WEB_RETRIEVAL_CALLS}
+    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": MAX_WEB_RETRIEVAL_CALLS, "errors": 0}}
 
 
 @pytest.mark.asyncio
@@ -966,7 +965,7 @@ async def test_the_old_counter_survives_the_backend_being_rebuilt_between_routin
         with pytest.raises(WebRetrievalLimitExceededError):
             await second.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: MAX_WEB_RETRIEVAL_CALLS}
+    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": MAX_WEB_RETRIEVAL_CALLS, "errors": 0}}
 
 
 # ---------------------------------------------------------------------------

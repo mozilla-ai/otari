@@ -170,10 +170,6 @@ class ToolUsageTally:
     def is_empty(self) -> bool:
         return not self._counts
 
-    def billable_calls(self) -> dict[str, int]:
-        """Successful calls per tool."""
-        return {tool: counts["billed"] for tool, counts in self._counts.items() if counts["billed"]}
-
     def label_calls(self) -> list[LabelCalls]:
         """Successful calls per tool and label, the units settlement prices."""
         return [
