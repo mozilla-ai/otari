@@ -1613,7 +1613,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         ),
     },
     "gateway.models.providers.ProviderCredential": {
-        "repository": None,
+        "repository": "gateway/repositories/providers/provider_credential_repository.py",
         "baseline": ("gateway/services/provider_store_service.py",),
     },
     "gateway.models.providers.ProviderEndpoint": {

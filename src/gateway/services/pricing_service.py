@@ -111,7 +111,9 @@ def normalize_effective_at(value: datetime | None) -> datetime:
     return normalized.astimezone(UTC)
 
 
-def _resolve_default(provider: str | None, model: str, as_of: datetime) -> ModelsDevPrice | None:
+def _resolve_default(
+    provider: str | None, model: str, as_of: datetime, implementation: str | None = None
+) -> ModelsDevPrice | None:
     """The models.dev entry pricing ``model`` at ``as_of``, or ``None`` on a miss.
 
     A date no generation covers is a miss too, so callers degrade to unpriced.
@@ -120,7 +122,11 @@ def _resolve_default(provider: str | None, model: str, as_of: datetime) -> Model
     implementation behind an instance is looked up per call because it is
     registered state: re-typing an instance in the dashboard takes effect at once.
     """
-    return resolve_as_of(active_timeline(), as_of, provider, model, _provider_implementation(provider))
+    if implementation == provider:
+        implementation = None
+    return resolve_as_of(
+        active_timeline(), as_of, provider, model, implementation or _provider_implementation(provider)
+    )
 
 
 def model_context_window(provider: str | None, model: str, as_of: datetime | None = None) -> int | None:
@@ -149,7 +155,9 @@ def default_pricing_reference(provider: str | None, model: str, as_of: datetime 
     return None if entry is None else entry.reference
 
 
-def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> ModelPricing | None:
+def default_model_pricing(
+    provider: str | None, model: str, as_of: datetime, *, implementation: str | None = None
+) -> ModelPricing | None:
     """Resolve default pricing for a model from the models.dev catalog.
 
     Returns a *transient* (unpersisted) ``ModelPricing`` carrying the per-million
@@ -166,14 +174,20 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     Context-tiered pricing keeps its thresholds. A provider-agnostic match may
     resolve an ambiguous model *name* to a different provider's rate only when
     every provider listing it agrees on the price.
+
+    ``implementation`` names the any-llm implementation behind ``provider``
+    where the caller knows it and the registered resolver does not (a named
+    hosted provider).
     """
-    resolved = default_pricing_match(provider, model, as_of)
+    resolved = default_pricing_match(provider, model, as_of, implementation=implementation)
     return None if resolved is None else resolved[0]
 
 
-def default_pricing_match(provider: str | None, model: str, as_of: datetime) -> tuple[ModelPricing, str] | None:
+def default_pricing_match(
+    provider: str | None, model: str, as_of: datetime, *, implementation: str | None = None
+) -> tuple[ModelPricing, str] | None:
     """:func:`default_model_pricing` with the reference of the entry that answered, from one resolution."""
-    entry = _resolve_default(provider, model, as_of)
+    entry = _resolve_default(provider, model, as_of, implementation)
     if entry is None or entry.input is None or entry.output is None:
         return None
 

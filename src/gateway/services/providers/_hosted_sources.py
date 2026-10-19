@@ -1,8 +1,8 @@
 """Where a hosted provider comes from: a stored row, or an entry in configuration.
 
 The deployment's hosted providers are the stored rows merged with the
-``hosted_providers:`` block, one per provider, and a row wins over an entry of
-the same provider. Everything that serves, lists or dials a hosted provider
+``hosted_providers:`` block, one per name, and a row wins over an entry of the
+same name. Everything that serves, lists or dials a hosted provider
 reads this merged view, so a provider declared in configuration is served,
 discovered and swept exactly as a stored one is. An entry is read from the
 configuration on every use and never written to the database.
@@ -31,7 +31,7 @@ class HostedSource:
 
     row: HostedProvider | None = None
     entry: HostedProviderEntry | None = None
-    # Whether a configuration entry of the same provider is shadowed by ``row``.
+    # Whether a configuration entry of the same name is shadowed by ``row``.
     shadows_config: bool = False
 
     @property
@@ -39,7 +39,13 @@ class HostedSource:
         return "database" if self.row is not None else "config"
 
     @property
-    def provider(self) -> str:
+    def name(self) -> str:
+        """What requests, the roster, the price list and usage know this provider by."""
+        return self.row.name if self.row is not None else self._entry.name
+
+    @property
+    def implementation(self) -> str:
+        """The any-llm implementation serving it."""
         return self.row.provider if self.row is not None else self._entry.provider
 
     @property
@@ -67,7 +73,13 @@ class HostedSource:
         if self.row is not None:
             return credential_of(self.row, quiet=quiet)
         entry = self._entry
-        return ResolvedHostedProvider(api_key=entry.api_key, api_base=entry.api_base, client_args=entry.client_args)
+        return ResolvedHostedProvider(
+            api_key=entry.api_key,
+            api_base=entry.api_base,
+            client_args=entry.client_args,
+            name=entry.name,
+            implementation=entry.provider,
+        )
 
     def withheld_from(self, organization_id: uuid.UUID | None) -> bool:
         """Whether ``organization_id`` is served as if this provider did not exist.
@@ -97,21 +109,21 @@ class HostedSources:
         return self.config.hosted_provider_entries()
 
     async def all(self) -> list[HostedSource]:
-        """Every hosted provider by name, a row winning over an entry of the same provider."""
+        """Every hosted provider by name, a row winning over an entry of the same name."""
         entries = self.entries()
         merged = {
-            row.provider: HostedSource(row=row, shadows_config=row.provider in entries)
+            row.name: HostedSource(row=row, shadows_config=row.name in entries)
             for row in await self.providers.list_all()
         }
-        for provider, entry in entries.items():
-            merged.setdefault(provider, HostedSource(entry=entry))
-        return [merged[provider] for provider in sorted(merged)]
+        for name, entry in entries.items():
+            merged.setdefault(name, HostedSource(entry=entry))
+        return [merged[name] for name in sorted(merged)]
 
-    async def get(self, provider: str) -> HostedSource | None:
+    async def get(self, name: str) -> HostedSource | None:
         """One hosted provider by name, with the accepted aliases folded, or None."""
-        name = lookup_name(provider)
+        name = lookup_name(name)
         entries = self.entries()
-        row = await self.providers.get_by_provider(name)
+        row = await self.providers.get_by_name(name)
         if row is not None:
             return HostedSource(row=row, shadows_config=name in entries)
         entry = entries.get(name)
@@ -126,15 +138,15 @@ async def refuse_unsafe_configured_endpoints(config: GatewayConfig) -> None:
     host.
 
     Raises:
-        ValueError: every entry the gate rejects, by provider.
+        ValueError: every entry the gate rejects, by name.
     """
     problems: list[str] = []
-    for provider, entry in config.hosted_provider_entries().items():
+    for name, entry in config.hosted_provider_entries().items():
         if not entry.api_base:
             continue
         try:
             await validate_provider_api_base(entry.api_base)
         except UnsafeURLError as exc:
-            problems.append(f"hosted_providers.{provider}.api_base: {exc}")
+            problems.append(f"hosted_providers.{name}.api_base: {exc}")
     if problems:
         raise ValueError("; ".join(problems))

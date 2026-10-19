@@ -187,23 +187,26 @@ class ProviderEndpoint(Base):
 class HostedProvider(Base):
     """A provider this deployment serves hosted inference on, and the key it serves it with.
 
-    One row per any-llm implementation: the deployment's own credential for a
-    request that brings none and names no configured instance, asked for only
-    after every rung upstream of it has missed. Keyed on the implementation
-    because the runtime echoes ``provider`` back as the name usage is keyed on;
-    named instances of one implementation stay a configuration concern.
+    The deployment's own credential for a request that brings none, asked for
+    only after every rung upstream of it has missed. ``name`` is what a request,
+    the roster, the price list and usage know it by; ``provider`` is the any-llm
+    implementation that serves it. The name defaults to the implementation, and
+    a different one lets two endpoints of one implementation coexist
+    (``openai`` and ``openai-eu``).
 
     The key and the SDK client extras are both stored encrypted and read back
     in one place. ``api_key_last4`` is kept in clear so a listing can tell rows
-    apart without decrypting every credential.
+    apart without decrypting every credential. A keyless backend stores no key.
     """
 
     __tablename__ = "hosted_providers"
-    __table_args__ = (UniqueConstraint("provider", name="uq_hosted_providers_provider"),)
+    __table_args__ = (UniqueConstraint("name", name="uq_hosted_providers_name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # The implementation's own name unless one is given.
+    name: Mapped[str] = mapped_column(String(64), default=lambda context: context.get_current_parameters()["provider"])
     provider: Mapped[str] = mapped_column(String(64))
-    encrypted_api_key: Mapped[str] = mapped_column()
+    encrypted_api_key: Mapped[str | None] = mapped_column()
     api_key_last4: Mapped[str | None] = mapped_column(String(4))
     api_base: Mapped[str | None] = mapped_column(String(1024))
     # Bedrock's region and IAM pair, as one encrypted JSON document: an IAM
@@ -229,10 +232,10 @@ class HostedProviderModel(Base):
     """One model the deployment offers on a hosted provider.
 
     Membership and a serving switch. The rate lives in ``model_pricing`` keyed
-    ``provider:model``, so this table cannot drift from what a request settles
-    at. Keyed on the provider's name rather than a foreign key, because a
-    hosted provider may also be declared in configuration with no row of its
-    own, and its roster still lives here.
+    ``name:model``, so this table cannot drift from what a request settles
+    at. ``provider`` holds the hosted provider's name rather than a foreign
+    key, because a hosted provider may also be declared in configuration with
+    no row of its own, and its roster still lives here.
 
     Dispatch serves only a model whose row is switched on: a row switched
     off and a model with no row are both refused.

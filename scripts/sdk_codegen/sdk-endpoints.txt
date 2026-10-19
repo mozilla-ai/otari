@@ -133,6 +133,10 @@ GET /api/v1/hosted-providers                        # dashboard-only
 POST /api/v1/hosted-providers                       # dashboard-only
 GET /api/v1/hosted-providers/refresh/preview        # dashboard-only
 POST /api/v1/hosted-providers/refresh               # dashboard-only
+POST /api/v1/hosted-providers/test                  # dashboard-only
+POST /api/v1/hosted-providers/reencrypt             # dashboard-only
+GET /api/v1/hosted-providers/migration              # dashboard-only
+POST /api/v1/hosted-providers/migration             # dashboard-only
 PATCH /api/v1/hosted-providers/{provider}           # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}          # dashboard-only
 GET /api/v1/hosted-providers/{provider}/models      # dashboard-only

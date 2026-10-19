@@ -243,8 +243,20 @@ class HostedModelNotFoundError(TenancyNotFoundError):
 
 
 class HostedProviderAlreadyExistsError(TenancyConflictError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"A hosted provider named '{name}' is already configured")
+
+
+class HostedProviderApiKeyMissingError(TenancyValidationError):
+    """A provider that needs a key, created without one and without an endpoint of its own.
+
+    A keyless backend needs no key, and a custom endpoint is called with the
+    placeholder key a keyless ``providers:`` instance takes; anything else would
+    be stored unable to serve.
+    """
+
     def __init__(self, provider: str) -> None:
-        super().__init__(f"A hosted provider for '{provider}' is already configured")
+        super().__init__(f"'{provider}' needs an API key, unless it points at an endpoint of its own")
 
 
 class HostedProviderApiBaseMaskedError(TenancyValidationError):
@@ -273,6 +285,13 @@ class HostedProviderClientArgsUnreadableError(TenancyValidationError):
             "A masked client argument keeps the stored value, and there is none that can be read back. "
             "Enter the client arguments in full."
         )
+
+
+class HostedProviderInvalidNameError(TenancyValidationError):
+    """A name a hosted provider cannot take: a selector could not address it, or it is taken by meaning."""
+
+    def __init__(self, name: str, problem: str) -> None:
+        super().__init__(f"The hosted provider name '{name}' {problem}")
 
 
 class HostedProviderKeyRequiredError(TenancyValidationError):
@@ -343,8 +362,10 @@ __all__ = [
     "HostedModelNotFoundError",
     "HostedProviderAlreadyExistsError",
     "HostedProviderApiBaseMaskedError",
+    "HostedProviderApiKeyMissingError",
     "HostedProviderNotFoundError",
     "HostedProviderClientArgsUnreadableError",
+    "HostedProviderInvalidNameError",
     "HostedProviderKeyRequiredError",
     "HostedProviderUnknownOrganizationError",
     "HostedProviderUnknownProviderError",

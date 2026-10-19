@@ -25,9 +25,12 @@ function hostedProvider(
 ): HostedProvider {
   return {
     id: "11111111-1111-4111-8111-111111111111",
+    name: "openai",
     provider: "openai",
     source: "database",
     shadows_config: false,
+    has_api_key: true,
+    decryptable: true,
     api_key_last4: "abcd",
     api_base: null,
     client_args: null,

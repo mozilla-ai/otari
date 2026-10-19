@@ -4,10 +4,11 @@ Only the hosted providers declared in configuration live here so far; the
 ``providers:`` block of named instances is still on ``GatewayConfig`` in
 ``core/config.py``.
 
-``hosted_providers`` is keyed by any-llm implementation and takes the fields
-the hosted-providers API body takes. An entry is never written to the database
-and never encrypted: it is read from this block on every use, and a stored row
-of the same provider wins over it. ``${VAR}`` interpolation reaches it as it
+``hosted_providers`` is keyed by the hosted provider's name and takes the
+fields the hosted-providers API body takes, ``provider`` naming the any-llm
+implementation where it differs from the name. An entry is never written to the
+database and never encrypted: it is read from this block on every use, and a
+stored row of the same name wins over it. ``${VAR}`` interpolation reaches it as it
 reaches the rest of a configuration file, and ``OTARI_HOSTED_PROVIDERS`` sets
 the whole block as JSON, replacing the file's block rather than merging into it
 (``load_config`` applies it).
@@ -28,7 +29,7 @@ from gateway.core.settings_view import OMITTED
 
 # What a ``hosted_providers:`` entry may not carry, with the reason it is refused.
 _REFUSED_KEYS = {
-    "provider_type": "a hosted provider is keyed by its implementation; a named instance belongs in providers:",
+    "provider_type": "a hosted provider names its implementation in 'provider'",
 }
 
 
@@ -37,6 +38,7 @@ class _HostedProviderEntryShape(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    provider: str | None = Field(default=None, min_length=1)
     api_key: str | None = Field(default=None, min_length=1)
     api_base: str | None = None
     client_args: dict[str, Any] | None = None
@@ -49,6 +51,7 @@ class _HostedProviderEntryShape(BaseModel):
 class HostedProviderEntry:
     """One hosted provider declared in configuration, validated."""
 
+    name: str
     provider: str
     api_key: str | None = field(repr=False)
     api_base: str | None
@@ -59,44 +62,48 @@ class HostedProviderEntry:
     models: tuple[str, ...]
 
 
-def _entry_error(provider: str, exc: ValidationError) -> ValueError:
+def _entry_error(name: str, exc: ValidationError) -> ValueError:
     """The first problem with an entry, named by its field and never by its value."""
     problems = []
     for error in exc.errors(include_input=False, include_url=False):
         where = ".".join(str(part) for part in error["loc"])
-        problems.append(f"hosted_providers.{provider}.{where}: {error['msg']}" if where else error["msg"])
+        problems.append(f"hosted_providers.{name}.{where}: {error['msg']}" if where else error["msg"])
     return ValueError("; ".join(problems))
 
 
 def parse_hosted_providers(raw: Mapping[str, Any]) -> dict[str, HostedProviderEntry]:
-    """Validate the ``hosted_providers:`` block into one entry per provider.
+    """Validate the ``hosted_providers:`` block into one entry per name.
 
     Raises:
-        ValueError: an entry names no any-llm implementation, carries a key it
-            may not, or holds a field of the wrong shape.
+        ValueError: an entry names no any-llm implementation, has a name a
+            hosted provider cannot take, carries a key it may not, or holds a
+            field of the wrong shape.
     """
     entries: dict[str, HostedProviderEntry] = {}
-    for provider, entry in raw.items():
-        try:
-            LLMProvider(provider)
-        except ValueError:
-            msg = f"hosted_providers.{provider} is not an any-llm implementation; the block is keyed by one."
-            raise ValueError(msg) from None
+    for name, entry in raw.items():
         # A bare ``ollama:`` is an entry with every field at its default.
         entry = {} if entry is None else entry
         if not isinstance(entry, Mapping):
-            msg = f"hosted_providers.{provider} must be a mapping of settings."
+            msg = f"hosted_providers.{name} must be a mapping of settings."
             raise ValueError(msg)
         for key, reason in _REFUSED_KEYS.items():
             if key in entry:
-                msg = f"hosted_providers.{provider}.{key} is not accepted: {reason}"
+                msg = f"hosted_providers.{name}.{key} is not accepted: {reason}"
                 raise ValueError(msg)
         try:
             shape = _HostedProviderEntryShape.model_validate(dict(entry))
         except ValidationError as exc:
-            raise _entry_error(provider, exc) from None
+            raise _entry_error(name, exc) from None
+        provider = shape.provider.strip() if shape.provider is not None else name
+        try:
+            LLMProvider(provider)
+        except ValueError:
+            where = f"hosted_providers.{name}.provider" if shape.provider is not None else f"hosted_providers.{name}"
+            msg = f"{where} is not an any-llm implementation; name one in 'provider' for a named entry."
+            raise ValueError(msg) from None
         api_base = shape.api_base.strip() if shape.api_base is not None else None
-        entries[provider] = HostedProviderEntry(
+        entries[name] = HostedProviderEntry(
+            name=name,
             provider=provider,
             api_key=shape.api_key,
             api_base=api_base or None,
@@ -119,8 +126,9 @@ class ProviderSettings(BaseModel):
         # Each entry may carry a key, so the block stays out of the config's repr.
         repr=False,
         description=(
-            "Hosted providers declared in configuration, keyed by any-llm implementation, each with the fields "
-            "the hosted-providers API takes: 'api_key', 'api_base', 'client_args', 'enabled', "
+            "Hosted providers declared in configuration, keyed by name, each with the fields the hosted-providers "
+            "API takes: 'provider' (the any-llm implementation, defaulting to the name), 'api_key', 'api_base', "
+            "'client_args', 'enabled', "
             "'restricted_to_organization_id', and an optional 'models' list offered when the provider cannot list "
             "its own. Served after every other credential, as a stored hosted provider is, and never written to "
             "the database; a stored hosted provider of the same name wins. Settable as JSON through "

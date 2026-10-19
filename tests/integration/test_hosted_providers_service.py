@@ -42,6 +42,7 @@ from gateway.repositories.pricing import ModelPricingRepository, OrganizationMod
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
+    ProviderCredentialRepository,
     ProviderEndpointRepository,
 )
 from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository, WorkspaceRepository
@@ -90,6 +91,7 @@ def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedPro
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
+        deployment_providers=ProviderCredentialRepository(uow),
     )
 
 
@@ -117,7 +119,9 @@ def _discovery(
 def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]) -> None:
     """Make the community dataset price exactly ``rates``, and nothing else."""
 
-    def _stub(provider: str | None, model: str, as_of: object) -> ModelPricing | None:
+    def _stub(
+        provider: str | None, model: str, as_of: object, *, implementation: str | None = None
+    ) -> ModelPricing | None:
         if model not in rates:
             return None
         input_rate, output_rate = rates[model]
@@ -622,7 +626,9 @@ async def test_new_base_rates_drop_a_seeds_tiers_and_carry_an_operators(
     """A tier's rates are absolute, so they stay with the base rates they were written beside."""
     tier = {"min_input_tokens": 200_000, "input_price_per_million": 5.0, "output_price_per_million": 15.0}
 
-    def _tiered(provider: str | None, model: str, as_of: object) -> ModelPricing | None:
+    def _tiered(
+        provider: str | None, model: str, as_of: object, *, implementation: str | None = None
+    ) -> ModelPricing | None:
         return ModelPricing(
             model_key=f"{provider}:{model}",
             input_price_per_million=Decimal("2.5"),

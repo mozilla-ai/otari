@@ -66,7 +66,7 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
             # The stored name, so an alias settles under the key the provider is
             # priced and switched under rather than under the alias, which
             # nothing prices. Equal to ``provider`` for anything but an alias.
-            response_provider=resolved.provider or provider,
+            response_provider=resolved.name or provider,
             client_args=resolved.client_args,
         )
 

@@ -46,6 +46,7 @@ function providerInfo(
     env_key: envKey,
     pricing_urls: [],
     capabilities: CAPS,
+    source: "config",
   }
 }
 

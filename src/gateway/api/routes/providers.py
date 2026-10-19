@@ -14,7 +14,7 @@ at all.
 """
 
 import asyncio
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from any_llm import LLMProvider
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -59,6 +59,7 @@ from gateway.services.provider_store_service import (
     reencrypt_credentials,
     refresh_provider_cache,
     save_credential,
+    stored_instances,
 )
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -113,6 +114,13 @@ class ProviderInfoSchema(BaseModel):
     env_key: str | None = Field(default=None, description="Env var the credential is read from.")
     pricing_urls: list[str] = Field(default_factory=list)
     capabilities: ProviderCapabilitiesSchema
+    source: Literal["config", "dashboard"] = Field(
+        default="config",
+        description=(
+            "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML), 'dashboard' for one "
+            "stored through the deployment providers page."
+        ),
+    )
 
 
 class ProvidersResponse(BaseModel):
@@ -121,9 +129,10 @@ class ProvidersResponse(BaseModel):
     providers: list[ProviderInfoSchema]
 
 
-def _to_schema(info: ProviderInfo) -> ProviderInfoSchema:
+def _to_schema(info: ProviderInfo, stored: frozenset[str]) -> ProviderInfoSchema:
     caps = info.capabilities
     return ProviderInfoSchema(
+        source="dashboard" if info.instance in stored else "config",
         instance=info.instance,
         provider_type=info.provider_type,
         name=info.name,
@@ -157,7 +166,8 @@ async def list_providers(
     pricing links, and display name from the bundled any-llm and models.dev
     datasets. No provider is contacted, so this is cheap and always available.
     """
-    return ProvidersResponse(providers=[_to_schema(info) for info in list_provider_info(config)])
+    stored = stored_instances()
+    return ProvidersResponse(providers=[_to_schema(info, stored) for info in list_provider_info(config)])
 
 
 class KnownProviderSummarySchema(BaseModel):

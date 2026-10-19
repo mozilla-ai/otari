@@ -521,22 +521,41 @@ the same instance name. Config-file entries remain read-only in the dashboard.
 
 Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
 `otari gen-secret-key`. To rotate it, configure the new key before the old key,
-run the provider and search-tool re-encryption endpoints, then remove the old
-key. Losing every configured encryption key makes stored credentials
-unrecoverable.
+run the provider, hosted provider and search-tool re-encryption endpoints
+(`POST /api/v1/provider-credentials/reencrypt`,
+`POST /api/v1/hosted-providers/reencrypt` and
+`POST /api/v1/search-tools/reencrypt`), then remove the old key. Losing every
+configured encryption key makes stored credentials unrecoverable.
+
+Providers stored this way are moving onto hosted providers.
+`GET /api/v1/hosted-providers/migration` previews the move and
+`POST /api/v1/hosted-providers/migration` applies it: each stored provider
+becomes a hosted provider of the same name, served by the implementation its
+`provider_type` names, so an `instance:model` selector keeps its name. The
+stored provider is removed once the hosted one offers a model; one whose
+provider lists none is kept until its models are added on the Hosted providers
+page. A name a hosted provider already holds, or a key no configured
+`OTARI_SECRET_KEY` reads, is reported and left in place. A hosted provider is
+asked after an organization's own key, where a stored provider was asked
+before it, so an organization holding its own key is served on that key once
+its provider has moved.
 
 ### Hosted providers in config.yml
 
 A hosted provider is a credential the deployment serves requests on when
 nothing else credentials them (see [Modes](modes.md#hosted-providers-and-byo-credentials)).
 Besides the Hosted providers page, a standalone or hosted deployment can declare
-them in a `hosted_providers:` block, keyed by any-llm implementation, with the
-fields the `/api/v1/hosted-providers` body takes:
+them in a `hosted_providers:` block, keyed by name, with the fields the
+`/api/v1/hosted-providers` body takes:
 
 ```yaml
 hosted_providers:
   openai:
     api_key: ${OPENAI_API_KEY}
+  openai-eu:
+    provider: openai
+    api_key: ${OPENAI_EU_API_KEY}
+    api_base: https://eu.api.openai.com/v1
   anthropic:
     api_key: ${ANTHROPIC_API_KEY}
     restricted_to_organization_id: 4f1c2a7e-0b9d-4c55-9a0e-2d6f8b3c1e90
@@ -545,23 +564,30 @@ hosted_providers:
     models: [qwen3-32b]
 ```
 
+The name is what a request addresses (`openai-eu:gpt-4o`), and what the
+provider's models, prices and usage are keyed on. It defaults to the
+implementation; a name of its own lets two endpoints of one implementation be
+served side by side. A name may not contain `:` or `/`, may not be `otari` or
+`hosted`, and may not be another implementation's name.
+
 | Field | Meaning |
 |---|---|
-| `api_key` | The key the provider is served on. Required unless the provider needs none (listed below). |
+| `provider` | The any-llm implementation serving it. Defaults to the name. |
+| `api_key` | The key the provider is served on. Required unless the provider needs none (listed below) or has an `api_base` of its own. |
 | `api_base` | An endpoint other than the provider's default. |
 | `client_args` | What the provider's SDK client needs beyond the key, such as Bedrock's region. |
 | `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
 
-A key may be left out for these providers only: the self-hosted backends
-`vllm`, `ollama`, `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`,
-which are called with a placeholder key when they have an `api_base`, and
-`vertexai` and `vertexaianthropic`, which authenticate through the Google Cloud
-credentials in the gateway's own environment. Every other provider, Bedrock
-included, needs `api_key`. As for any hosted provider, a request is served on one
-only when no organization key, `providers:` instance or provider environment
-variable (such as `VLLM_API_KEY`) answers for it first.
+A key may be left out for the self-hosted backends `vllm`, `ollama`,
+`llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`, for `vertexai` and
+`vertexaianthropic`, which authenticate through the Google Cloud credentials in
+the gateway's own environment, and for any provider given an `api_base`, which
+is called with a placeholder key, as a self-hosted OpenAI-compatible server is.
+Every other provider, Bedrock included, needs `api_key`. The Hosted providers
+page and API follow the same rule. As for any hosted provider, a request is served on one
+only when no organization key or `providers:` instance answers for it first.
 
 Reference the key as `${VAR}` rather than writing it into the file: it is
 resolved from the environment as every `${VAR}` in the file is, so the key stays
@@ -578,8 +604,9 @@ the two are never merged per provider. An empty value leaves the file's block
 in place.
 
 The block is validated at load: an unknown implementation, a `provider_type`
-key (a named instance belongs in `providers:`), an unknown field, or a missing
-`api_key` for a provider that needs one fails the start. With
+key (the implementation goes in `provider`), a name a hosted provider cannot
+take, an unknown field, or a missing `api_key` for a provider that needs one
+fails the start. With
 `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`, an `api_base` that resolves to a
 private address fails it too, as it is refused for a provider stored through the
 page; that check runs at boot, because it resolves the host. The block is never

@@ -123,6 +123,22 @@ def apply_to_config(config: GatewayConfig) -> set[str]:
     return set(baseline) & set(_cache)
 
 
+def stored_instances() -> frozenset[str]:
+    """The instance names this worker's overlay holds, the ones the dashboard stored."""
+    return frozenset(_cache)
+
+
+def forget_stored_providers(config: GatewayConfig, instances: set[str]) -> None:
+    """Drop rows deleted elsewhere from this worker's overlay at once.
+
+    For a writer that removed rows outside this module, the move onto hosted
+    providers; other workers converge on their next refresh.
+    """
+    for instance in instances:
+        _cache.pop(instance, None)
+    apply_to_config(config)
+
+
 async def refresh_provider_cache(db: AsyncSession, config: GatewayConfig) -> set[str]:
     """Reload the overlay from the database, apply it, and return shadowed names."""
     global _cached_at  # noqa: PLW0603

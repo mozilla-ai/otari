@@ -47,15 +47,19 @@ class HostedOffers:
         self.models = models
         self.pricing = pricing
 
-    async def defaults_for(self, provider: str, models: Collection[str]) -> dict[str, ModelPricing]:
+    async def defaults_for(
+        self, provider: str, models: Collection[str], *, implementation: str | None = None
+    ) -> dict[str, ModelPricing]:
         """Today's community rate for each model that has one, keyed by model name.
 
-        Empty while the deployment does not consult the dataset: a rate seeded
-        from it would be a rate the operator switched off.
+        ``provider`` is the hosted provider's name, which the rates are keyed
+        under; ``implementation`` is what they are looked up as where the name
+        differs. Empty while the deployment does not consult the dataset: a
+        rate seeded from it would be a rate the operator switched off.
         """
         if not default_pricing_enabled():
             return {}
-        return await self.pricing.defaults_for(provider, models)
+        return await self.pricing.defaults_for(provider, models, implementation=implementation)
 
     async def offer(
         self, provider: str, names: Sequence[str], defaults: Mapping[str, ModelPricing]
@@ -118,7 +122,9 @@ class HostedOffers:
         await self.pricing.store_defaults(moved, now)
         return sorted(repriced)
 
-    async def current_rates(self, provider: str, rows: Sequence[HostedProviderModel]) -> dict[str, HostedModelRates]:
+    async def current_rates(
+        self, provider: str, rows: Sequence[HostedProviderModel], *, implementation: str | None = None
+    ) -> dict[str, HostedModelRates]:
         """What each offered model is currently served at, keyed by model name.
 
         Two rungs of the deployment's ladder, in its order: the stored version,
@@ -136,7 +142,7 @@ class HostedOffers:
             source = PRICE_SOURCE_DEFAULT if version.origin == SEED_ORIGIN else PRICE_SOURCE_DEPLOYMENT
             rates[keys[key]] = HostedModelRates.from_version(version, source)
         missing = [model for model in keys.values() if model not in rates]
-        for model, default in (await self.defaults_for(provider, missing)).items():
+        for model, default in (await self.defaults_for(provider, missing, implementation=implementation)).items():
             rates[model] = HostedModelRates.from_version(default, PRICE_SOURCE_DEFAULT)
         return rates
 

@@ -25,19 +25,19 @@ class HostedProviderRuntime:
         """
         async with self.uow:
             serveable = [
-                source.provider
+                source.name
                 for source in await self.sources.all()
                 if source.enabled
                 and not source.withheld_from(organization_id)
                 and source.credential(quiet=True) is not None
             ]
             served = await self.models.enabled_models_for_providers(serveable)
-        return {provider: frozenset(served.get(provider, set())) for provider in serveable}
+        return {name: frozenset(served.get(name, set())) for name in serveable}
 
     async def resolve(
-        self, provider: str, model: str | None = None, *, organization_id: uuid.UUID | None
+        self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
     ) -> ResolvedHostedProvider | None:
-        """A usable credential for ``provider`` on behalf of ``organization_id``, or None.
+        """A usable credential for the hosted provider ``name`` on behalf of ``organization_id``, or None.
 
         None covers every case the caller is not asked to tell apart: no
         provider, one switched off or restricted to another organization, a
@@ -46,11 +46,11 @@ class HostedProviderRuntime:
         roster is the whole of what the deployment's credential serves.
         """
         async with self.uow:
-            source = await self.sources.get(provider)
+            source = await self.sources.get(name)
             if source is None or not source.enabled or source.withheld_from(organization_id):
                 return None
             if model is not None:
-                offered = await self.models.get_by_model(source.provider, model)
+                offered = await self.models.get_by_model(source.name, model)
                 if offered is None or not offered.enabled:
                     return None
             return source.credential()
