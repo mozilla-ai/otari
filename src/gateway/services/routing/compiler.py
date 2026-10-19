@@ -38,6 +38,7 @@ from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
 from gateway.services.model_access import is_model_allowed, org_model_refusal
 from gateway.services.provider_kwargs import (
     credential_ladder_exhausted,
+    reaches_organization_key,
     resolve_catalog_fallback,
     resolve_provider_selector,
 )
@@ -435,7 +436,7 @@ def _resolve_candidates(
         # Every candidate is checked here, not only the plan's head, so a
         # `router`/`on_failure` fallover cannot serve a model the workspace's
         # organization key excludes just because the head candidate passed.
-        if workspace_id is not None and resolved.instance not in config.providers:
+        if workspace_id is not None and reaches_organization_key(config, resolved.instance):
             refusal = org_model_refusal(
                 workspace_id,
                 resolved.provider.value,

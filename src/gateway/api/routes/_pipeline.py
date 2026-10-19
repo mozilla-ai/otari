@@ -205,7 +205,7 @@ from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
-from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedAccessDeniedError, ModelProviderPort
+from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import (
     BudgetMinuteLimits,
@@ -298,12 +298,14 @@ from gateway.services.provider_kwargs import (
     keyless_placeholder_api_key,
     missing_credential,
     provider_key,
+    reaches_organization_key,
     require_declared_credential,
     resolve_provider_selector,
     with_failover_retries,
 )
 from gateway.services.providers import (
     managed_only_candidates,
+    organization_to_serve,
     owned_endpoint_http_client,
     refuse_managed_candidate,
     unpriced_model_refusal,
@@ -1547,7 +1549,10 @@ async def _prepare_for_dispatch(
     if ctx.plan is not None and len(ctx.plan.attempts) > 1:
         try:
             ctx.managed_only = await managed_only_candidates(
-                ctx.config, ctx.plan.attempts, hosted=lambda: port, organization_id=_hosted_organization(ctx)
+                ctx.config,
+                ctx.plan.attempts,
+                hosted=lambda: port,
+                organization_id=organization_to_serve(ctx.organization_id),
             )
         except asyncio.CancelledError:
             await release_reservation(ctx)
@@ -1562,16 +1567,6 @@ async def _prepare_for_dispatch(
         await _hold_at_deployment_paid_rate(ctx, served, adapter=adapter)
     await _admit_or_refuse(ctx, served, adapter=adapter, billing=billing)
     return served
-
-
-def _hosted_organization(ctx: RequestContext) -> uuid.UUID:
-    """The organization the hosted rung asks for this request.
-
-    A request with no organization (its workspace belongs to none) is served on
-    what is restricted to no organization, so it is asked as one no restriction
-    names; billing then has no organization to charge, and charges none.
-    """
-    return ctx.organization_id if ctx.organization_id is not None else NO_ORGANIZATION
 
 
 def hosted_model_not_offered_detail(selector: str) -> str:
@@ -1593,7 +1588,7 @@ async def _refuse_if_hosted_model_switched_off(
     provider exists.
     """
     try:
-        served = await port.get_hosted_models(organization_id=_hosted_organization(ctx))
+        served = await port.get_hosted_models(organization_id=organization_to_serve(ctx.organization_id))
     except Exception:
         # Best effort: the request then fails as it would have without this check.
         logger.warning("Could not list hosted models for %s:%s", resolved.instance, resolved.model)
@@ -1892,7 +1887,7 @@ async def _serve_from_hosted_credential(
     lookup = hosted_lookup(resolved.provider)
     try:
         credential = await port.resolve_hosted_credential(
-            organization_id=_hosted_organization(ctx),
+            organization_id=organization_to_serve(ctx.organization_id),
             workspace_id=ctx.workspace_id,
             # The instance rather than the implementation: that is the name
             # pricing, budgets and usage key on, and for a bare selector it is
@@ -2815,16 +2810,15 @@ async def resolve_request_context(
 
         # Organization-scoped model restriction (otari#643): the org key
         # resolved for this workspace+provider may narrow which models it
-        # serves. Applies only when the selector did not name a configured
-        # instance, the same condition `provider_kwargs.get_provider_kwargs`
-        # uses to decide whether to consult the organization overlay at all;
-        # an instance-addressed selector never reaches an organization key,
-        # so it is never subject to this restriction either.
+        # serves. Applies only to a selector that can reach an organization
+        # key (`provider_kwargs.reaches_organization_key`); a configured
+        # instance or a named hosted provider never does, so it is never
+        # subject to this restriction either.
         if (
             workspace_id is not None
             and gate_instance is not None
             and gate_impl is not None
-            and gate_instance not in config.providers
+            and reaches_organization_key(config, gate_instance)
             and (resolved_provider is None or resolved_provider.owned_endpoint is None)
         ):
             refusal = org_model_refusal(
@@ -3006,7 +3000,7 @@ async def resolve_request_context(
                 resolved_provider,
                 plan=plan,
                 hosted=model_provider,
-                organization_id=organization_id if organization_id is not None else NO_ORGANIZATION,
+                organization_id=organization_to_serve(organization_id),
             )
             # Record the rejection after the refund, so an operator who flipped
             # require_pricing on can see that live traffic is being dropped.

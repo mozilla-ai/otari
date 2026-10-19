@@ -17,8 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.settings.providers import parse_hosted_providers
 from gateway.models.usage import UsageLog
 from gateway.services.model_discovery_service import ProviderDiscovery
+from gateway.services.providers import hosted_implementation
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import shared_test_config
@@ -136,3 +138,23 @@ def test_a_name_nothing_defines_is_still_unknown(client: TestClient, master_key_
     _, status = _chat(client, master_key_header, "openai-us:gpt-4o")
 
     assert status == 400
+
+
+def test_deleting_a_row_that_overrides_a_configured_name_restores_the_configured_implementation(
+    test_config: GatewayConfig, client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The worker that deleted the row maps the name back to what configuration serves it as."""
+    entries = {"openai-eu": {"provider": "openai", "api_key": EU_KEY}}
+    with patch.object(type(test_config), "hosted_provider_entries", lambda _self: parse_hosted_providers(entries)):
+        created = client.post(
+            f"{API_ROOT}/hosted-providers",
+            json={"provider": "mistral", "name": "openai-eu", "api_key": US_KEY},
+            headers=master_key_header,
+        )
+        assert created.status_code == 201, created.text
+        assert hosted_implementation("openai-eu") == "mistral"
+
+        deleted = client.delete(f"{API_ROOT}/hosted-providers/openai-eu", headers=master_key_header)
+
+        assert deleted.status_code == 200, deleted.text
+        assert hosted_implementation("openai-eu") == "openai"

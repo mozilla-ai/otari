@@ -446,6 +446,16 @@ def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
     )
 
 
+def reaches_organization_key(config: GatewayConfig, instance: str) -> bool:
+    """Whether a selector naming ``instance`` can be served on an organization's own key.
+
+    Neither a ``providers:`` instance nor a hosted provider named otherwise than
+    its implementation ever consults one, so neither is subject to an
+    organization key's model restrictions.
+    """
+    return instance not in config.providers and _hosted_names(instance) is None
+
+
 def get_provider_kwargs(
     config: GatewayConfig,
     provider: LLMProvider,

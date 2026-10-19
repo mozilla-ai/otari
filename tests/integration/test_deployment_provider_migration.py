@@ -130,10 +130,10 @@ def test_applying_moves_each_row_under_its_name_and_removes_it(
     assert {row["instance"] for row in listed}.isdisjoint({"openai", "vllm"})
 
 
-def test_a_renamed_provider_is_copied_and_keeps_serving_as_a_deployment_provider(
+def test_a_renamed_provider_moves_under_its_name(
     client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
 ) -> None:
-    """No request reaches a hosted provider by a name of its own yet, so the deployment provider stays."""
+    """A request reaches a hosted provider by a name of its own, so the deployment provider goes."""
     _deployment_provider(
         client,
         master_key_header,
@@ -145,11 +145,9 @@ def test_a_renamed_provider_is_copied_and_keeps_serving_as_a_deployment_provider
 
     [row] = _rows(client.post(PATH, headers=master_key_header)).values()
 
-    assert (row["outcome"], row["source_removed"], row["models"]) == ("migrated", False, 1)
+    assert (row["outcome"], row["source_removed"], row["models"]) == ("migrated", True, 1)
     db_session.expire_all()
-    assert [credential.instance for credential in db_session.execute(select(ProviderCredential)).scalars()] == [
-        "openai-eu"
-    ]
+    assert db_session.execute(select(ProviderCredential)).scalars().all() == []
     hosted = db_session.execute(select(HostedProvider)).scalar_one()
     assert (hosted.name, hosted.provider) == ("openai-eu", "openai")
 

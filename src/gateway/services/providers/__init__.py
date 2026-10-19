@@ -20,6 +20,7 @@ from gateway.services.providers._hosted_provider_service import (
     OrganizationExists,
     ResolvedHostedProvider,
 )
+from gateway.services.providers._hosted_runtime import organization_to_serve
 from gateway.services.providers._hosted_sources import HostedSources, refuse_unsafe_configured_endpoints
 from gateway.services.providers._missing_credential import (
     managed_only_candidates,
@@ -64,6 +65,7 @@ __all__ = [
     "load_provider_endpoints_at_startup",
     "managed_only_candidates",
     "missing_provider_credential",
+    "organization_to_serve",
     "owned_endpoint_http_client",
     "provider_for",
     "refuse_managed_candidate",

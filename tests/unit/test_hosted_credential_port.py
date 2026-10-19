@@ -48,7 +48,12 @@ from gateway.ports.model_provider_port import (
     ModelProviderPort,
 )
 from gateway.services.inference import DeploymentCharge
-from gateway.services.provider_kwargs import ResolvedProvider, configure_hosted_names, resolve_provider_selector
+from gateway.services.provider_kwargs import (
+    ResolvedProvider,
+    configure_hosted_names,
+    reaches_organization_key,
+    resolve_provider_selector,
+)
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 WORKSPACE_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -1084,3 +1089,15 @@ def test_an_organization_key_serves_its_provider_first_and_never_a_named_hosted_
 
     assert bare.kwargs["api_key"] == "sk-org"
     assert "api_key" not in named.kwargs
+
+
+def test_only_a_selector_that_names_no_configured_or_named_hosted_provider_reaches_an_organization_key() -> None:
+    """An organization key's model restriction applies only where that key could serve."""
+    config = GatewayConfig(providers={"groq": {"api_key": "sk-groq"}})
+    configure_hosted_names({"openai-eu": "openai"}.get)
+    try:
+        reached = {name: reaches_organization_key(config, name) for name in ("openai", "groq", "openai-eu")}
+    finally:
+        configure_hosted_names(None)
+
+    assert reached == {"openai": True, "groq": False, "openai-eu": False}

@@ -67,6 +67,7 @@ from gateway.services.provider_kwargs import (
     ManagedCredentialUnsupportedError,
     MissingCredential,
     get_provider_kwargs,
+    reaches_organization_key,
     require_declared_credential,
     resolve_provider_selector,
 )
@@ -431,7 +432,7 @@ async def create_batch(
     # equivalent gate. Applies only when the selector did not name a
     # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
     # uses to decide whether to consult the organization overlay at all.
-    if workspace_id is not None and resolved.instance not in config.providers:
+    if workspace_id is not None and reaches_organization_key(config, resolved.instance):
         refusal = org_model_refusal(
             workspace_id, provider.value, model, selector=request.model, through_alias=resolved.alias is not None
         )

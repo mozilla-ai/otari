@@ -3,9 +3,20 @@
 import uuid
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.ports.model_provider_port import NO_ORGANIZATION
 from gateway.repositories.providers import HostedProviderModelRepository
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_sources import HostedSources
+
+
+def organization_to_serve(organization_id: uuid.UUID | None) -> uuid.UUID:
+    """The organization the hosted rung asks the port about for a request.
+
+    A request with no organization (its workspace belongs to none) is served on
+    what is restricted to no organization, so it is asked as one no restriction
+    names; billing then has no organization to charge, and charges none.
+    """
+    return organization_id if organization_id is not None else NO_ORGANIZATION
 
 
 class HostedProviderRuntime:

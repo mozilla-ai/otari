@@ -15,6 +15,7 @@ request through ``ModelProviderPort``, as for any hosted provider.
 import asyncio
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.repositories.providers import HostedProviderRepository
@@ -72,6 +73,12 @@ async def load_hosted_names_at_startup(config: GatewayConfig) -> None:
     reset_hosted_name_index()
     try:
         await _refresh_on_a_session_of_its_own(config)
+    except DATABASE_ERRORS as exc:
+        # By class only: a database error's message can carry the row it read.
+        logger.error(
+            "Failed to load hosted provider names (%s); a named hosted provider is unreachable until the next refresh",
+            describe_database_error(exc),
+        )
     except Exception:
         logger.exception("Failed to load hosted provider names; a named hosted provider is unreachable until then")
 
@@ -84,5 +91,9 @@ async def run_hosted_name_refresher(config: GatewayConfig, interval: float = HOS
             await _refresh_on_a_session_of_its_own(config)
         except asyncio.CancelledError:
             raise
+        except DATABASE_ERRORS as exc:
+            logger.warning(
+                "Hosted provider name refresh failed (%s); retrying in %ss", describe_database_error(exc), interval
+            )
         except Exception:
             logger.warning("Hosted provider name refresh failed; retrying in %ss", interval, exc_info=True)
