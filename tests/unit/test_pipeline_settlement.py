@@ -199,7 +199,8 @@ def _ctx(
         uow=None,
         log_writer=log_writer,
         hybrid_mode=hybrid_mode,
-        route=None,
+        # Every hybrid request carries the route its resolve answered with.
+        route=ResolvedRoute(request_id="req-1", fallback_enabled=False, attempts=[]) if hybrid_mode else None,
         user_token=user_token,
         api_key_id="key-1",
         user_id="user-1",

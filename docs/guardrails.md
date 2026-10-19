@@ -461,8 +461,12 @@ nothing else. A workspace cannot opt out of an entry scoped to it: the scope is
 the organization's to set.
 
 Organization guardrails are managed by standalone and hosted control planes.
-They do not currently apply on a [hybrid gateway](modes.md), because the
-platform does not expose a guardrail-resolution endpoint to the gateway.
+A [hybrid gateway](modes.md) enforces them too: the control plane sends the
+workspace's mandates, with the organization's own credentials, in its resolve
+answer, and the gateway runs each check itself. The prompt never reaches the
+control plane. A definition is built the first time a request needs it, so that
+request waits for the build, and is kept until the organization edits it. See
+the [hybrid-mode protocol](hybrid-mode-protocol.md#guardrails).
 
 ## Runnable walkthrough
 

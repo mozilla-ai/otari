@@ -103,6 +103,7 @@ from gateway.api.routes._platform import (
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY,
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY,
     ResolvedAttempt,
+    ResolvedGuardrailDefinition,
     ResolvedRoute,
     _classify_upstream_error,
     _report_platform_usage,
@@ -330,6 +331,7 @@ from gateway.services.sandbox_backend import (
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.tenancy.organization_guardrail_runner import handle as guardrail_handle
+from gateway.services.tenancy.organization_guardrail_runner import platform_handle as platform_guardrail_handle
 from gateway.services.tenancy.organization_guardrail_service import (
     ResolvedOrganizationGuardrail,
     resolve_organization_guardrails,
@@ -3623,20 +3625,36 @@ def merge_guardrail_layers(
     return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated), in_process)
 
 
-def _in_process_guardrails(ctx: RequestContext, effective: EffectiveGuardrails) -> dict[str, InProcessGuardrail | None]:
-    """The guardrails this worker already holds for the profiles the merge marked.
+async def _in_process_guardrails(
+    ctx: RequestContext, effective: EffectiveGuardrails
+) -> dict[str, InProcessGuardrail | None]:
+    """The built guardrails for the profiles the merge marked.
 
-    One dictionary lookup per profile, with nothing awaited and nothing built:
-    the runner holds what it holds, and a definition it does not is ``None``
-    here. That value is what makes the profile unevaluable rather than a check
-    the deployment's guardrails service is asked for, which it has never heard
-    of.
+    Standalone does one dictionary lookup per profile, with nothing awaited and
+    nothing built: the runner holds what it holds, and a definition it does not
+    is ``None`` here. That value is what makes the profile unevaluable rather
+    than a check the deployment's guardrails service is asked for, which it has
+    never heard of.
+
+    A hybrid worker builds a definition the first time the platform sends it,
+    so the first request to name one waits for its build.
 
     An empty map where the organization is unknown is the true answer rather
     than a fallback: an in-process entry can only come from
     :func:`_resolve_organization_guardrails`, which refuses the request before
     resolving anything when the organization is missing.
     """
+    if ctx.hybrid_mode:
+        definitions = {
+            guardrail.definition.id: guardrail.definition
+            for guardrail in (ctx.route.guardrails if ctx.route is not None else [])
+            if guardrail.definition is not None
+        }
+        profiles = list(effective.in_process.items())
+        handles = await asyncio.gather(
+            *(_platform_guardrail(definitions.get(definition_id)) for _, definition_id in profiles)
+        )
+        return {profile: built for (profile, _), built in zip(profiles, handles, strict=True)}
     organization_id = ctx.organization_id
     if organization_id is None:
         return {}
@@ -3646,15 +3664,23 @@ def _in_process_guardrails(ctx: RequestContext, effective: EffectiveGuardrails) 
     }
 
 
+async def _platform_guardrail(definition: ResolvedGuardrailDefinition | None) -> InProcessGuardrail | None:
+    """The built guardrail for a definition the platform sent, or None when it cannot run."""
+    if definition is None:
+        return None
+    return await platform_guardrail_handle(
+        definition.id, definition.guardrail_name, definition.version, definition.arguments
+    )
+
+
 async def _resolve_organization_guardrails(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext
 ) -> list[ResolvedOrganizationGuardrail]:
     """The guardrails the request's organization mandates for its workspace.
 
-    Standalone only. Hybrid mode's tenancy lives on the platform, which has no
-    guardrail resolve endpoint of its own (its guardrail enforcement was
-    reachable only through its own completion route), so a hybrid request is
-    checked exactly as it was before this plane existed.
+    In hybrid mode the platform owns the tenancy, and sends the mandates with
+    the resolve answer (``ResolvedRoute.guardrails``). Each is the same row
+    standalone reads below, so both modes merge and run them alike.
 
     One read per request rather than a cached overlay, per the seam #655 settled
     and #678 wrote down. Unlike the MCP and code-execution resolves beside it,
@@ -3677,7 +3703,22 @@ async def _resolve_organization_guardrails(
     unchecked.
     """
     if ctx.hybrid_mode:
-        return []
+        if ctx.route is None:
+            raise adapter.error(500, ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL, ErrorKind.API)
+        return [
+            ResolvedOrganizationGuardrail(
+                config=GuardrailConfig(
+                    profile=guardrail.profile,
+                    url=guardrail.url,
+                    mode=guardrail.mode,
+                    on_unavailable=guardrail.on_unavailable,
+                    validate_kwargs=guardrail.validate_kwargs,
+                ),
+                credential=guardrail.credential,
+                definition_id=guardrail.definition.id if guardrail.definition is not None else None,
+            )
+            for guardrail in ctx.route.guardrails
+        ]
     if ctx.db is None or ctx.workspace_id is None or ctx.organization_id is None:
         raise adapter.error(500, ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL, ErrorKind.API)
     try:
@@ -4080,7 +4121,7 @@ async def _admit_guardrails(
         config=ctx.config,
         credentials=effective.credentials,
         mandated=effective.mandated,
-        in_process=_in_process_guardrails(ctx, effective),
+        in_process=await _in_process_guardrails(ctx, effective),
         trace=ctx.trace,
     )
 

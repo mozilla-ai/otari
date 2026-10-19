@@ -42,10 +42,10 @@ older gateways.
 
 For example, the otari.ai resolve response also carries `provider_key_id` and
 `allowed_models`. Otari does not read these today, so they are intentionally
-absent from the shapes documented here. `user_id`, `workspace_id`, and
-`organization_id` (all below) are the exceptions: Otari reads each when
-present, but a peer omitting any of them is exactly as valid as a peer sending
-an unrecognized field.
+absent from the shapes documented here. `user_id`, `workspace_id`,
+`organization_id` and `guardrails` (all below) are the exceptions: Otari reads
+each when present, but a peer omitting any of them is exactly as valid as a peer
+sending an unrecognized field.
 
 When the operator points Otari's web-search backend at the platform
 (`OTARI_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
@@ -382,6 +382,62 @@ it cannot identify is exactly the one that would put the whole account at
 risk. The single-attempt shape below carries neither field, so a peer still
 sending it needs the setting off.
 
+#### Guardrails
+
+`guardrails` (optional) lists what the caller's organization mandates for the
+workspace the `X-User-Token` belongs to. Otari runs every entry on the request's
+input before it calls a provider, exactly as a standalone deployment runs the
+same rows from its own database. Absent and `[]` both mean none, so a peer that
+mandates nothing need not send the field. A peer that does mandate guardrails
+MUST send them on every answer: Otari keeps no list of its own between requests.
+
+```json
+{
+  "guardrails": [
+    {
+      "profile": "azure-safety",
+      "mode": "block",
+      "on_unavailable": "block",
+      "validate_kwargs": {},
+      "definition": {
+        "id": "0b6f1f43-8c8e-4d6e-9d55-7a1c0d1e2f3a",
+        "guardrail_name": "azure_content_safety",
+        "version": "2026-10-19T08:00:00+00:00",
+        "arguments": {
+          "endpoint": "https://example.cognitiveservices.azure.com",
+          "api_key": "..."
+        }
+      }
+    },
+    {
+      "profile": "prompt-injection",
+      "mode": "monitor",
+      "on_unavailable": "monitor",
+      "url": "https://guardrails.example.com",
+      "credential": "..."
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `profile` | Required. The check's name, unique within the list. |
+| `mode`, `on_unavailable` | Required, each `block` or `monitor`, with the meaning [Guardrails](guardrails.md) gives them. |
+| `validate_kwargs` | Optional. Arguments for each check. |
+| `definition` | A guardrail Otari builds and runs itself. `id` is stable for the definition and `version` changes on every edit: Otari builds a version the first time it sees it, keeps it, and builds again when `version` changes. `arguments` are its constructor arguments, secrets included; `null` says the peer could not read them, and the check is then unavailable. |
+| `url`, `credential` | A guardrails service, called with `credential` as a bearer token. A `null` `url` means the gateway's own `OTARI_GUARDRAILS_URL`. Never sent with `definition`. |
+
+The credentials are the organization's own, so any gateway that may serve the
+organization may receive them, in the way a BYO provider key is returned. They
+are as sensitive as `api_key`: neither side may log them.
+
+A `guardrails` value Otari cannot read (not a list, an entry missing `mode` or
+`on_unavailable`, an unknown mode, or `definition` beside `url` or
+`credential`) is answered `502 Bad Gateway` with `detail = "Authorization
+service unavailable"`, and no provider is called, because serving the request
+would skip a mandate.
+
 ### Response: single-attempt shape
 
 Otari also accepts a flat payload:
@@ -404,7 +460,7 @@ multi-attempt shape. `user_id` has no legacy mirror here, the same treatment
 as `extra_params`: a peer old enough to still emit this shape predates the
 field entirely. `workspace_id` and `organization_id` are read here too, from
 the same top level, since a peer that still answers flat may nonetheless know
-its own tenant.
+its own tenant. `guardrails` is read from the same top level, too.
 
 ### Failure
 
