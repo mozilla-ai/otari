@@ -182,6 +182,19 @@ def test_a_provider_that_lists_nothing_keeps_its_deployment_provider(
     assert [provider.name for provider in db_session.execute(select(HostedProvider)).scalars()] == ["openai"]
 
 
+def test_a_name_a_hosted_provider_cannot_take_says_how_to_move_it(
+    client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]]
+) -> None:
+    """An instance named after another implementation was legal here and is not for a hosted provider."""
+    _deployment_provider(client, master_key_header, "groq", provider_type="openai", api_key="sk-groq-3333")
+
+    [row] = _rows(client.get(PATH, headers=master_key_header)).values()
+
+    assert row["outcome"] == "invalid"
+    assert "names another provider" in row["detail"]
+    assert "under another name" in row["detail"]
+
+
 def test_a_row_no_configured_key_reads_is_left_where_it_is(
     client: TestClient,
     master_key_header: dict[str, str],

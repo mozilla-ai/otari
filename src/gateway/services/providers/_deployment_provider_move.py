@@ -49,10 +49,18 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
     )
     try:
         implementation = normalize_provider(declared)
-        name = normalize_name(instance, implementation)
     except TenancyError as exc:
         public.outcome = "invalid"
         public.detail = str(exc)
+        return PlannedMove(public)
+    try:
+        name = normalize_name(instance, implementation)
+    except TenancyError as exc:
+        public.outcome = "invalid"
+        public.detail = (
+            f"{exc}, so a hosted provider cannot keep it. Add it on the Hosted providers page under another "
+            "name, point its callers at that name, then remove the deployment provider."
+        )
         return PlannedMove(public)
     if name in hosted_names:
         public.outcome = "conflict"
