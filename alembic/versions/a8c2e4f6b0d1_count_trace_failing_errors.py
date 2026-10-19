@@ -1,8 +1,8 @@
-"""Count a trace's tool errors apart from its other errors.
+"""Count the errors that fail a trace's session apart from its other errors.
 
 A tool's error goes back to the model, which usually recovers, so the session
 series counts a trace as failed only for an error other than a tool's.
-``tool_error_count`` is the part of ``error_count`` that tools account for,
+``failing_error_count`` is the part of ``error_count`` that fails the session,
 backfilled from the spans each trace already holds.
 
 Revision ID: a8c2e4f6b0d1
@@ -22,14 +22,14 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column("traces", sa.Column("tool_error_count", sa.Integer(), server_default="0", nullable=False))
+    op.add_column("traces", sa.Column("failing_error_count", sa.Integer(), server_default="0", nullable=False))
     op.execute(
         sa.text(
-            "UPDATE traces SET tool_error_count = ("
+            "UPDATE traces SET failing_error_count = ("
             "SELECT COUNT(*) FROM trace_spans"
             " WHERE trace_spans.workspace_id = traces.workspace_id"
             " AND trace_spans.trace_id = traces.trace_id"
-            " AND trace_spans.kind = 'tool' AND trace_spans.outcome = 'error'"
+            " AND trace_spans.kind <> 'tool' AND trace_spans.outcome = 'error'"
             " AND NOT trace_spans.recovered"
             ") WHERE error_count > 0"
         )
@@ -37,4 +37,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("traces", "tool_error_count")
+    op.drop_column("traces", "failing_error_count")

@@ -1,7 +1,7 @@
-"""The revision that counts a trace's tool errors apart, exercised on SQLite.
+"""The revision that counts the errors that fail a trace's session apart, exercised on SQLite.
 
 The integration suite migrates PostgreSQL only, so this is the SQLite half: an
-existing trace's tool errors are backfilled from its spans, and the downgrade
+existing trace's failing errors are backfilled from its spans, and the downgrade
 drops the column again.
 """
 
@@ -30,7 +30,7 @@ _INSERT_SPAN = text(
 
 @pytest.fixture
 def chain(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
-    database_url = f"sqlite:///{tmp_path / 'trace_tool_errors.db'}"
+    database_url = f"sqlite:///{tmp_path / 'trace_failing_errors.db'}"
     config = Config()
     config.set_main_option("script_location", str(_ALEMBIC_DIR))
     config.set_main_option("sqlalchemy.url", database_url)
@@ -43,7 +43,7 @@ def chain(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
         engine.dispose()
 
 
-def test_an_existing_trace_has_its_tool_errors_backfilled(chain: tuple[Config, Engine]) -> None:
+def test_an_existing_trace_has_its_failing_errors_backfilled(chain: tuple[Config, Engine]) -> None:
     config, engine = chain
     spans = [
         # trace, span, kind, outcome, recovered
@@ -75,8 +75,10 @@ def test_an_existing_trace_has_its_tool_errors_backfilled(chain: tuple[Config, E
     command.upgrade(config, _REVISION)
 
     with engine.begin() as connection:
-        rows = connection.execute(text("SELECT trace_id, error_count, tool_error_count FROM traces ORDER BY trace_id"))
-        assert [tuple(row) for row in rows] == [("clean-run", 0, 0), ("failed-run", 2, 1), ("recovered-run", 2, 2)]
+        rows = connection.execute(
+            text("SELECT trace_id, error_count, failing_error_count FROM traces ORDER BY trace_id")
+        )
+        assert [tuple(row) for row in rows] == [("clean-run", 0, 0), ("failed-run", 2, 1), ("recovered-run", 2, 0)]
 
 
 def test_the_downgrade_drops_the_column(chain: tuple[Config, Engine]) -> None:
@@ -84,6 +86,6 @@ def test_the_downgrade_drops_the_column(chain: tuple[Config, Engine]) -> None:
     command.upgrade(config, _REVISION)
     command.downgrade(config, _BEFORE)
 
-    assert "tool_error_count" not in {column["name"] for column in inspect(engine).get_columns("traces")}
+    assert "failing_error_count" not in {column["name"] for column in inspect(engine).get_columns("traces")}
     command.upgrade(config, _REVISION)
-    assert "tool_error_count" in {column["name"] for column in inspect(engine).get_columns("traces")}
+    assert "failing_error_count" in {column["name"] for column in inspect(engine).get_columns("traces")}

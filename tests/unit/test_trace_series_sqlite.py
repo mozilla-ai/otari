@@ -67,7 +67,9 @@ def _write(trace_id: str, *spans: SpanRecord) -> TraceWrite:
 async def test_tool_errors_alone_do_not_fail_a_session(store: TraceService) -> None:
     await store.write(
         (
-            _write("recovered", _span("req-1"), _span("tool-1", kind="tool", outcome="error"), _span("llm-1", kind="llm")),
+            _write(
+                "recovered", _span("req-1"), _span("tool-1", kind="tool", outcome="error"), _span("llm-1", kind="llm")
+            ),
             _write("tools-only", _span("req-1"), *(_span(f"t{n}", kind="tool", outcome="error") for n in range(15))),
             _write("clean", _span("req-1"), _span("tool-1", kind="tool")),
         )
