@@ -93,11 +93,21 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
                 <td className="px-3 py-1.5 tabular-nums">
                   {attempt.attempt_position ?? "?"}
                 </td>
-                <td className="px-3 py-1.5 text-foreground">
-                  {findPricingSelector(attempt)}
-                  {attempt.id === entry.id ? (
-                    <Chip className="ml-2">this row</Chip>
-                  ) : null}
+                {/* Takes the width the other lanes leave and cuts a long target
+                    short, so Total time and Cost stay on screen. The summary
+                    above names the served target in full. */}
+                <td className="w-full max-w-0 px-3 py-1.5 text-foreground">
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="min-w-0 truncate"
+                      title={findPricingSelector(attempt)}
+                    >
+                      {findPricingSelector(attempt)}
+                    </span>
+                    {attempt.id === entry.id ? (
+                      <Chip className="shrink-0">this row</Chip>
+                    ) : null}
+                  </span>
                 </td>
                 <td className="px-3 py-1.5">
                   {describeSelectionReason(attempt.selection_reason) ?? "—"}

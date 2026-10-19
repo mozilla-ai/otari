@@ -1,6 +1,11 @@
 import type { UsageEntry } from "@/client"
 import { formatNumber } from "@/shared/helpers/format"
-import { buildTokenComposition, formatTokenCount } from "./activityModel"
+import {
+  buildTokenComposition,
+  formatTokenLane,
+  isCompactCount,
+} from "./activityModel"
+import { LaneValue } from "./LaneValue"
 
 // Billed input, cache reads and writes included, so Input and Output add up to
 // the row's billed tokens. On a cached agent call the cache is most of that
@@ -8,10 +13,22 @@ import { buildTokenComposition, formatTokenCount } from "./activityModel"
 // has every raw field.
 export function InputTokens({ entry }: { entry: UsageEntry }) {
   const composition = buildTokenComposition(entry)
-  if (composition === null) return formatTokenCount(entry.prompt_tokens)
+  const total = composition
+    ? composition.fresh + composition.cacheRead + composition.cacheWrite
+    : entry.prompt_tokens
+  const display = formatTokenLane(total)
+  const exact = total === null ? display : formatNumber(total)
+  if (
+    composition === null ||
+    (!composition.cacheRead && !composition.cacheWrite)
+  ) {
+    return total !== null && isCompactCount(total) ? (
+      <LaneValue display={display} exact={exact} />
+    ) : (
+      display
+    )
+  }
   const { fresh, cacheRead, cacheWrite } = composition
-  const input = formatNumber(fresh + cacheRead + cacheWrite)
-  if (!cacheRead && !cacheWrite) return input
   const split = [
     `Fresh input ${formatNumber(fresh)}`,
     cacheRead ? `cache read ${formatNumber(cacheRead)}` : null,
@@ -19,10 +36,5 @@ export function InputTokens({ entry }: { entry: UsageEntry }) {
   ]
     .filter(Boolean)
     .join(", ")
-  return (
-    <span title={split}>
-      {input}
-      <span className="sr-only">, {split}</span>
-    </span>
-  )
+  return <LaneValue display={display} exact={exact} detail={split} />
 }

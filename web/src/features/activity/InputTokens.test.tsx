@@ -30,7 +30,7 @@ describe("InputTokens", () => {
   })
 
   it("adds no title when the cache took no part", () => {
-    const { container } = render(
+    render(
       <InputTokens
         entry={entry({
           billing_meters: { total_input_tokens: 400, completion_tokens: 100 },
@@ -38,8 +38,7 @@ describe("InputTokens", () => {
       />,
     )
 
-    expect(container).toHaveTextContent("400")
-    expect(container.querySelector("[title]")).toBeNull()
+    expect(screen.getByText("400")).not.toHaveAttribute("title")
   })
 
   it("falls back to the raw prompt, and to an em-dash, without usage", () => {
@@ -66,5 +65,21 @@ describe("InputTokens", () => {
       />,
     )
     expect(container).toHaveTextContent("—")
+  })
+
+  it("shortens a count past the lane, keeping the exact one for title and screen reader", () => {
+    render(
+      <InputTokens
+        entry={entry({
+          prompt_tokens: 1_234_567_890,
+          completion_tokens: 1,
+          billing_meters: null,
+        })}
+      />,
+    )
+
+    expect(screen.getByText("1.23B")).toHaveAttribute("aria-hidden")
+    expect(screen.getByText("1,234,567,890")).toHaveClass("sr-only")
+    expect(screen.getByTitle("1,234,567,890")).toBeInTheDocument()
   })
 })

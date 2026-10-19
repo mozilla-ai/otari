@@ -105,22 +105,23 @@ describe("RequestDetail", () => {
     ).toHaveTextContent("1,200")
   })
 
-  it("titles a named user with the name, while the copy keeps the id", async () => {
+  it("shows a named user's whole name, while the copy keeps the id", async () => {
     mockApi()
     renderPage(
       <RequestDetail
         entry={entry({
           user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
-          user_alias: "Alice Example",
+          user_alias: "Aleksandra Wiśniewska-Kowalczyk",
         })}
         onPriceModel={null}
       />,
     )
     await flushRouter()
 
-    expect(screen.getByText("Alice Example")).toHaveAttribute(
-      "title",
-      "Alice Example",
+    // The detail is where a name the row cut short is read in full, so it
+    // wraps. jsdom cannot measure truncation, so the wrapping class is pinned.
+    expect(screen.getByText("Aleksandra Wiśniewska-Kowalczyk")).toHaveClass(
+      "wrap-anywhere",
     )
     expect(
       screen.getByRole("button", { name: "Copy user id" }),

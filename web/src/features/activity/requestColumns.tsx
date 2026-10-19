@@ -6,11 +6,16 @@ import {
   buildTokenComposition,
   displayStatus,
   formatTokenCount,
+  formatTokenLane,
   formatToolUsage,
   formatUSD,
+  formatUSDLane,
+  isCompactCount,
+  isCompactUSD,
   listToolUsage,
 } from "./activityModel"
 import { InputTokens } from "./InputTokens"
+import { LaneValue } from "./LaneValue"
 import { StatusMark } from "./StatusMark"
 
 // The request log's columns that read nothing but the row. Activity and the
@@ -22,7 +27,7 @@ type RequestColumn = DataTableColumn<UsageEntry>
 export const apiKeyLabel = (entry: UsageEntry): string =>
   entry.api_key_id === null
     ? "—"
-    : (entry.api_key_name ?? `${entry.api_key_id.slice(0, 8)}…`)
+    : entry.api_key_name || `${entry.api_key_id.slice(0, 8)}…`
 
 export const TIME_COLUMN: RequestColumn = {
   id: "time",
@@ -91,7 +96,7 @@ export const API_KEY_COLUMN: RequestColumn = {
     // The title is the whole id when the label had to shorten it.
     <span
       className="block truncate text-muted"
-      title={entry.api_key_name ?? entry.api_key_id ?? "—"}
+      title={entry.api_key_name || entry.api_key_id || "—"}
     >
       {apiKeyLabel(entry)}
     </span>
@@ -109,17 +114,33 @@ export const OUTPUT_TOKENS_COLUMN: RequestColumn = {
   id: "output_tokens",
   header: "Output",
   align: "end",
-  cell: (entry) =>
-    formatTokenCount(
-      buildTokenComposition(entry)?.output ?? entry.completion_tokens,
-    ),
+  cell: (entry) => {
+    const output =
+      buildTokenComposition(entry)?.output ?? entry.completion_tokens
+    return output !== null && isCompactCount(output) ? (
+      <LaneValue
+        display={formatTokenLane(output)}
+        exact={formatTokenCount(output)}
+      />
+    ) : (
+      formatTokenLane(output)
+    )
+  },
 }
 
 export const COST_COLUMN: RequestColumn = {
   id: "cost",
   header: "Cost",
   align: "end",
-  cell: (entry) => formatUSD(entry.cost),
+  cell: (entry) =>
+    entry.cost !== null && isCompactUSD(entry.cost) ? (
+      <LaneValue
+        display={formatUSDLane(entry.cost)}
+        exact={formatUSD(entry.cost)}
+      />
+    ) : (
+      formatUSD(entry.cost)
+    ),
 }
 
 export const STATUS_COLUMN: RequestColumn = {

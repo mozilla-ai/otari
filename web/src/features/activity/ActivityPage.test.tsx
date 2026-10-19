@@ -513,10 +513,11 @@ describe("ActivityPage", () => {
     // A request that failed before the provider reported usage has no count to
     // show, so both cells are an em-dash rather than a zero.
     const failed = screen.getByText("failed-model").closest("tr")!
-    for (const column of ["input_tokens", "output_tokens"]) {
-      expect(
-        failed.querySelector(`td[data-column="${column}"]`),
-      ).toHaveTextContent("—")
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent)
+    for (const column of ["Input", "Output"]) {
+      expect(failed.cells[headers.indexOf(column)]).toHaveTextContent("—")
     }
   })
 
@@ -1624,20 +1625,24 @@ describe("ActivityPage table-scan avoidance", () => {
     ).toBe(false)
   })
 
-  it("falls back to a short id when the row carries no key name", async () => {
-    // The label is null whenever the key was deleted or never named, so the
-    // column must not render an empty cell for a row that does have a key.
-    mockApi({
-      rows: [entry({ api_key_id: "abcdef123456", api_key_name: null })],
-    })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+  it.each([null, ""])(
+    "falls back to a short id when the key name is %j",
+    async (name) => {
+      // The label is null whenever the key was deleted or never named, and the
+      // API accepts an empty name, so the column must not render an empty cell
+      // for a row that does have a key.
+      mockApi({
+        rows: [entry({ api_key_id: "abcdef123456", api_key_name: name })],
+      })
+      renderPage(<ActivityPage />, "/activity?range=24h")
 
-    // Shortened in the cell, whole on hover.
-    expect(await screen.findByText("abcdef12…")).toHaveAttribute(
-      "title",
-      "abcdef123456",
-    )
-  })
+      // Shortened in the cell, whole on hover.
+      expect(await screen.findByText("abcdef12…")).toHaveAttribute(
+        "title",
+        "abcdef123456",
+      )
+    },
+  )
 })
 
 describe("ActivityPage user naming", () => {
