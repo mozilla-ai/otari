@@ -21,14 +21,16 @@ import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
-  HOSTED_SURFACES,
   organizationContext,
   pendingOrganizationInvitation,
+  SURFACES,
   seriesPoint,
   usageTotals,
   workspaceActivation,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+
+const WITHOUT_PROVIDERS = SURFACES.filter((surface) => surface !== "providers")
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -682,11 +684,11 @@ describe("OverviewPage", () => {
     )
   })
 
-  it("states an unreachable provider without a link on a hosted deployment", async () => {
-    // Provider health reports on `config.providers`, the process-global table a
-    // hosted deployment serves no page for, so both candidate destinations are
-    // wrong: `/providers` is answered with "not available here", and the
-    // organization page lists a different table the instance is not on.
+  it("states an unreachable provider without a link where the deployment serves no providers page", async () => {
+    // Provider health reports on `config.providers`, the process-global table,
+    // so without its page both candidate destinations are wrong: `/providers`
+    // is answered with "not available here", and the organization page lists a
+    // different table the instance is not on.
     mockApi({
       health: {
         providers: [],
@@ -698,7 +700,7 @@ describe("OverviewPage", () => {
     renderPage(
       <OverviewPage />,
       "/overview",
-      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
+      bootstrap({ surfaces: WITHOUT_PROVIDERS }),
     )
 
     expect(
@@ -830,20 +832,16 @@ describe("OverviewIndex routing", () => {
     expect(await screen.findByTestId("loc")).toHaveTextContent("/providers")
   })
 
-  it("sends a hosted deployment to the same organization page", async () => {
-    // A hosted deployment does not report the `providers` surface at all, so
-    // the shell answers that route with "not available here". Both topologies
-    // land in the same place now, which is the point: the row that moved is the
-    // fallback, not this answer.
+  it("sends a deployment without the providers page to the organization's", async () => {
+    // Without the `providers` surface the shell answers that route with "not
+    // available here", so the organization's own page is where a provider is
+    // added.
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(
       <OverviewIndex />,
       "/overview",
-      bootstrap({
-        deployment_type: "hosted",
-        surfaces: HOSTED_SURFACES,
-      }),
+      bootstrap({ surfaces: WITHOUT_PROVIDERS }),
     )
 
     await screen.findByText("Get started with Otari")
@@ -1750,13 +1748,7 @@ describe("OverviewIndex for an identity with no organization", () => {
   } = {}) {
     return render(
       <QueryClientProvider client={client}>
-        <DeploymentProvider
-          value={bootstrap({
-            deployment_type: "hosted",
-            surfaces: HOSTED_SURFACES,
-            open_signup: openSignup,
-          })}
-        >
+        <DeploymentProvider value={bootstrap({ open_signup: openSignup })}>
           <OverviewIndex />
         </DeploymentProvider>
       </QueryClientProvider>,

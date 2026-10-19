@@ -13,7 +13,7 @@ Pass a file explicitly:
 otari serve --config config.yml
 ```
 
-A small standalone configuration looks like this:
+A small configuration looks like this:
 
 ```yaml
 database_url: "postgresql://otari:otari@postgres:5432/otari"
@@ -87,7 +87,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
-| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone only. See [Health checks](health-checks.md). |
+| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -102,12 +102,11 @@ the corresponding startup value after the database is available.
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
-| `streaming_first_chunk_hold_ms` | How long a standalone gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
+| `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
-| `mode` | `standalone` or `hosted`. See [Modes](modes.md). |
 
 For every field, its current default, validation, and description live on
 `GatewayConfig` in `src/gateway/core/config.py`, or in the per-domain module
@@ -235,9 +234,7 @@ replica that served it and on every other replica within 30 seconds; a changed
 rule keeps the requests it already counted. Choose "Each model" to add a
 `per: model` rule and pick its models. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
 whose name config.yml later declares is skipped with a warning at startup and
-left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it. A
-hosted control plane serves no inference, so its dashboard does not offer the
-rules.
+left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it.
 
 ### Trace context propagation
 
@@ -521,7 +518,7 @@ providers:
 
 ### Runtime provider management
 
-Standalone operators can store provider credentials through the Providers page
+Operators can store provider credentials through the Providers page
 or `/api/v1/provider-credentials`. Stored entries override config-file entries with
 the same instance name. Config-file entries remain read-only in the dashboard.
 
@@ -549,8 +546,8 @@ its provider has moved.
 ### Hosted providers in config.yml
 
 A hosted provider is a credential the deployment serves requests on when
-nothing else credentials them (see [Modes](modes.md#hosted-providers-and-byo-credentials)).
-Besides the Hosted providers page, a standalone or hosted deployment can declare
+nothing else credentials them (see [Hosted providers](hosted-providers.md#hosted-providers-and-byo-credentials)).
+Besides the Hosted providers page, a deployment can declare
 them in a `hosted_providers:` block, keyed by name, with the fields the
 `/api/v1/hosted-providers` body takes:
 
@@ -812,11 +809,8 @@ address, and one scraper exhausts the budget for everyone, unless
 is per worker, so a deployment running N workers serves up to N times the
 configured number.
 
-In hosted mode a visitor sees the same thing a visitor sees anywhere else: the
-process-wide `providers:` instances, which in that mode are the deployment's
-own rather than any tenant's, and the deployment-wide roster of the hosted
-models it pays for (what `ModelProviderPort.get_hosted_models` answers with no
-organization), priced at the deployment's rates. No
+The hosted models a visitor sees are the deployment-wide roster (what
+`ModelProviderPort.get_hosted_models` answers with no organization). No
 organization's providers, overrides, or usage are public, whatever the flag is
 set to.
 
@@ -1071,8 +1065,7 @@ it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 3
 
 These entries are separate from `providers` because none of these upstreams serves
 chat: they never appear in `/api/v1/models` or provider health. Price a decision
-model like any other, as `<provider>:<model>` in `pricing`. Decisions are
-standalone-mode only.
+model like any other, as `<provider>:<model>` in `pricing`.
 
 ### Agent model recommendations
 
@@ -1089,7 +1082,7 @@ agent_recommender_candidates:
   opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
 ```
 
-These are a standalone deployment's settings. On otari.ai a managed
+These are a deployment's own settings. On otari.ai a managed
 recommender answers behind the same route, so neither applies there.
 `agent_recommender_model` is a `decision_providers` selector, resolved per
 request, so a deployment that never asks need not configure the provider.
@@ -1190,8 +1183,7 @@ code_execution_workspace_default: false  # OTARI_CODE_EXECUTION_WORKSPACE_DEFAUL
 Each decides only for a workspace with no stored policy: `false` refuses the
 tool there as a stored disabled policy would, and a workspace owner or admin
 turns it on from the Tools pages or the workspace policy API. A stored policy
-always wins. Unset, the tools are on, except on a hosted deployment, where they
-are off. See [Built-in tools](tools.md#per-workspace-web-access-policy) for what
+always wins. Unset, the tools are on. See [Built-in tools](tools.md#per-workspace-web-access-policy) for what
 each policy covers.
 
 ## Documentation links
@@ -1215,8 +1207,8 @@ privacy_url: "https://example.com/privacy"
 Each is independent. Unset, the Terms of service row is absent and the Data &
 Privacy row stays disabled. A deployment whose dashboard sits beside a site that
 owns the documents points at that site. `GET /api/v1/bootstrap` publishes both
-addresses unauthenticated, so a credential in either is refused at startup, the
-way `data_plane_url` refuses one. The same check covers `docs_url` and
+addresses unauthenticated, so a credential in either is refused at startup. The
+same check covers `docs_url` and
 `site_url`.
 
 ## The public site
@@ -1259,19 +1251,6 @@ Left unset on a split deployment, an OAuth callback lands the browser on an
 origin holding none of the sign-in state it started with, and the sign-in fails
 with the authorization code unspent. Passkeys need their own settings there; see
 [Access control](access-control.md#passkeys).
-
-## The data-plane address
-
-A hosted control plane does not serve inference. Set `data_plane_url` or
-`OTARI_DATA_PLANE_URL` to the gateway origin used by client snippets:
-
-```yaml
-data_plane_url: "https://gateway.example.com"
-```
-
-Supply the origin or path prefix without a trailing slash or `/api/v1`. Credentials,
-query strings, and fragments are refused because `GET /api/v1/bootstrap` publishes
-this value without authentication.
 
 ## Extending Otari with a bootstrap module
 

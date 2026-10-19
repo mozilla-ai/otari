@@ -59,17 +59,12 @@ Enforces:
 21. Service package imports: code outside a domain's service package
     imports only its root, so the root's exports are the domain's whole
     public API.
-22. Mode branches: nothing under services/ reads the deployment's mode,
-    so the behavior for each mode is chosen by a binding, not by a branch in a service.
-    A read is any use of is_hosted_mode, effective_mode or configured_mode, or a call to deployment_for.
-    The raw mode field and the platform token stay with review, because their names do not say that a mode is read.
-    The modules that still read one are named on a baseline, and the baseline only shrinks.
-23. Model access: each ORM model has one repository module that may construct or query it,
+22. Model access: each ORM model has one repository module that may construct or query it,
     so a table has one writer and its queries stay in one place.
     A model has none until a repository holds its queries.
     The other modules that use a model are named on its baseline, and the baseline only shrinks.
     A class in models/ is an ORM model when it passes table=True or assigns __tablename__ or __table__.
-24. Listener defaults: no parameter or class field typed as a listener has a default,
+23. Listener defaults: no parameter or class field typed as a listener has a default,
     so a caller cannot skip a listener by leaving it out.
     A listener type is one whose name contains Listener.
     Containing it, rather than ending in it, also catches an alias such as WorkspaceListenerDep.
@@ -77,7 +72,7 @@ Enforces:
     A FastAPI dependency declares a listener as Annotated[Listener, Depends(...)], since a Depends(...) default counts.
     A field kept out of the constructor, such as field(init=False), is not a parameter, so the rule skips it.
     The parameters and fields that still have one are named on a baseline, and the baseline only shrinks.
-25. Libraries: nothing under any-search/ or any-fetch/, tests and scripts
+24. Libraries: nothing under any-search/ or any-fetch/, tests and scripts
     included, imports the gateway, SQLAlchemy, SQLModel, FastAPI, uvicorn or
     the other library, so each runs on its own with httpx and pydantic. A
     library keeps its tests and scripts inside its directory rather than
@@ -441,7 +436,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/model_access.py",
     "gateway/services/oauth_service.py",
     "gateway/services/organization_pricing_service.py",
-    "gateway/services/playground_dispatch.py",
     "gateway/services/playground_service.py",
     "gateway/services/policy_store.py",
     "gateway/services/pricing_init_service.py",
@@ -632,7 +626,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/log_writer.py",
     "gateway/services/master_key_service.py",
     "gateway/services/organization_pricing_service.py",
-    "gateway/services/playground_dispatch.py",
     "gateway/services/playground_service.py",
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
@@ -758,55 +751,6 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
             "call site, so import it under its own name"
             for line, name in _renamed_unit_of_work_imports(tree, src_root / relative_path, src_root)
         )
-    return violations
-
-
-MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode")
-MODE_FUNCTION = "deployment_for"
-# The services that still read the deployment's mode.
-# An entry that stops reading it fails the check until it is removed, so the list only shrinks.
-SERVICE_MODE_READ_BASELINE: tuple[str, ...] = ()
-
-
-def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:
-    """Return the line and name of each read of the deployment's mode in a module, including one through getattr."""
-    found: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) and node.attr in MODE_READS:
-            found.append((node.lineno, node.attr))
-        elif isinstance(node, ast.Call) and _called_name(node.func) == MODE_FUNCTION:
-            found.append((node.lineno, MODE_FUNCTION))
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "getattr"
-            and len(node.args) > 1
-        ):
-            name = node.args[1]
-            if isinstance(name, ast.Constant) and isinstance(name.value, str) and name.value in MODE_READS:
-                found.append((node.lineno, name.value))
-    return sorted(found)
-
-
-def check_service_mode_reads(src_root: Path) -> list[str]:
-    """Check that no service off the baseline reads the deployment's mode, and that every baseline entry still does."""
-    violations: list[str] = []
-    reading: set[str] = set()
-    for relative_path, tree in _parsed_modules(src_root, SERVICE_SCOPE):
-        reads = _mode_reads(tree)
-        if not reads:
-            continue
-        reading.add(relative_path)
-        if relative_path not in SERVICE_MODE_READ_BASELINE:
-            violations.extend(
-                f"{relative_path}:{line} reads {name}; a service gets the behavior for each mode from a binding, "
-                "not from a branch on the mode"
-                for line, name in reads
-            )
-    violations.extend(
-        f"{relative_path} is on the mode read baseline but reads no mode; remove it from the baseline"
-        for relative_path in sorted(set(SERVICE_MODE_READ_BASELINE) - reading)
-    )
     return violations
 
 
@@ -1033,7 +977,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/oauth_service.py",
     "gateway/services/organization_pricing_service.py",
     "gateway/services/password_service.py",
-    "gateway/services/playground_dispatch.py",
     "gateway/services/playground_service.py",
     "gateway/services/policy_store.py",
     "gateway/services/pricing_init_service.py",
@@ -1420,7 +1363,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/repositories/overview/overview_repository.py",
             "gateway/repositories/users_repository.py",
             "gateway/services/bootstrap_service.py",
-            "gateway/services/playground_dispatch.py",
             "gateway/services/tenancy/workspace_activation_service.py",
             "gateway/services/workspace_scope.py",
         ),
@@ -2154,7 +2096,6 @@ def main() -> int:
     database_violations = check_database_imports(SRC_ROOT)
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
-    mode_read_violations = check_service_mode_reads(SRC_ROOT)
     listener_default_violations = check_listener_defaults(SRC_ROOT)
     # NOTE: A page with no domains fails here, so a rule that reads them cannot pass by checking nothing.
     domains, domains_page_violations = read_domains_page(REPO_ROOT / DOMAINS_DOC)
@@ -2200,12 +2141,6 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal Unit of Work construction violations: {len(unit_of_work_violations)}")
 
-    if mode_read_violations:
-        print("\n❌ Mode read violations:\n")
-        for violation in mode_read_violations:
-            print(f"  {violation}")
-        print(f"\nTotal mode read violations: {len(mode_read_violations)}")
-
     if listener_default_violations:
         print("\n❌ Listener default violations:\n")
         for violation in listener_default_violations:
@@ -2249,7 +2184,6 @@ def main() -> int:
         or database_violations
         or transaction_violations
         or unit_of_work_violations
-        or mode_read_violations
         or listener_default_violations
         or flat_module_violations
         or domain_name_violations

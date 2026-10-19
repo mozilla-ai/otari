@@ -1,64 +1,8 @@
-# Runtime modes
+# Hosted providers
 
-Otari has two deployment modes, selected by `OTARI_MODE`. Standalone serves both
-the control plane and data plane. Hosted serves only a multi-tenant control plane.
-
-## Comparison
-
-| | Standalone | Hosted |
-| --- | --- | --- |
-| Local database | Yes | Yes |
-| Local management API | Yes | Yes |
-| Local inference | Yes | No |
-| Provider credentials | Local config or database | Organization-scoped for tenants; deployment config is operator-only |
-| Dashboard | Full local dashboard | Organization-scoped control plane |
-
-`GET /api/v1/bootstrap` publishes the effective mode, sign-in methods, available
-management surfaces, and the data-plane URL the dashboard needs.
-
-Hybrid mode, a gateway attached to otari.ai, has been removed. Otari refuses to
-start while `OTARI_AI_TOKEN` is set or `OTARI_MODE` is `hybrid`, and ignores a
-leftover `platform:` block in `config.yml` with a warning. The `PLATFORM_*` and
-`STREAMING_FALLBACK_*` variables are no longer read. To keep serving, unset the
-token and run the gateway in standalone mode with providers of its own.
-
-## Mode and who runs it
-
-The mode says what a process serves. It does not say who runs the process.
-
-A **self-hosted** gateway is one you run on your own infrastructure, in
-standalone mode. "Hosted" names the control-plane mode. It is not the opposite of
-"self-hosted": a hosted deployment serves no inference, and anyone can run one.
-
-## Standalone
-
-Standalone is the default when `OTARI_MODE` is unset. It serves the full API, stores keys, budgets, and usage locally, and resolves
-providers from configuration or stored credentials.
-
-SQLite is useful for evaluation. Use PostgreSQL for a durable deployment.
-
-Standalone supports local aliases and routing policies, including failover,
-weighted and priority routing, conditional selection, and learned routing. Multi-provider
-fallback is therefore available without otari.ai when you configure a policy.
-
-## Hosted
-
-Set `OTARI_MODE=hosted` when one process is the control plane for multiple
-organizations.
-
-Hosted mode serves the management API and `GET /api/v1/models`, but does not serve
-inference, files, batches, or other data-plane operations. Those paths return a
-descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
-point clients to the correct gateway.
-
-The dashboard hides the Providers page, whose stored instances are deployment-wide
-rather than per tenant, leaving the organization-scoped provider keys that a
-standalone deployment also has. It keeps the Hosted providers page, where an
-operator configures the credentials the deployment pays for (see
-[Hosted providers and BYO credentials](#hosted-providers-and-byo-credentials)).
-It also hides the Playground, whose whole purpose is to dispatch a completion.
-Deployment-wide APIs still require operator authority; organization-scoped APIs
-apply membership and role checks.
+A hosted provider is a credential the deployment itself pays for, offered to
+the organizations it serves. This page covers where it sits among the other
+credentials a request can be served on, and how a request on it is billed.
 
 ## Hosted providers and BYO credentials
 
@@ -85,8 +29,8 @@ model switched off, or one the roster does not list, is refused with `424`. The
 deployment settles the upstream bill for a hosted model, which is why its rate
 belongs to the deployment and not to any one organization. A hosted provider
 can be restricted to one organization, and every other organization is then
-served as if it did not exist. Any standalone or hosted deployment configures
-them on the Hosted providers page, through `/api/v1/hosted-providers`, or in the
+served as if it did not exist. An operator configures them on the Hosted
+providers page, through `/api/v1/hosted-providers`, or in the
 `hosted_providers:` block of `config.yml` (see
 [Configuration](configuration.md#hosted-providers-in-configyml)), where a stored
 provider of the same name wins over the configured one.
@@ -114,7 +58,7 @@ of either view dials at once, and changing or deleting a hosted provider drops
 its cached listing so the next read dials the credential as it now stands. A
 provider switched off and one whose key cannot be decrypted are never dialed.
 
-## Deployment-paid credentials in standalone
+## Deployment-paid credentials
 
 A deployment can serve a model on a credential it owns, once an organization's
 own key, a stored provider and `config.yml` have all missed: the core serves it

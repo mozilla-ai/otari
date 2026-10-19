@@ -2327,7 +2327,7 @@ async def _resolve_keyed_user_id(
     *,
     adapter: FormatAdapter[Any, Any],
     db: AsyncSession,
-    uow: UnitOfWork | None,
+    uow: UnitOfWork,
     log_writer: LogWriter,
     config: GatewayConfig,
     raw_request: Request,
@@ -2354,8 +2354,6 @@ async def _resolve_keyed_user_id(
     the budget ``Otari-End-User-Budget`` names when it is new.
     """
     if api_key is not None and user_id_from_request and _names_end_user(api_key, user_id_from_request):
-        if uow is None:
-            raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
         try:
             end_user = await get_budget_service(uow, db).resolve_end_user(
                 api_key=api_key,
@@ -2441,14 +2439,12 @@ async def _admit_idempotent(
 
 async def _budget_minute_limits(
     adapter: FormatAdapter[Any, Any],
-    uow: UnitOfWork | None,
+    uow: UnitOfWork,
     db: AsyncSession,
     user_id: str,
     strategy: str | None,
 ) -> BudgetMinuteLimits | None:
     """The per-minute limits of the user's own budget, admitted alongside ``rate_limits``."""
-    if uow is None:
-        raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
     return await get_budget_service(uow, db).minute_limits(user_id, strategy=strategy)
 
 
@@ -2466,8 +2462,8 @@ async def resolve_request_context(
     adapter: FormatAdapter[Any, Any],
     raw_request: Request,
     response: Response,
-    db: AsyncSession | None,
-    uow: UnitOfWork | None,
+    db: AsyncSession,
+    uow: UnitOfWork,
     config: GatewayConfig,
     log_writer: LogWriter,
     model: str,
@@ -2542,8 +2538,6 @@ async def resolve_request_context(
 
     request_id = str(uuid.uuid4())
     set_request_id(raw_request, response, request_id)
-    if db is None:
-        raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
     # No session cookie is consulted *here*, and that is the point: this
     # plane calls a provider with somebody's credentials and writes a usage
     # row against somebody's budget. ``is_master_key`` below sends both

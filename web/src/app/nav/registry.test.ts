@@ -1,7 +1,6 @@
 import { FiBox } from "react-icons/fi"
 import { describe, expect, it } from "vitest"
 import { BASE_CAPABILITIES } from "@/shared/hooks/useEntitlements"
-import { HOSTED_SURFACES } from "@/tests/fixtures"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
 import { OVERLAY_NAV_ITEMS } from "./overlayNavItems"
 import { OVERLAY_DEPLOYMENT_NAV_SECTIONS } from "./overlaySections"
@@ -213,8 +212,8 @@ describe("nav registry", () => {
   })
 
   it.each([
-    ["standalone", "providers", "/providers"],
-    ["hosted", "organization_providers", "/organization/provider-keys"],
+    ["deployment", "providers", "/providers"],
+    ["organization", "organization_providers", "/organization/provider-keys"],
   ])(
     "places %s providers above Org settings in General",
     (_, surface, path) => {
@@ -345,13 +344,13 @@ describe("nav registry", () => {
     }
   })
 
-  it("gates every organization destination on a surface standalone reports", () => {
+  it("gates every organization destination on a surface the bootstrap reports", () => {
     // Pinned as the whole rail, because the failure mode is silent in both
     // directions: a missing gate ships a link to a page that cannot work, and a
     // gate on a surface the bootstrap does not report hides a page that can. A
     // typo in a surface name is silent the same way, since `NavItemBase.surface`
     // is a bare string.
-    const standalone = [
+    const surfaces = [
       "admin",
       "budgets",
       "keys",
@@ -370,28 +369,16 @@ describe("nav registry", () => {
       "workspaces",
     ]
     for (const item of ORG_NAV_SECTIONS.flatMap(({ items }) => items)) {
-      expect(standalone).toContain(item.surface)
+      expect(surfaces).toContain(item.surface)
     }
     expect(navItemForPath("/organization/usage")?.surface).toBe(
       "organization_usage",
     )
-    // Provider keys sits beside the process-global row on standalone, which is
-    // why the two carry different labels.
+    // Provider keys sits beside the process-global row, which is why the two
+    // carry different labels.
     expect(navItemForPath("/organization/provider-keys")?.surface).toBe(
       "organization_providers",
     )
-    // The other direction, read from the fixture the hosted-shell tests render
-    // with, which is what keeps that fixture honest: a surface added to the
-    // backend's HOSTED_SURFACES and not to the fixture leaves those tests
-    // quietly rendering a rail the product does not have, and fails here
-    // instead.
-    for (const surface of [
-      "organization_guardrails",
-      "organization_providers",
-      "organization_usage",
-    ]) {
-      expect(HOSTED_SURFACES).toContain(surface)
-    }
     expect(navItemForPath("/organization/guardrails")?.surface).toBe(
       "organization_guardrails",
     )
@@ -455,9 +442,8 @@ describe("nav registry", () => {
       "/organization/guardrails",
       "/organization",
     ])
-    // The labels are the thing under test, because both rows render on a
-    // standalone deployment and a shared label would leave them
-    // indistinguishable.
+    // The labels are the thing under test, because both rows render and a
+    // shared label would leave them indistinguishable.
     expect(general?.items.map((item) => item.label)).toEqual([
       "Providers",
       "Deployment providers",

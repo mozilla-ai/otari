@@ -58,7 +58,7 @@ class InferenceSettings(BaseModel):
             "How long a non-streaming completion sent with an Idempotency-Key is kept, so that a "
             "retry with the same key returns the stored response instead of calling the provider "
             "and billing again. The stored response includes the generated content. 0 ignores the "
-            "header. Standalone mode only."
+            "header."
         ),
     )
     idempotency_lease_sec: Annotated[int, OMITTED] = Field(

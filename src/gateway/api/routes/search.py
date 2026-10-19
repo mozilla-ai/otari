@@ -62,7 +62,7 @@ from gateway.api.deps import (
     WebSearchPolicyPortDep,
     get_budget_service,
     get_config,
-    get_db_if_needed,
+    get_db,
     get_log_writer,
     verify_api_key_or_master_key,
 )
@@ -135,7 +135,7 @@ async def create_search(
     response: Response,
     request: SearchRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
@@ -183,7 +183,7 @@ async def create_search_for_tool(
     request: SearchRequest,
     search_tool_name: Annotated[str, Path(description="Configured search tool to run against")],
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
@@ -230,7 +230,7 @@ async def _dispatch_search(
     request: SearchRequest,
     tool_name: str | None,
     auth_result: tuple[APIKey | None, bool],
-    db: AsyncSession | None,
+    db: AsyncSession,
     config: GatewayConfig,
     log_writer: LogWriter,
     budget_service: BudgetService,
@@ -245,9 +245,7 @@ async def _dispatch_search(
     any-llm provider.
     """
     # The session the policy port reads on too, so one release before the provider call
-    # frees the request's one connection. Never None: the endpoint is mounted only where
-    # a process serves both planes, which get_db_if_needed hands a session.
-    assert db is not None
+    # frees the request's one connection.
     started_at = time.monotonic()
     api_key, _ = auth_result
     api_key_id = api_key.id if api_key else None

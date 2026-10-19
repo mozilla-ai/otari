@@ -5,8 +5,8 @@ never replace or remove the import.
 
 Before changing the backend, read
 [backend-standards](../../.github/skills/backend-standards/SKILL.md). The root
-[AGENTS.md](../../AGENTS.md) owns runtime modes, validation, and generated
-artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
+[AGENTS.md](../../AGENTS.md) owns the lint, test, and generated-artifact
+rules. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 [The modular monolith](../../ARCHITECTURE.md#the-modular-monolith) names the
 target shape and its import rules,
 [Layering](../../.github/skills/backend-standards/SKILL.md#layering) gives the
@@ -88,7 +88,7 @@ dashboard session. It does not prove that the session may act deployment-wide.
   own rather than overriding the gate in place.
 - Tenant routes authenticate, resolve `CurrentIdentity`, and authorize the
   organization or workspace in `services/tenancy/authorization.py`.
-- Data-plane routes use `verify_api_key_or_master_key`, which never accepts a
+- Inference routes use `verify_api_key_or_master_key`, which never accepts a
   dashboard cookie. The Playground's own completion endpoint
   (`routes/playground.py`) is the one surface that runs a completion from a
   session, and it is a separate route rather than a relaxation of that one: it

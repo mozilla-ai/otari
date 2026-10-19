@@ -59,7 +59,6 @@ import {
   useUpdateKey,
 } from "@/shared/api/apiKeys"
 import { useUsers } from "@/shared/api/users"
-import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
 import { formatDate } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,
@@ -72,7 +71,6 @@ import {
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 import { ExpiryFields } from "./ExpiryFields"
 import { KeyActionsMenu } from "./KeyActionsMenu"
 import {
@@ -174,10 +172,7 @@ function KeySecretStep({
   memberLabels: ReadonlyMap<string, string>
   secretRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>
 }) {
-  // Where a request from this deployment belongs, which is not always the address
-  // that served this page: a hosted control plane serves the dashboard and not
-  // the API. Undefined when it has not said where its gateway is (otari#823).
-  const baseUrl = resolveSnippetBaseUrl(useDeployment())
+  const baseUrl = resolveSnippetBaseUrl()
   const secret = result.key
   // The key and both snippets show one stand-in, so the credential on this
   // screen reads as one thing rather than three.
@@ -190,23 +185,15 @@ function KeySecretStep({
 
   // The same two calls the setup guide hands out with its own key; the builders
   // are shared so an operator cannot be shown two dialects of one request.
-  // One value rather than two, so a deployment that named no gateway drops both
-  // together and the copy under the heading cannot disagree with the fields.
-  const snippets = baseUrl
-    ? {
-        curl: buildCurlSnippet({ baseUrl, apiKey: secret }),
-        python: buildPythonSnippet({ baseUrl, apiKey: secret }),
-        // The same two commands around the stand-in, which is what the
-        // snippets show whenever the key is concealed. Without them concealing
-        // the key would leave it in plain sight twice over, in the requests
-        // that explain it.
-        concealedCurl: buildCurlSnippet({ baseUrl, apiKey: concealedSecret }),
-        concealedPython: buildPythonSnippet({
-          baseUrl,
-          apiKey: concealedSecret,
-        }),
-      }
-    : undefined
+  const snippets = {
+    curl: buildCurlSnippet({ baseUrl, apiKey: secret }),
+    python: buildPythonSnippet({ baseUrl, apiKey: secret }),
+    // The same two commands around the stand-in, which is what the snippets
+    // show whenever the key is concealed. Without them concealing the key would
+    // leave it in plain sight twice over, in the requests that explain it.
+    concealedCurl: buildCurlSnippet({ baseUrl, apiKey: concealedSecret }),
+    concealedPython: buildPythonSnippet({ baseUrl, apiKey: concealedSecret }),
+  }
 
   return (
     // `alert` rather than `status`: this is the one message in the product that
@@ -235,35 +222,27 @@ function KeySecretStep({
       <div className="flex flex-col gap-2">
         <div>
           <div className="text-body">Make your first call</div>
-          {snippets === undefined ? (
-            <MissingGatewayAddressNotice />
-          ) : (
-            <p className="text-caption">
-              Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model from
-              the Models page.
-            </p>
-          )}
+          <p className="text-caption">
+            Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model from
+            the Models page.
+          </p>
         </div>
-        {snippets !== undefined ? (
-          <>
-            <CopyField
-              label="curl"
-              value={snippets.curl}
-              concealed={snippets.concealedCurl}
-              isRevealed={isSecretRevealed}
-              onRevealChange={setIsSecretRevealed}
-              isMultiline
-            />
-            <CopyField
-              label="Python (Otari SDK)"
-              value={snippets.python}
-              concealed={snippets.concealedPython}
-              isRevealed={isSecretRevealed}
-              onRevealChange={setIsSecretRevealed}
-              isMultiline
-            />
-          </>
-        ) : null}
+        <CopyField
+          label="curl"
+          value={snippets.curl}
+          concealed={snippets.concealedCurl}
+          isRevealed={isSecretRevealed}
+          onRevealChange={setIsSecretRevealed}
+          isMultiline
+        />
+        <CopyField
+          label="Python (Otari SDK)"
+          value={snippets.python}
+          concealed={snippets.concealedPython}
+          isRevealed={isSecretRevealed}
+          onRevealChange={setIsSecretRevealed}
+          isMultiline
+        />
       </div>
     </div>
   )

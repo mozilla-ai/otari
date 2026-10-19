@@ -46,7 +46,7 @@ provider's own environment variable holds. When no candidate has a credential, t
 refused with `424 provider_not_configured`, or `424 managed_credential_unsupported`
 when at least one of them is a model the deployment offers only on its own
 credentials, which a policy with fallbacks never serves on
-([modes](modes.md#deployment-paid-credentials-in-standalone)). A candidate whose provider rejects
+([Hosted providers](hosted-providers.md#deployment-paid-credentials)). A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
 request is refused with `424 provider_credential_rejected`.
@@ -254,7 +254,7 @@ effective weighted shares, and mandatory guardrails. The API equivalent is
 
 A policy decides the model of a request that reaches Otari. A coding agent that
 talks to its provider directly can still ask Otari which model a new subagent
-should run on, through `POST /api/v1/routing/recommend`. A standalone
+should run on, through `POST /api/v1/routing/recommend`. A self-run
 deployment puts one choice question to the decision model it configured and
 recommends the candidate it picks; on otari.ai a managed recommender answers
 instead. The harness that asks picks the candidates: Claude Code chooses among
@@ -267,7 +267,7 @@ else is dispatched. See
 
 ## Managing policies at runtime
 
-Config-file policies apply to every workspace. Standalone operators can also
+Config-file policies apply to every workspace. Operators can also
 manage stored policies through the Routing page or `/api/v1/routing/policies`.
 Stored policies belong to one workspace and can optionally be scoped to one
 user. The operator's list, like `/api/v1/aliases`, shows the stored entries of
@@ -340,8 +340,7 @@ carry the same values: failover happens before the stream opens, so the serving
 candidate and the attempt count are already known when the headers are sent. A
 failure later in the stream is reported in the stream and changes neither. The
 request's cost is `usage.cost_usd` in the body, as described in the
-[API reference](api-reference.md#request-id-and-inline-cost). These headers are
-sent by a standalone gateway.
+[API reference](api-reference.md#request-id-and-inline-cost).
 
 Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.
 

@@ -44,6 +44,7 @@ from gateway.core.config import (
     TAGS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
+    warn_about_removed_mode_settings,
 )
 from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
@@ -582,7 +583,7 @@ def _validate_provider_account_pepper(config: GatewayConfig) -> None:
     of one secret expose the other, and tie their rotations together.
     """
     makes_copies = config.files_enabled and config.files_provider_upload_enabled
-    if not makes_copies or config.is_hosted_mode:
+    if not makes_copies:
         return
     pepper = config.provider_account_pepper
     if pepper is None:
@@ -632,28 +633,6 @@ async def apply_declared_access(config: GatewayConfig, session: "AsyncSession", 
             len(config.budgets),
             len(config.api_keys),
         )
-
-
-def _warn_if_hosted_has_no_data_plane(config: GatewayConfig) -> None:
-    """Warn when a hosted control plane cannot say where its data plane is.
-
-    A hosted deployment serves the dashboard but is not where customer inference
-    belongs (otari#822), so the dashboard needs ``data_plane_url`` to build a
-    runnable snippet for a key it has just issued. Without it the snippet is
-    withheld rather than pointed at this host, which is correct but leaves an
-    operator wondering where it went, so the reason is said once at startup.
-
-    A warning and not a startup error: the alternative would take a running
-    control plane down on its next redeploy over a dashboard affordance, and the
-    management API this deployment exists to serve is unaffected either way.
-    """
-    if not config.is_hosted_mode or config.data_plane_url:
-        return
-    logger.warning(
-        "Hosted mode is active with no data_plane_url configured, so the dashboard will not "
-        "show request snippets beside a new key: it has no data-plane gateway address to put "
-        "in one, and this host is not it. Set data_plane_url (or OTARI_DATA_PLANE_URL)."
-    )
 
 
 # How long shutdown waits for refreshers and feature workers to acknowledge cancellation.
@@ -988,8 +967,7 @@ async def _validation_error_handler(_: Request, exc: Exception) -> Response:
 def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
-    config.validate_mode_selection()
-    _warn_if_hosted_has_no_data_plane(config)
+    warn_about_removed_mode_settings()
     _validate_metrics_support(config)
     _validate_rate_limit_store(config)
     config.validate_declared_access()
@@ -1249,7 +1227,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         config.bootstrap,
         config=config,
         membership_listener=get_membership_listener,
-        workspace_listener=functools.partial(get_workspace_listener, config=config),
+        workspace_listener=get_workspace_listener,
         search_keys=get_workspace_search_keys,
         code_execution_policies=get_workspace_code_execution_policies,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),

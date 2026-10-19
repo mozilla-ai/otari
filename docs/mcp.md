@@ -63,7 +63,7 @@ Both endpoints refer to a server by the id it was registered under. There is no
 inline server field: registering a remote MCP server with Otari
 once, rather than transmitting a URL and a credential per request, is what keeps
 authorization, credential storage, revocation, and allowlist policy on Otari's
-side of the boundary. Local `stdio` servers stay outside this: a hosted Otari
+side of the boundary. Local `stdio` servers stay outside this: a remote Otari
 deployment cannot reach a machine-local process.
 
 ### Discovery
@@ -295,11 +295,9 @@ sent to the redirect destination.
 
 ### Availability
 
-Both endpoints are data-plane surfaces. Standalone resolves stored servers from
-the authenticated API key's workspace; a master-key request holds no workspace of
-its own and reaches no stored server, so it gets the `404`. Hosted mode is a control
-plane and serves neither: both paths return the standard hosted-mode `404`
-naming the configured data-plane URL.
+Both endpoints resolve stored servers from the authenticated API key's
+workspace; a master-key request holds no workspace of its own and reaches no
+stored server, so it gets the `404`.
 
 ## Messages streaming activity
 
@@ -368,7 +366,7 @@ differently, and deliberately: the loop above resolves a list and skips one
 entry, while an endpoint asked about exactly that server answers `404` rather
 than returning nothing.
 
-### Configuring them (standalone)
+### Configuring them
 
 The dashboard manages them under **Tools → MCP servers**, which acts on the
 workspace the switcher has selected. Everything below is the same thing over the

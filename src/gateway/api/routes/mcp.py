@@ -30,7 +30,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -42,7 +42,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from gateway.api.deps import (
     McpServerPortDep,
     get_config,
-    get_db_if_needed,
+    get_db,
     verify_api_key_or_master_key,
 )
 
@@ -320,7 +320,7 @@ class _Principal:
 
 async def _authenticate(
     raw_request: Request,
-    db: AsyncSession | None,
+    db: AsyncSession,
     config: GatewayConfig,
 ) -> _Principal:
     """Authenticate, and rate-limit the principal before any outbound access.
@@ -329,11 +329,6 @@ async def _authenticate(
     A master-key request is refused with a 404, because it has no workspace and would reach one tenant's servers.
     A blocked user is refused here, because these routes reserve nothing and never reach the budget gate.
     """
-    if db is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        )
     api_key, _is_master = await verify_api_key_or_master_key(raw_request, db, config)
     if api_key is None:
         raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
@@ -481,7 +476,7 @@ class McpToolsResponse(BaseModel):
 async def list_mcp_tools(
     raw_request: Request,
     mcp_server_id: uuid.UUID,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     mcp_server_port: McpServerPortDep,
 ) -> McpToolsResponse:
@@ -595,7 +590,7 @@ async def list_mcp_tools(
 async def execute_mcp_tool(
     raw_request: Request,
     request: McpExecuteRequest,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     mcp_server_port: McpServerPortDep,
 ) -> CallToolResult:

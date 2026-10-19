@@ -21,9 +21,9 @@ from gateway.api.deps import (
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
-    get_db_if_needed,
+    get_db,
     get_log_writer,
-    get_unit_of_work_if_needed,
+    get_unit_of_work,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
@@ -452,8 +452,8 @@ async def chat_completions(
     raw_request: Request,
     response: Response,
     request: ChatCompletionRequest,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
@@ -495,8 +495,8 @@ async def run_chat_completion(
     raw_request: Request,
     response: Response,
     request: ChatCompletionRequest,
-    db: AsyncSession | None,
-    uow: UnitOfWork | None,
+    db: AsyncSession,
+    uow: UnitOfWork,
     files: FileService | None,
     config: GatewayConfig,
     log_writer: LogWriter,
@@ -619,7 +619,7 @@ async def run_chat_completion(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
@@ -627,7 +627,7 @@ async def run_chat_completion(
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,

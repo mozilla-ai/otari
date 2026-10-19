@@ -14,8 +14,8 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 
 from gateway.api.main import _register_contributed_routers, _register_core_routers, register_routers
-from gateway.api.routes import hosted_mode, otlp
-from gateway.container import RouterContribution, build_container
+from gateway.api.routes import otlp
+from gateway.container import build_container
 from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 
 Operations = Counter[tuple[str, str]]
@@ -38,12 +38,11 @@ def _standalone() -> GatewayConfig:
     """A config that does not read the machine it runs on.
 
     A bare ``GatewayConfig()`` takes routing decisions from the ambient
-    environment: the mode, and whether a bootstrap contributes routers. Both sides
-    of the comparisons below shift together under each of those, so the test stays green while covering a different
+    environment, such as whether a bootstrap contributes routers. Both sides of the
+    comparisons below shift together under it, so the test stays green while covering a different
     surface than it names, which is worse than failing.
     """
     return GatewayConfig(
-        mode="standalone",
         bootstrap=None,
         web_search_provider=None,
     )
@@ -109,43 +108,3 @@ def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -
     assert first(f"{API_ROOT}/models/metadata") < first(f"{API_ROOT}/models/{{model_id:path}}")
     assert first(f"{API_ROOT}/pricing/refresh") < first(f"{API_ROOT}/pricing/{{model_key:path}}")
     assert first(f"{API_ROOT}/search-tools/providers") < first(f"{API_ROOT}/search-tools/{{name}}")
-
-
-def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:
-    """The mode stubs are catch-alls over whole prefixes, so they are mounted last.
-
-    An overlay that contributes a route under a stubbed prefix has made a
-    choice, and a fallback must not overrule it. Move the stub above the
-    contributed routers and every such route answers with the stub's 404
-    instead, with the suite still green.
-    """
-    contributed = APIRouter()
-
-    @contributed.get("/chat/overlay-probe")
-    async def overlay_probe() -> dict[str, str]:
-        return {"ok": "yes"}
-
-    container = build_container(None, workspace_listener=None)
-    container.contribute_router(RouterContribution(capability="probe", router=contributed))
-
-    app = FastAPI()
-    app.state.container = container
-    app.state.enabled_features = ()
-    register_routers(app, GatewayConfig(mode="hosted", bootstrap=None))
-    routes = _api_routes(app)
-
-    # The probe sits under /chat, which the hosted stub claims with a catch-all.
-    probe = next(i for i, (path, _) in enumerate(routes) if path.endswith("/chat/overlay-probe"))
-
-    stubs = [i for i, (_, route) in enumerate(routes) if route.endpoint.__module__ == hosted_mode.__name__]
-    served = [
-        i
-        for i, (path, route) in enumerate(routes)
-        if route.endpoint.__module__ != hosted_mode.__name__ and path.startswith(API_ROOT)
-    ]
-    assert stubs, "no mode stub was mounted, so this check would hold vacuously"
-    assert served, "nothing else was mounted, so this check would hold vacuously"
-    assert min(stubs) > max(served), (
-        "a mode stub is mounted ahead of a route the deployment actually serves, so the stub will answer for it"
-    )
-    assert probe < min(stubs), "the stub is ahead of a contributed route, so it will answer for it"

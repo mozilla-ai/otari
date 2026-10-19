@@ -9,7 +9,7 @@ The gateway is an async FastAPI service: request handlers in `api/routes/`, busi
 `services/`, queries in `repositories/`, ORM in `models/`, migrations in `alembic/versions/`.
 This guide is the backend counterpart to the frontend skill and to the path-scoped review
 instructions in `.github/instructions/` (architecture, performance and security). `AGENTS.md`
-is the source of truth for build/test/lint commands and runtime modes; read it first. This file
+is the source of truth for build/test/lint commands; read it first. This file
 captures the conventions that keep new backend code correct and consistent.
 
 ## Async SQLAlchemy 2.0: the house style
@@ -171,8 +171,6 @@ A reservation that never settles leaks and permanently shrinks the user's budget
   client-supplied `user` field.
 - Enforce budgets atomically (the reservation is a single conditional `UPDATE`), not
   check-then-act. Use `is None` for "absent" vs a legitimate `0` (falsy-zero traps).
-- New billable logic must be correct in every applicable runtime mode. Verify whether it
-  belongs in the local control-plane branch (`db is not None`), the data plane, or both.
 
 ## Migrations (Alembic)
 

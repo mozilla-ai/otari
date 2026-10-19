@@ -926,14 +926,14 @@ function OverviewHeader({
 // provider-key page, so the only person who can press this is the operator, and
 // `/providers` is where a fresh gateway is set up and carries the first-run
 // panel that continues the flow. Gating on the caller here too would restate a
-// rule already guaranteed one level up. Hosted and a control plane report no
-// `providers` surface, so naming it unconditionally would point an operator at
-// the shell's "not available here" panel.
+// rule already guaranteed one level up. A deployment that reports no
+// `providers` surface answers it with the shell's "not available here" panel,
+// so the route is not named unconditionally.
 //
 // Only correct for *adding* one, which is why provider health does not use it:
 // `/providers/health` reports on `config.providers`, the process-global
-// table, so on a hosted deployment an unreachable instance is not a row the
-// organization page could show. `AttentionStrip` drops the link there rather
+// table, so an unreachable instance is not a row the organization page could
+// show. Without the `providers` surface, `AttentionStrip` drops the link rather
 // than sending somebody to a page the instance is not on.
 function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
   const serves = useSurfaces()
@@ -1023,9 +1023,9 @@ function AttentionStrip({
   isReady: boolean
   hasFailed: boolean
 }) {
-  // Provider health is about `config.providers`, which a hosted deployment
-  // serves no page for, so those two entries state the problem without offering
-  // a destination there. Naming one would be worse than naming none: both
+  // Provider health is about `config.providers`, so where the deployment serves
+  // no page for it those two entries state the problem without offering a
+  // destination. Naming one would be worse than naming none: both
   // candidates are wrong, `/providers` because the shell answers it with "not
   // available here" and the organization page because the instance is not on it.
   const providerProblemsAreReachable = useSurfaces()("providers")

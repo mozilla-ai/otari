@@ -1,4 +1,4 @@
-"""The caller's organization's guardrails (standalone mode only).
+"""The caller's organization's guardrails.
 
 Thin composition over `gateway.services.tenancy.organization_guardrail_service`:
 resolve the caller's identity, call the service, return its typed result. The

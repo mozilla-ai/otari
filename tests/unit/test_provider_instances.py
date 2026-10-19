@@ -652,12 +652,9 @@ def test_candidate_model_keys_accepts_string_provider_from_any_llm(monkeypatch: 
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", [None, "hosted"])
-def test_undeclared_provider_on_env_var_is_missing_a_credential(
-    mode: str | None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_undeclared_provider_on_env_var_is_missing_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
-    config = GatewayConfig(mode=mode, providers={}) if mode else GatewayConfig(providers={})
+    config = GatewayConfig(providers={})
     kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC)
 
     missing = missing_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs)

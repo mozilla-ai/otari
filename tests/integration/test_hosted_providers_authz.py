@@ -84,12 +84,10 @@ def _discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _stub)
 
 
-@pytest.fixture(params=["standalone", "hosted"])
-def mode_client(
-    request: pytest.FixtureRequest, test_config: GatewayConfig, clean_database: None
-) -> Generator[TestClient]:
-    """A client on each topology that mounts the surface, so the gate is pinned on both."""
-    yield from build_test_client(test_config.model_copy(update={"mode": request.param}))
+@pytest.fixture
+def mode_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """A client on its own config, so the gate is pinned on the app as built."""
+    yield from build_test_client(test_config)
 
 
 @dataclass

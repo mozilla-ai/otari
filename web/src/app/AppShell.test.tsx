@@ -22,7 +22,6 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import {
   bootstrap,
   callerOrganizationMembership,
-  HOSTED_SURFACES,
   organizationContext,
   pendingOrganizationInvitation,
 } from "@/tests/fixtures"
@@ -179,7 +178,6 @@ function renderShell(
 }
 
 const SETTINGS_WITH_PRICING: GatewaySettings = {
-  mode: "standalone",
   version: "1.0.0",
   model_discovery: true,
   default_pricing: true,
@@ -694,31 +692,17 @@ describe("AppShell surface gating", () => {
     expect(screen.queryByText("Gateway")).toBeNull()
   })
 
-  it("puts the hosted deployment's own Providers row in that same place", async () => {
+  it("sends the organization's own Providers row to its provider keys", async () => {
     mockMatchMedia(false)
-    // The other half of the either/or the two rows encode. A hosted deployment
-    // drops `providers` and reports `organization_providers` in its place, so
-    // the row under General is a different destination with the same label, and
-    // nothing above this asserts that: the registry test reads the declaration,
-    // and the page's own tests render it without a rail.
-    await renderShell(
-      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
-      { url: "/organization/members" },
-    )
+    // The row and Deployment providers sit side by side under General, and only
+    // the label tells them apart, so the destination is asserted off the
+    // rendered rail rather than the registry.
+    await renderShell(bootstrap(), { url: "/organization/members" })
     const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
     const providers = await within(sidebar).findByRole("link", {
       name: "Providers",
     })
     expect(providers).toHaveAttribute("href", "/organization/provider-keys")
-    // Where the deployment's own row stands on standalone, with Guardrails then
-    // Org settings after it, read off the rendered order rather than off the
-    // registry.
-    expect(
-      within(sidebar)
-        .getAllByRole("link")
-        .map((link) => link.textContent)
-        .slice(-3),
-    ).toEqual(["Providers", "Guardrails", "Org settings"])
 
     const user = userEvent.setup()
     await user.click(providers)
@@ -1389,21 +1373,6 @@ describe("AppShell entitlement gating", () => {
     expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
       "Default workspace",
     )
-  })
-
-  it("leads the trail with the organization when a deployment can hold several", async () => {
-    mockMatchMedia(false)
-    // A standalone deployment leaves the organization out of the trail whether
-    // or not the caller belongs to a second, so `hosted` is what exercises this:
-    // `OTARI_MODE=hosted` is the mode a multi-tenant deployment runs in, and
-    // bootstrap.py reports `deployment_type: "hosted"` for it.
-    await renderShell(bootstrap({ deployment_type: "hosted" }))
-
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    // The organization's name comes from the membership context, so the trail
-    // renders before it can lead with one.
-    await within(crumb).findByText("Default Organization")
-    expect(crumb).toHaveTextContent("Overview")
   })
 
   it("drops a nested destination whose own surface the deployment lacks", async () => {

@@ -107,8 +107,7 @@ router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-# Published by both: the ``usage`` page reads one workspace at a time, and a
-# standalone deployment can serve several organizations as a hosted one does.
+# Beside ``usage``, which reads one workspace at a time, because a deployment can serve several organizations.
 SURFACE = Surface("organization_usage")
 
 

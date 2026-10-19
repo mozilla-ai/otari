@@ -19,7 +19,7 @@ function wrapper(value = bootstrap()) {
 
 describe("useDeployment", () => {
   it("hands back the bootstrap the page was served with", () => {
-    const served = bootstrap({ deployment_type: "hosted" })
+    const served = bootstrap({ docs_url: "https://docs.example.com" })
     const { result } = renderHook(() => useDeployment(), {
       wrapper: wrapper(served),
     })

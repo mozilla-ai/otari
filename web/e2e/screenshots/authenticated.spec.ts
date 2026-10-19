@@ -608,9 +608,3 @@ test.describe("the domain dialog", () => {
     await captureScreenshot(page, "organization-domains-claim-dialog")
   })
 })
-
-// No capture for the organization provider-key dialog. Its page is gated on the
-// `organization_providers` surface, which only a hosted deployment publishes
-// (bootstrap.py's HOSTED_SURFACES), and this suite boots a standalone gateway,
-// so the route answers with "Providers is not available here". Covering it
-// would mean a third gateway in the harness rather than a test.

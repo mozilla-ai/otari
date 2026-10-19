@@ -73,23 +73,6 @@ the old shape.
 - Code still in the old shape commits in its services. Do not flag a commit
   the PR does not add.
 
-## Deployment modes
-
-The behavior for each deployment mode belongs in a binding chosen where the app
-is wired, not in a branch on the mode. The check refuses a read of
-`configured_mode`, `effective_mode` or `is_hosted_mode`, or a
-call to `deployment_for`, under `services/`. It does not catch the cases below.
-
-- Flag a service that branches on the mode another way, such as on
-  `config.mode` or on the `OTARI_MODE` environment variable.
-- Flag a PR that makes a builder in `api/deps.py` or a factory in
-  `container.py` read the mode and pass the answer to a service as an argument,
-  such as `on_by_default=config.is_hosted_mode`. The service then branches on
-  that argument. The builder or factory binds a different implementation for
-  each mode instead.
-- Flag a mode read added to a module already on `SERVICE_MODE_READ_BASELINE`.
-  The baseline lists modules, not reads.
-
 ## Planes and overlays
 
 `ARCHITECTURE.md` places each piece of work with two questions. Does Otari need

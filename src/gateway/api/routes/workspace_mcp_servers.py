@@ -1,4 +1,4 @@
-"""Workspace-scoped MCP server management (standalone mode only).
+"""Workspace-scoped MCP server management.
 
 Thin composition over
 `gateway.services.tenancy.workspace_mcp_server_service`, following

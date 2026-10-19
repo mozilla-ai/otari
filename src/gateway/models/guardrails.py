@@ -104,8 +104,7 @@ class OrganizationGuardrailDefinition(Base):
     possibly-divergent copies with no safe automatic answer, and that asymmetry
     is what settles it.
 
-    Organization-keyed, not deployment-global. A row that served every tenant
-    could not be reached from ``HOSTED_SURFACES`` at all (#818).
+    Organization-keyed, not deployment-global, so each tenant manages its own (#818).
 
     The runner builds these rows and holds the vendor clients ready
     (``services/tenancy/organization_guardrail_runner``), and a mandate pointing

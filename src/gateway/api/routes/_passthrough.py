@@ -50,7 +50,6 @@ from gateway.api.deps import (
 from gateway.api.routes._attempts import classify_local_attempt_error
 from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
-    DB_UNAVAILABLE_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
     _elapsed_ms,
     _raise_for_unresolvable_model,
@@ -185,8 +184,8 @@ async def run_passthrough(
     endpoint: str,
     raw_request: Request,
     response: Response | None,
-    auth_result: tuple[APIKey | None, bool] | None,
-    db: AsyncSession | None,
+    auth_result: tuple[APIKey | None, bool],
+    db: AsyncSession,
     config: GatewayConfig,
     log_writer: LogWriter,
     model: str,
@@ -261,8 +260,6 @@ async def run_passthrough(
     Returns:
         The provider result plus the resolved selector and rate-limit headers.
     """
-    if auth_result is None or db is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=DB_UNAVAILABLE_DETAIL)
     # Anchor request latency at the earliest point in the scaffold (monotonic,
     # so it is immune to wall-clock steps); recorded on the usage log below.
     started_at = time.monotonic()

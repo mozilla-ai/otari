@@ -80,9 +80,8 @@ catalog_router = APIRouter(
     dependencies=[Depends(verify_catalog_reader)],
 )
 
-# Not hosted: a stored provider is shared by every organization and overrides their own keys.
-# Hiding the page does not stop the API from writing one.
-SURFACE = Surface("providers", hosted=False)
+# Operator-only: a stored provider is shared by every organization and overrides their own keys.
+SURFACE = Surface("providers")
 
 
 class ProviderCapabilitiesSchema(BaseModel):

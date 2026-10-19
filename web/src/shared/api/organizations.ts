@@ -628,8 +628,8 @@ function invalidateOrgProviderModels(
 // The organization's own upstream provider credentials (#670), which every
 // workspace under it inherits. A different table from `/provider-credentials`
 // above: that one is keyed on an instance name and belongs to the process, this
-// one belongs to the tenant. Only a hosted deployment reports the surface these
-// hooks serve (`organization_providers`).
+// one belongs to the tenant. The surface these hooks serve is
+// `organization_providers`.
 //
 // Archived keys are fetched too, and filtered in the page rather than by a
 // second query: archiving is reversible, the list is small, and a toggle that

@@ -114,8 +114,6 @@ def serve(
     if auto_migrate is not None:
         gateway_config.auto_migrate = auto_migrate
 
-    gateway_config.validate_mode_selection()
-
     if not gateway_config.master_key:
         logger.info(
             "No master key configured; one will be generated and printed at startup. "

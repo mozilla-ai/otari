@@ -5,8 +5,7 @@ generated document sits under ``API_ROOT`` or ``OTLP_ROOT``. Second, that the
 allowlists in ``gateway.main`` name routes that exist: the generator reads
 those same lists, so the committed document and the generator agree even when
 both are stale. The routing table is the independent source of truth here.
-Third, that the operation ids hold in every mode, not only in the standalone
-mode the committed document is generated from. And a fourth that no document
+Third, that the operation ids are stable and unique. And a fourth that no document
 shows at all: that the roots are spelled nowhere but in their owner, since a
 path built in a helper or a message from the literal is invisible above.
 
@@ -35,7 +34,6 @@ from gateway.api.routes import (
     batches,
     chat,
     embeddings,
-    hosted_mode,
     images,
     mcp,
     messages,
@@ -64,9 +62,8 @@ SHELL_PATHS = frozenset({"/", "/welcome", "/favicon.svg", "/dashboard-build.json
 SHELL_MOUNTS = ("/assets", "/pwa", "/fonts")
 
 
-def _config(postgres_url: str, mode: str | None, **overrides: Any) -> GatewayConfig:
+def _config(postgres_url: str, **overrides: Any) -> GatewayConfig:
     return GatewayConfig(
-        mode=mode,
         database_url=postgres_url,
         master_key="test-master-key",
         auto_migrate=False,
@@ -85,57 +82,51 @@ def _mounted(app: FastAPI) -> set[str]:
 
 
 @pytest.fixture(scope="module")
-def standalone(postgres_url: str) -> FastAPI:
-    return create_app(_config(postgres_url, "standalone", enable_metrics=True))
-
-
-@pytest.fixture(scope="module")
-def hosted(postgres_url: str) -> FastAPI:
-    return create_app(_config(postgres_url, "hosted"))
+def gateway_app(postgres_url: str) -> FastAPI:
+    return create_app(_config(postgres_url, enable_metrics=True))
 
 
 def _under(path: str, root: str) -> bool:
     return path == root or path.startswith(f"{root}/")
 
 
-def test_every_mounted_route_is_under_a_root_or_frozen(standalone: FastAPI, hosted: FastAPI) -> None:
-    for app in (standalone, hosted):
-        stray = {
-            p
-            for p in _mounted(app)
-            if not (
-                _under(p, API_ROOT)
-                or _under(p, OTLP_ROOT)
-                or p in FROZEN_ROOT_PATHS
-                or p in SHELL_PATHS
-                or p.startswith(SHELL_MOUNTS)
-            )
-        }
-        assert not stray, f"routes outside {API_ROOT} and {OTLP_ROOT}: {sorted(stray)}"
+def test_every_mounted_route_is_under_a_root_or_frozen(gateway_app: FastAPI) -> None:
+    stray = {
+        p
+        for p in _mounted(gateway_app)
+        if not (
+            _under(p, API_ROOT)
+            or _under(p, OTLP_ROOT)
+            or p in FROZEN_ROOT_PATHS
+            or p in SHELL_PATHS
+            or p.startswith(SHELL_MOUNTS)
+        )
+    }
+    assert not stray, f"routes outside {API_ROOT} and {OTLP_ROOT}: {sorted(stray)}"
 
 
-def test_every_published_path_is_under_a_root(standalone: FastAPI) -> None:
-    paths = standalone.openapi()["paths"]
+def test_every_published_path_is_under_a_root(gateway_app: FastAPI) -> None:
+    paths = gateway_app.openapi()["paths"]
     assert paths, "the generated document has no paths"
     stray = {p for p in paths if not (_under(p, API_ROOT) or _under(p, OTLP_ROOT))}
     assert not stray, f"published outside {API_ROOT} and {OTLP_ROOT}: {sorted(stray)}"
 
 
-def test_frozen_root_paths_still_exist(standalone: FastAPI) -> None:
-    mounted = _mounted(standalone)
+def test_frozen_root_paths_still_exist(gateway_app: FastAPI) -> None:
+    mounted = _mounted(gateway_app)
     missing = FROZEN_ROOT_PATHS - mounted
     assert not missing, f"frozen root paths were moved or dropped: {sorted(missing)}"
 
 
-def test_exact_match_allowlist_names_mounted_routes(standalone: FastAPI) -> None:
-    mounted = _mounted(standalone)
+def test_exact_match_allowlist_names_mounted_routes(gateway_app: FastAPI) -> None:
+    mounted = _mounted(gateway_app)
     assert _UNAUTHENTICATED_PATHS, "_UNAUTHENTICATED_PATHS is empty"
     missing = set(_UNAUTHENTICATED_PATHS) - mounted
     assert not missing, f"_UNAUTHENTICATED_PATHS names routes that are not mounted: {sorted(missing)}"
 
 
-def test_prefix_allowlists_cover_at_least_one_route(standalone: FastAPI) -> None:
-    mounted = _mounted(standalone)
+def test_prefix_allowlists_cover_at_least_one_route(gateway_app: FastAPI) -> None:
+    mounted = _mounted(gateway_app)
     for name, prefixes in (
         ("_PUBLIC_PREFIXES", _PUBLIC_PREFIXES),
         ("_COOKIE_AUTH_PREFIXES", _COOKIE_AUTH_PREFIXES),
@@ -145,8 +136,8 @@ def test_prefix_allowlists_cover_at_least_one_route(standalone: FastAPI) -> None
             assert any(_under(p, prefix) for p in mounted), f"{name}: nothing mounted under {prefix}"
 
 
-def test_generated_document_stamps_security_as_the_allowlists_say(standalone: FastAPI) -> None:
-    paths = standalone.openapi()["paths"]
+def test_generated_document_stamps_security_as_the_allowlists_say(gateway_app: FastAPI) -> None:
+    paths = gateway_app.openapi()["paths"]
     for path in _UNAUTHENTICATED_PATHS:
         for method, operation in paths[path].items():
             if isinstance(operation, dict):
@@ -164,7 +155,7 @@ def _operation_ids(app: FastAPI) -> Counter[str]:
     return ids
 
 
-def test_no_operation_id_names_a_mount_root(standalone: FastAPI, hosted: FastAPI) -> None:
+def test_no_operation_id_names_a_mount_root(gateway_app: FastAPI) -> None:
     """The id is the method name a generated SDK exposes, so it must outlive a path move.
 
     FastAPI's default folds the whole path into the id, which is how every
@@ -172,39 +163,19 @@ def test_no_operation_id_names_a_mount_root(standalone: FastAPI, hosted: FastAPI
     form that default writes them, with every non-word character an underscore.
     """
     roots = tuple(re.sub(r"\W", "_", root) for root in (API_ROOT, OTLP_ROOT))
-    for mode, app in (("standalone", standalone), ("hosted", hosted)):
-        stray = sorted(op for op in _operation_ids(app) if any(root in op for root in roots))
-        assert not stray, f"{mode}: operation ids carry a mount root: {stray}"
+    stray = sorted(op for op in _operation_ids(gateway_app) if any(root in op for root in roots))
+    assert not stray, f"operation ids carry a mount root: {stray}"
 
 
-def test_operation_ids_are_tag_and_handler(standalone: FastAPI) -> None:
+def test_operation_ids_are_tag_and_handler(gateway_app: FastAPI) -> None:
     """One anchor, so a scheme change cannot pass as long as it avoids the root."""
-    assert "keys-create_key" in _operation_ids(standalone)
+    assert "keys-create_key" in _operation_ids(gateway_app)
 
 
-def test_the_hosted_stub_is_not_published(hosted: FastAPI) -> None:
-    """A refusal is a deployment posture, not an operation a client can call.
-
-    Pinned by name rather than left to the duplicate check, which the stub
-    would also pass if it were split into one route per method.
-    """
-    prefixes = [f"{API_ROOT}{prefix}" for prefix, _ in hosted_mode.DATA_PLANE_PREFIXES]
-    assert prefixes, "no stub prefixes to check"
-    published = {p for p in hosted.openapi()["paths"] if any(_under(p, prefix) for prefix in prefixes)}
-    assert not published, f"refused paths reached the document: {sorted(published)}"
-
-
-def test_operation_ids_are_unique_in_every_mode(standalone: FastAPI, hosted: FastAPI) -> None:
-    """A duplicate id makes the document invalid, and only one mode's document is committed.
-
-    The hosted stub answers several methods from one handler, and an id is
-    derived once per route, so a stub that reaches the document duplicates
-    itself. Standalone mounts no stub, which is why the committed document
-    never showed it.
-    """
-    for mode, app in (("standalone", standalone), ("hosted", hosted)):
-        duplicated = sorted(op for op, count in _operation_ids(app).items() if count > 1)
-        assert not duplicated, f"{mode}: duplicate operation ids: {duplicated}"
+def test_operation_ids_are_unique(gateway_app: FastAPI) -> None:
+    """A duplicate id makes the document invalid."""
+    duplicated = sorted(op for op, count in _operation_ids(gateway_app).items() if count > 1)
+    assert not duplicated, f"duplicate operation ids: {duplicated}"
 
 
 # Paths that may appear in published prose without being ours to move. The usage
@@ -238,7 +209,7 @@ def _described_paths(document: dict[str, Any]) -> set[str]:
     return {path.rstrip(".,)`") for path in found}
 
 
-def test_no_published_description_names_a_moved_path(standalone: FastAPI) -> None:
+def test_no_published_description_names_a_moved_path(gateway_app: FastAPI) -> None:
     """Published prose is API documentation, so a stale path in it misleads a caller.
 
     A docstring cannot interpolate, so these paths are written out by hand and
@@ -246,7 +217,7 @@ def test_no_published_description_names_a_moved_path(standalone: FastAPI) -> Non
     are paths that did not move: a frozen usage label a caller filters on, and
     two foreign contracts Otari mirrors rather than owns.
     """
-    stray = _described_paths(standalone.openapi()) - PROSE_EXEMPT_PATHS
+    stray = _described_paths(gateway_app.openapi()) - PROSE_EXEMPT_PATHS
     assert not stray, f"published prose still names paths that moved: {sorted(stray)}"
 
 

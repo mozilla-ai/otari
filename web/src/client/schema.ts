@@ -129,7 +129,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Agent Telemetry Rows
-         * @description Delete agent_telemetry rows by explicit ids or by filter (standalone).
+         * @description Delete agent_telemetry rows by explicit ids or by filter.
          *
          *     Target either an explicit selection (`ids`) or everything matching a filter
          *     (`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date
@@ -151,7 +151,7 @@ export interface paths {
         };
         /**
          * Count Agent Telemetry
-         * @description Total agent_telemetry rows matching the given filters (standalone).
+         * @description Total agent_telemetry rows matching the given filters.
          *
          *     The filter set mirrors the purge endpoint's, so this sizes exactly what a
          *     "delete all N matching" would remove. Behavioral and metric rows are counted
@@ -175,7 +175,7 @@ export interface paths {
         };
         /**
          * Agent Telemetry Series
-         * @description Row volume over time, split by user or API key (standalone).
+         * @description Row volume over time, split by user or API key.
          *
          *     Mirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top
          *     groups as their own series with the remainder folded into a reconciling
@@ -200,7 +200,7 @@ export interface paths {
         };
         /**
          * Agent Telemetry Summary
-         * @description What the coding agent produced in a window, and what it cost (standalone).
+         * @description What the coding agent produced in a window, and what it cost.
          *
          *     Range-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),
          *     so the aggregates stay served by the timestamp index. Returns the outcome
@@ -4256,11 +4256,6 @@ export interface paths {
          *
          *     ``user`` in the body is the one field the pipeline will not read here: spend
          *     binds to the session's own attribution user, derived and never accepted.
-         *
-         *     On a hosted control plane there is no local pipeline to call, so the same
-         *     principal is forwarded to the data-plane gateway instead
-         *     (:func:`_dispatch_to_data_plane`). The request and the response are the same
-         *     either way.
          */
         post: operations["playground-playground_chat_completions"];
         delete?: never;
@@ -5861,7 +5856,7 @@ export interface paths {
          * @description Persist and apply tool/guardrail setting changes.
          *
          *     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-         *     omitted field is left unchanged. Operator-gated and standalone-only.
+         *     omitted field is left unchanged. Operator-gated.
          */
         patch: operations["tool-settings-update_tool_settings"];
         trace?: never;
@@ -6140,7 +6135,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Usage Rows
-         * @description Delete imported usage rows by explicit ids or by filter (standalone).
+         * @description Delete imported usage rows by explicit ids or by filter.
          *
          *     Target either the current selection (``ids``) or everything matching a filter
          *     (``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /
@@ -6197,7 +6192,7 @@ export interface paths {
         put?: never;
         /**
          * Ingest External Usage
-         * @description Ingest a batch of externally-observed usage events (standalone).
+         * @description Ingest a batch of externally-observed usage events.
          *
          *     Authenticated with either an API key or the master key. Usage binds to the
          *     authenticated principal: an API key attributes to its own user (and stamps its
@@ -6255,7 +6250,7 @@ export interface paths {
         };
         /**
          * Get Request Settlement
-         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.
          *
          *     This is how a caller recovers the cost of a request whose response never
          *     carried one: a stream that failed or was disconnected mid-response, or a
@@ -6316,7 +6311,7 @@ export interface paths {
         put?: never;
         /**
          * Set Usage Price Rows
-         * @description Set the cost of imported usage rows from manual per-1M rates (standalone).
+         * @description Set the cost of imported usage rows from manual per-1M rates.
          *
          *     Target either the current selection (``ids``) or everything matching a filter
          *     (``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed
@@ -9724,16 +9719,11 @@ export interface components {
          */
         DeploymentBootstrap: {
             /**
-             * Data Plane Url
-             * @description Where this deployment's inference traffic belongs, when it is not served here. Set only by a hosted control plane, which serves the dashboard but not inference (otari#822); null for standalone, which serves inference at the address that reached this page. Not a human link target: it is the gateway's bare address, which the dashboard suffixes with the API root to build its request snippets. So it must carry no API root anywhere (a value ending in /api/v1, or a whole endpoint like /api/v1/chat/completions, renders that path twice) and no credential, since this response is unauthenticated. This gateway refuses both at startup; any deployment serving this contract should publish the same shape. Null on a hosted deployment means unconfigured, and the dashboard then shows no snippet rather than one naming this host.
-             */
-            data_plane_url: string | null;
-            /**
              * Deployment Type
-             * @description Which deployment serves this URL. 'standalone' owns its own data and serves one tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment run as a control plane), which is why its management surfaces are the per-organization ones.
-             * @enum {string}
+             * @description Which kind of deployment serves this URL. Every Otari deployment answers 'standalone'.
+             * @constant
              */
-            deployment_type: "standalone" | "hosted";
+            deployment_type: "standalone";
             /**
              * Docs Url
              * @description Where this deployment's documentation lives, when it is not the operator guide bundled with the gateway. Set, the dashboard's Documentation links open it in a new tab; null, they go to the bundled guide at /#/docs, which stays served either way. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
@@ -9746,12 +9736,12 @@ export interface components {
             feedback_enabled: boolean;
             /**
              * Mail Ready
-             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature.
+             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.
              */
             mail_ready: boolean;
             /**
              * Maintenance Mode
-             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected.
+             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.
              */
             maintenance_mode: boolean;
             /**
@@ -9787,10 +9777,10 @@ export interface components {
             public_catalog: boolean;
             /**
              * Session Type
-             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
-             * @enum {string}
+             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is this deployment's own sign-in (see sign_in_methods for which credential it currently accepts).
+             * @constant
              */
-            session_type: "local_operator" | "hosted_user" | "none";
+            session_type: "local_operator";
             /**
              * Sign In Methods
              * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. The login page renders from this rather than trying a credential to find out.
@@ -10635,8 +10625,6 @@ export interface components {
              * @enum {string}
              */
             master_key_source: "configured" | "generated";
-            /** Mode */
-            mode: string;
             /** Model Discovery */
             model_discovery: boolean;
             /** Require Pricing */

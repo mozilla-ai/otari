@@ -3,19 +3,10 @@ import userEvent from "@testing-library/user-event"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { describe, expect, it, vi } from "vitest"
-import type { DeploymentType } from "@/client"
 import { DocsPage, markdownComponents } from "@/features/docs/DocsPage"
-import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap } from "@/tests/fixtures"
 
-// The intro points at `/welcome` only where the deployment serves it, so the
-// page reads the bootstrap and every render here goes through a provider.
-function renderDocs(deployment_type: DeploymentType = "standalone") {
-  return render(
-    <DeploymentProvider value={bootstrap({ deployment_type })}>
-      <DocsPage />
-    </DeploymentProvider>,
-  )
+function renderDocs() {
+  return render(<DocsPage />)
 }
 
 describe("DocsPage", () => {
@@ -233,13 +224,10 @@ describe("DocsPage code blocks", () => {
   })
 })
 
-// The bundled guide is ungated chrome, so a hosted tenant reads this page too.
-// Pointing them at `/welcome` there names a page otari.ai does not serve; see
-// `welcomeGuideHref`.
 describe("DocsPage get-started pointer", () => {
   // A link rather than a bare path in the prose, matching every other place
   // the dashboard names this page.
-  it("links the walkthrough where the deployment serves it", () => {
+  it("links the walkthrough", () => {
     renderDocs()
 
     const link = screen.getByRole("link", { name: "/welcome" })
@@ -247,17 +235,6 @@ describe("DocsPage get-started pointer", () => {
     expect(link).toHaveAttribute("target", "_blank")
     expect(
       screen.getByText(/New here\? The get-started walkthrough lives at/),
-    ).toBeInTheDocument()
-  })
-
-  it("says nothing about it on a hosted deployment, which serves none", () => {
-    renderDocs("hosted")
-
-    expect(screen.queryByRole("link", { name: "/welcome" })).toBeNull()
-    expect(screen.queryByText(/walkthrough lives at/)).toBeNull()
-    // The rest of the intro is unchanged: only the pointer goes.
-    expect(
-      screen.getByText(/A reference for operating this dashboard/),
     ).toBeInTheDocument()
   })
 })

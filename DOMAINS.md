@@ -96,9 +96,8 @@ with one and makes the change inside its block.
 
 It also defines `WorkspaceListener`, the interface another domain implements to
 set up a workspace in the transaction that creates it. Every service that
-creates a workspace takes one, with no default, and the binding is chosen per
-mode: a hosted control plane gets tools' `CodeExecutionWorkspaceDefaults`, and
-every other deployment `NullWorkspaceListener`. It also owns
+creates a workspace takes one, with no default. The core binds
+`NullWorkspaceListener`, and a build may bind another. It also owns
 `models/users.py`, `repositories/users_repository.py` and
 `services/workspace_scope.py`.
 
@@ -155,7 +154,7 @@ It owns `ports/agent_model_recommender_port.py` and its adapter in
 answers a subagent model recommendation and at what price. The core asks the
 decision model the deployment configured, which may be a local one, and a
 hosted build binds a recommender of its own, so the composition root binds
-the implementation and no caller reads a mode. Neither implementation meters
+the implementation and no caller chooses between them. Neither implementation meters
 the call; the decisions scaffold does.
 
 ### files
@@ -189,14 +188,14 @@ and their adapters in `adapters/`.
 
 `mcp_server_port.py` names where a workspace's MCP servers come from. One
 deployment holds those rows and another asks a peer that holds them for it, so
-the composition root binds the implementation and no caller reads a mode. A
+the composition root binds the implementation and no caller chooses between them. A
 resolved server is connected to directly; neither implementation proxies MCP
 traffic.
 
 `web_search_policy_port.py` names where a workspace's web search policy comes
 from, in the same two ways. The policy says who may search and how far, and
 carries the workspace's own search key where its organization brought one. A
-tools service applies it to a request with one rule on every plane, and
+tools service applies it to a request with one rule everywhere, and
 neither implementation carries a search.
 
 It also owns an organization's web search keys and each workspace's choice
@@ -255,12 +254,11 @@ and the Playground.
 
 ### platform
 
-Deployment settings, health, modes, maintenance mode and mail.
+Deployment settings, health, maintenance mode and mail.
 
-`deployment.py` holds `Plane`, which names the control plane and the data
-plane, and the value that says which of them a process serves. `surface.py`
-says which deployments publish a dashboard page and `feature.py` shapes an
-optional feature, so the three together are how a build describes itself.
+`surface.py` names the dashboard pages a deployment publishes and `feature.py`
+shapes an optional feature, so the two together are how a build describes
+itself.
 
 ### rate-limits
 

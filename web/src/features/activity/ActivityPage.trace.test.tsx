@@ -4,14 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ActivityPage } from "@/features/activity/ActivityPage"
 import { entry, mockApi, renderPage } from "@/tests/activity"
-import { STANDALONE_SURFACES } from "@/tests/fixtures"
+import { SURFACES } from "@/tests/fixtures"
 import { traceSummary } from "@/tests/traceFixtures"
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const WITH_TRACES = { surfaces: [...STANDALONE_SURFACES, "traces"] }
+const WITH_TRACES = { surfaces: [...SURFACES, "traces"] }
 
 const lookups = (calls: ReturnType<typeof mockApi>["calls"]) =>
   calls.filter((call) => call.url.includes("/traces/requests/"))

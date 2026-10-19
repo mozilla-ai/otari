@@ -21,6 +21,7 @@ import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat
 from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services import pricing_service
@@ -133,7 +134,7 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         raw_request=request,
         response=Response(),
         db=cast(AsyncSession, object()),
-        uow=None,
+        uow=cast(UnitOfWork, object()),
         config=config,
         log_writer=cast(Any, object()),
         model="openai:gpt-4",

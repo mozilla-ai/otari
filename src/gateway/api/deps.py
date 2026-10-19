@@ -1,8 +1,7 @@
 import secrets
 import time
 import uuid
-from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import aclosing
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
@@ -103,7 +102,7 @@ from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.organizations import InvitationMailLimit
 from gateway.services.overview import OverviewService
-from gateway.services.playground_service import ForwardedToolOffer, LocalToolOffer, PlaygroundToolOffer
+from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.providers import (
     HostedProviderService,
@@ -134,7 +133,6 @@ from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, W
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchService
 from gateway.services.tools import (
-    CodeExecutionWorkspaceDefaults,
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
@@ -391,8 +389,7 @@ async def _verify_federated_token(request: Request, db: AsyncSession, token: str
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication temporarily unavailable, please retry",
         ) from exc
-    # Internal keys hold a stored credential and are never anyone's to present; a rule on one is refused too.
-    if api_key is None or api_key.internal_secret is not None:
+    if api_key is None:
         record_auth_failure("federation_no_rule")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     logger.debug(
@@ -427,7 +424,7 @@ async def _verify_access_token(db: AsyncSession, token: str, config: GatewayConf
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication temporarily unavailable, please retry",
         ) from exc
-    if api_key is None or api_key.internal_secret is not None:
+    if api_key is None:
         record_auth_failure("federation_rule_gone")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     return await _admit_api_key(api_key)
@@ -889,31 +886,6 @@ async def verify_catalog_reader_or_public(
     return None
 
 
-async def get_db_if_needed() -> AsyncGenerator[AsyncSession | None, None]:
-    """Get a database session.
-
-    Typed optional for the routes that still handle a missing session; every
-    deployment has a database, so one is always yielded.
-    """
-    # A bare ``async for`` leaves ``get_db`` open when an error or cancellation
-    # is thrown in at teardown, so its session would hold a pooled connection
-    # until garbage collection.
-    async with aclosing(get_db()) as sessions:
-        async for db in sessions:
-            yield db
-
-
-async def verify_api_key_or_master_key_if_needed(
-    request: Request,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> tuple[APIKey | None, bool] | None:
-    """Verify the caller's key, or return ``None`` where the request has no session."""
-    if db is None:
-        return None
-    return await verify_api_key_or_master_key(request, db, config)
-
-
 def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayConfig) -> FileService:
     """Build Files operations for a scoped output request or cleanup job."""
 
@@ -952,7 +924,7 @@ def build_sandbox_file_bridge(
     *,
     raw_request: Request,
     config: GatewayConfig,
-    uow: UnitOfWork | None,
+    uow: UnitOfWork,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     inputs: list[StagedFile],
@@ -965,7 +937,7 @@ def build_sandbox_file_bridge(
     and otherwise under the one the request arrived on.
     """
     backends = _file_backends(raw_request)
-    if uow is None or not config.files_enabled or backends is None or user_id is None or workspace_id is None:
+    if not config.files_enabled or backends is None or user_id is None or workspace_id is None:
         return None
     base = (config.public_base_url or str(raw_request.base_url)).rstrip("/")
     return SandboxFileBridge(
@@ -982,7 +954,7 @@ def build_sandbox_file_bridge(
 def build_sandbox_container_registry(
     *,
     config: GatewayConfig,
-    uow: UnitOfWork | None,
+    uow: UnitOfWork,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     port: CodeExecutionPort | None,
@@ -994,13 +966,7 @@ def build_sandbox_container_registry(
     lease is scoped to the billed user and workspace, and to the adapter this
     build runs, so a deployment that changes providers starts fresh.
     """
-    if (
-        uow is None
-        or user_id is None
-        or workspace_id is None
-        or port is None
-        or config.sandbox_container_idle_ttl_sec <= 0
-    ):
+    if user_id is None or workspace_id is None or port is None or config.sandbox_container_idle_ttl_sec <= 0:
         return None
     return SandboxContainerRegistry(
         uow=uow,
@@ -1021,19 +987,6 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
     return UnitOfWork(db)
 
 
-def get_unit_of_work_if_needed(
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-) -> UnitOfWork | None:
-    """Return the request's Unit of Work, or ``None`` where the request has no session.
-
-    The counterpart of ``get_db_if_needed``. It is over the session that dependency yields.
-
-    NOTE: a route must take its session from ``get_db_if_needed`` as well.
-    ``get_db`` opens a session of its own, so a route that mixes the two gets two sessions and two Units of Work.
-    """
-    return None if db is None else get_unit_of_work(db)
-
-
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
@@ -1048,17 +1001,11 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
-def get_workspace_listener(
-    uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
-) -> WorkspaceListener:
-    """Return what sets up a workspace this request creates, bound per mode.
+def get_workspace_listener(uow: UnitOfWorkDep) -> WorkspaceListener:  # noqa: ARG001
+    """Return what sets up a workspace this request creates: nothing, since a new workspace needs no rows of its own.
 
-    A hosted control plane reads a workspace with no code execution policy as off, so there each new workspace
-    starts with one that turns it on. Elsewhere no policy already means on, so nothing is staged.
-    It writes through the request's Unit of Work, so a service that creates workspaces must be built on the same one.
+    Takes the Unit of Work because the container builds a listener from one.
     """
-    if config.is_hosted_mode:
-        return CodeExecutionWorkspaceDefaults(WorkspaceCodeExecutionPolicyRepository(uow))
     return NullWorkspaceListener()
 
 
@@ -1131,12 +1078,7 @@ WorkspaceCodeExecutionPoliciesDep = Annotated[
 
 
 def get_playground_tool_offer(config: Annotated[GatewayConfig, Depends(get_config)]) -> PlaygroundToolOffer:
-    """Return what this deployment offers a Playground message, bound per mode.
-
-    A hosted control plane forwards each completion to its data plane, whose sandbox and file store serve it.
-    """
-    if config.is_hosted_mode:
-        return ForwardedToolOffer(config)
+    """Return what this deployment offers a Playground message."""
     return LocalToolOffer(config)
 
 
@@ -1221,16 +1163,10 @@ def get_container(request: Request) -> Container:
 
 
 ContainerDep = Annotated[Container, Depends(get_container)]
-# ``get_db_if_needed`` and not ``get_db``.
-#
-# The consequence to know before an adapter writes anything: FastAPI caches a
-# dependency per callable, so this shares one session with a route that also
-# takes ``get_db_if_needed`` (the data-plane routes do) and opens a *second,
-# independent* one for a route that takes ``get_db`` (the management-plane
-# routes do). A port's "joins the caller's unit of work" therefore holds only
-# for the first kind. A route that means to commit a port's writes with its own
-# must take its session from ``get_db_if_needed`` too.
-PortSessionDep = Annotated[AsyncSession | None, Depends(get_db_if_needed)]
+# The request's own session: FastAPI caches a dependency per callable, so a port
+# resolved on this shares the session of the route that resolved it, and its
+# writes land in the commit that settles the request.
+PortSessionDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 def get_agent_model_recommender_port(container: ContainerDep) -> AgentModelRecommenderPort:
@@ -1277,9 +1213,6 @@ def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort
     return container.resolve(BillingPort, db)
 
 
-# ``get_db`` rather than ``PortSessionDep``, for a route whose own session is
-# ``get_db`` (the Playground): a deployment-paid charge is written on the port's
-# session and lands only in the commit that settles the request on that one.
 def get_request_session_billing_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     container: ContainerDep,
@@ -1293,14 +1226,6 @@ def get_entitlement_port(db: PortSessionDep, container: ContainerDep) -> Entitle
     return container.resolve(EntitlementPort, db)
 
 
-# ``get_db`` rather than ``PortSessionDep``, for the reason
-# ``get_telemetry_storage_port`` below gives: both surfaces resolving this port
-# (signup, and a member minting their own key) are standalone-only and already
-# hold a session from ``get_db``, and FastAPI caches a dependency per callable.
-# Naming the same one hands the adapter the caller's session instead of opening
-# a second, independent one against the same database for the same request,
-# which is what an adapter writing an outbox row or a "notified" stamp would
-# need to land its write in a transaction someone commits.
 def get_growth_signal_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     container: ContainerDep,
@@ -1309,8 +1234,7 @@ def get_growth_signal_port(
     return container.resolve(GrowthSignalPort, db)
 
 
-# ``get_db`` rather than ``PortSessionDep``: the adapter writes and does not commit,
-# so it must share the session of the Unit of Work whose block commits its writes.
+# The adapter writes and does not commit, so it shares the session of the Unit of Work whose block commits its writes.
 def get_identity_provider_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
@@ -1331,7 +1255,7 @@ def get_mcp_server_port(db: PortSessionDep, container: ContainerDep) -> McpServe
 
 def get_model_provider_port(
     db: PortSessionDep,
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    uow: UnitOfWorkDep,
     container: ContainerDep,
 ) -> ModelProviderPort:
     """Resolve the model-provider adapter this build bound at startup.
@@ -1341,9 +1265,6 @@ def get_model_provider_port(
     return container.resolve(ModelProviderPort, db, uow=uow)
 
 
-# ``get_db`` rather than ``PortSessionDep``, for a route or builder whose own
-# session is ``get_db``: FastAPI caches a dependency per callable, so naming the
-# same one hands the adapter that session instead of opening a second one.
 def get_request_session_model_provider_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
@@ -1358,12 +1279,6 @@ def model_provider_port_on(request: Request, db: AsyncSession) -> ModelProviderP
     return get_container(request).resolve(ModelProviderPort, db, uow=get_unit_of_work(db))
 
 
-# Deliberately ``get_db`` and not ``PortSessionDep``: every surface that
-# resolves this port (the OTLP receiver, the telemetry read and purge
-# endpoints, user deletion) is standalone-only and already holds a session from
-# ``get_db``, and FastAPI caches a dependency per callable. Naming the same one
-# hands the adapter the caller's session instead of opening a second,
-# independent one against the same database for the same request.
 def get_telemetry_storage_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     container: ContainerDep,
@@ -1914,7 +1829,7 @@ def get_log_writer(request: Request) -> LogWriter:
 
 
 def get_file_store(request: Request) -> FileStoragePort:
-    """Return the configured blob store for uploaded files (standalone mode)."""
+    """Return the configured blob store for uploaded files."""
     store: FileStoragePort = request.app.state.file_store
     return store
 
@@ -1935,26 +1850,23 @@ def get_file_service(
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 
 
-def get_file_service_if_needed(
+def get_optional_file_service(
     request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
 ) -> FileService | None:
     """Return the request's files service, or ``None`` where files are unavailable.
 
     The counterpart of ``get_file_service``, for a completion route.
-
-    NOTE: a route must take its session from ``get_db_if_needed`` as well, for the
-    reason ``get_unit_of_work_if_needed`` gives.
     """
     backends = _file_backends(request)
-    if uow is None or db is None or backends is None:
+    if backends is None:
         return None
     return FileService(uow, FileRepositories.on(uow), backends, config, lambda: default_workspace_id(db))
 
 
-OptionalFileServiceDep = Annotated[FileService | None, Depends(get_file_service_if_needed)]
+OptionalFileServiceDep = Annotated[FileService | None, Depends(get_optional_file_service)]
 
 
 async def _caller_organization_id(
@@ -2072,7 +1984,6 @@ __all__ = [
     "get_session_identity",
     "reset_config",
     "set_config",
-    "get_db_if_needed",
     "get_feedback_service",
     "get_file_store",
     "get_log_writer",

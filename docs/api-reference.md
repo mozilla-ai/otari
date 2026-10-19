@@ -31,20 +31,6 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
-## Availability by mode
-
-| Surface | Standalone | Hosted |
-| --- | --- | --- |
-| Health and `/api/v1/bootstrap` | Yes | Yes |
-| Chat, Messages, and Responses | Yes | No |
-| Caller-orchestrated MCP | Yes | No |
-| Other inference APIs | Yes | No |
-| `/api/v1/models` | Yes | Yes |
-| Management APIs | Yes | Yes |
-
-Hosted mode is a control plane. Its inference paths return a descriptive `404`
-and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
-
 ## Core inference APIs
 
 Otari implements three completion surfaces:
@@ -53,7 +39,7 @@ Otari implements three completion surfaces:
 - `POST /api/v1/messages` and `/api/v1/messages/count_tokens`, Anthropic Messages
 - `POST /api/v1/responses`, OpenAI Responses
 
-Standalone mode also serves embeddings, images, audio, files, batches,
+Otari also serves embeddings, images, audio, files, batches,
 moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
@@ -112,7 +98,7 @@ how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
-standalone [rerank](#rerank) and embeddings endpoints carry the same two fields
+[rerank](#rerank) and embeddings endpoints carry the same two fields
 on their `usage`. On a stream the fields ride the terminal usage event: for Chat
 Completions, the last chunk that reports usage and either has no choices (OpenAI's
 `stream_options.include_usage` chunk) or finishes a choice (providers such as Cohere
@@ -220,7 +206,7 @@ three surfaces:
 {"model": "openai:gpt-4o", "messages": [...], "metadata": {"purpose": "chat", "country": "DE"}}
 ```
 
-A standalone gateway records the tags on every usage row the request writes:
+The gateway records the tags on every usage row the request writes:
 served, failed, streamed or not, refused by the gateway (a disallowed model,
 missing pricing, an exhausted budget), and the separate row billing an image
 description made for a text-only model. LiteLLM's
@@ -269,8 +255,6 @@ key:
 GET /api/v1/usage/summary?group_by_tag=purpose&dimensions=none
 ```
 
-Tags are recorded in standalone mode only.
-
 ### The `user` field
 
 OpenAI's `user` field is a free-form end-user identifier, and OpenAI examples
@@ -297,8 +281,8 @@ To tag a request with a free-form end-user ID, put it in `metadata`
 A stream that fails mid-response ends in an error event, and one the client
 disconnects from ends with nothing, so neither delivers `usage.cost_usd`. The
 provider may still have charged for the tokens it reported before the stream
-ended (an Anthropic stream reports its input tokens in `message_start`), and a
-standalone gateway records and bills those tokens rather than treating the
+ended (an Anthropic stream reports its input tokens in `message_start`), and the
+gateway records and bills those tokens rather than treating the
 request as free.
 
 To recover that amount, look the request up by its `Otari-Request-ID`:
@@ -741,7 +725,7 @@ error where that names a cause (a rejected parameter, the provider's own
 explanation of a rejected request, redacted as described above, or what
 happened upstream, such as the provider's error status), and a fixed
 `An error occurred during streaming` otherwise. An event with no `code` is a
-failure inside the gateway. Either way, a standalone gateway records the
+failure inside the gateway. Either way, the gateway records the
 request's usage row with status `error`.
 On Messages, a stream the provider ends without `message_stop`, including one
 that sent no events at all, also ends in an `api_error` event rather than

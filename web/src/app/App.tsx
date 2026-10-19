@@ -98,11 +98,10 @@ export default function App({
  * Which of this deployment's roots renders, decided from the bootstrap and
  * (for one of them) the URL, rather than the route table: signing in is the
  * one decision no route gets to make, and accepting an invitation is one no
- * *session* gets to require. No page below here reads the deployment mode
- * again.
+ * *session* gets to require.
  */
 function DeploymentRoot({ hash }: { hash: string }) {
-  const { session_type, public_catalog, open_signup } = useDeployment()
+  const { public_catalog, open_signup } = useDeployment()
   const { isAuthenticated } = useAuth()
 
   // The one URL every visitor may reach without a session or the master key:
@@ -165,13 +164,8 @@ function DeploymentRoot({ hash }: { hash: string }) {
     )
   }
 
-  // Any deployment that issues a session needs one before the shell renders.
-  // Only the local operator signs in *here*, since a hosted session is minted by
-  // otari.ai's own flow, so a hosted deployment reaching this line is a routing
-  // bug to fix when that half lands. Gating on "issues no session" rather than on
-  // "issues this one" is what makes that bug a wrong screen instead of an
-  // unauthenticated shell whose every query 401s in a loop.
-  if (session_type !== "none" && !isAuthenticated) {
+  // The shell renders only behind a session.
+  if (!isAuthenticated) {
     return (
       <PublicPageTitle page="Sign in">
         <Login />

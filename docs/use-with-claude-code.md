@@ -20,7 +20,7 @@ claude
 Claude Code puts a telemetry value in `metadata.user_id`; the next section
 says how a key accepts it.
 
-### Standalone
+### On your own gateway
 
 Claude Code sends a telemetry value in `metadata.user_id`. It is not an
 Otari user ID, so create or update its API key with
@@ -40,7 +40,7 @@ curl "$OTARI_URL/api/v1/keys" \
   }'
 ```
 
-Then point Claude Code at the standalone gateway:
+Then point Claude Code at the gateway:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:8000/api"
@@ -57,7 +57,7 @@ The same values can go in the `env` block of Claude Code's settings file.
 A workload on Google Cloud, or behind another OpenID Connect issuer, can skip
 the key altogether: Claude Code's own workload identity
 (`ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and
-`ANTHROPIC_IDENTITY_TOKEN_FILE`) works against a standalone Otari that trusts
+`ANTHROPIC_IDENTITY_TOKEN_FILE`) works against an Otari that trusts
 the issuer. Unset `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` when you switch:
 either one, when set, takes precedence and the federation variables are
 ignored. See
@@ -77,7 +77,7 @@ claude
 Every request the session makes is then recorded with those tags, and the usage
 endpoints filter and group by them (`GET /api/v1/usage?tag=run:1234`), so one
 key can split its cost by agent, run or requester. Percent-encode a `,` or `=`
-inside a value. Tags are recorded in standalone mode only. See
+inside a value. See
 [Request tags](api-reference.md#request-tags) for the format and limits.
 
 ## Budgets
@@ -149,13 +149,13 @@ active API key may ask. The decision call is billed to the caller and recorded
 in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
 the harness acts on the answer with its own provider credentials.
 
-Who answers depends on the build. A standalone deployment asks the decision
+Who answers depends on the build. A self-run deployment asks the decision
 model `agent_recommender_model` names, which may be a local one, and the call
 costs what that provider charges. On otari.ai a managed recommender answers
 behind the same route, which you never configure, at the price of one
 recommendation.
 
-A standalone deployment needs a
+A self-run deployment needs a
 [decision provider](configuration.md#decision-providers) the
 `agent_recommender_model` selector resolves to, `typesafe` with an API key by
 default. Without one, the route answers 400 and the plugin falls back to the
@@ -227,8 +227,8 @@ line says so.
 ## Import Claude Code usage without routing
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
-sessions that do not already route through Otari. Send it to a standalone
-deployment or a hosted control plane.
+sessions that do not already route through Otari. Send it to any Otari
+deployment.
 
 Create a dedicated API key with `exclude_from_budget: true`, then configure the
 logs exporter. The optional metrics exporter adds content-free outcome counters.

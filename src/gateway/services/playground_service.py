@@ -219,14 +219,10 @@ _WORKSPACE_DISABLED = "Turned off for this workspace."
 _WORKSPACE_NOT_ENABLED = "Not turned on for this workspace."
 _NOT_CONFIGURED = "No backend is configured on this deployment."
 _FILES_OFF = "File uploads are turned off on this deployment."
-_FILES_NOT_FORWARDED = "This deployment's models run on another gateway, which cannot read files stored here."
 
 
 class PlaygroundToolOffer(Protocol):
-    """What the deployment offers a Playground message before its workspace narrows it.
-
-    Bound per mode where the app is wired, so nothing here reads the mode.
-    """
+    """What the deployment offers a Playground message before its workspace narrows it."""
 
     def code_execution(self, workspace_enabled: bool | None) -> ToolAvailability:
         """Code execution, given the workspace's stored switch (``None`` when it stored none)."""
@@ -256,32 +252,6 @@ class LocalToolOffer:
         if not self._config.files_enabled:
             return ToolAvailability(configured=False, enabled=False, reason=_FILES_OFF)
         return ToolAvailability(configured=True, enabled=True)
-
-
-class ForwardedToolOffer:
-    """A hosted control plane, which forwards each Playground completion to its data plane."""
-
-    def __init__(self, config: GatewayConfig) -> None:
-        self._config = config
-
-    def code_execution(self, workspace_enabled: bool | None) -> ToolAvailability:
-        """Code execution, read the way the platform reads it.
-
-        The platform's sandbox behind the data plane runs the code, so this
-        process's own sandbox config says nothing.
-        """
-        return _tool_availability(
-            True, workspace_enabled, on_without_policy=self._config.code_execution_on_without_policy()
-        )
-
-    def files(self) -> ToolAvailability:
-        """No uploads: the data plane resolves a ``file_id`` against its own store, and would not find one stored here.
-
-        So an upload is refused rather than accepted and then lost.
-        """
-        if not self._config.files_enabled:
-            return ToolAvailability(configured=False, enabled=False, reason=_FILES_OFF)
-        return ToolAvailability(configured=False, enabled=False, reason=_FILES_NOT_FORWARDED)
 
 
 async def resolve_tool_availability(

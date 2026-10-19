@@ -151,8 +151,8 @@ describe("apiFetch", () => {
   })
 
   it("explains a reply that is not JSON instead of quoting the markup at the operator", async () => {
-    // The edge in front of a hosted deployment serves the dashboard's own page
-    // at 200 for the statuses it remaps, so a refused write arrives here looking
+    // An edge in front of the gateway can serve the dashboard's own page at
+    // 200 for the statuses it remaps, so a refused write arrives here looking
     // like a successful one. `response.json()` then throws a SyntaxError whose
     // message is the markup it choked on, and the banner rendered exactly that
     // (otari-ai#2147).

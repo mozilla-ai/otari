@@ -102,9 +102,8 @@ API_VERSION = "v1"
 API_ROOT = f"/api/{API_VERSION}"
 # Base only: OTel exporters append /otlp/v1/traces and the other signal paths.
 OTLP_ROOT = "/otlp"
-# Selected hybrid mode before it was removed; refused at startup so a leftover
-# attached-gateway deployment fails loudly rather than booting as standalone.
-_REMOVED_HYBRID_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
+# Selected a runtime mode before modes were removed; each is ignored with a warning at startup.
+_REMOVED_MODE_ENV_VARS = ("OTARI_MODE", "OTARI_AI_TOKEN", "OTARI_DATA_PLANE_URL")
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
 # OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
@@ -578,15 +577,6 @@ class GatewayConfig(
         default="sqlite:///./otari.db",
         description="Database connection URL (SQLite default for local use; PostgreSQL recommended for production)",
     )
-    mode: Annotated[str | None, Shown(SettingsGroup.SERVER)] = Field(
-        default=None,
-        description=(
-            "Otari operating mode: 'standalone' (the default when unset) or 'hosted'. 'hosted' is "
-            "standalone's multi-tenant sibling: it owns its own database and serves the whole "
-            "management API, and it reports the per-organization provider-key surface rather than "
-            "the process-global one."
-        ),
-    )
     auto_migrate: Annotated[bool, Shown(SettingsGroup.SERVER)] = Field(
         default=True,
         description="Automatically run database migrations on startup",
@@ -785,21 +775,6 @@ class GatewayConfig(
             "without an account (the sign-in pages and the public model catalog) links to it; "
             "unset, it links to the catalog where one is published, and is not a link "
             "otherwise. A link target an operator configured, held to the same bar as docs_url."
-        ),
-    )
-    data_plane_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
-        default=None,
-        description=(
-            "Where this deployment's inference traffic belongs, as an absolute http(s) URL "
-            f"with no trailing slash and no '{API_ROOT}' or '/v1' path segment anywhere in it, not "
-            f"even as part of a full endpoint like '{API_ROOT}/chat/completions' (e.g. "
-            "'https://gateway.otari.ai'): the dashboard appends that path itself. It carries no "
-            "credential either, so no query string, fragment, or user:password. Only a hosted control "
-            "plane needs it: a standalone gateway serves inference at "
-            "its own address, so whatever reached the dashboard reaches the API, and this "
-            "stays unset. A control plane serving many organizations does not, so it has to "
-            "say where the data-plane gateway is or the dashboard has nothing runnable to "
-            "hand somebody with a new key. This is the base URL a client suffixes with the API root."
         ),
     )
     ui_base_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
@@ -1057,7 +1032,7 @@ class GatewayConfig(
             "write ('typesafe:jev-latest'). Each entry may declare a 'provider' (one of: typesafe, "
             "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
-            "in seconds. Standalone-mode only."
+            "in seconds."
         ),
     )
     agent_recommender_model: Annotated[str, OMITTED] = Field(
@@ -1179,7 +1154,7 @@ class GatewayConfig(
     )
     files_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
         default=True,
-        description="Enable the /api/v1/files upload/storage endpoints (standalone mode).",
+        description="Enable the /api/v1/files upload/storage endpoints.",
     )
     files_backend: Annotated[str, Shown(SettingsGroup.FILES)] = Field(
         default="local",
@@ -1467,8 +1442,7 @@ class GatewayConfig(
         default=None,
         description=(
             "Whether a workspace with no code-execution policy of its own may run code on the sandbox. "
-            "False makes code execution something a workspace admin turns on. When unset: on, except on "
-            "a hosted deployment, where it is off."
+            "False makes code execution something a workspace admin turns on. Unset means on."
         ),
     )
     mcp_allow_loopback: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1523,30 +1497,6 @@ class GatewayConfig(
     # configured, so ``verify_master_key`` can authenticate the generated key
     # without the plaintext ever living in config.
     _master_key_hash: str | None = PrivateAttr(default=None)
-
-    @property
-    def configured_mode(self) -> str | None:
-        """The explicitly set mode (normalized), or None when unset/blank."""
-        normalized = (self.mode or "").strip().lower()
-        return normalized or None
-
-    @property
-    def effective_mode(self) -> str:
-        return "hosted" if self.configured_mode == "hosted" else "standalone"
-
-    @property
-    def is_hosted_mode(self) -> bool:
-        """Whether this deployment is the multi-tenant control plane, not a single tenant's.
-
-        Not a second runtime: hosted mode owns its own database and mounts the
-        whole management API the way standalone does. What it changes is who the deployment serves, and
-        two things follow from that. Which management surfaces make sense on it:
-        the per-organization credential set rather than the process-global one
-        (see ``bootstrap.HOSTED_SURFACES``). And whether it serves a data plane
-        at all: it does not, because a control plane runs no customer traffic
-        (see ``api.main._register_core_routers``).
-        """
-        return self.effective_mode == "hosted"
 
     @property
     def effective_ui_base_url(self) -> str:
@@ -2123,22 +2073,12 @@ class GatewayConfig(
         return bool(self.sandbox_url or otari_env("SANDBOX_URL"))
 
     def web_search_on_without_policy(self) -> bool:
-        """Whether a workspace with no stored web-access policy may use the web tools.
-
-        The hosted fallback keeps the control plane's existing behavior and goes with hosted mode.
-        """
-        if self.web_search_workspace_default is not None:
-            return self.web_search_workspace_default
-        return not self.is_hosted_mode
+        """Whether a workspace with no stored web-access policy may use the web tools."""
+        return self.web_search_workspace_default is not False
 
     def code_execution_on_without_policy(self) -> bool:
-        """Whether a workspace with no stored code-execution policy may use the sandbox.
-
-        The hosted fallback keeps the control plane's existing behavior and goes with hosted mode.
-        """
-        if self.code_execution_workspace_default is not None:
-            return self.code_execution_workspace_default
-        return not self.is_hosted_mode
+        """Whether a workspace with no stored code-execution policy may use the sandbox."""
+        return self.code_execution_workspace_default is not False
 
     def effective_sandbox_image(self) -> str | None:
         """The image this deployment asks a sandbox session for, or ``None``.
@@ -2234,14 +2174,9 @@ class GatewayConfig(
         put in their own config. Rejected at load rather than dropped per request:
         a typo should be a startup error, not a Documentation link that silently goes nowhere.
 
-        ``data_plane_url`` keeps its own, stricter validator: a client builds a
-        request from it rather than following it.
-
-        Userinfo is the one refusal these three fields share with ``data_plane_url``, and
-        they share it for its reason rather than theirs: ``GET /api/v1/bootstrap``
-        is unauthenticated, so a credential written into any of these would
-        reach every browser that asked, which no redaction in the operator-gated
-        config viewer would cover.
+        Userinfo is refused because ``GET /api/v1/bootstrap`` is unauthenticated,
+        so a credential written into any of these would reach every browser that
+        asked, which no redaction in the operator-gated config viewer would cover.
         """
         normalized = (value or "").strip()
         if not normalized:
@@ -2251,8 +2186,7 @@ class GatewayConfig(
             msg = f"{info.field_name} must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
         if parsed.username is not None or parsed.password is not None:
-            # The value is left out of the message, as it is for
-            # ``data_plane_url``: the offending part of it is the credential.
+            # The value is left out of the message: the offending part of it is the credential.
             msg = f"{info.field_name} must carry no username or password"
             raise ValueError(msg)
         return normalized
@@ -2287,76 +2221,6 @@ class GatewayConfig(
             raise ValueError(msg)
         if parsed.username is not None or parsed.password is not None:
             msg = "ui_base_url must carry no username or password"
-            raise ValueError(msg)
-        return normalized
-
-    @field_validator("data_plane_url")
-    @classmethod
-    def _validate_data_plane_url(cls, value: str | None) -> str | None:
-        """Reject a data-plane address that is not an absolute http(s) URL.
-
-        Held to the same bar as ``docs_url`` and for the same reason: the
-        deployment bootstrap publishes it to the browser, which builds a runnable
-        snippet from it. A typo should be a startup error rather than a curl
-        command an operator copies and cannot explain.
-
-        The trailing slash is normalized away here so no consumer has to: the
-        dashboard suffixes this with ``/api/v1``, and ``https://host//api/v1``
-        is a different path on a strict router.
-
-        A query string or a fragment is refused for the same reason, and it is
-        the case a scheme check alone would miss: this is a base URL a client
-        appends to, so ``https://host?trace=1`` would put ``/api/v1/chat/completions``
-        inside the query value rather than in the path, and the snippet would
-        reach the deployment's root with a very strange parameter. Unlike
-        ``docs_url``, which is a link a person follows, nothing downstream can
-        recover from that.
-
-        A path carrying the API root is refused too, and it is the likelier
-        mistake of the two: everywhere else a client meets one, "base URL"
-        means the ``/api/v1`` address (the OpenAI SDK's own ``base_url``
-        includes it), so writing it here is the natural error, and it renders
-        a snippet posting to ``/api/v1/api/v1/chat/completions``, which looks
-        right and 404s on first use. Refused rather than stripped, because
-        stripping would be silent and wrong for a gateway genuinely mounted
-        under such a path, while refusing costs one edit. Any ``v1`` segment
-        counts, not just a trailing root, so a pasted endpoint
-        (``https://host/api/v1/chat/completions``) is refused as well. Any
-        other prefix is left alone: a gateway proxied at
-        ``https://api.example.com/otari`` is a real deployment.
-        """
-        normalized = (value or "").strip().rstrip("/")
-        if not normalized:
-            return None
-        parsed = urlsplit(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            msg = f"data_plane_url must be an absolute http(s) URL, got '{value}'"
-            raise ValueError(msg)
-        if parsed.query or parsed.fragment:
-            msg = f"data_plane_url must carry no query string or fragment, got '{value}'"
-            raise ValueError(msg)
-        # Userinfo is refused rather than redacted downstream, because this value
-        # is published *unauthenticated*: `GET /api/v1/bootstrap` hands it to any
-        # browser that asks, which no redaction in the operator-gated config
-        # viewer would cover. A credential has no business here either way, since
-        # the snippet built from this puts the whole address in a curl command
-        # somebody pastes into a terminal and a shell history.
-        if parsed.username is not None or parsed.password is not None:
-            # The message does not repeat the value, unlike the refusals above,
-            # since the offending part of it is the credential. That is tidiness
-            # and not redaction: pydantic renders the input on the error either
-            # way, and a value set here was already sitting in a config file or
-            # an environment variable. The guarantee this refusal buys is the
-            # one that matters, that the credential never reaches the
-            # unauthenticated bootstrap.
-            msg = "data_plane_url must carry no username or password"
-            raise ValueError(msg)
-        if any(segment.lower() == "v1" for segment in parsed.path.split("/")):
-            msg = (
-                f"data_plane_url must not carry the API root ({API_ROOT}) or any /v1 segment: the "
-                "dashboard appends that path itself, so give the gateway's own address (for example "
-                f"'https://gateway.otari.ai'). Got '{value}'"
-            )
             raise ValueError(msg)
         return normalized
 
@@ -2566,18 +2430,12 @@ class GatewayConfig(
             )
             raise ValueError(msg)
 
-    def validate_mode_selection(self) -> None:
-        """Refuse an unknown mode, and a leftover hybrid-mode token."""
-        if os.getenv(_REMOVED_HYBRID_TOKEN_ENV_VAR, "").strip():
-            msg = (
-                f"{_REMOVED_HYBRID_TOKEN_ENV_VAR} is set, but hybrid mode has been removed. Unset it to run "
-                "this deployment in standalone mode."
-            )
-            raise ValueError(msg)
-        configured_mode = self.configured_mode
-        if configured_mode is not None and configured_mode not in {"standalone", "hosted"}:
-            msg = "Invalid mode (set via OTARI_MODE or the config 'mode' field). Expected 'standalone' or 'hosted'."
-            raise ValueError(msg)
+
+def warn_about_removed_mode_settings() -> None:
+    """Log that a leftover runtime-mode variable is ignored, so an upgrade does not refuse to start over it."""
+    for name in _REMOVED_MODE_ENV_VARS:
+        if os.getenv(name, "").strip():
+            logger.warning("Ignoring %s: Otari no longer has runtime modes.", name)
 
 
 def _load_structured_env_config() -> dict[str, Any] | None:
@@ -2655,11 +2513,11 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     yaml_bridged_fields = {name for name in ENV_BRIDGED_FIELDS if config_dict.get(name) is not None}
 
     _apply_otari_env_overrides(config_dict)
-    if config_dict.pop("platform", None) is not None:
-        logger.warning("Ignoring the 'platform' config block: hybrid mode has been removed.")
+    for removed_key in ("platform", "mode", "data_plane_url"):
+        if config_dict.pop(removed_key, None) is not None:
+            logger.warning("Ignoring the '%s' config key: Otari no longer has runtime modes.", removed_key)
 
     config = GatewayConfig(**config_dict)
-    config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_hosted_providers()
     config.validate_aliases()

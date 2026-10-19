@@ -22,7 +22,7 @@ Five call sites with overlapping but not identical threat models:
   setups (private indexes etc.).
 
 * **Provider ``api_base``** (:func:`validate_provider_api_base`): the URL is
-  operator-supplied (master-key gated, standalone-only), the same trust level
+  operator-supplied (master-key gated), the same trust level
   as a config.yml provider endpoint. This one defaults to *allow-all*: the
   home-lab / self-hosted use case depends on private-network endpoints
   (``localhost``, RFC 1918), so the check is off unless an operator opts in via
@@ -282,7 +282,7 @@ async def validate_provider_api_base(url: str) -> None:
     """Reject a provider ``api_base`` that resolves to an internal address.
 
     Opt-in and default-allow: an operator-supplied ``api_base`` is master-key
-    gated and standalone-only, the same trust level as a config.yml provider
+    gated, the same trust level as a config.yml provider
     endpoint, and the home-lab / self-hosted use case depends on private-network
     endpoints (``localhost``, RFC 1918). So this is a no-op unless an operator
     sets ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, which turns on the same

@@ -1,4 +1,4 @@
-"""Deployment-wide account administration (standalone mode only).
+"""Deployment-wide account administration.
 
 Thin composition over `gateway.services.tenancy.deployment_user_service`, which
 carries the whole of the reasoning: who counts as an operator, why a refusal is a

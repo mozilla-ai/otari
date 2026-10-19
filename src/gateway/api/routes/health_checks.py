@@ -82,9 +82,8 @@ async def _poll(config: GatewayConfig) -> None:
 
 FEATURE = CoreFeature(
     name="health_checks",
-    surface=Surface("health_checks", hosted=False),
-    # A hosted control plane sends no inference of its own to check, so the deployment mode is asked too.
-    enabled=lambda config: config.health_checks_enabled and not config.is_hosted_mode,
+    surface=Surface("health_checks"),
+    enabled=lambda config: config.health_checks_enabled,
     routers=lambda config: (router,),
     worker=_poll,
 )

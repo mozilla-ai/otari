@@ -26,9 +26,9 @@ from gateway.api.deps import (
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
-    get_db_if_needed,
+    get_db,
     get_log_writer,
-    get_unit_of_work_if_needed,
+    get_unit_of_work,
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
@@ -40,7 +40,6 @@ from gateway.api.routes._normalize import (
     sandbox_requested,
 )
 from gateway.api.routes._pipeline import (
-    DB_UNAVAILABLE_DETAIL,
     DeclaredTools,
     ErrorKind,
     ToolBackends,
@@ -862,8 +861,8 @@ async def create_message(
     raw_request: Request,
     response: Response,
     request: MessagesRequest,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
@@ -998,7 +997,7 @@ async def create_message(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
@@ -1006,7 +1005,7 @@ async def create_message(
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
@@ -1134,7 +1133,7 @@ def _estimate_input_tokens(request: CountTokensRequest) -> int:
 async def count_message_tokens(
     raw_request: Request,
     request: CountTokensRequest,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> CountTokensResponse:
     """Anthropic ``/v1/messages/count_tokens``-compatible endpoint.
@@ -1145,8 +1144,6 @@ async def count_message_tokens(
     key, so the endpoint is not an open token-counting oracle.
     """
     try:
-        if db is None:
-            raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
         # No session cookie here either, for the reason the completions path
         # gives (`_pipeline.resolve_request_context`): this counts tokens for
         # the plane a cookie may not reach, so it must not report on one.

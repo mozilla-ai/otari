@@ -20,7 +20,7 @@ from typing import Annotated, Any
 from fastapi import Depends, Header, Request, Response
 from fastapi.encoders import jsonable_encoder
 
-from gateway.api.deps import build_inference_service, get_config, get_unit_of_work_if_needed
+from gateway.api.deps import build_inference_service, get_config, get_unit_of_work
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
@@ -223,7 +223,7 @@ class IdempotencyGuard:
 async def get_idempotency_guard(
     raw_request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     idempotency_key: Annotated[
         str | None,
         Header(
@@ -241,7 +241,7 @@ async def get_idempotency_guard(
 ) -> AsyncIterator[IdempotencyGuard]:
     """Yield the request's guard, and release its claim if the request did not complete."""
     service = None
-    if uow is not None and idempotency_key is not None and InferenceService.is_enabled(config):
+    if idempotency_key is not None and InferenceService.is_enabled(config):
         service = build_inference_service(uow, config)
 
     async def keep_alive(request: IdempotentRequest, claimed: Claimed) -> None:

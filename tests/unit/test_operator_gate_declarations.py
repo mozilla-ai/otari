@@ -144,9 +144,8 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
     "oauth.router": "the identity token in the body is the credential, verified in the token exchange",
-    "bootstrap.router": "unauthenticated on purpose: how a browser learns which mode it reached",
+    "bootstrap.router": "unauthenticated on purpose: read before a browser knows whether to sign in",
     "health.router": "unauthenticated liveness and readiness",
-    "hosted_mode.router": "mode stub: a 404 naming why the prefix is absent on this deployment",
 }
 
 

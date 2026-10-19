@@ -159,7 +159,7 @@ describe("ModelComboBox", () => {
 
     // Actionable: "no models" alone leaves an operator with nowhere to go, and
     // the sentence names the credential rather than the page that holds one,
-    // since a hosted deployment keeps those under the organization.
+    // since it may be the organization's or the deployment's.
     expect(
       await screen.findByText(/Add a provider credential/),
     ).toBeInTheDocument()

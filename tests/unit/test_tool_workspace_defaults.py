@@ -1,4 +1,4 @@
-"""What a workspace with no stored tool policy gets: the setting when set, else on except on a hosted deployment."""
+"""What a workspace with no stored tool policy gets: the setting when set, else on."""
 
 from collections.abc import Callable
 
@@ -14,19 +14,11 @@ _RESOLVERS: dict[str, Callable[[GatewayConfig], bool]] = {
 
 @pytest.mark.parametrize("field", list(_RESOLVERS))
 @pytest.mark.parametrize(
-    ("mode", "value", "expected"),
-    [
-        ("standalone", True, True),
-        ("standalone", False, False),
-        ("standalone", None, True),
-        ("hosted", None, False),
-        ("hosted", True, True),
-    ],
+    ("value", "expected"),
+    [(True, True), (False, False), (None, True)],
 )
-def test_the_setting_wins_and_unset_follows_the_deployment(
-    field: str, mode: str, value: bool | None, expected: bool
-) -> None:
-    config = GatewayConfig.model_validate({"mode": mode, field: value})
+def test_the_setting_wins_and_unset_is_on(field: str, value: bool | None, expected: bool) -> None:
+    config = GatewayConfig.model_validate({field: value})
 
     assert _RESOLVERS[field](config) is expected
 

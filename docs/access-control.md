@@ -509,7 +509,7 @@ sessions. A request whose session cookie no longer authenticates is refused
 with 401 "Your dashboard session has ended. Sign in again."
 
 A session authorizes the management API. It does not authorize
-`/api/v1/chat/completions` or any other data-plane path, which take an API key
+`/api/v1/chat/completions` or any other inference path, which take an API key
 or the master key and nothing else: a keyless request resolves to the
 deployment's default workspace, so honoring a cookie there would let any member
 of any organization spend that workspace's provider credential.

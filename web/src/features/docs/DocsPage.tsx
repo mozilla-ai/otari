@@ -10,8 +10,6 @@ import { Section } from "@/design-system/layout/Section"
 // running dashboard ships the guide that matches it, instead of pointing at a
 // docs site that may describe a different version. Rebuilding the dashboard
 // after editing the guide is what keeps them aligned (see AGENTS.md).
-import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 import dashboardGuide from "../../../../docs/dashboard.md?raw"
 
 // The bundled guide lives among sibling docs (configuration.md, quickstart.md,
@@ -154,32 +152,23 @@ function MarkdownCodeBlock({ node: _node, children }: MdProps<"pre">) {
 }
 
 export function DocsPage() {
-  // The pointer at the get-started walkthrough is only true where the gateway
-  // serving this dashboard serves that page too; see `welcomeGuideHref`.
-  const welcomeHref = welcomeGuideHref(useDeployment())
-
   return (
     <div className="flex flex-col">
       <PageIntro title="User guide">
         A reference for operating this dashboard, bundled with and
-        version-matched to the running gateway.
-        {welcomeHref ? (
-          <>
-            {" "}
-            New here? The get-started walkthrough lives at{" "}
-            {/* A new tab, like the other links to this page: it leaves the SPA,
-                and the guide is what the reader came here to keep. */}
-            <a
-              href={welcomeHref}
-              target="_blank"
-              rel="noreferrer"
-              className="text-link hover:text-link-hover"
-            >
-              {welcomeHref}
-            </a>
-            .
-          </>
-        ) : null}
+        version-matched to the running gateway. New here? The get-started
+        walkthrough lives at{" "}
+        {/* A new tab, like the other links to this page: it leaves the SPA,
+            and the guide is what the reader came here to keep. */}
+        <a
+          href="/welcome"
+          target="_blank"
+          rel="noreferrer"
+          className="text-link hover:text-link-hover"
+        >
+          /welcome
+        </a>
+        .
       </PageIntro>
       {/* One band of the page, like every other surface: the rule runs the
           width of the scroll area and the guide fills the page column rather

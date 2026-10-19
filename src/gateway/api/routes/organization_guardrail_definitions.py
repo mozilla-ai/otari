@@ -1,4 +1,4 @@
-"""The guardrails the caller's organization defined for Otari to run itself (standalone mode only).
+"""The guardrails the caller's organization defined for Otari to run itself.
 
 Thin composition over
 `gateway.services.tenancy.organization_guardrail_definition_service`: resolve the

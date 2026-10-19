@@ -4,13 +4,6 @@ Otari is an OpenAI-compatible LLM gateway. It routes to 40+ providers, manages
 API keys, enforces budgets, and records usage. It is also the gateway at the
 heart of [otari.ai](https://otari.ai).
 
-## Runtime modes
-
-- **Standalone** serves management and inference with local storage.
-- **Hosted** serves a multi-tenant control plane and no inference.
-
-See [Modes](modes.md) for the full comparison.
-
 ## New here?
 
 Start with the [Quickstart](quickstart.md).
@@ -22,7 +15,6 @@ The docs are grouped by what you are trying to do.
 ### Start here
 
 - [Quickstart](quickstart.md): get running and make your first request.
-- [Modes](modes.md): standalone and hosted deployments.
 
 ### For operators
 
@@ -34,6 +26,7 @@ Running and managing a gateway.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
 - [Workload identity](workload-identity.md): a backend on Google Cloud authenticates with its platform identity token instead of a key's secret.
 - [Models](models.md): selectors, providers, discovery, aliases, and capabilities.
+- [Hosted providers](hosted-providers.md): credentials the deployment pays for, and how requests on them are billed.
 - [Provider endpoints](provider-endpoints.md): model servers a workspace or a user brings, reached by name and kept out of budgets.
 - [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
 - [Health checks](health-checks.md): a scheduled check of every model the deployment serves, and email when one stops answering.
@@ -43,7 +36,7 @@ Running and managing a gateway.
 
 Calling the gateway from your own code.
 
-- [API reference](api-reference.md): authentication, mode availability, and links to generated schemas.
+- [API reference](api-reference.md): authentication, endpoint availability, and links to generated schemas.
 - [Built-in tools](tools.md): sandboxed code execution and web search Otari runs itself.
 - [MCP](mcp.md): connect MCP servers to chat, messages, and responses requests,
   or drive them from your own application through the caller-orchestrated endpoints.

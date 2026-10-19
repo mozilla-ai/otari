@@ -227,24 +227,19 @@ const BASE_NAV_SECTIONS = [
  *
  * Reached from the sidebar footer and left by the "Back to" link at its top,
  * so the two contexts never render together. Gated on the caller managing the
- * organization, which in a standalone deployment is always true: there is one
- * session, the local operator, and it owns the organization the gateway
- * provisioned for itself. The gate is written anyway because it is the thing
+ * organization, which today is always true: there is one session, the local
+ * operator, and it owns the organization the gateway provisioned for itself. The gate is written anyway because it is the thing
  * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
- * Every row but Deployment providers is gated on a surface both topologies
- * publish (`STANDALONE_SURFACES` and `HOSTED_SURFACES` in
+ * Every row is gated on a surface the bootstrap publishes (`SURFACES` in
  * `src/gateway/api/routes/bootstrap.py`), and a group whose every row a
  * deployment gates off drops entirely, heading included. Gateway holds nothing
  * in this build and drops; it stays declared for an overlay's Gateways.
  *
- * The organization's guardrails are published by both because their rows are
- * keyed on the organization. They are in General, under Deployment providers.
- *
- * The organization's own provider credentials are published by both because
- * the page behind them is where an organization's models are offered, priced
- * and switched. They sit under General beside the process-global `providers`
- * row, under a different label; see that pair for why.
+ * The organization's guardrails are in General, under Deployment providers.
+ * The organization's own provider credentials sit under General beside the
+ * process-global `providers` row, under a different label; see that pair for
+ * why.
  *
  * The design draws two more, Billing and Gateways, and neither is declared here
  * at all, because neither is this build's to declare: Billing is
@@ -277,8 +272,8 @@ const ORGANIZATION_NAV_SECTIONS = [
       // The organization as a whole, which the workspace rail's Usage page
       // cannot ask for: its scope is the sidebar's selected workspace, and the
       // switcher offers only the caller's own memberships (otari-ai#1963).
-      // Both topologies publish it, so on standalone it sits beside that page
-      // the way Providers sits beside Deployment providers. No `operatorOnly`
+      // It sits beside that page the way Providers sits beside Deployment
+      // providers. No `operatorOnly`
       // and no role gate here: the organization rail already opens only to a
       // caller who manages the organization, and the server scopes a member
       // who lands here by URL to their own workspaces, the same rows `/usage`
@@ -353,11 +348,9 @@ const ORGANIZATION_NAV_SECTIONS = [
     id: "org-general",
     label: "General",
     items: [
-      // Two rows, and on a standalone deployment both render, which is why they
-      // cannot share a label. The organization row is where an organization's
-      // models are offered, priced and switched, a tenant's question on either
-      // topology, so both surfaces are published there; hosted reports only the
-      // organization one.
+      // Two rows, and both render, which is why they cannot share a label. The
+      // organization row is where an organization's models are offered, priced
+      // and switched.
       //
       // The organization's own row keeps the bare noun, because this rail is
       // already scoped to the organization and the row whose scope is *not* the
@@ -375,7 +368,7 @@ const ORGANIZATION_NAV_SECTIONS = [
       // point is the one exception to the deployment-rail placement the other
       // two `operatorOnly` rows follow: a deployment operator who is not an
       // organization owner or admin has no rail path to this row at all. Silent
-      // today, because standalone's one operator always owns the organization
+      // today, because the one operator always owns the organization
       // its own gateway provisioned; it stops holding once the rail's own gate
       // (docblock above) becomes load-bearing at otari-ai#1716.
       {

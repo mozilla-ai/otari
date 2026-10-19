@@ -145,7 +145,7 @@ acts on them. Changing any setting stays a deployment operator's to do.
 
 ## Pricing a gateway-run tool
 
-In standalone mode, gateway-run tools are priced per successful call:
+Gateway-run tools are priced per successful call:
 
 ```text
 otari:code_execution
@@ -557,10 +557,8 @@ The authenticating API key determines the workspace. A workspace with no policy
 gets what `code_execution_workspace_default` says: `true`, deployment defaults
 apply; `false`, code execution is off until a workspace owner or admin turns it
 on, and the request is refused as if a disabled policy were stored. Unset, it is
-`true` everywhere except a hosted control plane, where it is `false`. The
-Playground's tools menu and the policy endpoint's `default_enabled` field read
-the same setting. A hosted control plane also gives each workspace it creates
-an enabled policy, so a new workspace starts with code execution on there.
+`true`. The Playground's tools menu and the policy endpoint's `default_enabled`
+field read the same setting.
 
 ## Web retrieval
 
@@ -795,8 +793,7 @@ nothing is narrowed; `false`, web access (all three doors above) is
 off until a workspace owner or admin turns it on, and a request is refused as if
 a disabled policy were stored, whatever search key the organization holds. The
 Playground's tools menu and the policy endpoint's `default_enabled` field read
-the same setting. Unset, it is `true` everywhere except a hosted control plane,
-where it is `false`, so there web access is something a workspace turns on.
+the same setting. Unset, it is `true`.
 
 ### Organization search keys
 
@@ -826,7 +823,7 @@ web-access policy still applies.
 
 ## Direct search
 
-In standalone mode, `POST /api/v1/search` lets the caller submit a query directly
+`POST /api/v1/search` lets the caller submit a query directly
 instead of waiting for a model to request one. Configure its named providers
 through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 

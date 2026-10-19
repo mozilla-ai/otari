@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db_if_needed
+from gateway.api.deps import get_db
 from gateway.log_config import logger
 from gateway.version import __version__
 
@@ -37,7 +37,7 @@ async def health_liveness() -> str:
 
 @router.get("/readiness")
 async def health_readiness(
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
     """Readiness probe endpoint.
 
@@ -55,12 +55,6 @@ async def health_readiness(
         HTTPException: 503 if service is not ready
 
     """
-    if db is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"status": "unhealthy", "database": "unavailable", "version": __version__},
-        )
-
     try:
         await db.execute(text("SELECT 1"))
         db_status = "connected"

@@ -46,15 +46,6 @@ async def overlay_withheld() -> dict[str, str]:
     return {"source": "overlay"}
 
 
-# Under a prefix the hosted stubs claim with a ``{path:path}`` catch-all on a
-# control plane, so mounting order decides which one answers. An overlay that
-# contributes a data-plane route to a control plane has made a choice, and the
-# stubs are a fallback rather than a veto.
-@granted_router.get("/chat/overlay-probe")
-async def overlay_probe_under_a_hosted_stub_prefix() -> dict[str, str]:
-    return {"source": "overlay"}
-
-
 class ProbeEntitlementAdapter:
     """Grants one capability, so the other contributed router stays refused."""
 
@@ -143,40 +134,3 @@ def test_nothing_is_mounted_or_rebound_without_a_selector(client: TestClient) ->
     container: Container = client.app.state.container  # type: ignore[attr-defined]
     assert container.router_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
-
-
-@pytest.fixture
-def hosted_bootstrap_client(postgres_url: str, overlay_on_path: str) -> Generator[TestClient]:
-    """A hosted control plane with the overlay attached, on the worker's database.
-
-    Hosted mode holds its own database, so it is built the way the rest of the
-    module's clients are, on the worker's database.
-    """
-    config = GatewayConfig(
-        mode="hosted",
-        database_url=postgres_url,
-        master_key="test-master-key",
-        auto_migrate=False,
-        require_pricing=False,
-        model_discovery=False,
-        bootstrap_api_key=False,
-        bootstrap=f"{overlay_on_path}:register",
-    )
-    yield from build_test_client(config)
-
-
-def test_a_contributed_route_wins_over_the_hosted_stub_catch_all(
-    hosted_bootstrap_client: TestClient,
-) -> None:
-    # The mirror of the test above, for the opposite plane. The hosted-mode
-    # stubs are ``{path:path}`` catch-alls over the inference prefixes, so an
-    # overlay that deliberately contributes a data-plane route to a control
-    # plane is only reachable if the stubs are mounted last.
-    response = hosted_bootstrap_client.get(f"{API_ROOT}/chat/overlay-probe")
-    # The stub still answers a path the overlay does not serve.
-    stub_response = hosted_bootstrap_client.post(f"{API_ROOT}/chat/completions", json={})
-
-    assert response.status_code == 200
-    assert response.json() == {"source": "overlay"}
-    assert stub_response.status_code == 404
-    assert stub_response.json()["detail"].startswith("This deployment is a control plane")

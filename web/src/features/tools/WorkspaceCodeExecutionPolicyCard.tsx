@@ -44,14 +44,10 @@ function narrowsAnything(policy: WorkspaceCodeExecutionPolicy): boolean {
  * longer offers. Admission refuses such a policy, so the switch alone would read
  * "on" over a workspace whose requests all fail.
  */
-function staleParts(policy: WorkspaceCodeExecutionPolicy, isHosted: boolean) {
+function staleParts(policy: WorkspaceCodeExecutionPolicy) {
   return {
-    // Hosted, `allowed_images` is the control plane's own list, not the
-    // platform sandbox's, so it cannot say a pin was withdrawn.
     image:
-      !isHosted &&
-      policy.image != null &&
-      !policy.allowed_images.includes(policy.image),
+      policy.image != null && !policy.allowed_images.includes(policy.image),
     tools: (policy.tools ?? []).some(
       (name) => !policy.available_tools.includes(name),
     ),
@@ -66,15 +62,9 @@ function staleParts(policy: WorkspaceCodeExecutionPolicy, isHosted: boolean) {
  */
 export function WorkspaceCodeExecutionPolicyCard({
   leading,
-  isHosted = false,
 }: {
   /** Rows above the switch, so the tool and its switch read as one card. */
   leading?: ReactNode
-  /**
-   * A hosted control plane, where the sandbox is the platform's rather than
-   * this process's, so `sandbox_configured` says nothing.
-   */
-  isHosted?: boolean
 }) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
@@ -140,11 +130,9 @@ export function WorkspaceCodeExecutionPolicyCard({
   const isOn = policy?.configured
     ? policy.enabled
     : (policy?.default_enabled ?? true)
-  const hasSandbox = isHosted || (policy?.sandbox_configured ?? true)
+  const hasSandbox = policy?.sandbox_configured ?? true
   const organizationName = context.data?.organization.name
-  const stale = policy
-    ? staleParts(policy, isHosted)
-    : { image: false, tools: false }
+  const stale = policy ? staleParts(policy) : { image: false, tools: false }
   const needsReset = isOn && (stale.image || stale.tools)
   // Disabled until the read has succeeded. Without that the switch sits on over
   // a workspace that may well have a stored policy, and one change issues the

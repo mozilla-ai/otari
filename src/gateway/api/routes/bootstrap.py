@@ -1,22 +1,13 @@
 """Deployment bootstrap the dashboard shell reads before it renders.
 
-One server-derived payload that selects the runtime context: which deployment is
-serving this URL, what kind of session it issues, which management surfaces it
-offers. The
-shell reads it once and gates navigation on it, so no page component has to ask
-which mode the gateway is in.
+One server-derived payload: what kind of session this deployment issues, which
+management surfaces it offers, and how a caller may sign in. The shell reads it
+once and gates navigation on it.
 
-Registered in every mode, and unauthenticated by necessity: this is what tells a
-browser whether a sign-in screen is even the right thing to show. It therefore
-carries no secret: ``data_plane_url``, ``docs_url``, ``terms_url``,
-``privacy_url`` and ``site_url`` are addresses an operator configured, not
-credentials.
-
-The contract is shared with otari.ai, which serves the same shape for its hosted
-deployment (mozilla-ai/otari-ai#1591). ``session_type`` names three values, and
-this server produces two of them: ``hosted_user`` is a session minted by somebody else's account
-system, which no build here does. The enum is the contract, not this
-deployment's inventory.
+Unauthenticated by necessity: this is what tells a browser whether a sign-in
+screen is even the right thing to show. It therefore carries no secret:
+``docs_url``, ``terms_url``, ``privacy_url`` and ``site_url`` are addresses an
+operator configured, not credentials.
 """
 
 from typing import Annotated, Literal
@@ -26,7 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db_if_needed, get_enabled_features
+from gateway.api.deps import get_config, get_db, get_enabled_features
 from gateway.api.routes import (
     admin,
     budgets,
@@ -47,7 +38,7 @@ from gateway.api.routes import (
     users,
     workspaces,
 )
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import GatewayConfig
 from gateway.core.database import describe_database_error
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
@@ -58,8 +49,8 @@ from gateway.services.tenancy.webauthn_service import has_any_credential
 
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
-DeploymentType = Literal["standalone", "hosted"]
-SessionType = Literal["local_operator", "hosted_user", "none"]
+DeploymentType = Literal["standalone"]
+SessionType = Literal["local_operator"]
 # How a caller may sign in to this deployment. ``master_key`` is the first-boot
 # credential and ``password`` the steady-state one, and a standalone gateway
 # offers exactly one of them: the master key until the operator claims the
@@ -98,51 +89,27 @@ _DECLARED_SURFACES: tuple[Surface, ...] = (
     workspaces.SURFACE,
 )
 
-STANDALONE_SURFACES: tuple[str, ...] = tuple(surface.name for surface in _DECLARED_SURFACES if surface.standalone)
-HOSTED_SURFACES: tuple[str, ...] = tuple(surface.name for surface in _DECLARED_SURFACES if surface.hosted)
+SURFACES: tuple[str, ...] = tuple(surface.name for surface in _DECLARED_SURFACES)
 
 
-def published_surfaces(config: GatewayConfig, enabled_features: tuple[CoreFeature, ...]) -> list[str]:
-    """The surfaces this deployment publishes, sorted.
-
-    Covers the fixed set and each enabled feature's surface.
-    One row short on a hosted deployment with no data plane configured; see below.
-    """
+def published_surfaces(enabled_features: tuple[CoreFeature, ...]) -> list[str]:
+    """The surfaces this deployment publishes, sorted: the fixed set and each enabled feature's surface."""
     featured = [feature.surface for feature in enabled_features if feature.surface is not None]
     surfaces = (*_DECLARED_SURFACES, *featured)
-    if config.is_hosted_mode:
-        names = {surface.name for surface in surfaces if surface.hosted}
-        # The one surface a hosted deployment publishes conditionally. The
-        # Playground forwards its completion to ``data_plane_url``
-        # (``services/playground_dispatch``), so a control plane that has not been
-        # told where its data plane is cannot serve the page at all. Decided here
-        # rather than declared ``hosted=False`` on the surface, because what
-        # settles it is this deployment's configuration and not the topology:
-        # every other row on the roster is the same answer for every deployment of
-        # that type.
-        if config.data_plane_url is None:
-            names.discard(playground.SURFACE.name)
-        return sorted(names)
-    return sorted({surface.name for surface in surfaces if surface.standalone})
+    return sorted({surface.name for surface in surfaces})
 
 
 class DeploymentBootstrap(BaseModel):
     """What the dashboard shell needs before it can render anything."""
 
     deployment_type: DeploymentType = Field(
-        description=(
-            "Which deployment serves this URL. 'standalone' owns its own data and serves one "
-            "tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment "
-            "run as a control plane), which is why its management surfaces are the "
-            "per-organization ones."
-        )
+        description="Which kind of deployment serves this URL. Every Otari deployment answers 'standalone'."
     )
     session_type: SessionType = Field(
         description=(
             "The kind of session this deployment issues, not whether the caller holds one. "
-            "'local_operator' is the standalone operator sign-in (see sign_in_methods for which "
-            "credential it currently accepts), 'hosted_user' an otari.ai "
-            "account, and 'none' a deployment that issues no management session at all."
+            "'local_operator' is this deployment's own sign-in (see sign_in_methods for which "
+            "credential it currently accepts)."
         )
     )
     surfaces: list[str] = Field(
@@ -150,22 +117,6 @@ class DeploymentBootstrap(BaseModel):
             "Management API groups this deployment serves, sorted, which is what its dashboard "
             "pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for "
             "the entitlement (licensing) axis, and this is the deployment (topology) axis."
-        )
-    )
-    data_plane_url: str | None = Field(
-        description=(
-            "Where this deployment's inference traffic belongs, when it is not served here. "
-            "Set only by a hosted control plane, which serves the "
-            "dashboard but not inference (otari#822); null for standalone, which "
-            "serves inference at the address that reached this page. Not a human link "
-            "target: it is the gateway's bare address, which the dashboard "
-            "suffixes with the API root to build its request snippets. So it must carry no API "
-            f"root anywhere (a value ending in {API_ROOT}, or a whole endpoint like "
-            f"{API_ROOT}/chat/completions, renders that path twice) and no credential, since this "
-            "response is unauthenticated. This gateway refuses both at startup; any deployment "
-            "serving this contract should publish the same shape. Null on a hosted "
-            "deployment means unconfigured, and the dashboard then shows no snippet rather "
-            "than one naming this host."
         )
     )
     docs_url: str | None = Field(
@@ -222,8 +173,7 @@ class DeploymentBootstrap(BaseModel):
         description=(
             "Whether this deployment is refusing new dashboard sign-ins while an operator "
             "redeploys it. The sign-in screen says so rather than presenting a form whose only "
-            "outcome is a 503. Sessions already issued keep working, and the management API and "
-            "the data plane are unaffected."
+            "outcome is a 503. Sessions already issued keep working, and the API is unaffected."
         )
     )
     passkeys_enabled: bool = Field(
@@ -278,7 +228,7 @@ class DeploymentBootstrap(BaseModel):
             "not merely whether a transport is configured: it also needs to know its own "
             "public URL to put in one. Lets the dashboard disable or hide a mail-dependent "
             "affordance instead of offering one that would fail at send time. Every "
-            "message this control plane sends carries such a link, which is why this is "
+            "message this deployment sends carries such a link, which is why this is "
             "one flag and not one per feature."
         )
     )
@@ -286,7 +236,7 @@ class DeploymentBootstrap(BaseModel):
 
 @router.get("", response_model=DeploymentBootstrap)
 async def get_bootstrap(
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     enabled_features: Annotated[tuple[CoreFeature, ...], Depends(get_enabled_features)],
 ) -> DeploymentBootstrap:
@@ -301,22 +251,11 @@ async def get_bootstrap(
     marker, and the identity it names, to answer whether *that* identity holds a
     password (#702).
     """
-    assert db is not None  # get_db_if_needed yields a session in every mode
-    # Hosted is standalone's multi-tenant sibling and differs here in exactly two
-    # fields. Everything below them is answered identically, because a hosted
-    # deployment holds its own database, mounts the same management API and mints
-    # its own sessions: ``session_type`` stays ``local_operator`` because this
-    # build's sign-in is this build's, not an account minted by somebody else's
-    # control plane, which is what ``hosted_user`` names.
-    hosted = config.is_hosted_mode
     return DeploymentBootstrap(
-        deployment_type="hosted" if hosted else "standalone",
+        deployment_type="standalone",
         session_type="local_operator",
-        surfaces=published_surfaces(config, enabled_features),
+        surfaces=published_surfaces(enabled_features),
         sign_in_methods=await _sign_in_methods(db, config),
-        # Standalone is its own data plane and answers null; a hosted control
-        # plane is not, and publishes wherever its operator says the gateway is.
-        data_plane_url=config.data_plane_url if hosted else None,
         docs_url=config.docs_url,
         terms_url=config.terms_url,
         privacy_url=config.privacy_url,

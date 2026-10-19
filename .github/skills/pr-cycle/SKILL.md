@@ -13,8 +13,7 @@ the self-review, [`frontend-standards`](../frontend-standards/SKILL.md) before a
 (its [testing.md](../frontend-standards/testing.md) is the dashboard's test guidance), and
 [`backend-standards`](../backend-standards/SKILL.md) before any `src/gateway/` edit (its "Before
 you finish" section carries the backend test bar). [AGENTS.md](../../../AGENTS.md) owns the
-repo-wide facts this skill leans on: the two runtime modes, the test notes, and the generated
-artifacts.
+repo-wide facts this skill leans on: the test notes and the generated artifacts.
 
 ## The cycle (one PR)
 
@@ -23,8 +22,7 @@ artifacts.
 2. **Understand the issue.** Read it and the exact files and lines it names, and verify current
    signatures before editing rather than trusting the issue's snippet. Read `AGENTS.md` plus the
    scoped one for the directory you are in (`web/`, `src/gateway/`). A backend edit respects the
-   layer rules `scripts/check_architecture.py` enforces; a management route is standalone-only,
-   so check `register_routers()` placement.
+   layer rules `scripts/check_architecture.py` enforces.
 3. **Implement.** For a refactor, keep it strictly **behavior-preserving**: no change to a
    public API, a route, a query key, or an invalidation. Correctness over speed.
 4. **Tests.** Happy path and error path, next to the behavior they cover (unit for pure logic,

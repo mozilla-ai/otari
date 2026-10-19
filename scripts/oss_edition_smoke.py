@@ -95,10 +95,8 @@ WORKING_PREFIX = "/working"
 
 # Everything the gateway reads from the environment is cleared before it starts,
 # so the config file this script writes is the only thing that decides what boots.
-# A developer's exported OTARI_MODE would otherwise select hosted mode
-# (GatewayConfig.effective_mode) and quietly turn the gate into a check of the
-# other edition; OTARI_DATABASE_URL or the CLI's DATABASE_URL would
-# point the run at a database nobody meant to smoke. OTARI_BOOTSTRAP, the overlay
+# OTARI_DATABASE_URL or the CLI's DATABASE_URL would otherwise point the run at
+# a database nobody meant to smoke. OTARI_BOOTSTRAP, the overlay
 # selector, is covered by the same sweep, which is what keeps this a gate on the
 # plain build rather than on whatever overlay a developer had exported.
 SCRUBBED_ENV_PREFIXES = ("OTARI_",)
@@ -315,7 +313,7 @@ def oss_edition_env(base_env: dict[str, str], secret_key: str, pepper: str) -> d
 def oss_edition_config(*, database_url: str, port: int | None, mock_base_url: str, names: Names) -> dict[str, Any]:
     """Return the config file contents for the OSS edition under smoke.
 
-    No ``mode`` and no provider anyone has to hold a key for: this is the config
+    No provider anyone has to hold a key for: this is the config
     a self-hoster could write on day one. A ``port`` of ``None`` leaves out
     ``host`` and ``port``, for a container whose environment sets its listen
     address, as the published image does.

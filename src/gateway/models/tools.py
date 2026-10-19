@@ -41,7 +41,7 @@ class SearchToolCredential(Base):
     search row's enrichment instance. The API key is held encrypted
     (``secret_box``) and is optional, because a ``searxng`` backend is normally
     keyless; ``last4`` is kept in clear only so the UI can show which key is set
-    without ever decrypting. Standalone mode only.
+    without ever decrypting.
     """
 
     __tablename__ = "search_tool_credentials"
