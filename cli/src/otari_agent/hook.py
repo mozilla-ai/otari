@@ -634,11 +634,12 @@ def _hook_collect_stop_diff_range(repo_root: Path) -> "_DiffRange | None":
     """Select the committed and working-tree range a Stop event should judge.
 
     A branch's upstream is the strongest local indication of where its work
-    started. If it is unavailable or unrelated, use a remote's advertised
-    default branch; a repository with neither falls back to ``HEAD`` so an
-    otherwise useful hook still sees unstaged changes. The returned
-    description is included in judge evidence so a reader can tell which
-    history was reviewed.
+    started unless it points at ``HEAD``, as it does after the branch is
+    pushed. In that case, prefer a remote's advertised default branch and keep
+    the upstream range only when no default-branch range is available. A
+    repository with neither falls back to ``HEAD`` so the hook still sees
+    unstaged changes. The returned description is included in judge evidence
+    so a reader can tell which history was reviewed.
     """
     if _hook_stop_branch_header(repo_root) is None:
         return None
@@ -648,11 +649,13 @@ def _hook_collect_stop_diff_range(repo_root: Path) -> "_DiffRange | None":
 
     has_candidate = False
     upstream = _hook_stop_upstream(repo_root)
+    upstream_range: _DiffRange | None = None
     if upstream is not None:
         has_candidate = True
         diff_range = _hook_stop_merge_base(repo_root, head, upstream, f"upstream {upstream}")
-        if diff_range is not None:
+        if diff_range is not None and diff_range.base != head:
             return diff_range
+        upstream_range = diff_range
 
     default_branch = _hook_default_branch(repo_root)
     if default_branch is not None:
@@ -661,6 +664,9 @@ def _hook_collect_stop_diff_range(repo_root: Path) -> "_DiffRange | None":
             diff_range = _hook_stop_merge_base(repo_root, head, *default_branch)
             if diff_range is not None:
                 return diff_range
+
+    if upstream_range is not None:
+        return upstream_range
 
     if not has_candidate:
         return _DiffRange(

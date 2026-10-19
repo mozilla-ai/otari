@@ -267,6 +267,40 @@ def test_stop_range_uses_the_upstream_merge_base_for_committed_and_working_tree_
     assert "+uncommitted = True" in diff
 
 
+def test_stop_range_uses_default_branch_when_pushed_upstream_is_at_head(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", base], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "config", "remote.origin.url", "https://example.invalid/repo.git"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "switch", "-q", "-c", "feature"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "branch.feature.remote", "origin"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "branch.feature.merge", "refs/heads/feature"], cwd=repo, check=True)
+    (repo / "committed.py").write_text("committed = True\n", encoding="utf-8")
+    head = _commit(repo)
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/feature", head], cwd=repo, check=True)
+    (repo / "uncommitted.py").write_text("uncommitted = True\n", encoding="utf-8")
+
+    diff_range = hook_cli._hook_collect_stop_diff_range(repo)
+
+    assert diff_range is not None
+    assert diff_range.base == base
+    assert diff_range.description is not None
+    assert "default branch refs/remotes/origin/main merge base" in diff_range.description
+    assert hook_cli._hook_collect_changed_paths(repo, diff_range) == ["committed.py", "uncommitted.py"]
+    diff = hook_cli._hook_collect_diff(repo, diff_range)
+    assert diff is not None
+    assert "+committed = True" in diff
+    assert "+uncommitted = True" in diff
+
+
 def test_stop_range_falls_back_to_the_remote_default_branch_without_an_upstream(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     base = subprocess.run(

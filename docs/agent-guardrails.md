@@ -379,7 +379,7 @@ Nothing is contacted and no model is called, so a `judge` gate reports
 otari guardrails check --base origin/main
 ```
 
-The change runs from the commit where the branch left `--base` to the working tree, untracked files included. `--head <commit>` ends it at a commit instead, and reads the change from Git alone. `--base` defaults to `HEAD` for this explicit command. A `Stop` event selects the branch's merge base with its upstream, falls back to the remote default branch when the upstream is unavailable or has no common history, and uses `HEAD` if neither is available. It includes the working tree, so commits made during the session remain in the evidence. `otari guardrails validate --path` prints this Stop base assumption in its preview.
+The change runs from the commit where the branch left `--base` to the working tree, untracked files included. `--head <commit>` ends it at a commit instead, and reads the change from Git alone. `--base` defaults to `HEAD` for this explicit command. A `Stop` event selects the branch's merge base with its upstream unless that base is `HEAD`; when the upstream is unavailable, unrelated, or points at the pushed `HEAD`, it tries the remote default branch. If that default-branch range is unavailable, it keeps the upstream range when possible, then uses `HEAD` when neither range exists. It includes the working tree, so commits made during the session remain in the evidence. `otari guardrails validate --path` prints this Stop base assumption in its preview.
 
 Every gate sees the paths the change touches as `stop.working_tree` evidence. A deleted path counts as changed, and a rename counts as both of its paths.
 

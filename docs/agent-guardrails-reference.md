@@ -567,7 +567,7 @@ what "no `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` given" defaults to:
   for a later `Stop` event's own transcript scan to mistake for real session
   evidence.
 
-The diff covers tracked changes (`git diff HEAD`) and every untracked file
+The diff covers tracked changes (`git diff <selected Stop base>`) and every untracked file
 the ignore rules do not exclude, each appended as a `new file` hunk. Both
 halves are needed, because a rule about what a change adds is mostly a rule
 about files Git has never seen, and a tracked-only diff shows a judge the
@@ -593,7 +593,7 @@ untracked and a tree whose untracked files could not be listed would
 otherwise produce the same evidence, which for a change made entirely of new
 files is no evidence.
 
-A diff `otari hook` could not collect at all (`git diff HEAD` failing: no
+A diff `otari hook` could not collect at all (`git diff <selected Stop base>` failing: no
 `HEAD` yet, a timeout, `git` itself missing) is kept distinct from one it
 collected and found genuinely empty: the former skips the model call
 entirely and reports `error` directly, rather than asking the model to judge
@@ -610,7 +610,7 @@ transcript is JSONL, not English prose. A second real call at 100,505
 characters consumed ~73,383 tokens total and succeeded with comfortable
 headroom. The caps keep the worst case near that validated-safe size.
 
-`git diff HEAD`'s own bytes are a tracked file's real content, not
+The selected range's tracked diff bytes are a file's real content, not
 necessarily valid UTF-8 (a Latin-1-encoded file, a binary blob committed by
 mistake, ...); collecting it decodes leniently (`errors="replace"`, which an
 untracked file's own bytes also get) and
@@ -992,9 +992,9 @@ overridden.
 
 A `judge` gate only ever runs on `Stop`, for the same reason
 `command_if_changed` is meaningful mainly there: it needs the same
-`transcript_path` this section already reads, plus `git diff HEAD`, both of
-which only mean something once there is a finished change to judge, not a
-`PreToolUse` call about to make one. `otari hook` parses the local policy
+`transcript_path` this section already reads, plus the selected Stop diff range
+and untracked paths. Those only mean something once there is a finished change
+to judge, not a `PreToolUse` call about to make one. `otari hook` parses the local policy
 itself to find each `judge` gate's `rubric`, then makes one local `claude -p`
 call per gate (see the `judge` gate type above) and checks the resulting
 verdicts.
