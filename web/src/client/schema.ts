@@ -20631,7 +20631,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["DeploymentProviderMigrationRequest"] | null;
+                "application/json": components["schemas"]["DeploymentProviderMigrationRequest"];
             };
         };
         responses: {

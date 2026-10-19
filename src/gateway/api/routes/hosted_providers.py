@@ -26,7 +26,7 @@ and its roster still has to be reachable.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
 
 from gateway.api.deps import HostedProviderServiceDep, require_deployment_operator_or_absent, verify_master_key
 from gateway.api.routes.organizations import Message
@@ -60,6 +60,8 @@ router = APIRouter(
 # inference on these, and a hosted control plane holds them for the data plane
 # that resolves against it. The page is operator-only on either.
 SURFACE = Surface("hosted_providers")
+
+_EVERY_ROW = DeploymentProviderMigrationRequest()
 
 
 @router.get("")
@@ -127,7 +129,9 @@ async def preview_deployment_provider_migration(
 
 @router.post("/migration")
 async def apply_deployment_provider_migration(
-    service: HostedProviderServiceDep, body: DeploymentProviderMigrationRequest | None = None
+    service: HostedProviderServiceDep,
+    # Defaulted rather than optional: a POST with no body moves every row that can move.
+    body: Annotated[DeploymentProviderMigrationRequest, Body()] = _EVERY_ROW,
 ) -> DeploymentProviderMigrationPublic:
     """Move the deployment providers stored through the dashboard onto hosted providers of the same name.
 
@@ -136,7 +140,7 @@ async def apply_deployment_provider_migration(
     model. One that cannot move is reported and left in place. ``instances``
     limits the move to the rows of the preview the caller reviewed.
     """
-    return await service.migrate_deployment_providers(apply=True, instances=None if body is None else body.instances)
+    return await service.migrate_deployment_providers(apply=True, instances=body.instances)
 
 
 @router.get("/refresh/preview")
