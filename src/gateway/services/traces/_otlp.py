@@ -16,6 +16,11 @@ flag. A gate span names the tool call it checked, and a read attaches it there.
 A gate that fired is the guardrail working, so neither it nor the tool call it
 stopped is an error: only a gate that could not decide is.
 
+What a Claude Code model request cost is not on its span: the usage ledger
+prices it from the ``api_request`` event on the logs signal. That ingest hands
+each priced request back as a usage span, keyed by the request's id so a retried
+export counts once, and a read folds its cost onto the request it priced.
+
 Nothing is passed through verbatim. Each name and value is projected the way the
 gateway's own spans are, so text an agent put in a span name or attribute never
 reaches the store, and the original OTLP body is never kept. Numbers and times
@@ -27,8 +32,9 @@ import hashlib
 import itertools
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from gateway.log_config import logger
@@ -37,8 +43,11 @@ from gateway.services.traces._collector import call_id_digest, identifier_or_non
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
 from gateway.types.traces import (
+    ID_PATTERN,
     LIST_SEPARATOR,
+    RATE_METERS,
     SPAN_CONTENT_MAX_LENGTH,
+    USAGE_OPERATION,
     SpanRecord,
     TraceWrite,
     is_identifier,
@@ -59,6 +68,10 @@ _CLAUDE_CODE_DECISION = "tool.blocked_on_user"
 _CLAUDE_CODE_EXECUTION = "tool.execution"
 
 HOOK_SCOPE = "otari.hook"
+# The usage sources a session's cost is imported from: Claude Code's model requests and a judge gate's.
+CLAUDE_CODE_USAGE_SOURCE = "claude_code"
+HOOK_USAGE_SOURCE = "otari-hook"
+_SESSION_USAGE_SOURCES = frozenset({CLAUDE_CODE_USAGE_SOURCE, HOOK_USAGE_SOURCE})
 # A gate that could not decide, which reads like a guardrail that could not run.
 _UNDECIDED_GATE = frozenset({"unknown", "error", "not_run"})
 _GATE_ATTRIBUTES = (
@@ -138,6 +151,16 @@ class _Window:
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=UTC)
         return min(max(moment, self.floor), self.ceiling)
+
+
+def _request_id(attributes: Mapping[str, Any]) -> str | None:
+    """A model request's provider id, which the usage ledger prices it by.
+
+    It is an id, so it is held to the id pattern rather than a name's: a name
+    refuses anything shaped like a credential, which a request id often is.
+    """
+    value = _str(attributes, "request_id")
+    return value if value is not None and ID_PATTERN.fullmatch(value) else None
 
 
 def _str(attributes: Mapping[str, Any], *keys: str) -> str | None:
@@ -444,6 +467,7 @@ def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _
         duration_ms=duration,
         model=identifier_or_none(_str(attributes, "gen_ai.request.model", "model")) if llm else None,
         provider=identifier_or_none(_str(attributes, "gen_ai.system")) if llm else None,
+        request_id=_request_id(attributes) if llm else None,
         input_tokens=prompt,
         output_tokens=_int(attributes, "output_tokens") if llm else None,
         cache_read_tokens=cache_read,
@@ -504,6 +528,8 @@ def _gate_record(span: OtlpSpan, window: _Window) -> SpanRecord:
         duration_ms=duration,
         model=model,
         provider=identifier_or_none(_str(attributes, "gen_ai.provider.name")) if model else None,
+        # The id its model calls were priced under, so a read can fold their cost onto it.
+        request_id=span.span_id if model and ID_PATTERN.fullmatch(span.span_id) else None,
         input_tokens=prompt,
         output_tokens=_int(attributes, "gen_ai.usage.output_tokens") if model else None,
         cache_read_tokens=cache_read,
@@ -655,3 +681,81 @@ def record_otlp_export(
         return
     if projection.dropped:
         logger.info("OTLP spans: %d of %d not recorded", projection.dropped, total)
+
+
+@dataclass(frozen=True)
+class PricedRequest:
+    """A model request the usage ledger priced: its id, the session it names and what it cost."""
+
+    request_id: str
+    session_key: str
+    at: datetime
+    cost: Decimal
+    source: str
+    # USD per million tokens on each of :data:`RATE_METERS`, where the request was priced by the token.
+    rates: Mapping[str, Decimal] = field(default_factory=dict)
+
+
+def _usage_span(request: PricedRequest, window: _Window) -> SpanRecord:
+    at = window.clamp(request.at)
+    return SpanRecord(
+        span_id="usage-" + hashlib.sha256(request.request_id.encode()).hexdigest()[:40],
+        kind="llm",
+        origin="otlp",
+        name="claude_code.usage",
+        operation=USAGE_OPERATION,
+        outcome="ok",
+        start_time=at,
+        end_time=at,
+        request_id=request.request_id,
+        cost_snapshot=request.cost,
+        attributes={
+            f"otari.llm.rate.{meter}": format(request.rates[meter].normalize(), "f")
+            for meter in RATE_METERS
+            if meter in request.rates
+        },
+    )
+
+
+def record_priced_requests(
+    writer: TraceWriter,
+    requests: Iterable[PricedRequest],
+    *,
+    budget_exempt: bool,
+    workspace_id: uuid.UUID,
+    user_id: str | None,
+    api_key_id: str | None,
+    retention: timedelta,
+) -> None:
+    """Hand what each priced model request, Claude Code's or a judge gate's, cost to its session. Never raises.
+
+    Only for a key that may import (``budget_exempt``), as :func:`record_otlp_export` holds its spans to,
+    and only usage from a source whose sessions the trace store has.
+    """
+    if not budget_exempt:
+        return
+    now = datetime.now(UTC)
+    window = _Window(floor=now - retention, ceiling=now + _FUTURE_SKEW)
+    try:
+        by_session: dict[SessionRef, list[SpanRecord]] = {}
+        for request in itertools.islice(requests, MAX_SPANS_PER_EXPORT):
+            if request.source not in _SESSION_USAGE_SOURCES:
+                continue
+            session = SessionRef(source="otlp", key=request.session_key)
+            if session not in by_session and len(by_session) >= MAX_TRACES_PER_EXPORT:
+                continue
+            by_session.setdefault(session, []).append(_usage_span(request, window))
+        for session, records in by_session.items():
+            writer.submit(
+                TraceWrite(
+                    workspace_id=workspace_id,
+                    trace_id=session.trace_id(workspace_id, user_id, api_key_id),
+                    user_id=user_id,
+                    api_key_id=api_key_id,
+                    session_source="otlp",
+                    harness=_CLAUDE_CODE_HARNESS,
+                    spans=tuple(records),
+                )
+            )
+    except Exception as exc:  # noqa: BLE001 - a session's cost never fails the export that priced it
+        logger.warning("OTLP request costs not recorded: %s", type(exc).__name__)

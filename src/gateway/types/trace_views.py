@@ -59,6 +59,28 @@ class GateSummary:
 
 
 @dataclass(frozen=True)
+class ToolCost:
+    """An estimate of what one tool call cost, from the model requests either side of it.
+
+    ``subagent`` is exact: what the requests of a subagent the call ran cost.
+    """
+
+    span_id: str
+    calling: Decimal
+    writing: Decimal
+    rereading: Decimal
+    result_tokens: int
+    later_requests: int
+    calls_sharing_request: int
+    calls_sharing_result: int
+    subagent: Decimal | None = None
+
+    @property
+    def total(self) -> Decimal:
+        return self.calling + self.writing + self.rereading + (self.subagent or Decimal(0))
+
+
+@dataclass(frozen=True)
 class TraceView:
     """A session as it is read: its totals, its turns and its spans."""
 
@@ -70,3 +92,4 @@ class TraceView:
     approximate: frozenset[str]
     truncated: bool
     gates: tuple[GateSummary, ...] = ()
+    tool_costs: tuple[ToolCost, ...] = ()

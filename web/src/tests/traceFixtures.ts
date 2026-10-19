@@ -129,6 +129,7 @@ export function traceDetail(overrides: Partial<TraceDetail> = {}): TraceDetail {
     ],
     truncated: false,
     gates: [],
+    tool_costs: [],
     ...overrides,
   }
 }

@@ -111,6 +111,11 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
     "otari.llm.ttft_ms": int,
+    # USD per million tokens a priced model request paid on each meter, as a decimal.
+    "otari.llm.rate.input": str,
+    "otari.llm.rate.output": str,
+    "otari.llm.rate.cache_read": str,
+    "otari.llm.rate.cache_write": str,
     "otari.tool.decision": str,
     "otari.tool.decision_source": str,
     "otari.tool.succeeded": bool,
@@ -173,6 +178,13 @@ def _check_id(name: str, value: str | None) -> None:
 def _check_identifier(name: str, value: str | None) -> None:
     if value is not None and not is_identifier(value):
         raise InvalidSpanError(f"{name} must be identifier-shaped")
+
+
+# The operation of a span that carries only what a model request cost, priced by
+# the usage ledger after the request: a read folds it onto that request.
+USAGE_OPERATION = "usage"
+# The meters a model request is priced on, each a rate attribute ``otari.llm.rate.<meter>``.
+RATE_METERS = ("input", "output", "cache_read", "cache_write")
 
 
 @dataclass(frozen=True)

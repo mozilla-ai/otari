@@ -14,7 +14,10 @@ of the answer as soon as it is stored and no stored state can disagree with it:
   A failed attempt a fallback recovered does not fail anything;
 - a gate an agent's hook reported hangs under the tool call it checked, by call
   id, or else under the step it ran in (a Stop gate checks no tool call).
-  It arrives on its own export, so this is the only place the two meet.
+  It arrives on its own export, so this is the only place the two meet;
+- what a model request or a judge gate's model calls cost, where the usage
+  ledger priced it afterwards, is folded onto it by its id, and the span that
+  carried it is not read.
 """
 
 from bisect import bisect_right
@@ -22,8 +25,9 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from gateway.services.traces._tool_costs import tool_costs
 from gateway.types.trace_views import GateSummary, TraceView, TurnState, TurnView
-from gateway.types.traces import GuardrailDefinition, SpanRecord, TraceDetail
+from gateway.types.traces import USAGE_OPERATION, GuardrailDefinition, SpanRecord, TraceDetail
 
 # How long a session may be quiet and still count as in progress.
 IDLE_TIMEOUT = timedelta(minutes=10)
@@ -61,6 +65,31 @@ def _fill_client_tool_starts(spans: list[SpanRecord], steps: list[SpanRecord]) -
                 approximate.add(span.span_id)
         filled.append(span)
     return filled, approximate
+
+
+# A model request, or a judge gate, whose model calls the usage ledger prices.
+_PRICED_KINDS = frozenset({"llm", "guardrail"})
+
+
+def _price_requests(spans: list[SpanRecord]) -> list[SpanRecord]:
+    """Each model request and judge gate with what the usage ledger says it cost.
+
+    No span is left that only carried a cost.
+    """
+    priced = {
+        span.request_id: span
+        for span in spans
+        if span.operation == USAGE_OPERATION and span.request_id and span.cost_snapshot is not None
+    }
+    read: list[SpanRecord] = []
+    for span in spans:
+        if span.operation == USAGE_OPERATION:
+            continue
+        usage = priced.get(span.request_id or "") if span.kind in _PRICED_KINDS and span.cost_snapshot is None else None
+        if usage is not None:
+            span = replace(span, cost_snapshot=usage.cost_snapshot, attributes={**span.attributes, **usage.attributes})
+        read.append(span)
+    return read
 
 
 def _settle_tools(spans: list[SpanRecord]) -> list[SpanRecord]:
@@ -240,10 +269,12 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
 def trace_view(detail: TraceDetail, *, now: datetime) -> TraceView:
     """One stored trace as a person reads it: its spans in order, grouped into turns."""
     steps = sorted((span for span in detail.spans if span.kind == "step"), key=_moment)
-    spans, approximate = _fill_client_tool_starts(_settle_tools(_attach_gates(list(detail.spans), steps)), steps)
+    priced = _price_requests(list(detail.spans))
+    spans, approximate = _fill_client_tool_starts(_settle_tools(_attach_gates(priced, steps)), steps)
     spans.sort(key=_moment)
     last_activity = detail.summary.last_activity_at
     turns = _turns(spans, now=now, last_activity=last_activity)
+    costs = tool_costs(spans)
     return TraceView(
         summary=detail.summary,
         state="active" if now - last_activity < IDLE_TIMEOUT else "idle",
@@ -252,4 +283,5 @@ def trace_view(detail: TraceDetail, *, now: datetime) -> TraceView:
         approximate=frozenset(approximate),
         truncated=detail.truncated,
         gates=_gate_summaries(spans, detail.definitions),
+        tool_costs=costs,
     )

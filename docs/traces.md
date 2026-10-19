@@ -142,6 +142,7 @@ its model traffic through Otari. Use a budget-exempt API key, as for
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
 export CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
 export OTEL_TRACES_EXPORTER=otlp
+export OTEL_LOGS_EXPORTER=otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer tk-your-import-key"
@@ -159,6 +160,53 @@ error, such as a command that exited non-zero: the agent reads that error like
 any other result, and `grep` finding nothing or a test failing on purpose
 returns one too. A short `claude -p` run can exit before its last spans are
 exported.
+
+A session's cost comes from its logs, not its spans: Otari prices each model
+request's `api_request` event at the deployment's rates, cache reads and writes
+included, and shows the cost on the request and its session. Without
+`OTEL_LOGS_EXPORTER=otlp` a session has its tokens but no cost. The cost is
+what the requests are worth at API prices, so on a Claude subscription it is
+not what was charged.
+
+A session's header counts its tool calls and the gates its hooks ran, each
+broken down on hover: the calls by tool, and the gates by what they decided.
+**At a glance** opens a session with what it did and where its time and money
+went: its turns, model requests and tool calls; the time spent in model
+requests, hooks, running tools and waiting for you to approve a call; what each
+meter cost (fresh input, output, cache reads and cache writes) and what reading
+from the cache saved over paying for those tokens as fresh input; and each
+tool's calls and running time. A call that started a subagent runs until the
+subagent's last span. Each gate is timed by its own run, so a slow judge gate
+shows on its own.
+
+A judge gate that [reports its model calls](agent-guardrails.md#reporting-to-otari)
+is priced like a request and counted in the session's cost, though not in any
+turn's. Its check shows the model, the tokens and the cost, and **At a glance**
+says what the judge gates cost in all.
+
+A turn shows what its requests cost. A tool call shows an estimate, marked `≈`,
+because a provider bills requests, not tool calls. It is read off the requests
+either side of the call, in the context the call ran in (a subagent has its
+own):
+
+- **Calling it:** its share of the output of the request that called it.
+- **Adding its result:** how much the next request's context grew, at what that
+  request paid for new input, usually a cache write.
+- **Re-reading it:** the result again on every later request, at the cache-read
+  rate, or the cache-write rate once the cache expired, until the context is
+  compacted.
+
+Calls made together share these equally, since a request reports how much its
+context grew, not how much of that each result was. An `Agent` call also carries
+what its subagent's requests cost, which is exact.
+
+**Cost by tool** adds the estimates up for the session: each tool's calls and
+cost, and its share of the session. A subagent's calls are listed under the
+call that ran it, with the models the subagent used and what its own reasoning
+and answers cost, and are counted there once. What judge gates cost is listed
+apart. What no tool call accounts for, such as the prompts and the answers, is
+listed last. It is where to look before
+moving a tool's work, or a subagent, to a smaller model.
 
 ### Keeping what a span was about
 

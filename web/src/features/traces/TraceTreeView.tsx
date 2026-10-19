@@ -17,17 +17,22 @@ function Metrics({
   durationMs,
   cost,
   tokens,
+  estimate,
 }: {
   durationMs: number
   cost: number
   tokens: number
+  /** An estimated cost, marked as one. */
+  estimate?: number
 }) {
-  if (durationMs <= 0 && !cost && !tokens) return null
+  if (durationMs <= 0 && !cost && !tokens && !estimate) return null
   return (
     <span className="flex items-center gap-x-3 truncate text-mono-caption whitespace-nowrap text-muted">
       {durationMs > 0 ? <span>{formatDuration(durationMs)}</span> : null}
       {cost ? (
         <span>{formatCost(cost)}</span>
+      ) : estimate ? (
+        <span>≈ {formatCost(estimate)}</span>
       ) : tokens ? (
         <span>{formatNumber(tokens)} tokens</span>
       ) : null}
@@ -132,6 +137,7 @@ function TreeRow({
             durationMs={obs.endMs - obs.startMs}
             cost={obs.cost ?? 0}
             tokens={tokens}
+            estimate={obs.estimate?.total}
           />
         </span>
       </button>

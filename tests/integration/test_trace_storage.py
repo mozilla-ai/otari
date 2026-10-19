@@ -154,6 +154,27 @@ async def test_a_replayed_write_is_counted_as_duplicate_and_adds_nothing(
     assert (detail.summary.span_count, detail.summary.input_tokens) == (2, 10)
 
 
+async def test_a_requests_cost_counts_once_on_its_session_and_is_not_a_span(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    priced = _write(
+        workspace,
+        "session-1",
+        _span("usage-1", kind="llm", operation="usage", request_id="req_1", cost_snapshot=Decimal("0.25")),
+        session_source="otlp",
+    )
+    await store.write((_write(workspace, "session-1", _span("llm-1", kind="llm", request_id="req_1")),))
+    await store.write((priced,))
+
+    replay = await store.write((priced,))
+
+    assert replay.duplicate == 1
+    detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
+    assert detail is not None
+    assert (detail.summary.span_count, detail.summary.cost_snapshot) == (1, Decimal("0.25"))
+
+
 async def test_a_span_repeated_inside_one_write_is_stored_once(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:
