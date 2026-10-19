@@ -190,7 +190,7 @@ def test_a_name_a_hosted_provider_cannot_take_says_how_to_move_it(
 
     assert row["outcome"] == "invalid"
     assert "names another provider" in row["detail"]
-    assert "Keep the deployment provider serving it" in row["detail"]
+    assert "point its callers at that name" in row["detail"]
 
 
 def test_a_row_no_configured_key_reads_is_left_where_it_is(

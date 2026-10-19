@@ -59,8 +59,9 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
     except TenancyError as exc:
         public.outcome = "invalid"
         public.detail = (
-            f"{exc}, so a hosted provider cannot keep it. Keep the deployment provider serving it; if its callers "
-            f"can use '{implementation}:<model>', add a hosted provider of that name instead."
+            f"{exc}, so a hosted provider cannot keep it. Add it on the Hosted providers page under its "
+            f"implementation's name ('{implementation}') or a name of its own, which requests reach as "
+            "'<name>:<model>', point its callers at that name, then remove the deployment provider."
         )
         return PlannedMove(public)
     if name in hosted_names:
