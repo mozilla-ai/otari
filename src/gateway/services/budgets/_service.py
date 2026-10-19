@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from collections.abc import Callable, Mapping
+from datetime import datetime
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.api_keys import ApiKeyConfig
@@ -350,12 +351,24 @@ class BudgetService:
         blocked: bool | None,
         skip: int,
         limit: int,
+        created_before: datetime | None = None,
     ) -> list[EndUserPublic]:
         """Return a page of the key owner's end users, oldest first; ``external_id`` narrows it to that one."""
         async with self._uow:
             return await self._end_users.page(
-                api_key, external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
+                api_key,
+                external_id=external_id,
+                budget_id=budget_id,
+                blocked=blocked,
+                skip=skip,
+                limit=limit,
+                created_before=created_before,
             )
+
+    async def delete_end_users(self, *, api_key: APIKey, user_ids: list[str]) -> int:
+        """Soft-delete these end users of the key's owner; returns how many were live and are now deleted."""
+        async with self._uow:
+            return await self._end_users.delete(api_key, user_ids)
 
     async def count_end_users(
         self, *, api_key: APIKey, external_id: str | None, budget_id: str | None, blocked: bool | None

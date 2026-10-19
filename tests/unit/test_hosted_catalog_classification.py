@@ -6,6 +6,7 @@ keeps, which it removes, and why it keeps the ones it does not offer.
 
 from gateway.services.providers._hosted_catalog import (
     KEEP_DEPLOYMENT_INSTANCE,
+    KEEP_FETCH_TOOL,
     KEEP_GATEWAY_TOOL,
     KEEP_OWNED_ENDPOINT,
     KEEP_SEARCH_TOOL,
@@ -20,6 +21,7 @@ def _verdicts(
     offered: set[str] = set(),  # noqa: B006
     deployment_instances: set[str] = set(),  # noqa: B006
     search_providers: set[str] = set(),  # noqa: B006
+    fetch_providers: set[str] = set(),  # noqa: B006
     owned_endpoints: set[str] = set(),  # noqa: B006
 ) -> dict[str, tuple[str, str | None]]:
     results = classify_priced_keys(
@@ -27,6 +29,7 @@ def _verdicts(
         offered=frozenset(offered),
         deployment_instances=frozenset(deployment_instances),
         search_providers=frozenset(search_providers),
+        fetch_providers=frozenset(fetch_providers),
         owned_endpoints=frozenset(owned_endpoints),
     )
     return {verdict.model_key: (verdict.verdict, verdict.reason) for verdict in results}
@@ -71,6 +74,20 @@ def test_a_configured_search_tool_rate_is_kept() -> None:
     verdicts = _verdicts(priced=[("tavily:search", 1)], offered={"openai:gpt-4o"}, search_providers={"tavily"})
 
     assert verdicts == {"tavily:search": ("kept", KEEP_SEARCH_TOOL)}
+
+
+def test_a_configured_fetch_tool_rate_is_kept() -> None:
+    """A fetch instance's rate and the built-in fetcher's are tool prices, not models nothing offers."""
+    verdicts = _verdicts(
+        priced=[("tabstack:tabstack", 1), ("builtin:builtin_fetch", 1)],
+        offered={"openai:gpt-4o"},
+        fetch_providers={"tabstack", "builtin"},
+    )
+
+    assert verdicts == {
+        "tabstack:tabstack": ("kept", KEEP_FETCH_TOOL),
+        "builtin:builtin_fetch": ("kept", KEEP_FETCH_TOOL),
+    }
 
 
 def test_a_model_served_by_a_configured_instance_is_kept() -> None:

@@ -241,6 +241,53 @@ def test_pricing_for_a_search_tool_provider_is_loaded(postgres_url: str, test_db
         dispose_override()
 
 
+def test_pricing_for_a_fetch_instance_provider_is_loaded(postgres_url: str, test_db: Session) -> None:
+    """A fetch instance's ``provider:instance`` rate is kept although its provider is not under ``providers``."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        fetch_tools={"tabstack": {"provider": "tabstack", "api_key": "test-key"}},
+        pricing={"tabstack:tabstack": PricingConfig(input_price_per_million=2000.0, output_price_per_million=0.0)},
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app):
+            loaded = test_db.query(ModelPricing).filter(ModelPricing.model_key == "tabstack:tabstack").first()
+            assert loaded is not None
+            assert loaded.input_price_per_million == 2000.0
+    finally:
+        dispose_override()
+
+
+def test_pricing_for_the_builtin_fetcher_is_loaded_without_any_fetch_instance(
+    postgres_url: str, test_db: Session
+) -> None:
+    """``builtin:builtin_fetch`` prices the built-in fetcher, which every deployment has."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        pricing={"builtin:builtin_fetch": PricingConfig(input_price_per_million=1000.0, output_price_per_million=0.0)},
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app):
+            loaded = test_db.query(ModelPricing).filter(ModelPricing.model_key == "builtin:builtin_fetch").first()
+            assert loaded is not None
+            assert loaded.input_price_per_million == 1000.0
+    finally:
+        dispose_override()
+
+
 def test_pricing_loaded_from_config_normalizes_legacy_slash_format(postgres_url: str, test_db: Session) -> None:
     """Test that pricing configured with legacy slash format is normalized to colon format."""
     config = GatewayConfig(

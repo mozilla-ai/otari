@@ -31,6 +31,27 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("names the model and the API key in full, which the row cuts short", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          model: "claude-sonnet-4-5-20250929",
+          api_key_id: "key-1",
+          api_key_name: "production-backend-service",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    const field = (label: string): string =>
+      screen.getByText(label, { exact: true }).parentElement!.textContent ?? ""
+    expect(field("Model")).toContain("claude-sonnet-4-5-20250929")
+    expect(field("API key")).toContain("production-backend-service")
+    expect(field("API key ID")).toContain("key-1")
+  })
+
   it("shows a skipped candidate as a note, not as an error", async () => {
     mockApi()
     renderPage(
@@ -82,6 +103,29 @@ describe("RequestDetail", () => {
     expect(
       screen.getByTitle(/the tokens this request was priced on/),
     ).toHaveTextContent("1,200")
+  })
+
+  it("shows a named user's whole name, while the copy keeps the id", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
+          user_alias: "Aleksandra Wiśniewska-Kowalczyk",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    // The detail is where a name the row cut short is read in full, so it
+    // wraps. jsdom cannot measure truncation, so the wrapping class is pinned.
+    expect(screen.getByText("Aleksandra Wiśniewska-Kowalczyk")).toHaveClass(
+      "wrap-anywhere",
+    )
+    expect(
+      screen.getByRole("button", { name: "Copy user id" }),
+    ).toBeInTheDocument()
   })
 
   it("shows the reasoning tokens, and a dash for a row that never recorded them", async () => {
@@ -297,6 +341,47 @@ describe("RequestDetail", () => {
     expect(screen.getByText("Billed meters")).toBeInTheDocument()
     expect(screen.getByText(/200 at \$10.00 \/ 1M/)).toBeInTheDocument()
     expect(screen.getByText(/2 at .* each/)).toBeInTheDocument()
+  })
+
+  it("shows one line per label for a tool that ran under several", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          pricing_breakdown: [
+            {
+              meter: "web_fetch_calls",
+              label: "builtin:builtin_fetch",
+              units: 2,
+              unit_rate: 0.01,
+              cost: 0.02,
+            },
+            {
+              meter: "web_fetch_calls",
+              label: "tabstack:tabstack",
+              units: 1,
+              unit_rate: 0.005,
+              cost: 0.005,
+            },
+            // A tool line an older gateway stored, without a label.
+            {
+              meter: "web_search_calls",
+              units: 3,
+              unit_rate: 0.01,
+              cost: 0.03,
+            },
+          ],
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getAllByText("web fetch calls")).toHaveLength(2)
+    expect(screen.getByText("builtin:builtin_fetch")).toBeInTheDocument()
+    expect(screen.getByText("tabstack:tabstack")).toBeInTheDocument()
+    expect(screen.getByText(/2 at .* each/)).toBeInTheDocument()
+    expect(screen.getByText(/3 at .* each/)).toBeInTheDocument()
   })
 
   it("shows the provider-reported compute time alongside Total time", async () => {

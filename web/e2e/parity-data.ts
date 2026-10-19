@@ -14,8 +14,7 @@ import { authHeaders, expectOk } from "./helpers"
 // Rows are imported through POST /v1/usage/external-events rather than by making
 // provider calls: the endpoint writes real usage_logs rows (priced through the
 // same pricing path) with no upstream to reach, which is what lets the suite run
-// with no network egress. Imported rows carry counts_toward_budget=false, which
-// is also what makes them eligible for Activity's bulk actions.
+// with no network egress. Imported rows carry counts_toward_budget=false.
 export const PARITY = {
   source: "parity-e2e",
   users: {
@@ -34,9 +33,6 @@ export const PARITY = {
     // Deliberately left without a pricing row: the negative case for the Priced
     // filter, and the row whose detail panel offers "Price this model".
     unpriced: { provider: "groq", model: "llama-parity-unpriced" },
-    // Owned by the bulk-delete test, which consumes it. Kept off the two models
-    // above so deleting it cannot make an earlier assertion unreproducible.
-    scratch: { provider: "groq", model: "scratch-parity-model" },
   },
 } as const
 
@@ -64,7 +60,6 @@ export const COUNTS = {
   priced: 30,
   unpriced: 6,
   errors: 3,
-  scratch: 4,
 } as const
 
 // Every seeded row lands inside this many hours of now, so all of them fall in
@@ -138,18 +133,6 @@ function errorEvents(): SeedEvent[] {
   }))
 }
 
-function scratchEvents(): SeedEvent[] {
-  return Array.from({ length: COUNTS.scratch }, (_, i) => ({
-    source_event_id: `parity-scratch-${i}`,
-    timestamp: spread(COUNTS.scratch, i),
-    ...PARITY.models.scratch,
-    input_tokens: 100,
-    output_tokens: 20,
-    duration_ms: 200 + i,
-    user_id: PARITY.users.light,
-  }))
-}
-
 // Create the users the imported rows attribute to. Ingestion rejects usage for a
 // user that does not exist, and a re-run against a warm database must not fail on
 // its own leftovers, so an existing user is accepted.
@@ -202,12 +185,7 @@ export async function seedParityUsage(page: Page): Promise<void> {
   await ensureUsers(page)
   await ensurePricing(page)
 
-  const events = [
-    ...pricedEvents(),
-    ...unpricedEvents(),
-    ...errorEvents(),
-    ...scratchEvents(),
-  ]
+  const events = [...pricedEvents(), ...unpricedEvents(), ...errorEvents()]
   const seeded = await page.request.post(`${API_ROOT}/usage/external-events`, {
     headers: authHeaders,
     data: { source: PARITY.source, events },

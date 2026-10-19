@@ -28,6 +28,30 @@ describe("RoutingCell", () => {
     ).toBeInTheDocument()
   })
 
+  it("keeps the whole line in its title, since the cell cuts it short", () => {
+    render(
+      <RoutingCell
+        entry={entry({
+          policy_name: "cheap-first",
+          status: "absorbed",
+          attempt_position: 1,
+          attempt_count: 2,
+        })}
+        outcome={{
+          servedBy: "openai:gpt-4o",
+          servedPosition: 2,
+          spilledFrom: [],
+        }}
+      />,
+    )
+
+    expect(
+      screen.getByTitle(
+        "cheap-first: attempt 1 of 2 failed, served by openai:gpt-4o",
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("says a candidate was skipped for a full rate limit, not that it failed", () => {
     render(
       <RoutingCell

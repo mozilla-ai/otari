@@ -80,6 +80,14 @@ class SpanPublic(BaseModel):
     tool_type: str | None
     tool_call_id: str | None
     request_id: str | None
+    otel_trace_id: str | None = Field(
+        description="The OpenTelemetry trace id an OTLP span was exported with, in lowercase hex. "
+        "Null on a span the gateway recorded itself."
+    )
+    otel_span_id: str | None = Field(
+        description="The OpenTelemetry span id an OTLP span was exported with, in lowercase hex. "
+        "Null on a span the gateway recorded itself."
+    )
     attributes: dict[str, str | int | float | bool]
 
 
@@ -164,6 +172,8 @@ def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
         tool_type=span.tool_type,
         tool_call_id=span.tool_call_id,
         request_id=span.request_id,
+        otel_trace_id=span.otel_trace_id,
+        otel_span_id=span.otel_span_id,
         attributes=dict(span.attributes),
     )
 

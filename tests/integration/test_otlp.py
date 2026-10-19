@@ -800,8 +800,8 @@ def test_otlp_claude_platform_request_is_booked_once(
     assert (request.provider, request.model) == ("anthropic", "claude-opus-4-8")
     assert (request.prompt_tokens, request.cache_read_tokens, request.cache_write_tokens) == (1000, 200, 100)
     assert request.cache_write_1h_tokens == 40
-    # Input counts the cache, so 700 fresh tokens; both TTLs bill at the one cache-write rate.
-    expected = _usd(700, "15") + _usd(200, "1.5") + _usd(100, "18.75") + _usd(50, "75")
+    # Input counts the cache, so 700 fresh tokens; the 40 1h writes bill at twice the input rate.
+    expected = _usd(700, "15") + _usd(200, "1.5") + _usd(60, "18.75") + _usd(40, "30") + _usd(50, "75")
     assert request.cost == expected
     assert rows["msg_claude_1:compaction"].cost == _usd(300, "15") + _usd(20, "75")
 

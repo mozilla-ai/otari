@@ -522,22 +522,41 @@ the same instance name. Config-file entries remain read-only in the dashboard.
 
 Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
 `otari gen-secret-key`. To rotate it, configure the new key before the old key,
-run the provider and search-tool re-encryption endpoints, then remove the old
-key. Losing every configured encryption key makes stored credentials
-unrecoverable.
+run the provider, hosted provider and search-tool re-encryption endpoints
+(`POST /api/v1/provider-credentials/reencrypt`,
+`POST /api/v1/hosted-providers/reencrypt` and
+`POST /api/v1/search-tools/reencrypt`), then remove the old key. Losing every
+configured encryption key makes stored credentials unrecoverable.
+
+Providers stored this way are moving onto hosted providers.
+`GET /api/v1/hosted-providers/migration` previews the move and
+`POST /api/v1/hosted-providers/migration` applies it: each stored provider
+becomes a hosted provider of the same name, served by the implementation its
+`provider_type` names, so an `instance:model` selector keeps its name. The
+stored provider is removed once the hosted one offers a model; one whose
+provider lists none is kept until its models are added on the Hosted providers
+page. A name a hosted provider already holds, or a key no configured
+`OTARI_SECRET_KEY` reads, is reported and left in place. A hosted provider is
+asked after an organization's own key, where a stored provider was asked
+before it, so an organization holding its own key is served on that key once
+its provider has moved.
 
 ### Hosted providers in config.yml
 
 A hosted provider is a credential the deployment serves requests on when
 nothing else credentials them (see [Modes](modes.md#hosted-providers-and-byo-credentials)).
 Besides the Hosted providers page, a standalone or hosted deployment can declare
-them in a `hosted_providers:` block, keyed by any-llm implementation, with the
-fields the `/api/v1/hosted-providers` body takes:
+them in a `hosted_providers:` block, keyed by name, with the fields the
+`/api/v1/hosted-providers` body takes:
 
 ```yaml
 hosted_providers:
   openai:
     api_key: ${OPENAI_API_KEY}
+  openai-eu:
+    provider: openai
+    api_key: ${OPENAI_EU_API_KEY}
+    api_base: https://eu.api.openai.com/v1
   anthropic:
     api_key: ${ANTHROPIC_API_KEY}
     restricted_to_organization_id: 4f1c2a7e-0b9d-4c55-9a0e-2d6f8b3c1e90
@@ -546,23 +565,30 @@ hosted_providers:
     models: [qwen3-32b]
 ```
 
+The name is what a request addresses (`openai-eu:gpt-4o`), and what the
+provider's models, prices and usage are keyed on. It defaults to the
+implementation; a name of its own lets two endpoints of one implementation be
+served side by side. A name may not contain `:` or `/`, may not be `otari` or
+`hosted`, and may not be another implementation's name.
+
 | Field | Meaning |
 |---|---|
-| `api_key` | The key the provider is served on. Required unless the provider needs none (listed below). |
+| `provider` | The any-llm implementation serving it. Defaults to the name. |
+| `api_key` | The key the provider is served on. Required unless the provider needs none (listed below) or has an `api_base` of its own. |
 | `api_base` | An endpoint other than the provider's default. |
 | `client_args` | What the provider's SDK client needs beyond the key, such as Bedrock's region. |
 | `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
 
-A key may be left out for these providers only: the self-hosted backends
-`vllm`, `ollama`, `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`,
-which are called with a placeholder key when they have an `api_base`, and
-`vertexai` and `vertexaianthropic`, which authenticate through the Google Cloud
-credentials in the gateway's own environment. Every other provider, Bedrock
-included, needs `api_key`. As for any hosted provider, a request is served on one
-only when no organization key, `providers:` instance or provider environment
-variable (such as `VLLM_API_KEY`) answers for it first.
+A key may be left out for the self-hosted backends `vllm`, `ollama`,
+`llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`, for `vertexai` and
+`vertexaianthropic`, which authenticate through the Google Cloud credentials in
+the gateway's own environment, and for any provider given an `api_base`, which
+is called with a placeholder key, as a self-hosted OpenAI-compatible server is.
+Every other provider, Bedrock included, needs `api_key`. The Hosted providers
+page and API follow the same rule. As for any hosted provider, a request is served on one
+only when no organization key or `providers:` instance answers for it first.
 
 Reference the key as `${VAR}` rather than writing it into the file: it is
 resolved from the environment as every `${VAR}` in the file is, so the key stays
@@ -579,8 +605,9 @@ the two are never merged per provider. An empty value leaves the file's block
 in place.
 
 The block is validated at load: an unknown implementation, a `provider_type`
-key (a named instance belongs in `providers:`), an unknown field, or a missing
-`api_key` for a provider that needs one fails the start. With
+key (the implementation goes in `provider`), a name a hosted provider cannot
+take, an unknown field, or a missing `api_key` for a provider that needs one
+fails the start. With
 `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`, an `api_base` that resolves to a
 private address fails it too, as it is refused for a provider stored through the
 page; that check runs at boot, because it resolves the host. The block is never
@@ -805,6 +832,11 @@ Optional cache fields reprice cached input when a provider reports it:
 - `cache_read_price_per_million`
 - `cache_write_price_per_million`
 
+A Claude model (one whose model name contains `claude`, on any provider) bills
+a cache write made with a one-hour TTL at twice the input rate, which is
+Anthropic's price for it, whenever its `cache_write_price_per_million` is set
+above zero. Every other cache write bills at `cache_write_price_per_million`.
+
 Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
 accepted shape.
@@ -852,6 +884,12 @@ provider's reported charge when it reports one, and at the rate otherwise. A
 search a workspace's organization search key served is priced under
 `otari:web_search` instead, since the deployment cannot price the organization's
 own provider account.
+
+A fetch instance's rate is keyed the same way (`tabstack:tabstack` for an
+instance named `tabstack` backed by `tabstack`), and so is the built-in
+fetcher's, `builtin:builtin_fetch`; their providers need no entry under
+`providers:` either. They price the fetch tool's calls on that instance, ahead
+of `otari:web_fetch`.
 
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
@@ -953,8 +991,8 @@ Rules for instances:
   (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
 - `options` are checked against the provider's options. A search instance may also
   set `max_results` and `time_range`, and a fetch instance `max_chars`, which every
-  provider of that tool takes. Not in effect yet: they apply once the instances
-  serve requests through the libraries.
+  provider of that tool takes. A fetch instance's `max_chars` cuts what each fetch
+  tool call returns; in-loop search does not read the search ones yet.
 - A `search_tools` entry that breaks the name rules, or whose `options` carry a key
   the provider does not know or a value it refuses, still loads, with a warning
   that names the entry and the problem. Fix it: a later release refuses it, and
@@ -972,7 +1010,9 @@ wins over the configuration file until it is cleared.
 `POST /api/v1/search-tools/test` runs one search or one fetch on an instance before
 it is saved, and `POST /api/v1/search-tools/{name}/test` on one that exists. Each
 says whether the call worked, the error's tag when it did not, and how many hits or
-characters came back, never the content. `builtin_fetch` has no test yet.
+characters came back, never the content. `builtin_fetch` is tested as a fetch tool
+call runs it: through the built-in fetcher, with no domain policy and no private
+hosts.
 
 The defaults and the call limit are runtime settings, also set from Tools or
 `/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
@@ -995,11 +1035,11 @@ A default that names no instance, set in the file or earlier at runtime, is trea
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
 In this release `web_search_default_tool` picks the tool for a direct
-`POST /api/v1/search` that names none, and no other request uses these settings
-yet. The rest take effect in later releases: `web_fetch_default_tool` when web
-fetch moves onto the fetch instances, and the in-loop parts of
-`web_search_default_tool` and `web_search_max_calls`, with a search instance's
-`fetch_tool`, when in-loop search does.
+`POST /api/v1/search` that names none, and `web_fetch_default_tool` the fetch
+instance every fetch tool call runs on. The rest take effect when in-loop search
+moves onto the search instances: the in-loop parts of `web_search_default_tool`
+and `web_search_max_calls`, and the fetch instance that enriches search results,
+a search instance's `fetch_tool` or else `web_fetch_default_tool`.
 
 After that, the old in-loop backend still serves some requests until it is
 removed. In that period `web_fetch_default_tool` governs every fetch tool call,

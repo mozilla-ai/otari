@@ -17,11 +17,15 @@ import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
+  useHostedProviders,
+  useReencryptHostedProviders,
+} from "@/shared/api/hostedProviders"
+import {
   useReencryptProviderCredentials,
   useStoredProviders,
 } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -518,14 +522,34 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
 }
 
 function SecretKeyRow() {
+  const hostsHosted = useSurfaces()("hosted_providers")
   const storedProviders = useStoredProviders()
+  const hostedProviders = useHostedProviders(hostsHosted)
   const reencrypt = useReencryptProviderCredentials()
-  const result = reencrypt.data
-  const storedCount = storedProviders.data?.length ?? 0
-  const unreadableCount = (storedProviders.data ?? []).filter(
-    (provider) => !provider.decryptable,
-  ).length
+  const reencryptHosted = useReencryptHostedProviders()
+  // A configured hosted provider holds no ciphertext, so only stored ones count.
+  const storedHosted = (hostedProviders.data?.data ?? []).filter(
+    (provider) => provider.source === "database",
+  )
+  const storedCount = (storedProviders.data?.length ?? 0) + storedHosted.length
+  const unreadableCount =
+    (storedProviders.data ?? []).filter((provider) => !provider.decryptable)
+      .length + storedHosted.filter((provider) => !provider.decryptable).length
   const hasStoredKeys = storedCount > 0
+  const isPending = reencrypt.isPending || reencryptHosted.isPending
+  // Complete only once every store this deployment holds keys in has answered:
+  // a message saying all keys moved while one store failed would invite
+  // removing the old key from under it. A failure shows in the error banner.
+  const hostedResult = hostsHosted
+    ? reencryptHosted.data
+    : { reencrypted: 0, unreadable: 0, skipped: 0 }
+  const result =
+    reencrypt.data && hostedResult && !isPending
+      ? {
+          reencrypted: reencrypt.data.reencrypted + hostedResult.reencrypted,
+          unreadable: reencrypt.data.unreadable + hostedResult.unreadable,
+        }
+      : undefined
 
   return (
     <div className="flex flex-col gap-4 py-4">
@@ -547,16 +571,24 @@ function SecretKeyRow() {
           <Button
             size="sm"
             variant="ghost"
-            isDisabled={!hasStoredKeys || reencrypt.isPending}
-            onPress={() => reencrypt.mutate()}
+            isDisabled={!hasStoredKeys || isPending}
+            onPress={() => {
+              reencrypt.mutate()
+              if (hostsHosted) reencryptHosted.mutate()
+            }}
           >
-            {reencrypt.isPending
-              ? "Re-encrypting…"
-              : "Re-encrypt provider keys"}
+            {isPending ? "Re-encrypting…" : "Re-encrypt provider keys"}
           </Button>
         </div>
       </div>
-      <ErrorBanner error={storedProviders.error ?? reencrypt.error} />
+      <ErrorBanner
+        error={
+          storedProviders.error ??
+          hostedProviders.error ??
+          reencrypt.error ??
+          reencryptHosted.error
+        }
+      />
       {unreadableCount > 0 ? (
         <InfoBanner tone="warning">
           {unreadableCount} stored provider key

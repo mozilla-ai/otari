@@ -55,7 +55,7 @@ from gateway.services.model_discovery_service import ProviderDiscovery, get_mode
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.providers import HostedProviderService, HostedSources
-from gateway.services.providers._hosted_catalog import KEEP_OWNED_ENDPOINT
+from gateway.services.providers._hosted_catalog import KEEP_FETCH_TOOL, KEEP_OWNED_ENDPOINT
 from gateway.services.secret_box import generate_secret_key
 
 pytestmark = pytest.mark.asyncio
@@ -117,7 +117,9 @@ def _discovery(
 def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]) -> None:
     """Make the community dataset price exactly ``rates``, and nothing else."""
 
-    def _stub(provider: str | None, model: str, as_of: object) -> ModelPricing | None:
+    def _stub(
+        provider: str | None, model: str, as_of: object, *, implementation: str | None = None
+    ) -> ModelPricing | None:
         if model not in rates:
             return None
         input_rate, output_rate = rates[model]
@@ -622,7 +624,9 @@ async def test_new_base_rates_drop_a_seeds_tiers_and_carry_an_operators(
     """A tier's rates are absolute, so they stay with the base rates they were written beside."""
     tier = {"min_input_tokens": 200_000, "input_price_per_million": 5.0, "output_price_per_million": 15.0}
 
-    def _tiered(provider: str | None, model: str, as_of: object) -> ModelPricing | None:
+    def _tiered(
+        provider: str | None, model: str, as_of: object, *, implementation: str | None = None
+    ) -> ModelPricing | None:
         return ModelPricing(
             model_key=f"{provider}:{model}",
             input_price_per_million=Decimal("2.5"),
@@ -913,6 +917,26 @@ async def test_a_sweep_takes_the_overrides_above_what_it_removes_whatever_the_ra
 
     again = await service.refresh_catalog(apply=True)
     assert (again.removed, again.removed_price_rows, again.removed_override_rows) == ([], 0, 0)
+
+
+async def test_a_sweep_keeps_the_rates_fetch_tools_are_priced_at(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The built-in fetcher's rate and a fetch instance's survive a sweep, as a search tool's do."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _price(async_db, "builtin:builtin_fetch", "1000", "0")
+    await _price(async_db, "tabstack:tabstack", "2000", "0")
+    service = _service(async_db, GatewayConfig(fetch_tools={"tabstack": {"provider": "tabstack", "api_key": "k"}}))
+    await _provider(service, monkeypatch, "gpt-4o")
+
+    applied = await service.refresh_catalog(apply=True)
+
+    assert applied.removed == []
+    assert [(group.reason, group.models) for group in applied.kept] == [
+        (KEEP_FETCH_TOOL, ["builtin:builtin_fetch", "tabstack:tabstack"])
+    ]
+    assert len(await _versions(async_db, "builtin:builtin_fetch")) == 1
+    assert len(await _versions(async_db, "tabstack:tabstack")) == 1
 
 
 async def test_a_sweep_keeps_the_rates_an_owned_endpoint_settles_at(

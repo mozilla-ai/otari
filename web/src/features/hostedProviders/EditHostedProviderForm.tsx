@@ -1,10 +1,14 @@
 import { useState } from "react"
 
-import type { HostedProvider } from "@/client"
+import type { HostedProvider, TestHostedProviderRequest } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import {
+  ConnectionTestButton,
+  ConnectionTestResult,
+} from "@/features/providers/ConnectionTest"
 import {
   type CredentialFieldValues,
   credentialFieldsFor,
@@ -19,12 +23,16 @@ import {
   ProviderCredentialFields,
   parseClientArgs,
 } from "@/features/providers/providerFields"
-import { useUpdateHostedProvider } from "@/shared/api/hostedProviders"
+import {
+  useTestHostedProvider,
+  useUpdateHostedProvider,
+} from "@/shared/api/hostedProviders"
 
 import { movesToAnotherOrigin } from "./endpointOrigin"
 
-// The editor for one hosted provider. The provider itself is immutable (the
-// update body cannot change it), so it is named in the description. The key box
+// The editor for one hosted provider. Its name and implementation are immutable
+// (the update body cannot change them), so they are named in the description.
+// The key box
 // starts empty and stays optional, which is the whole shape of a write-only
 // credential. A stored typed secret arrives masked, so blank there means "keep
 // it" and the mask is echoed back for the server to restore.
@@ -65,9 +73,14 @@ export function EditHostedProviderForm({
   onClose: () => void
 }) {
   const update = useUpdateHostedProvider()
+  const test = useTestHostedProvider()
   const [draft, setDraft] = useState<EditDraft>(() => draftFrom(provider))
 
   const spec = credentialSpecFor(provider.provider)
+  const identity =
+    provider.name === provider.provider
+      ? provider.name
+      : `${provider.name} (${provider.provider})`
   const parsedClientArgs = parseClientArgs(draft.clientArgs)
   const credentialErrors = validateCredentialFields(
     credentialFieldsFor(provider.provider),
@@ -75,13 +88,33 @@ export function EditHostedProviderForm({
     draft.redacted,
   )
   const { isDirty } = useDirtySnapshot(draft)
+  // A provider stored without a key has none to send anywhere.
   const needsKey =
+    provider.has_api_key &&
     draft.apiKey === "" &&
     movesToAnotherOrigin(provider.api_base ?? "", draft.apiBase)
   const canSubmit =
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
     !needsKey
+
+  const buildTest = (): TestHostedProviderRequest | null => {
+    if (!canSubmit || !parsedClientArgs.ok) return null
+    const clientArgs = mergeCredentialFields(
+      draft.credentials,
+      parsedClientArgs.value,
+      draft.redacted,
+    )
+    return {
+      provider: provider.provider,
+      name: provider.name,
+      ...(draft.apiKey === "" ? {} : { api_key: draft.apiKey }),
+      api_base: draft.apiBase.trim() || null,
+      ...(provider.client_args === null && clientArgs === null
+        ? {}
+        : { client_args: clientArgs }),
+    }
+  }
 
   const submit = () => {
     if (!canSubmit || !parsedClientArgs.ok) return
@@ -95,7 +128,7 @@ export function EditHostedProviderForm({
     )
     update.mutate(
       {
-        provider: provider.provider,
+        provider: provider.name,
         body: {
           ...(draft.apiKey === "" ? {} : { api_key: draft.apiKey }),
           api_base: draft.apiBase.trim(),
@@ -115,17 +148,18 @@ export function EditHostedProviderForm({
         if (!open) onClose()
       }}
       title="Edit hosted provider"
-      description={
+      description={`${identity}. ${
         provider.api_key_last4
-          ? `${provider.provider}. The stored key ends in ${provider.api_key_last4}.`
-          : `${provider.provider}. No key is stored for this provider.`
-      }
+          ? `The stored key ends in ${provider.api_key_last4}.`
+          : "No key is stored for this provider."
+      }`}
       submitLabel="Save"
       onSubmit={submit}
       isPending={update.isPending}
       isSubmitDisabled={!canSubmit}
       isDirty={isDirty}
       error={update.error}
+      footerStart={<ConnectionTestButton test={test} getPayload={buildTest} />}
     >
       <SecretField
         label={spec?.apiKeyLabel ?? "API key"}
@@ -156,10 +190,12 @@ export function EditHostedProviderForm({
         redacted={draft.redacted}
       />
       <ClientArgsField
+        isEncryptedAtRest
         value={draft.clientArgs}
         onChange={(clientArgs) => setDraft({ ...draft, clientArgs })}
         error={parsedClientArgs.ok ? null : parsedClientArgs.error}
       />
+      <ConnectionTestResult test={test} />
     </FormDialog>
   )
 }

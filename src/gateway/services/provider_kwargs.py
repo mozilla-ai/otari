@@ -41,7 +41,7 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -56,7 +56,7 @@ from gateway.core.config import (
     GatewayConfig,
     provider_credential_env_names,
 )
-from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
+from gateway.core.error_codes import MANAGED_CREDENTIAL_UNSUPPORTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
@@ -301,6 +301,23 @@ def hosted_lookup(provider: LLMProvider) -> HostedLookup:
 _uncredentialed_warned: set[str] = set()
 
 
+def _no_hosted_names(_name: str) -> str | None:
+    return None
+
+
+# The implementation serving a hosted provider whose name is not an
+# implementation's own (``openai-eu``), registered at startup by the
+# composition root (``configure_hosted_names``) as pricing's provider types
+# are: the names live in ``services/providers``, which imports this module.
+_hosted_names: Callable[[str], str | None] = _no_hosted_names
+
+
+def configure_hosted_names(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup from a hosted provider's name to its implementation; None unregisters it."""
+    global _hosted_names  # noqa: PLW0603
+    _hosted_names = resolver or _no_hosted_names
+
+
 def uncredentialed_env_names(config: GatewayConfig, instance: str, entry: Mapping[str, Any]) -> tuple[str, ...] | None:
     """The variables a ``providers:`` entry could have taken its credential from, or ``None``.
 
@@ -427,6 +444,16 @@ def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
         # codeql[py/clear-text-logging-sensitive-data]
         variable,
     )
+
+
+def reaches_organization_key(config: GatewayConfig, instance: str) -> bool:
+    """Whether a selector naming ``instance`` can be served on an organization's own key.
+
+    Neither a ``providers:`` instance nor a hosted provider named otherwise than
+    its implementation ever consults one, so neither is subject to an
+    organization key's model restrictions.
+    """
+    return instance not in config.providers and _hosted_names(instance) is None
 
 
 def get_provider_kwargs(
@@ -820,7 +847,12 @@ def resolve_provider_selector(
         # organization's own offerings may answer. Relabeled like an alias: the
         # caller sees the spelling they sent, and pricing keys on the target.
         alias = resolve_catalog_selector(model_selector, workspace_id=workspace_id)
-    if alias is None and (written := split_selector(model_selector)) is not None and written[0] not in config.providers:
+    if (
+        alias is None
+        and (written := split_selector(model_selector)) is not None
+        and written[0] not in config.providers
+        and _hosted_names(written[0]) is None
+    ):
         # An organization key serves only the ids it offers, so a provider's
         # undated name reaches its one dated build there. A ``providers:``
         # instance sends any id as written and is never rewritten.
@@ -842,6 +874,21 @@ def resolve_provider_selector(
     if split is not None and split[0] in config.providers:
         instance, model = split
         provider = LLMProvider(config.provider_instance_type(instance))
+        return ResolvedProvider(
+            instance=instance,
+            provider=provider,
+            model=model,
+            kwargs=get_provider_kwargs(config, provider, instance=instance),
+            alias=model_selector if alias is not None else None,
+        )
+
+    if split is not None and (implementation := _hosted_names(split[0])) is not None:
+        # A hosted provider named otherwise than its implementation. Reached by
+        # its name alone: an organization key for the implementation would send
+        # the request to another endpoint, so none is consulted, and the
+        # credential is the hosted rung's to resolve.
+        instance, model = split
+        provider = LLMProvider(implementation)
         return ResolvedProvider(
             instance=instance,
             provider=provider,
@@ -945,6 +992,10 @@ class MissingCredential:
 
     @classmethod
     def from_error(cls, exc: MissingApiKeyError) -> "MissingCredential":
+        if isinstance(exc, ManagedCredentialUnsupportedError):
+            return ManagedCredentialUnsupported(
+                provider=exc.provider_name or "unknown", env_var=None, selectors=(exc.selector,), surface=exc.surface
+            )
         return cls(provider=exc.provider_name or "unknown", env_var=exc.env_var_name or None)
 
     def behind_alias(self, alias: str | None) -> "MissingCredential":
@@ -968,6 +1019,67 @@ class MissingCredential:
             f"Declare it under providers: in config.yml{declare}, store it on the Providers page, "
             "or add an organization provider key."
         )
+
+
+# What a managed-credential refusal names as the place the caller reached them through.
+MANAGED_SURFACE_ROUTING_POLICY = "a routing policy with fallbacks"
+MANAGED_SURFACE_BATCHES = "batches"
+
+
+def managed_credential_unsupported_detail(selectors: Sequence[str], surface: str) -> str:
+    """Why a model offered only on the deployment's managed credentials was refused on ``surface``."""
+    names = ", ".join(f"'{selector}'" for selector in sorted(set(selectors)))
+    verb = "is" if len(set(selectors)) == 1 else "are"
+    return (
+        f"{names} {verb} offered on this deployment's managed credentials only through Chat Completions, "
+        f"Messages and Responses with a single model, not through {surface}. "
+        "Use one of those, or add your own provider key."
+    )
+
+
+class ManagedCredentialUnsupportedError(MissingApiKeyError):
+    """Nothing declared serves a candidate the deployment offers only on its managed credentials.
+
+    A ``MissingApiKeyError``, so every path that skips or refuses a candidate
+    missing a key treats this one alike, while :func:`missing_credential` reads
+    it as :class:`ManagedCredentialUnsupported`. ``selector`` is the name the
+    caller wrote (an alias or a policy), never the target behind it.
+    """
+
+    def __init__(self, provider_name: str, *, selector: str, surface: str) -> None:
+        self.env_var_name = ""
+        self.selector = selector
+        self.surface = surface
+        AnyLLMError.__init__(
+            self, managed_credential_unsupported_detail([selector], surface), provider_name=provider_name
+        )
+
+
+@dataclass(frozen=True)
+class ManagedCredentialUnsupported(MissingCredential):
+    """A missing credential the deployment would have supplied, on a path its managed credentials do not serve."""
+
+    selectors: tuple[str, ...] = ()
+    surface: str = ""
+    code: ClassVar[str] = MANAGED_CREDENTIAL_UNSUPPORTED
+
+    @property
+    def detail(self) -> str:
+        return managed_credential_unsupported_detail(self.selectors, self.surface)
+
+
+def shared_managed_refusal(missing: Sequence[MissingCredential]) -> ManagedCredentialUnsupported | None:
+    """The refusal for candidates that all lacked a credential, when any was offered only on managed credentials.
+
+    Named ahead of the others, because declaring a provider the deployment serves
+    on its own credentials is not the remedy for those. Each name the caller
+    wrote is named once, however many of its candidates were managed.
+    """
+    managed = [entry for entry in missing if isinstance(entry, ManagedCredentialUnsupported)]
+    if not managed:
+        return None
+    selectors = tuple(sorted({selector for entry in managed for selector in entry.selectors}))
+    return replace(managed[0], selectors=selectors)
 
 
 def missing_credential(exc: BaseException) -> MissingCredential | None:

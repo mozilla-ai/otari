@@ -1086,7 +1086,17 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     })
     renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
+    const row = (await screen.findByText("gpt-5.6")).closest("tr")!
+    // The Activity log's columns: input and output apart, not one total.
+    expect(
+      screen.getByRole("columnheader", { name: "Input" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("columnheader", { name: "Output" }),
+    ).toBeInTheDocument()
+    expect(within(row).getByText("10")).toBeInTheDocument()
+    expect(within(row).getByText("5")).toBeInTheDocument()
+    expect(within(row).queryByText("15")).not.toBeInTheDocument()
     // Activity serves this caller from the same scoped surface, so the preview
     // may hand them off to it.
     expect(screen.getByRole("link", { name: /view all/i })).toHaveAttribute(

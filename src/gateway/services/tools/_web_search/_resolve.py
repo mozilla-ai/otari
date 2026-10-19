@@ -46,6 +46,7 @@ import any_fetch
 import any_search
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
+    BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
     PROVIDER_DEFAULT_OPTIONS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
@@ -79,6 +80,7 @@ from gateway.models.tools import (
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
+from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, gateway_tool_pricing_key
 
 # What runs a resolved call: one of the libraries, or the old code, which in
 # the loop is the old backend and on the direct endpoint the old SearXNG client
@@ -91,13 +93,9 @@ Runner = Literal["library", "old"]
 DIRECT_TIMEOUT_S = 30.0
 IN_LOOP_TIMEOUT_S = 15.0
 
-# The rows that price any backend of each tool (design L), under the key the
-# pricing service gives a gateway-run tool. Spelled out here rather than imported,
-# since the pricing modules import this package.
-_SEARCH_FALLBACK_RATE = f"otari:{WEB_SEARCH_TOOL_NAME}"
-_FETCH_FALLBACK_RATE = f"otari:{WEB_FETCH_TOOL_NAME}"
-# The label of a call an organization key serves, before the provider: never a pricing row.
-_ORG_LABEL_PREFIX = "org"
+# The rows that price any backend of each tool (design L).
+_SEARCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_SEARCH_TOOL_NAME)
+_FETCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_FETCH_TOOL_NAME)
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
 
 
@@ -215,6 +213,11 @@ def resolve_fetch(
         if (on_key := _fetch_on_credential(policy.fetch_credential)) is not None:
             return on_key
     return _fetch_on_instance(instances.get(configured_fetch_default(config)) or instances[BUILTIN_FETCH])
+
+
+def builtin_fetch_resolved() -> ResolvedFetch:
+    """``builtin_fetch`` as :func:`resolve_fetch` answers it, for code that holds no config."""
+    return _fetch_on_instance(BUILTIN_FETCH_INSTANCE)
 
 
 def _fetch_instances(config: ToolSettings) -> dict[str, ToolInstance]:
@@ -463,7 +466,7 @@ def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[s
     """
     if credential.source == WebToolCredentialSource.HYBRID:
         return None, ()
-    return f"{_ORG_LABEL_PREFIX}:{credential.provider}", (fallback,)
+    return f"{ORGANIZATION_KEY_LABEL_PREFIX}{credential.provider}", (fallback,)
 
 
 def _layered(

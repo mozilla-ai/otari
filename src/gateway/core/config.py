@@ -314,6 +314,39 @@ def _is_keyless(provider_type: str) -> bool:
     return provider_type in KEYLESS_SELF_HOSTED_PROVIDERS or provider_credential_env_names(provider_type) == ()
 
 
+def hosted_provider_name_problem(name: str, provider: str) -> str | None:
+    """Why ``name`` cannot name a hosted provider served by ``provider``, or None when it can.
+
+    The implementation's own name always may. Any other is the prefix of a
+    ``name:model`` selector, so it cannot hold the separators a selector splits
+    on, and it follows the instance-name rules. Another implementation's name
+    is refused, because a request for ``anthropic:...`` must not reach an
+    OpenAI endpoint.
+    """
+    if name == provider:
+        return None
+    if not name or name != name.strip():
+        return "must not be blank or carry surrounding spaces"
+    if len(name) > 64:
+        return "must be at most 64 characters"
+    if ":" in name or "/" in name:
+        return "must not contain ':' or '/'"
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        return "is reserved"
+    if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
+        return "names another provider"
+    return None
+
+
+def hosted_key_optional(provider_type: str, api_base: str | None) -> bool:
+    """Whether a hosted provider may be configured without a key.
+
+    A keyless backend needs none, and neither does a custom endpoint, which is
+    called with the placeholder key a keyless ``providers:`` instance is.
+    """
+    return _is_keyless(provider_type) or bool(api_base and api_base.strip())
+
+
 def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     """Environment variables any-llm reads for a provider's credential.
 
@@ -2079,8 +2112,9 @@ class GatewayConfig(
         On top of the shape ``hosted_provider_entries`` checks, an entry for a
         provider that needs a key must carry one: unlike a ``providers:``
         instance, a hosted provider is served on its own credential and never
-        on the provider's environment variable. A keyless self-hosted backend
-        may leave it out. The restriction's organization cannot be checked
+        on the provider's environment variable. A keyless self-hosted backend,
+        or an entry pointing at its own ``api_base``, may leave it out. The
+        restriction's organization cannot be checked
         here, before the database is reachable; boot logs one that names
         nothing.
         """
@@ -2090,15 +2124,18 @@ class GatewayConfig(
                 "hosted_providers is ignored in hybrid mode: a hybrid gateway is served the credentials otari.ai "
                 "resolves for it, and has no hosted providers of its own."
             )
-        for provider, entry in entries.items():
-            if entry.api_key is None and not _is_keyless(provider):
+        for name, entry in entries.items():
+            if (problem := hosted_provider_name_problem(name, entry.provider)) is not None:
+                msg = f"hosted_providers.{name}: the name {problem}."
+                raise ValueError(msg)
+            if entry.api_key is None and not hosted_key_optional(entry.provider, entry.api_base):
                 msg = (
-                    f"hosted_providers.{provider}.api_key is required: {provider} needs a key. "
+                    f"hosted_providers.{name}.api_key is required: {entry.provider} needs a key. "
                     "Reference it as ${VAR} rather than writing it into the file."
                 )
                 raise ValueError(msg)
-            if provider == LLMProvider.BEDROCK.value:
-                _validate_bedrock_client_config(provider, entry.client_args, block="hosted_providers")
+            if entry.provider == LLMProvider.BEDROCK.value:
+                _validate_bedrock_client_config(name, entry.client_args, block="hosted_providers")
 
     def _warn_on_uncredentialed_bare_entry(self, instance: str) -> None:
         """Warn when a settings-less entry names a provider that needs a credential.

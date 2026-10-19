@@ -18,6 +18,15 @@ import { KpiCell } from "@/design-system/metrics/KpiCell"
 import { KpiStrip } from "@/design-system/metrics/KpiStrip"
 import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { TrendChip } from "@/design-system/metrics/TrendChip"
+import {
+  API_KEY_COLUMN,
+  COST_COLUMN,
+  INPUT_TOKENS_COLUMN,
+  MODEL_COLUMN,
+  OUTPUT_TOKENS_COLUMN,
+  STATUS_COLUMN,
+  TIME_COLUMN,
+} from "@/features/activity/requestColumns"
 import { scopeLabel } from "@/features/budgets/organizationBudget"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
@@ -45,7 +54,6 @@ import {
   deltaFraction,
   formatNumber,
   formatPct,
-  formatRelative,
   formatUsd,
 } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -1315,41 +1323,20 @@ function shortDate(bucket: string | undefined): string {
     : d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
-// "absorbed" is kept verbatim rather than folded into "ok": it is an attempt a
-// routing policy recovered from, so calling it "ok" would present a failed attempt
-// as a served request, and this preview is unfiltered so those rows do appear here.
-// It is still not an error, which is why it does not read as one.
-function statusWord(status: string): string {
-  if (status === "error") return "error"
-  return status === "absorbed" ? "absorbed" : "ok"
-}
-
-/**
- * Status as a family on a square dot plus a severity in text, never as a fill.
- * The dot says which family (served, failed, recovered) and the word says what
- * happened, so neither hue alone nor shape alone has to carry it.
- */
-function StatusMark({ status }: { status: string }) {
-  const word = statusWord(status)
-  const dot =
-    word === "error"
-      ? "bg-danger"
-      : word === "absorbed"
-        ? "bg-text-subtle"
-        : "bg-success"
-  const text = word === "error" ? "text-danger" : "text-muted"
-  return (
-    <span className={`flex items-center gap-2 text-mono-caption ${text}`}>
-      <Dot className={dot} />
-      {word.toUpperCase()}
-    </span>
-  )
-}
+// The Activity log's own columns, so the preview reads as that log a few rows
+// long.
+const RECENT_COLUMNS: DataTableColumn<UsageEntry>[] = [
+  TIME_COLUMN,
+  MODEL_COLUMN,
+  API_KEY_COLUMN,
+  INPUT_TOKENS_COLUMN,
+  OUTPUT_TOKENS_COLUMN,
+  COST_COLUMN,
+  STATUS_COLUMN,
+]
 
 // Newest few requests, as an at-a-glance preview. Rows are read-only; a single
-// "View all" link opens the full Activity log. Cost and tokens are nullable per
-// row, and a failed request has neither, which reads as an em dash rather than
-// as a zero it did not spend.
+// "View all" link opens the full Activity log.
 function RecentActivity({
   entries,
   loading,
@@ -1359,63 +1346,6 @@ function RecentActivity({
   loading: boolean
   error: unknown
 }) {
-  const columns: DataTableColumn<UsageEntry>[] = [
-    {
-      id: "time",
-      header: "Time",
-      cell: (entry) => (
-        <span
-          className="text-mono-caption text-muted"
-          title={new Date(entry.timestamp).toLocaleString()}
-        >
-          {formatRelative(entry.timestamp)}
-        </span>
-      ),
-    },
-    {
-      id: "model",
-      header: "Model",
-      isRowHeader: true,
-      cell: (entry) => (
-        <span className="text-mono-caption text-foreground">{entry.model}</span>
-      ),
-    },
-    {
-      id: "key",
-      header: "Key",
-      cell: (entry) => (
-        <span className="text-mono-caption text-muted">
-          {entry.api_key_name ?? "—"}
-        </span>
-      ),
-    },
-    {
-      id: "tokens",
-      header: "Tokens",
-      align: "end",
-      cell: (entry) => (
-        <span className="text-mono-caption tabular-nums">
-          {entry.total_tokens === null ? "—" : formatNumber(entry.total_tokens)}
-        </span>
-      ),
-    },
-    {
-      id: "cost",
-      header: "Cost",
-      align: "end",
-      cell: (entry) => (
-        <span className="text-mono-caption tabular-nums">
-          {entry.cost === null ? "—" : formatUsd(entry.cost)}
-        </span>
-      ),
-    },
-    {
-      id: "status",
-      header: "Status",
-      cell: (entry) => <StatusMark status={entry.status} />,
-    },
-  ]
-
   return (
     <section className="flex flex-col pt-6 lg:pr-6">
       <div className="flex items-baseline justify-between pb-3">
@@ -1428,13 +1358,12 @@ function RecentActivity({
         </Link>
       </div>
       <ErrorBanner error={error} />
-      {/* The lane widths and the row pitch are in globals.css, keyed on the
-          column ids below: they have to reach `.table__column`, which is
-          HeroUI's DOM and not addressable from here. */}
+      {/* The lane widths and the row pitch are in globals.css, shared with
+          the Activity log and keyed on the column ids. */}
       <div className="otari-overview-activity">
         <DataTable
           ariaLabel="Recent activity"
-          columns={columns}
+          columns={RECENT_COLUMNS}
           rows={entries}
           getRowKey={(entry) => entry.id}
           isLoading={loading}

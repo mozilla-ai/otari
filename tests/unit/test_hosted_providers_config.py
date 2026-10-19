@@ -85,14 +85,40 @@ def test_an_unknown_implementation_is_refused() -> None:
         _validated({"not-a-provider": {"api_key": KEY}})
 
 
-def test_a_provider_type_is_refused_because_named_instances_stay_in_providers() -> None:
+def test_a_named_entry_names_its_implementation_in_provider() -> None:
+    entry = _validated({"openai-eu": {"provider": "openai", "api_key": KEY}}).hosted_provider_entries()["openai-eu"]
+
+    assert (entry.name, entry.provider) == ("openai-eu", "openai")
+
+
+def test_a_named_entry_naming_no_implementation_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"hosted_providers\.openai-eu\.provider is not an any-llm implementation"):
+        _validated({"openai-eu": {"provider": "not-a-provider", "api_key": KEY}})
+
+
+@pytest.mark.parametrize(
+    ("name", "problem"),
+    [("anthropic", "names another provider"), ("hosted", "is reserved"), ("eu/openai", "must not contain")],
+)
+def test_a_name_a_selector_could_not_address_is_refused(name: str, problem: str) -> None:
+    with pytest.raises(ValueError, match=rf"hosted_providers\.{name}: the name {problem}"):
+        _validated({name: {"provider": "openai", "api_key": KEY}})
+
+
+def test_a_provider_type_is_refused_because_the_implementation_goes_in_provider() -> None:
     with pytest.raises(ValueError, match=r"hosted_providers\.openai\.provider_type is not accepted"):
         _validated({"openai": {"api_key": KEY, "provider_type": "openai"}})
 
 
 def test_a_keyed_provider_without_a_key_is_refused() -> None:
     with pytest.raises(ValueError, match=r"hosted_providers\.openai\.api_key is required"):
-        _validated({"openai": {"api_base": "https://hosted.test/v1"}})
+        _validated({"openai": {"enabled": True}})
+
+
+def test_a_keyed_provider_on_an_endpoint_of_its_own_may_leave_the_key_out() -> None:
+    entry = _validated({"openai": {"api_base": "https://hosted.test/v1"}}).hosted_provider_entries()["openai"]
+
+    assert entry.api_key is None
 
 
 def test_a_bare_keyed_entry_is_refused() -> None:
@@ -203,7 +229,7 @@ def test_the_whole_block_is_settable_as_json_in_the_environment(
 
 
 def test_the_environment_block_is_validated_at_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OTARI_HOSTED_PROVIDERS", json.dumps({"openai": {"api_base": "https://hosted.test/v1"}}))
+    monkeypatch.setenv("OTARI_HOSTED_PROVIDERS", json.dumps({"openai": {"enabled": True}}))
 
     with pytest.raises(ValueError, match=r"hosted_providers\.openai\.api_key is required"):
         _load(tmp_path, "")

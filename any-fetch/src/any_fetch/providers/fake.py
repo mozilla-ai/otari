@@ -55,6 +55,8 @@ class FakeProvider(AnyFetch):
         tier="test",
         max_urls_per_call=1,
         renders_javascript=False,
+        # Its final_url option stands in for a redirect.
+        reports_final_url=True,
         formats=["text"],
         options=[
             OptionSpec(name="text", type="string", description="The page text. Canned text when unset."),

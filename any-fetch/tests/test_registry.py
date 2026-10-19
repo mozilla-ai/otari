@@ -49,6 +49,14 @@ def test_supported_providers() -> None:
     assert AnyFetch.get_supported_providers() == ["builtin", "exa", "fake", "tabstack"]
 
 
+def test_only_a_fetcher_that_follows_redirects_itself_reports_the_final_url() -> None:
+    """Exa and Tabstack answer with the URL as asked even after a redirect, so a caller cannot check where it led."""
+    reported = {
+        name: AnyFetch.get_provider_metadata(name).reports_final_url for name in AnyFetch.get_supported_providers()
+    }
+    assert reported == {"builtin": True, "exa": False, "fake": True, "tabstack": False}
+
+
 def test_provider_class_and_metadata() -> None:
     assert AnyFetch.get_provider_class("fake") is FakeProvider
     assert AnyFetch.get_provider_class("builtin") is BuiltinProvider

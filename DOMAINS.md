@@ -235,8 +235,6 @@ the hook evaluates in process and never calls this route.
 
 Usage rows, the usage log writer, OTLP ingest and coding-agent telemetry.
 
-It also owns the route helper `api/routes/_billing_schemas.py`.
-
 ### traces
 
 Agent traces: one agent session, its turns, and the spans inside them (each

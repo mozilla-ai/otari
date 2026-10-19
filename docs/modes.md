@@ -108,8 +108,16 @@ the organization's own provider key serves the request. Where that is missing
 too, one of the deployment's **hosted providers** does.
 
 A hosted provider is a credential the deployment's operator configures for the
-deployment to serve requests on: one per provider, with a roster of the models
-offered on it and the rate each is charged at on the deployment price list.
+deployment to serve requests on, under a name that defaults to its provider
+(a name of its own, such as `openai-eu`, lets two endpoints of one provider
+be served side by side), with a roster of the models offered on it and the rate
+each is charged at on the deployment price list. A hosted provider named after its
+provider is reached by a bare `provider:model` request once neither a
+`providers:` instance nor the organization's own key answers. One with a name
+of its own is reached only by that name (`openai-eu:gpt-4o`): an organization's
+key for the provider never serves it, because that key belongs to another
+endpoint. A request whose workspace belongs to no organization is served only
+on a hosted provider restricted to no organization.
 Only a model switched on in that roster is served on the hosted credential: a
 model switched off, or one the roster does not list, is refused with `424`. The
 deployment settles the upstream bill for a hosted model, which is why its rate
@@ -176,7 +184,12 @@ charged.
 
 Today this covers Chat Completions, Messages, Responses and the Playground for a
 plain model or a single-target alias or policy. A routing policy with fallback
-candidates and the pass-through endpoints never reach `ModelProviderPort`.
+candidates, the pass-through endpoints (embeddings, images, audio, rerank,
+moderations) and batches never serve on a deployment-owned credential. A model
+the deployment offers the organization only that way is refused there with `424`
+(`managed_credential_unsupported`) rather than `provider_not_configured`, before
+anything is sent upstream. A routing policy skips such a candidate as it skips
+one with no credential, and answers with that code only when no candidate served.
 
 ## Internal protocol
 

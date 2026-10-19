@@ -94,9 +94,13 @@ def _chat(messages: list[Any]) -> TurnFacts:
 
 def _messages(messages: list[Any]) -> TurnFacts:
     items = _dicts(messages)
-    if not items or items[-1].get("role") != "user":
+    # A mid-conversation system message is the harness's context, not the user's input, so the input is under it.
+    last = len(items) - 1
+    while last >= 0 and items[last].get("role") == "system":
+        last -= 1
+    if last < 0 or items[last].get("role") != "user":
         return TurnFacts(opens_turn=False)
-    content = items[-1].get("content")
+    content = items[last].get("content")
     if isinstance(content, str):
         return TurnFacts(opens_turn=True)
     blocks = _dicts(content)
@@ -114,7 +118,7 @@ def _messages(messages: list[Any]) -> TurnFacts:
             call_id=block["tool_use_id"],
             name=names.get(block["tool_use_id"]),
             is_error=bool(block.get("is_error")),
-            position=len(items) - 1,
+            position=last,
         )
         for block in results
         if isinstance(block.get("tool_use_id"), str)

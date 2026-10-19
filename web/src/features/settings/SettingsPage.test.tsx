@@ -273,6 +273,15 @@ function mockApi(
       if (url.includes(`${API_ROOT}/provider-credentials`)) {
         return jsonResponse(storedList)
       }
+      if (
+        url.includes(`${API_ROOT}/hosted-providers/reencrypt`) &&
+        method === "POST"
+      ) {
+        return jsonResponse({ reencrypted: 0, skipped: 0, unreadable: 0 })
+      }
+      if (url.includes(`${API_ROOT}/hosted-providers`)) {
+        return jsonResponse({ data: [], count: 0 })
+      }
       // Ahead of the /v1/settings branch below, which would otherwise answer
       // the mail card's request with the whole settings payload.
       if (url.includes(`${API_ROOT}/settings/mail`)) {
@@ -489,6 +498,38 @@ describe("SettingsPage", () => {
     expect(
       await screen.findByText(/Re-encrypted 1 provider key/),
     ).toBeInTheDocument()
+    // The hosted providers hold keys under the same secret, so one press covers both.
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith(`${API_ROOT}/hosted-providers/reencrypt`) &&
+          (init?.method ?? "") === "POST",
+      ),
+    ).toBe(true)
+  })
+
+  it("does not report the rotation complete while the hosted provider keys failed to re-encrypt", async () => {
+    const fetchMock = mockApi(SETTINGS, [storedProvider("openai", "1234")])
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes(`${API_ROOT}/hosted-providers/reencrypt`)) {
+        return new Response(JSON.stringify({ detail: "boom" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+    const user = userEvent.setup()
+
+    renderWithClient(<SettingsPage />)
+    await screen.findByText("Credential security")
+    await user.click(
+      screen.getByRole("button", { name: "Re-encrypt provider keys" }),
+    )
+
+    expect(await screen.findByText("boom")).toBeInTheDocument()
+    expect(screen.queryByText(/Re-encrypted \d+ provider key/)).toBeNull()
   })
 
   it("shows unreadable provider key recovery guidance in the Credential security category", async () => {

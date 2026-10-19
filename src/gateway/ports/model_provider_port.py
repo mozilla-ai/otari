@@ -24,6 +24,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+NO_ORGANIZATION = uuid.UUID(int=0)
+"""An organization no hosted-provider restriction names.
+
+Asked for a caller acting for no organization that is still to be served,
+which may be served only on what is restricted to no organization. ``None``
+asks for the deployment's own view instead, which sees every provider.
+"""
+
 HostedModels = Mapping[str, frozenset[str] | None]
 """The hosted providers a caller may use, each with the models the deployment advertises on it.
 
@@ -55,6 +63,14 @@ class HostedCredential:
     # What the upstream SDK client needs beyond the key (Bedrock's region and
     # IAM pair), in the shape a ``config.yml`` instance's ``client_args`` takes.
     client_args: Mapping[str, Any] | None = None
+    # The any-llm implementation serving ``response_provider``, where that is a
+    # name of the deployment's own (``openai-eu``) rather than an implementation.
+    implementation: str | None = None
+
+    @property
+    def upstream(self) -> str:
+        """The any-llm implementation a dispatch builds its client for."""
+        return self.implementation or self.response_provider
 
 
 class HostedAccessDeniedError(Exception):

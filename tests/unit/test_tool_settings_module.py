@@ -371,6 +371,16 @@ def test_a_fetch_entry_named_like_a_stored_search_tool_is_left_out(caplog: pytes
     )
 
 
+def test_the_fetch_providers_are_the_fetch_instances_own_builtin_included() -> None:
+    """The prefixes of the fetch instances' rate keys, which the configuration's prices may use."""
+    assert GatewayConfig().fetch_tool_providers() == {"builtin"}
+    config = GatewayConfig(
+        fetch_tools={"tabstack": {"provider": "tabstack", "api_key": "k"}, "exa-fetch": {"provider": "exa"}},
+        search_tools={"exa": _EXA},
+    )
+    assert config.fetch_tool_providers() == {"builtin", "tabstack", "exa"}
+
+
 def test_a_search_entry_named_builtin_fetch_loads_beside_the_implicit_instance(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

@@ -99,24 +99,11 @@ export function useDeleteBudget() {
 // above rather than a view over them: each row carries its own counters, so one
 // row is a pooled cap over whatever its scope names. See `client/index.ts`.
 //
-const fetchAllScopedBudgets = () =>
-  fetchAllRows<ScopedBudget>("/scoped-budgets")
-
-// Gated for the same reason as `useBudgets` above.
-export function useScopedBudgets(enabled = true) {
-  return useQuery({
-    queryKey: [SCOPED_BUDGETS],
-    queryFn: fetchAllScopedBudgets,
-    staleTime: 60_000,
-    enabled,
-  })
-}
-
 // The ceiling on one API key's own spend across every provider, or undefined
 // when it has none. Other ceilings can cap the same requests (its owner's
 // budget, its workspace's), so this is the key's own allowance and not the one
-// that binds. Gated like the list above, and keyed under it so a write to any
-// ceiling refreshes it.
+// that binds. Gated like `useBudgets` above, and keyed under `SCOPED_BUDGETS`
+// so a write to any ceiling refreshes it.
 export function useApiKeyCeiling(keyId: string, enabled = true) {
   return useQuery({
     queryKey: [SCOPED_BUDGETS, "api_token", keyId],
@@ -222,7 +209,7 @@ export function useDeleteScopedBudget() {
 // ---------------------------------------------------------------------------
 // The organization's own budgets and spend ceilings
 //
-// The tenant-scoped counterpart to `useBudgets` / `useScopedBudgets` above,
+// The tenant-scoped counterpart to the budgets and scoped-budget hooks above,
 // which read `/budgets` and `/scoped-budgets` and have answered 403 to
 // anyone who does not operate the deployment since #821. These read the
 // caller's own organization instead, and are owner-or-admin on both halves:

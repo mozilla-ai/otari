@@ -34,6 +34,9 @@ def test_the_surface_lists_are_spelled_out() -> None:
         # Keyed on the organization on either edition, so neither withholds it.
         "organization_guardrails",
         "organization_providers",
+        # Where the organization is narrower than the deployment, which a
+        # standalone deployment serving several of them is too.
+        "organization_usage",
         "organizations",
         "playground",
         "pricing",
