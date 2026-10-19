@@ -17,11 +17,15 @@ import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
+  useHostedProviders,
+  useReencryptHostedProviders,
+} from "@/shared/api/hostedProviders"
+import {
   useReencryptProviderCredentials,
   useStoredProviders,
 } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -518,14 +522,33 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
 }
 
 function SecretKeyRow() {
+  const hostsHosted = useSurfaces()("hosted_providers")
   const storedProviders = useStoredProviders()
+  const hostedProviders = useHostedProviders(hostsHosted)
   const reencrypt = useReencryptProviderCredentials()
-  const result = reencrypt.data
-  const storedCount = storedProviders.data?.length ?? 0
-  const unreadableCount = (storedProviders.data ?? []).filter(
-    (provider) => !provider.decryptable,
-  ).length
+  const reencryptHosted = useReencryptHostedProviders()
+  // Both stores hold keys under OTARI_SECRET_KEY: the deployment providers
+  // stored through the dashboard and the hosted providers. A configured
+  // hosted provider holds no ciphertext, so only stored ones count.
+  const storedHosted = (hostedProviders.data?.data ?? []).filter(
+    (provider) => provider.source === "database",
+  )
+  const storedCount = (storedProviders.data?.length ?? 0) + storedHosted.length
+  const unreadableCount =
+    (storedProviders.data ?? []).filter((provider) => !provider.decryptable)
+      .length + storedHosted.filter((provider) => !provider.decryptable).length
   const hasStoredKeys = storedCount > 0
+  const isPending = reencrypt.isPending || reencryptHosted.isPending
+  const results = [reencrypt.data, reencryptHosted.data].filter(
+    (result) => result !== undefined,
+  )
+  const result =
+    results.length > 0 && !isPending
+      ? {
+          reencrypted: results.reduce((sum, r) => sum + r.reencrypted, 0),
+          unreadable: results.reduce((sum, r) => sum + r.unreadable, 0),
+        }
+      : undefined
 
   return (
     <div className="flex flex-col gap-4 py-4">
@@ -547,16 +570,24 @@ function SecretKeyRow() {
           <Button
             size="sm"
             variant="ghost"
-            isDisabled={!hasStoredKeys || reencrypt.isPending}
-            onPress={() => reencrypt.mutate()}
+            isDisabled={!hasStoredKeys || isPending}
+            onPress={() => {
+              reencrypt.mutate()
+              if (hostsHosted) reencryptHosted.mutate()
+            }}
           >
-            {reencrypt.isPending
-              ? "Re-encrypting…"
-              : "Re-encrypt provider keys"}
+            {isPending ? "Re-encrypting…" : "Re-encrypt provider keys"}
           </Button>
         </div>
       </div>
-      <ErrorBanner error={storedProviders.error ?? reencrypt.error} />
+      <ErrorBanner
+        error={
+          storedProviders.error ??
+          hostedProviders.error ??
+          reencrypt.error ??
+          reencryptHosted.error
+        }
+      />
       {unreadableCount > 0 ? (
         <InfoBanner tone="warning">
           {unreadableCount} stored provider key
