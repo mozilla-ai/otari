@@ -73,6 +73,7 @@ def _trace(session: Session, workspace_id: uuid.UUID, trace_id: str, *, failed: 
             step_count=2,
             span_count=5,
             error_count=1 if failed else 0,
+            failing_error_count=1 if failed else 0,
             cost_snapshot=Decimal("0.02"),
         )
     )
