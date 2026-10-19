@@ -3,7 +3,7 @@
 import uuid
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.ports.model_provider_port import NO_ORGANIZATION
+from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedCredential, HostedModels, ModelProviderPort
 from gateway.repositories.providers import HostedProviderModelRepository
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_sources import HostedSources
@@ -17,6 +17,28 @@ def organization_to_serve(organization_id: uuid.UUID | None) -> uuid.UUID:
     names; billing then has no organization to charge, and charges none.
     """
     return organization_id if organization_id is not None else NO_ORGANIZATION
+
+
+async def hosted_models_for(port: ModelProviderPort, *, organization_id: uuid.UUID | None) -> HostedModels:
+    """What the port advertises to a request's organization, a request with no organization included."""
+    return await port.get_hosted_models(organization_id=organization_to_serve(organization_id))
+
+
+async def hosted_credential_for(
+    port: ModelProviderPort,
+    *,
+    organization_id: uuid.UUID | None,
+    workspace_id: uuid.UUID | None,
+    provider: str,
+    model: str | None,
+) -> HostedCredential | None:
+    """The deployment-owned credential the port resolves for a request, a request with no organization included."""
+    return await port.resolve_hosted_credential(
+        organization_id=organization_to_serve(organization_id),
+        workspace_id=workspace_id,
+        provider=provider,
+        model=model,
+    )
 
 
 class HostedProviderRuntime:

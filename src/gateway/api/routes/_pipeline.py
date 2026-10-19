@@ -273,7 +273,7 @@ from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import (
     key_model_refusal,
     model_not_allowed_detail,
-    org_model_refusal,
+    organization_key_refusal,
     resolve_request_allowlist,
     unresolvable_model_detail,
     unresolved_model_refusal,
@@ -298,14 +298,14 @@ from gateway.services.provider_kwargs import (
     keyless_placeholder_api_key,
     missing_credential,
     provider_key,
-    reaches_organization_key,
     require_declared_credential,
     resolve_provider_selector,
     with_failover_retries,
 )
 from gateway.services.providers import (
+    hosted_credential_for,
+    hosted_models_for,
     managed_only_candidates,
-    organization_to_serve,
     owned_endpoint_http_client,
     refuse_managed_candidate,
     unpriced_model_refusal,
@@ -1552,7 +1552,7 @@ async def _prepare_for_dispatch(
                 ctx.config,
                 ctx.plan.attempts,
                 hosted=lambda: port,
-                organization_id=organization_to_serve(ctx.organization_id),
+                organization_id=ctx.organization_id,
             )
         except asyncio.CancelledError:
             await release_reservation(ctx)
@@ -1588,7 +1588,7 @@ async def _refuse_if_hosted_model_switched_off(
     provider exists.
     """
     try:
-        served = await port.get_hosted_models(organization_id=organization_to_serve(ctx.organization_id))
+        served = await hosted_models_for(port, organization_id=ctx.organization_id)
     except Exception:
         # Best effort: the request then fails as it would have without this check.
         logger.warning("Could not list hosted models for %s:%s", resolved.instance, resolved.model)
@@ -1886,8 +1886,9 @@ async def _serve_from_hosted_credential(
         return resolved
     lookup = hosted_lookup(resolved.provider)
     try:
-        credential = await port.resolve_hosted_credential(
-            organization_id=organization_to_serve(ctx.organization_id),
+        credential = await hosted_credential_for(
+            port,
+            organization_id=ctx.organization_id,
             workspace_id=ctx.workspace_id,
             # The instance rather than the implementation: that is the name
             # pricing, budgets and usage key on, and for a bare selector it is
@@ -1984,7 +1985,7 @@ async def _serve_from_hosted_credential(
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
 
     try:
-        upstream = LLMProvider(credential.implementation or credential.response_provider)
+        upstream = LLMProvider(credential.upstream)
     except ValueError as exc:
         # The adapter named an upstream any-llm does not implement, so nothing
         # can be dispatched. That is a defect in this build rather than caller
@@ -2810,19 +2811,16 @@ async def resolve_request_context(
 
         # Organization-scoped model restriction (otari#643): the org key
         # resolved for this workspace+provider may narrow which models it
-        # serves. Applies only to a selector that can reach an organization
-        # key (`provider_kwargs.reaches_organization_key`); a configured
-        # instance or a named hosted provider never does, so it is never
-        # subject to this restriction either.
+        # serves. The caller's own endpoint never reaches one.
         if (
-            workspace_id is not None
-            and gate_instance is not None
+            gate_instance is not None
             and gate_impl is not None
-            and reaches_organization_key(config, gate_instance)
             and (resolved_provider is None or resolved_provider.owned_endpoint is None)
         ):
-            refusal = org_model_refusal(
+            refusal = organization_key_refusal(
+                config,
                 workspace_id,
+                gate_instance,
                 gate_impl.value,
                 gate_model,
                 selector=model,
@@ -3000,7 +2998,7 @@ async def resolve_request_context(
                 resolved_provider,
                 plan=plan,
                 hosted=model_provider,
-                organization_id=organization_to_serve(organization_id),
+                organization_id=organization_id,
             )
             # Record the rejection after the refund, so an operator who flipped
             # require_pricing on can see that live traffic is being dropped.

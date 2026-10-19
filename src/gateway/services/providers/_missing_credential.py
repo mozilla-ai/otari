@@ -18,6 +18,7 @@ from gateway.services.provider_kwargs import (
     MissingCredential,
     missing_declared_credential,
 )
+from gateway.services.providers._hosted_runtime import organization_to_serve
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -48,8 +49,9 @@ async def missing_provider_credential(
     missing = missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs)
     if missing is None:
         return None
-    if hosted is not None and organization_id is not None:
-        if resolved.instance in await hosted.get_hosted_models(organization_id=organization_id):
+    if hosted is not None:
+        offered = await hosted.get_hosted_models(organization_id=organization_to_serve(organization_id))
+        if resolved.instance in offered:
             return None
     return missing.behind_alias(resolved.alias)
 
@@ -84,8 +86,6 @@ async def managed_only_candidates(
     which may meter a credential that would not serve. A failure to list
     answers nothing, leaving the ordinary refusal.
     """
-    if organization_id is None:
-        return frozenset()
     uncredentialed = [
         candidate
         for candidate in candidates
@@ -94,7 +94,7 @@ async def managed_only_candidates(
     if not uncredentialed:
         return frozenset()
     try:
-        offered = await hosted().get_hosted_models(organization_id=organization_id)
+        offered = await hosted().get_hosted_models(organization_id=organization_to_serve(organization_id))
     except Exception:
         logger.warning("Could not list hosted models to classify uncredentialed candidates")
         return frozenset()

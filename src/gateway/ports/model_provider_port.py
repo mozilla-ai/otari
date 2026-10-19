@@ -67,6 +67,11 @@ class HostedCredential:
     # name of the deployment's own (``openai-eu``) rather than an implementation.
     implementation: str | None = None
 
+    @property
+    def upstream(self) -> str:
+        """The any-llm implementation a dispatch builds its client for."""
+        return self.implementation or self.response_provider
+
 
 class HostedAccessDeniedError(Exception):
     """Raised when an organization may not use the upstream that would serve a candidate.
