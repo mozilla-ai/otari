@@ -350,6 +350,12 @@ class ProviderEndpointsPublic(SQLModel):
 class HostedProviderCreateRequest(SQLModel):
     """Configure a provider this deployment will serve hosted inference on.
 
+    ``provider`` is the any-llm implementation. ``name`` is what requests
+    address it by (``name:model``), defaulting to ``provider``; a name of its
+    own lets two endpoints of one implementation coexist. ``api_key`` may be
+    left out for a backend that needs none, or for an endpoint of its own
+    (``api_base``), which is called with a placeholder key.
+
     ``client_args`` is whatever the provider's SDK client needs beyond the key
     (Bedrock's region and IAM pair), the same shape an organization provider
     key takes. Values under credential-shaped names come back masked.
@@ -360,7 +366,8 @@ class HostedProviderCreateRequest(SQLModel):
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
 
     provider: str = Field(min_length=1, max_length=64)
-    api_key: str = Field(min_length=1, max_length=1024)
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
     enabled: bool = True
@@ -370,10 +377,12 @@ class HostedProviderCreateRequest(SQLModel):
 class HostedProviderUpdateRequest(SQLModel):
     """Rotate the key, repoint the base, or turn a provider off.
 
-    ``provider`` is immutable: changing it is a delete plus a create, because
-    the key belongs to the provider it was issued by. Omitting ``api_key``
-    leaves the stored credential untouched, so a toggle never re-sends a secret
-    the caller does not have. ``client_args`` omitted is left alone; an explicit
+    ``provider`` and ``name`` are immutable: changing either is a delete plus a
+    create, because the key belongs to the provider it was issued by and
+    requests address the name. Omitting ``api_key`` leaves the stored
+    credential untouched, so a toggle never re-sends a secret the caller does
+    not have; an explicit null removes it, where the provider can be served
+    without one. ``client_args`` omitted is left alone; an explicit
     null clears it, and an entry echoed back as the mask keeps the stored value.
     ``restricted_to_organization_id`` reads the same way: omitted keeps the
     restriction, null lifts it.
@@ -390,24 +399,31 @@ class HostedProviderUpdateRequest(SQLModel):
 
 
 class HostedProviderPublic(SQLModel):
-    """One hosted provider, named by its provider and the tail of its key.
+    """One hosted provider, known by its name, its implementation and the tail of its key.
 
     No shape in this section carries key material: a stored credential is
     known by its last four characters and nothing else, ``client_args`` goes
     out with credential-shaped values masked, and ``api_base`` with the
     password in its userinfo and its query values masked.
 
-    ``source`` says where the provider is defined. A ``config`` provider comes
-    from the ``hosted_providers:`` block, has no row and so no ``id`` or
-    timestamps, and is changed by editing the configuration rather than through
-    this API; its models are administered as a stored provider's are.
-    ``shadows_config`` marks a stored provider that wins over a configuration
-    entry of the same provider, which serves again once the row is deleted.
+    ``name`` is what requests address and every route takes; ``provider`` is
+    the any-llm implementation. ``source`` says where the provider is defined.
+    A ``config`` provider comes from the ``hosted_providers:`` block, has no
+    row and so no ``id`` or timestamps, and is changed by editing the
+    configuration rather than through this API; its models are administered as
+    a stored provider's are. ``shadows_config`` marks a stored provider that
+    wins over a configuration entry of the same name, which serves again once
+    the row is deleted. ``has_api_key`` is false for one stored without a key,
+    and ``decryptable`` false for one whose key or extras no configured
+    ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
     """
 
     id: uuid.UUID | None = None
+    name: str
     provider: str
     source: Literal["database", "config"] = "database"
+    has_api_key: bool = True
+    decryptable: bool = True
     api_key_last4: str | None = None
     api_base: str | None = None
     client_args: dict[str, Any] | None = None
@@ -424,19 +440,23 @@ class HostedProviderPublic(SQLModel):
         *,
         client_args: dict[str, Any] | None,
         api_base: str | None,
+        decryptable: bool,
         shadows_config: bool = False,
     ) -> HostedProviderPublic:
         """Read one row for the API: no key, and the extras with credential-shaped values masked.
 
         ``client_args`` is passed in decrypted, because the row holds them
-        encrypted and the service is what reads them back. ``api_base`` is
-        passed in already masked, because the URL masking lives in the service
-        layer this one may not import.
+        encrypted and the service is what reads them back, and so is whether
+        they could be. ``api_base`` is passed in already masked, because the URL
+        masking lives in the service layer this one may not import.
         """
         return cls(
             id=row.id,
+            name=row.name,
             provider=row.provider,
             source="database",
+            has_api_key=row.encrypted_api_key is not None,
+            decryptable=decryptable,
             api_key_last4=row.api_key_last4,
             api_base=api_base,
             client_args=redact_secret_like_values(client_args),
@@ -451,8 +471,10 @@ class HostedProviderPublic(SQLModel):
     def from_config(
         cls,
         *,
+        name: str,
         provider: str,
         api_key_last4: str | None,
+        has_api_key: bool,
         api_base: str | None,
         client_args: dict[str, Any] | None,
         enabled: bool,
@@ -463,8 +485,10 @@ class HostedProviderPublic(SQLModel):
         ``api_base`` is passed in already masked, as for a row.
         """
         return cls(
+            name=name,
             provider=provider,
             source="config",
+            has_api_key=has_api_key,
             api_key_last4=api_key_last4,
             api_base=api_base,
             client_args=redact_secret_like_values(client_args),
@@ -478,6 +502,108 @@ class HostedProvidersPublic(SQLModel):
 
     data: list[HostedProviderPublic]
     count: int
+
+
+class HostedProviderTestRequest(SQLModel):
+    """Credentials to try against a provider without storing them.
+
+    The fields the create body takes. ``name`` naming an existing stored
+    provider lets a field left out fall back to what it stores, so an edit form
+    can test without re-entering the key; pointing the stored key at another
+    origin still needs the key typed again, as an update does.
+    """
+
+    model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
+
+    provider: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    api_base: str | None = Field(default=None, max_length=1024)
+    client_args: dict[str, Any] | None = None
+
+
+class HostedProviderTestPublic(SQLModel):
+    """What a connection test found: whether the provider answered, and how many models it lists.
+
+    ``discovery_unsupported`` is set for a provider with no model listing,
+    which a test cannot reach that way although it may still serve.
+    """
+
+    ok: bool
+    model_count: int = 0
+    error: str | None = None
+    discovery_unsupported: bool = False
+
+
+class HostedProvidersReencryptPublic(SQLModel):
+    """What re-encrypting the stored hosted provider credentials did.
+
+    ``unreadable`` counts providers no configured key reads, left as they were
+    to be re-entered; ``skipped`` those edited while the rotation ran, already
+    written under the primary key.
+    """
+
+    reencrypted: int
+    unreadable: int
+    skipped: int
+
+
+DeploymentProviderMigrationOutcome = Literal["migrate", "migrated", "conflict", "unreadable", "invalid", "failed"]
+
+
+class DeploymentProviderMigrationRowPublic(SQLModel):
+    """What moving one deployment provider onto a hosted provider does, or did.
+
+    ``instance`` is the deployment provider's name, which the hosted provider
+    keeps, so ``instance:model`` selectors keep working. ``outcome`` is
+    ``migrate`` in a preview and ``migrated`` once applied; ``conflict``,
+    ``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with
+    ``detail`` saying why. ``source_removed`` says whether the deployment
+    provider was removed: it is kept while the hosted provider offers no model,
+    so nothing it serves stops being served. ``notes`` are what an operator
+    should check afterwards.
+    """
+
+    instance: str
+    provider: str | None = None
+    api_base: str | None = None
+    outcome: DeploymentProviderMigrationOutcome
+    detail: str | None = None
+    models: int | None = None
+    source_removed: bool = False
+    notes: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = Field(
+        default=None, description="The deployment provider's version, which an apply names to move this row as shown."
+    )
+
+
+class DeploymentProviderMigrationReviewedRow(SQLModel):
+    """One row of the preview the caller reviewed: its instance and the version it was shown at."""
+
+    instance: str
+    updated_at: datetime | None = None
+
+
+class DeploymentProviderMigrationRequest(SQLModel):
+    """Which deployment providers to move: the ones the caller reviewed, as reviewed.
+
+    ``rows`` names the rows of the preview the caller saw, each with the
+    ``updated_at`` it was shown at. A row the preview did not show, or one
+    changed since, is left where it is, so nothing moves that nobody reviewed.
+    Omitted, every row that can move does.
+    """
+
+    model_config = {
+        "json_schema_extra": {"example": {"rows": [{"instance": "openai-eu", "updated_at": "2026-10-19T09:00:00Z"}]}}
+    }
+
+    rows: list[DeploymentProviderMigrationReviewedRow] | None = None
+
+
+class DeploymentProviderMigrationPublic(SQLModel):
+    """The deployment providers stored through the dashboard, and how each moves onto a hosted provider."""
+
+    rows: list[DeploymentProviderMigrationRowPublic]
 
 
 def _rates_come_as_a_pair(request: HostedModelCreateRequest | HostedModelUpdateRequest) -> None:
@@ -714,6 +840,11 @@ class HostedAvailableModelsPublic(SQLModel):
 
 
 __all__ = [
+    "DeploymentProviderMigrationOutcome",
+    "DeploymentProviderMigrationPublic",
+    "DeploymentProviderMigrationRequest",
+    "DeploymentProviderMigrationReviewedRow",
+    "DeploymentProviderMigrationRowPublic",
     "HostedAvailableModelsPublic",
     "HostedCatalogKeptGroupPublic",
     "HostedCatalogProviderRefreshPublic",
@@ -726,8 +857,11 @@ __all__ = [
     "HostedModelsRefreshPublic",
     "HostedProviderCreateRequest",
     "HostedProviderPublic",
+    "HostedProviderTestPublic",
+    "HostedProviderTestRequest",
     "HostedProviderUpdateRequest",
     "HostedProvidersPublic",
+    "HostedProvidersReencryptPublic",
     "OrgProviderAvailableModelsPublic",
     "OrgProviderKeyCreateRequest",
     "OrgProviderKeyModelCreateRequest",

@@ -35,6 +35,7 @@ from gateway.api.deps import (
     set_config,
 )
 from gateway.api.main import register_routers
+from gateway.api.request_id import with_request_id
 from gateway.api.trace_capture import TraceCaptureMiddleware
 from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
@@ -108,16 +109,20 @@ from gateway.services.pricing_refresh_service import (
     run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
-from gateway.services.provider_kwargs import warn_about_ignored_provider_variables
+from gateway.services.provider_kwargs import configure_hosted_names, warn_about_ignored_provider_variables
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
     reset_provider_cache,
     run_provider_refresher,
 )
 from gateway.services.providers import (
+    hosted_implementation,
+    load_hosted_names_at_startup,
     load_provider_endpoints_at_startup,
     refuse_unsafe_configured_endpoints,
+    reset_hosted_name_index,
     reset_provider_endpoint_cache,
+    run_hosted_name_refresher,
     run_provider_endpoint_refresher,
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
@@ -140,7 +145,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
-from gateway.services.tools import build_web_provider_client
+from gateway.services.tools import build_web_provider_client, register_builtin_fetcher
 from gateway.services.traces import RequestTraces, TraceWriter, stored_by
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.version import __version__
@@ -356,6 +361,9 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         "provider endpoint",
         lambda _config, _container: run_provider_endpoint_refresher(),
         reset_provider_endpoint_cache,
+    ),
+    _LifespanWorker(
+        "hosted provider name", lambda config, _container: run_hosted_name_refresher(config), reset_hosted_name_index
     ),
     # Not a cache of rows like its neighbours: this holds constructed vendor
     # clients, so its tick rebuilds only what a write moved and its reset gives
@@ -771,7 +779,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # implementation it actually dispatches to. Deliberately not
         # ``provider_instance_type``: that normalizes ``openai-compatible`` to
         # ``openai``, which names a wire protocol rather than a vendor.
-        configure_provider_types(config.provider_pricing_implementation)
+        # A named hosted provider is priced as its implementation, as an instance
+        # declaring a ``provider_type`` is.
+        configure_provider_types(
+            lambda name: config.provider_pricing_implementation(name) or hosted_implementation(name)
+        )
+        configure_hosted_names(hosted_implementation)
         _validate_provider_user_identifier_key(config)
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
@@ -855,6 +868,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # vendor handshake.
             await load_guardrail_runner_at_startup()
             await load_provider_endpoints_at_startup()
+            await load_hosted_names_at_startup(config)
             # On a Unit of Work of its own, after the session above has closed.
             await _report_hosted_providers_config(config)
             container: Container = app.state.container
@@ -946,11 +960,10 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
         raise exc
     code = error_code_of(exc.headers)
     if code is None:
-        return await http_exception_handler(request, exc)
-    return JSONResponse(
-        {"detail": exc.detail, "code": code},
-        status_code=exc.status_code,
-        headers=exc.headers,
+        return with_request_id(request, await http_exception_handler(request, exc))
+    return with_request_id(
+        request,
+        JSONResponse({"detail": exc.detail, "code": code}, status_code=exc.status_code, headers=exc.headers),
     )
 
 
@@ -1059,6 +1072,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # Before any route can make a provider call.
     any_search.install_log_filter()
     any_fetch.install_log_filter()
+    # any-fetch's builtin provider is otari's own fetcher, registered here rather than on import.
+    register_builtin_fetcher()
 
     app = FastAPI(
         title="otari",

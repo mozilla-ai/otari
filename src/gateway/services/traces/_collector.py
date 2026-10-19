@@ -95,7 +95,8 @@ class RequestTrace:
     The step's id is the request's ``Otari-Request-ID``, so it is unique per
     request: two retries with the same history are two steps, each with its cost.
     A request that names its session joins that session's trace; one that names
-    none is a trace of its own.
+    none is a trace of its own. A subagent's step opens no turn, since the
+    subagent works inside its parent's.
     """
 
     request_id: str
@@ -108,6 +109,7 @@ class RequestTrace:
     session: SessionRef | None = None
     harness: str | None = None
     turn: TurnFacts | None = None
+    subagent: bool = False
     spans: list[SpanRecord] = field(default_factory=list)
     dropped: int = 0
 
@@ -265,7 +267,7 @@ class RequestTrace:
             kind="step",
             origin="gateway",
             name=identifier_or_none(self.endpoint) or "request",
-            opens_turn=self.turn.opens_turn if self.turn is not None else False,
+            opens_turn=self.turn is not None and self.turn.opens_turn and not self.subagent,
             outcome="ok" if ok else "error",
             error_class=error_class,
             start_time=self.started_at,

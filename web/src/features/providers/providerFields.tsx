@@ -137,10 +137,13 @@ export function ClientArgsField({
   value,
   onChange,
   error,
+  isEncryptedAtRest = false,
 }: {
   value: string
   onChange: (next: string) => void
   error: string | null
+  /** Whether the store behind the form encrypts these, as the hosted providers' does. */
+  isEncryptedAtRest?: boolean
 }) {
   return (
     <TextField
@@ -166,7 +169,9 @@ export function ClientArgsField({
             // genuinely needs a secret in here (`gateway/models/provider_keys.py`),
             // `redact_secret_like_values` is why it does not come back, and
             // `encrypted_api_key` is the protection it does not get.
-            "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. An option named like a credential is masked when read back, but nothing here is encrypted at rest."}
+            (isEncryptedAtRest
+              ? "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. Encrypted at rest, and an option named like a credential is masked when read back."
+              : "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. An option named like a credential is masked when read back, but nothing here is encrypted at rest.")}
         </Description>
       </FieldMessages>
     </TextField>

@@ -187,14 +187,66 @@ def _prepare(
     pool: ToolBackend,
     *,
     drop_stream: bool,
-) -> tuple[list[Any], list[dict[str, Any]], dict[str, Any]]:
-    """Split ``completion_kwargs`` into (transcript, merged tools, base kwargs)."""
+) -> tuple[list[Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Split ``completion_kwargs`` into (transcript, merged tools, caller's tools, base kwargs)."""
     transcript = coerce(completion_kwargs.get(strategy_key))
     user_tools = list(completion_kwargs.get("tools") or [])
     merged_tools = user_tools + convert(pool.openai_tools)
     excluded = {strategy_key, "tools", "stream"} if drop_stream else {strategy_key, "tools"}
     base = {k: v for k, v in completion_kwargs.items() if k not in excluded}
-    return transcript, merged_tools, base
+    return transcript, merged_tools, user_tools, base
+
+
+def _tool_name(entry: Any) -> str | None:
+    """The function name a tool or ``tool_choice`` entry names, in any of the three wire shapes."""
+    if not isinstance(entry, dict):
+        return None
+    function = entry.get("function")
+    name = function.get("name") if isinstance(function, dict) else entry.get("name")
+    return name if isinstance(name, str) else None
+
+
+# What the last round tells the model. Withholding the tools is not enough on its own:
+# Gemini 2.5, denied the call it wants mid-task, ends with no answer at all.
+FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer now from the results you already have."
+
+
+def _round_kwargs(
+    base: dict[str, Any],
+    merged_tools: list[dict[str, Any]],
+    user_tools: list[dict[str, Any]],
+    pool: ToolBackend,
+    *,
+    final: bool,
+) -> dict[str, Any]:
+    """The tool arguments for one round.
+
+    The last round the loop allows withholds the gateway's own tools, so the model
+    answers from what its earlier rounds gathered rather than calling a tool whose
+    result could never reach it. The caller's tools stay, since a call of one ends
+    the loop anyway. Every provider the loop serves accepts a transcript holding
+    calls of a tool the round no longer declares.
+    """
+    tools = user_tools if final else merged_tools
+    kwargs = dict(base)
+    if tools:
+        kwargs["tools"] = tools
+    if final:
+        choice_name = _tool_name(kwargs.get("tool_choice"))
+        if not tools or (choice_name is not None and pool.owns_tool(choice_name)):
+            kwargs.pop("tool_choice", None)
+    return kwargs
+
+
+def _round_transcript(transcript: list[Any], *, final: bool) -> list[Any]:
+    """The transcript one round sends: the last one's ends with :data:`FINAL_ROUND_NOTE`.
+
+    A plain user message reads the same in all three formats. The note goes to the
+    provider only, never into the transcript the loop keeps.
+    """
+    if not final:
+        return transcript
+    return [*transcript, {"role": "user", "content": FINAL_ROUND_NOTE}]
 
 
 def _stream_scope(stream: AsyncIterator[Any]) -> AbstractAsyncContextManager[Any]:
@@ -248,7 +300,7 @@ async def run_tool_loop(
     ``check_first_response`` runs before it and may raise to refuse that
     response as a provider failure, which leaves the attempt free to fall over.
     """
-    transcript, merged_tools, base = _prepare(
+    transcript, merged_tools, user_tools, base = _prepare(
         strategy.transcript_key,
         strategy.coerce_transcript,
         strategy.convert_pool_tools,
@@ -259,10 +311,10 @@ async def run_tool_loop(
     acc = strategy.new_usage_accumulator()
     first_response_signaled = False
 
-    for _ in range(max_iterations):
-        kwargs: dict[str, Any] = {**base, strategy.transcript_key: transcript, "stream": False}
-        if merged_tools:
-            kwargs["tools"] = merged_tools
+    for iteration in range(1, max_iterations + 1):
+        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
+        kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
+        kwargs["stream"] = False
 
         result = await strategy.call(kwargs)
         if not first_response_signaled:
@@ -324,7 +376,7 @@ async def run_tool_loop_stream(
     The upstream stream is closed when the loop stops consuming it early;
     see :func:`_stream_scope`.
     """
-    transcript, merged_tools, base = _prepare(
+    transcript, merged_tools, user_tools, base = _prepare(
         strategy.transcript_key,
         strategy.coerce_transcript,
         strategy.convert_pool_tools,
@@ -336,9 +388,8 @@ async def run_tool_loop_stream(
     acc = strategy.new_stream_accumulator()
 
     for iteration in range(1, max_iterations + 1):
-        kwargs: dict[str, Any] = {**base, strategy.transcript_key: transcript}
-        if merged_tools:
-            kwargs["tools"] = merged_tools
+        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
+        kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
 
         stream = await strategy.open_stream(kwargs)
         state = strategy.new_stream_state()

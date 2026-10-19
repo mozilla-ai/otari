@@ -202,6 +202,20 @@ def install_models_dev() -> Callable[[dict[str, Any] | None], "ModelsDevPriceInd
     return install
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _builtin_fetcher_registered() -> None:
+    """Register otari's fetcher as any-fetch's ``builtin`` provider, once per worker.
+
+    ``create_app`` registers it at startup. A test that runs ``builtin`` without an
+    app, such as one that constructs the old web backend with its fetch half on,
+    must not depend on an earlier test having built one, which a sharded or
+    parallel run does not guarantee.
+    """
+    from gateway.services.tools import register_builtin_fetcher
+
+    register_builtin_fetcher()
+
+
 @pytest.fixture(scope="session")
 def _migrated_sqlite_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A SQLite database migrated to head once per worker, for new databases to start from."""

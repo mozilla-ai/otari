@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from gateway.api.routes._billing_schemas import TokenChargeLine, UnitChargeLine
 from gateway.api.routes.usage import UsageEntry
+from gateway.schemas.usage_and_telemetry import TokenChargeLine, ToolChargeLine, UnitChargeLine
 
 # Every charge line the gateway writes today, one per producer. Sourced from
 # rerank.py, embeddings.py, images.py, metered_pricing.py and pricing_service.py
@@ -30,7 +30,9 @@ TOKEN_LINE = {"meter": "input", "units": 1200, "rate_per_million": 3.0, "cost": 
 IMAGE_LINE = {"meter": "images", "units": 2, "unit_rate": 0.04, "cost": 0.08}
 REQUEST_LINE = {"meter": "request", "units": 1, "unit_rate": 0.002, "cost": 0.002}
 SEARCH_UNIT_LINE = {"meter": "search_units", "units": 2, "unit_rate": 0.002, "cost": 0.004}
-TOOL_LINE = {"meter": "web_search_calls", "units": 3, "unit_rate": 0.01, "cost": 0.03}
+TOOL_LINE = {"meter": "web_search_calls", "label": "exa:exa-search", "units": 3, "unit_rate": 0.01, "cost": 0.03}
+# A stored tool line without a label, which an older gateway wrote.
+UNLABELED_TOOL_LINE = {"meter": "web_search_calls", "units": 3, "unit_rate": 0.01, "cost": 0.03}
 
 
 def entry(**overrides: object) -> UsageEntry:
@@ -66,7 +68,9 @@ def entry(**overrides: object) -> UsageEntry:
     return UsageEntry(**fields)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("line", [TOKEN_LINE, IMAGE_LINE, REQUEST_LINE, SEARCH_UNIT_LINE, TOOL_LINE])
+@pytest.mark.parametrize(
+    "line", [TOKEN_LINE, IMAGE_LINE, REQUEST_LINE, SEARCH_UNIT_LINE, TOOL_LINE, UNLABELED_TOOL_LINE]
+)
 def test_charge_line_round_trips_unchanged(line: dict[str, object]) -> None:
     """A stored line serializes back exactly as written, keys and values."""
     dumped = entry(pricing_breakdown=[line]).model_dump(mode="json")["pricing_breakdown"]
@@ -79,10 +83,12 @@ def test_which_rate_a_line_carries_is_what_types_it() -> None:
     A renderer picks the branch on the key it finds; if both shapes collapsed to
     one model, a token line could be rendered with an undefined per-call rate.
     """
-    breakdown = entry(pricing_breakdown=[TOKEN_LINE, TOOL_LINE]).pricing_breakdown
+    breakdown = entry(pricing_breakdown=[TOKEN_LINE, TOOL_LINE, REQUEST_LINE, UNLABELED_TOOL_LINE]).pricing_breakdown
     assert breakdown is not None
     assert isinstance(breakdown[0], TokenChargeLine)
-    assert isinstance(breakdown[1], UnitChargeLine)
+    assert isinstance(breakdown[1], ToolChargeLine)
+    assert type(breakdown[2]) is UnitChargeLine
+    assert type(breakdown[3]) is UnitChargeLine
 
 
 def test_an_unrecognised_line_survives_instead_of_failing_the_row() -> None:
@@ -216,9 +222,10 @@ def test_the_shapes_reach_the_published_spec() -> None:
     assert "unit_rate" in schemas["UnitChargeLine"]["properties"]
     assert set(schemas["TokenChargeLine"]["required"]) == {"meter", "units", "rate_per_million", "cost"}
     assert set(schemas["UnitChargeLine"]["required"]) == {"meter", "units", "unit_rate", "cost"}
+    assert set(schemas["ToolChargeLine"]["required"]) == {"meter", "label", "units", "unit_rate", "cost"}
 
     # And the union is what a client narrows on, so a row's breakdown has to
-    # offer both named shapes rather than only the permissive arm.
+    # offer the named shapes rather than only the permissive arm.
     breakdown = schemas["UsageEntry"]["properties"]["pricing_breakdown"]
     refs = json.dumps(breakdown)
-    assert "TokenChargeLine" in refs and "UnitChargeLine" in refs
+    assert "TokenChargeLine" in refs and "UnitChargeLine" in refs and "ToolChargeLine" in refs

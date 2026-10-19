@@ -10,9 +10,15 @@ from gateway.services.tools._native import Dialect, NativeRendering
 
 
 class NativeCheck(Protocol):
-    """Whether ``provider`` runs ``tool_entry``, a declaration in some provider's own words, itself in ``dialect``."""
+    """Whether ``provider`` runs ``tool_entry``, a declaration in some provider's own words, itself in ``dialect``.
 
-    def __call__(self, tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect) -> bool: ...
+    ``model`` is the candidate's model, for a provider that runs a tool with some of its models only;
+    ``None`` reads as a model that does not.
+    """
+
+    def __call__(
+        self, tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect, model: str | None = None
+    ) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -23,7 +29,7 @@ class BuiltinTool:
     It is also the name a call is metered and priced under, so renaming a tool orphans its pricing and usage history.
     ``definition`` returns a new function definition in the Chat Completions shape on every call.
     ``configured`` answers whether this deployment has a backend that can run the tool.
-    ``runs_natively`` answers, for one attempt's provider and dialect, whether that provider runs a
+    ``runs_natively`` answers, for one attempt's provider, model and dialect, whether that provider runs a
     declaration of the tool itself. ``None`` for the provider reads as not native.
     ``native`` holds the tool's rendering for each dialect it is announced in, and omits the
     rest. A dialect that is absent announces nothing through the registry.

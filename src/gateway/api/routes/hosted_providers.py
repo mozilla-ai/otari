@@ -12,8 +12,8 @@ deployment's own credentials is one worth not confirming to a signed-in member.
 Declared on the router so a route added later inherits both.
 
 **This surface never returns a credential.** Not on create, not on read, not
-once. A hosted provider is named by its provider and the last four characters
-of its key, and that is all a client ever learns about it. The key is read in
+once. A hosted provider is known by its name, its implementation and the last
+four characters of its key, and that is all a client ever learns about it. The key is read in
 one place, the ``ModelProviderPort`` adapter, which hands it to the upstream
 SDK inside this process and never over the wire. There is deliberately no
 resolve endpoint here.
@@ -26,12 +26,14 @@ and its roster still has to be reachable.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
 
 from gateway.api.deps import HostedProviderServiceDep, require_deployment_operator_or_absent, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.core.surface import Surface
 from gateway.schemas.providers import (
+    DeploymentProviderMigrationPublic,
+    DeploymentProviderMigrationRequest,
     HostedAvailableModelsPublic,
     HostedCatalogRefreshPublic,
     HostedModelCreateRequest,
@@ -42,6 +44,9 @@ from gateway.schemas.providers import (
     HostedProviderCreateRequest,
     HostedProviderPublic,
     HostedProvidersPublic,
+    HostedProvidersReencryptPublic,
+    HostedProviderTestPublic,
+    HostedProviderTestRequest,
     HostedProviderUpdateRequest,
 )
 
@@ -55,6 +60,8 @@ router = APIRouter(
 # inference on these, and a hosted control plane holds them for the data plane
 # that resolves against it. The page is operator-only on either.
 SURFACE = Surface("hosted_providers")
+
+_EVERY_ROW = DeploymentProviderMigrationRequest()
 
 
 @router.get("")
@@ -83,6 +90,59 @@ async def create_hosted_provider(
     then serves instead.
     """
     return await service.create_provider(body)
+
+
+@router.post("/test")
+async def test_hosted_provider(
+    service: HostedProviderServiceDep, body: HostedProviderTestRequest
+) -> HostedProviderTestPublic:
+    """Ask a provider what it lists on the given credentials, storing nothing.
+
+    Backs the form's "Test connection". With ``name`` naming a stored provider,
+    a field left out is read from it, so an edit can be tested without typing
+    the key again; pointing the stored key at another origin still needs it.
+    Failure comes back in the body.
+    """
+    return await service.test_credentials(body)
+
+
+@router.post("/reencrypt")
+async def reencrypt_hosted_providers(service: HostedProviderServiceDep) -> HostedProvidersReencryptPublic:
+    """Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
+
+    Run after rotating the key, alongside ``POST /api/v1/provider-credentials/reencrypt``.
+    A provider no configured key reads is left as it is, to be re-entered.
+    """
+    return await service.reencrypt()
+
+
+@router.get("/migration")
+async def preview_deployment_provider_migration(
+    service: HostedProviderServiceDep,
+) -> DeploymentProviderMigrationPublic:
+    """What moving the deployment providers stored through the dashboard onto hosted providers would do.
+
+    Writes nothing and dials nothing.
+    """
+    return await service.migrate_deployment_providers(apply=False)
+
+
+@router.post("/migration")
+async def apply_deployment_provider_migration(
+    service: HostedProviderServiceDep,
+    # Defaulted rather than optional: a POST with no body moves every row that can move.
+    body: Annotated[DeploymentProviderMigrationRequest, Body()] = _EVERY_ROW,
+) -> DeploymentProviderMigrationPublic:
+    """Move the deployment providers stored through the dashboard onto hosted providers of the same name.
+
+    Each is created as a hosted provider, offering what it lists as a create
+    does, and the deployment provider is removed once the hosted one offers a
+    model. One that cannot move is reported and left in place. ``rows``
+    limits the move to the rows of the preview the caller reviewed, at the
+    versions it was shown them.
+    """
+    reviewed = None if body.rows is None else {row.instance: row.updated_at for row in body.rows}
+    return await service.migrate_deployment_providers(apply=True, reviewed=reviewed)
 
 
 @router.get("/refresh/preview")

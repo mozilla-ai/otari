@@ -213,19 +213,6 @@ def test_an_unusable_base_rate_refuses_to_price(rate: Any) -> None:
         effective_rates(_pricing(input_price_per_million=rate), 1_000)
 
 
-def test_a_1h_write_bills_at_the_ordinary_cache_write_rate() -> None:
-    cost = calculate_token_cost(
-        _pricing(cache_write_price_per_million=Decimal("3.75")),
-        input_tokens=0,
-        output_tokens=0,
-        cache_write_tokens=100,
-        cache_write_1h_tokens=100,
-        cache_tokens_included=False,
-    )
-
-    assert cost == Decimal("0.000375")
-
-
 def test_sub_amounts_of_one_row_can_be_summed_before_the_row_is_rounded() -> None:
     """Rounding per line would round the row once per line, not once.
 
@@ -244,6 +231,93 @@ def test_sub_amounts_of_one_row_can_be_summed_before_the_row_is_rounded() -> Non
     assert settled_line == Decimal("0.000031")
     assert quantize_cost(exact_line * 10_000) == Decimal("0.312000")
     assert settled_line * 10_000 == Decimal("0.310000")
+
+
+# ---------------------------------------------------------------------------
+# 1h cache writes
+# ---------------------------------------------------------------------------
+
+# Haiku 5.5's catalog rates. Anthropic bills a 5m cache write at 1.25x input and
+# a 1h write at 2x; the catalog carries only the first.
+_HAIKU_5_5: dict[str, Any] = {
+    "model_key": "anthropic:claude-haiku-5-5",
+    "input_price_per_million": Decimal("0.10"),
+    "output_price_per_million": Decimal("0.50"),
+    "cache_write_price_per_million": Decimal("0.125"),
+}
+
+
+def _one_hour_writes(pricing: SimpleNamespace, tokens: int) -> Decimal:
+    return calculate_token_cost(
+        pricing,
+        input_tokens=0,
+        output_tokens=0,
+        cache_write_tokens=tokens,
+        cache_write_1h_tokens=tokens,
+        cache_tokens_included=False,
+    )
+
+
+def test_a_claude_1h_write_bills_at_twice_the_input_rate() -> None:
+    cost, _, lines = price_billable_usage(
+        _pricing(**_HAIKU_5_5),
+        billable_usage(
+            input_tokens=0,
+            output_tokens=0,
+            cache_write_tokens=4_000,
+            cache_write_1h_tokens=3_000,
+            cache_tokens_included=False,
+        ),
+    )
+
+    assert cost == Decimal("0.000725")
+    assert [(line["meter"], line["units"], line["rate_per_million"]) for line in lines] == [
+        ("cache_write", 1_000, 0.125),
+        ("cache_write_1h", 3_000, 0.2),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("model_key", "cost"),
+    [
+        ("anthropic:claude-haiku-5-5", "0.000800"),
+        ("bedrock:us.anthropic.claude-haiku-5-5", "0.000800"),
+        ("vertexaianthropic:claude-haiku-5-5@default", "0.000800"),
+        ("openai:gpt-5", "0.000500"),
+        # An Anthropic-compatible endpoint serving another vendor's model.
+        ("minimax:MiniMax-M2", "0.000500"),
+    ],
+)
+def test_a_1h_write_bills_at_twice_input_only_for_a_claude_model(model_key: str, cost: str) -> None:
+    assert _one_hour_writes(_pricing(**{**_HAIKU_5_5, "model_key": model_key}), 4_000) == Decimal(cost)
+
+
+def test_a_1h_write_on_a_rate_that_names_no_model_bills_at_the_cache_write_rate() -> None:
+    pricing = _pricing(cache_write_price_per_million=Decimal("3.75"))
+
+    assert _one_hour_writes(pricing, 100) == Decimal("0.000375")
+
+
+def test_a_claude_1h_write_takes_twice_the_input_rate_of_the_tier_it_reaches() -> None:
+    tier = {
+        "min_input_tokens": 100_000,
+        "input_price_per_million": Decimal("0.5"),
+        "cache_write_price_per_million": Decimal("0.625"),
+    }
+
+    assert _one_hour_writes(_pricing(**_HAIKU_5_5, pricing_tiers=[tier]), 200_000) == Decimal("0.200000")
+
+
+def test_a_claude_1h_write_with_no_cache_write_rate_bills_at_the_input_rate() -> None:
+    pricing = _pricing(**{**_HAIKU_5_5, "cache_write_price_per_million": None})
+
+    assert _one_hour_writes(pricing, 4_000) == Decimal("0.000400")
+
+
+def test_a_claude_1h_write_follows_a_free_cache_write_rate() -> None:
+    pricing = _pricing(**{**_HAIKU_5_5, "cache_write_price_per_million": Decimal(0)})
+
+    assert _one_hour_writes(pricing, 4_000) == Decimal(0)
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +379,42 @@ def test_an_estimate_reserves_the_dearest_rate_a_prompt_token_could_attract() ->
     assert plain == Decimal("0.030000")
     assert five_minute == Decimal("0.037500")
     assert one_hour == Decimal("0.037500")
+
+
+def test_a_claude_estimate_reserves_a_1h_write_at_the_rate_it_settles_at() -> None:
+    estimate = estimate_metered_cost(
+        _pricing(**_HAIKU_5_5), estimated_input_tokens=4_000, estimated_output_tokens=0, cache_write_ttl="1h"
+    )
+
+    assert estimate == _one_hour_writes(_pricing(**_HAIKU_5_5), 4_000) == Decimal("0.000800")
+
+
+def test_a_1h_estimate_still_covers_5m_writes_priced_above_twice_the_input_rate() -> None:
+    """A request asking for any 1h write is estimated as 1h, though most of its writes may be 5m.
+
+    The bundled snapshot's daoxe row prices a Claude cache write at 5x input.
+    """
+    pricing = _pricing(
+        model_key="daoxe:claude-haiku-4-5-20251001",
+        input_price_per_million=Decimal("1"),
+        output_price_per_million=Decimal("5"),
+        cache_write_price_per_million=Decimal("5"),
+    )
+    settled = calculate_token_cost(
+        pricing,
+        input_tokens=0,
+        output_tokens=0,
+        cache_write_tokens=10_000,
+        cache_write_1h_tokens=100,
+        cache_tokens_included=False,
+    )
+
+    estimate = estimate_metered_cost(
+        pricing, estimated_input_tokens=10_000, estimated_output_tokens=0, cache_write_ttl="1h"
+    )
+
+    assert settled == Decimal("0.049700")
+    assert estimate == Decimal("0.050000")
 
 
 def test_an_estimate_never_prices_below_the_input_rate() -> None:

@@ -26,8 +26,23 @@ from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.tools import WEB_FETCH_HEADER, WEB_SEARCH_HEADER
+from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
+from gateway.services.web_retrieval_policy import canonicalize_web_url
 
 from .conftest import MODEL_NAME
+
+
+def _page() -> WebFetchResult:
+    """What the built-in fetcher reads off a page, so no test reaches the network."""
+    url = canonicalize_web_url("https://example.com")
+    return WebFetchResult(
+        text="page text",
+        content_type="text/plain",
+        content_kind="text",
+        requested_url=url,
+        final_url=url,
+        redirect_count=0,
+    )
 
 
 def _completion(*, tool_call: bool, tool: str = "web_search", arguments: str = '{"query": "otari"}') -> ChatCompletion:
@@ -325,7 +340,7 @@ def test_auto_claims_anthropics_fetch_keyword_on_chat_completions(
 ) -> None:
     """Chat Completions has no native fetch, so `Otari-Web-Fetch: auto` runs the keyword on Otari."""
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
-    fetch = AsyncMock(return_value="page text")
+    fetch = AsyncMock(return_value=_page())
     with (
         patch(
             "gateway.services.mcp_loop.acompletion",
@@ -336,7 +351,7 @@ def test_auto_claims_anthropics_fetch_keyword_on_chat_completions(
                 ]
             ),
         ),
-        patch("gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool", new=fetch),
+        patch.object(WebFetchService, "fetch", new=fetch),
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",

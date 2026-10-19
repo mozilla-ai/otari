@@ -302,16 +302,10 @@ def _build_event(
     """
     provider: Any
     duration: Any
-    # No GenAI or Claude Code OTLP shape carries the 5m/1h cache-write split, so every cache write stays in
-    # the base (5m) bucket. Claude Code writes with both TTLs (measured on real session
-    # transcripts, roughly a quarter to a third of creation tokens are 5m and the rest
-    # 1h), so either default is wrong for the other share: 5m undercharges the 1h
-    # tokens, 1h overcharges the 5m ones. Anthropic prices a 1h write at 2x base input
-    # against 1.25x for a 5m one, so booking the base bucket keeps an imported estimate
-    # from ever reading above true cost. Callers holding the real split use
-    # POST /api/v1/usage/external-events, which takes cache_write_1h_tokens directly.
-    # No branch below reassigns this today: it stays a variable rather than a literal at
-    # the construction site as the seam for an emitter that does report the split.
+    # Neither Claude Code's events nor the GenAI attributes read below carry the 5m/1h cache-write split, so
+    # every write books at the cache-write rate. That is below the 2x input a Claude model's 1h write costs,
+    # so an imported estimate never reads above true cost. A caller holding the split sends
+    # cache_write_1h_tokens to POST /api/v1/usage/external-events.
     cache_write_1h = 0
     reasoning = 0
     event_name = attrs.get("event.name")

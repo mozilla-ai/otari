@@ -15,7 +15,13 @@ from gateway.services.tools._web_search._litellm import (
     filter_hits_by_domain,
     page_budget_chars,
 )
-from gateway.services.tools._web_search._resolve import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
+from gateway.services.tools._web_search._resolve import (
+    ResolvedFetch,
+    ResolvedSearch,
+    builtin_fetch_resolved,
+    resolve_fetch,
+    resolve_search,
+)
 
 __all__ = [
     "CHARS_PER_TOKEN",
@@ -26,6 +32,7 @@ __all__ = [
     "ResolvedFetch",
     "ResolvedSearch",
     "SearchQuery",
+    "builtin_fetch_resolved",
     "filter_hits_by_domain",
     "page_budget_chars",
     "pick_direct_search_instance",

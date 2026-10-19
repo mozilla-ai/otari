@@ -289,7 +289,7 @@ often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
 user: any other value is refused with
 `403 'user' field does not match the authenticated API key's user`. A key's
-`reject_user_mismatch` (see [API keys](access-control.md#api-keys)), or the
+`reject_user_mismatch` (see [Mismatched `user` fields](access-control.md#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
 [service key](access-control.md#service-keys-and-end-users) may name its own end
@@ -530,6 +530,8 @@ never a body, a URL or the query:
 On a search the workspace's organization key serves, they name the key's
 provider. A 502 for a failure that is not the provider's, such as an organization
 key this gateway cannot call, carries none of them.
+The completion routes send the same headers when a provider fails a completion;
+see [Provider failures](#provider-failures).
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
@@ -682,12 +684,13 @@ reworded.
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price. An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: declare the provider in `config.yml` with an `api_key` reading the environment variable the detail names (a keyless or ambient-credential provider needs only the entry), store it through the dashboard, or add an organization provider key. The variable alone serves nothing | |
+| `managed_credential_unsupported` | 424 | The deployment offers the model only on its own (managed) credentials, which serve a single-model Chat Completions, Messages or Responses request, and the request reached it through a pass-through endpoint, a batch, or a routing policy with fallbacks (whose candidates all failed, at least one of them for this reason). Nothing was sent upstream. Send it as a single model to one of those three endpoints, or add your own provider key | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
 | `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
 | `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
-| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason`, or the connection carrying it was cut. The output received so far is truncated | |
+| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
 
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
@@ -695,6 +698,25 @@ has left (`... has $X of budget remaining, less than this request's estimated
 cost of $Y`); see [Budgets](access-control.md#budgets). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
 [Refusals and `Retry-After`](access-control.md#refusals-and-retry-after).
+
+### Provider failures
+
+When the provider itself fails a completion (Chat Completions, Messages or
+Responses), by timing out, dropping the connection or answering with a 5xx, the
+`5xx` Otari answers with carries what is safe to show of it, the same headers a
+[direct search](#search)'s `502` carries, and never a body or a URL:
+
+| Header | Value |
+|---|---|
+| `Otari-Error-Provider` | The provider that failed, as config names it, such as `exa`. |
+| `Otari-Error-Status` | The provider's own HTTP status; absent for a timeout or a lost connection. |
+| `Otari-Error-Tag` | `timeout`, `network`, `http_error`, or the provider's own code when its error body names one, such as Exa's `SERVICE_OVERLOADED`. |
+| `Otari-Error-Retryable` | `true`: each of these may succeed on a retry. |
+
+When a routing policy tried several candidates, they describe the last one tried.
+A `4xx` from the provider carries none of them: a billing, quota or credential
+failure describes the gateway's own provider account, and a provider's `429`
+already carries `upstream_rate_limited`.
 
 A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request
@@ -715,9 +737,21 @@ place the failure is named. It carries the code from the table above when one
 applies (`upstream_rate_limited`, `context_length_exceeded`),
 `provider_stream_interrupted` when the provider's stream ended before it
 finished, otherwise `provider_error` when the provider failed the stream. On
+Chat Completions and Responses, a failure on the provider's own side also
+carries the [provider failure](#provider-failures)'s fields as
+`error.provider_failure`: `{"provider": "exa", "status": 503, "tag":
+"SERVICE_OVERLOADED", "retryable": true}`, with `status` `null` when the provider
+gave none. On
 Chat Completions a stream is finished once a choice reports its
 `finish_reason`; one that closes without any, even after sending content, ends
-in this error event rather than in a bare `data: [DONE]`. Its message is the `detail` the same failure would carry as an HTTP
+in this error event rather than in a bare `data: [DONE]`. On Responses from a
+provider with its own Responses API, a stream is finished once the provider sends
+`response.completed`, `response.incomplete` or `response.failed`, and one that
+closes before them ends the same way. A Responses stream Otari
+[translates from a chat completion](#responses-on-providers-without-a-responses-api)
+always ends in `response.completed`, or in `response.incomplete` when the
+provider stopped for length or a content filter, so one the provider cut short
+is not caught and closes as a success. The error event's message is the `detail` the same failure would carry as an HTTP
 error where that names a cause (a rejected parameter, the provider's own
 explanation of a rejected request, redacted as described above, or what
 happened upstream, such as the provider's error status), and a fixed

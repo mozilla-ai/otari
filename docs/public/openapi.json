@@ -5999,6 +5999,174 @@
         "title": "DeploymentBootstrap",
         "type": "object"
       },
+      "DeploymentProviderMigrationPublic": {
+        "description": "The deployment providers stored through the dashboard, and how each moves onto a hosted provider.",
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/DeploymentProviderMigrationRowPublic"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "DeploymentProviderMigrationPublic",
+        "type": "object"
+      },
+      "DeploymentProviderMigrationRequest": {
+        "description": "Which deployment providers to move: the ones the caller reviewed, as reviewed.\n\n``rows`` names the rows of the preview the caller saw, each with the\n``updated_at`` it was shown at. A row the preview did not show, or one\nchanged since, is left where it is, so nothing moves that nobody reviewed.\nOmitted, every row that can move does.",
+        "example": {
+          "rows": [
+            {
+              "instance": "openai-eu",
+              "updated_at": "2026-10-19T09:00:00Z"
+            }
+          ]
+        },
+        "properties": {
+          "rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DeploymentProviderMigrationReviewedRow"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows"
+          }
+        },
+        "title": "DeploymentProviderMigrationRequest",
+        "type": "object"
+      },
+      "DeploymentProviderMigrationReviewedRow": {
+        "description": "One row of the preview the caller reviewed: its instance and the version it was shown at.",
+        "properties": {
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "DeploymentProviderMigrationReviewedRow",
+        "type": "object"
+      },
+      "DeploymentProviderMigrationRowPublic": {
+        "description": "What moving one deployment provider onto a hosted provider does, or did.\n\n``instance`` is the deployment provider's name, which the hosted provider\nkeeps, so ``instance:model`` selectors keep working. ``outcome`` is\n``migrate`` in a preview and ``migrated`` once applied; ``conflict``,\n``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with\n``detail`` saying why. ``source_removed`` says whether the deployment\nprovider was removed: it is kept while the hosted provider offers no model,\nso nothing it serves stops being served. ``notes`` are what an operator\nshould check afterwards.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "outcome": {
+            "enum": [
+              "migrate",
+              "migrated",
+              "conflict",
+              "unreadable",
+              "invalid",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "source_removed": {
+            "default": false,
+            "title": "Source Removed",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The deployment provider's version, which an apply names to move this row as shown.",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "instance",
+          "outcome"
+        ],
+        "title": "DeploymentProviderMigrationRowPublic",
+        "type": "object"
+      },
       "DeploymentUserOrganizationPublic": {
         "description": "One organization an identity belongs to, as the operator surface lists it.",
         "properties": {
@@ -6702,6 +6870,21 @@
           }
         },
         "title": "EndUserUpdate",
+        "type": "object"
+      },
+      "EndUsersDeleted": {
+        "description": "How many end users a delete removed.",
+        "properties": {
+          "deleted": {
+            "description": "End users deleted by this call. A page as full as the limit may leave more.",
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "EndUsersDeleted",
         "type": "object"
       },
       "ExecutionState": {
@@ -8312,7 +8495,7 @@
         "type": "object"
       },
       "HostedProviderCreateRequest": {
-        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.",
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.",
         "example": {
           "api_key": "<your OpenAI API key>",
           "provider": "openai"
@@ -8331,10 +8514,17 @@
             "title": "Api Base"
           },
           "api_key": {
-            "maxLength": 1024,
-            "minLength": 1,
-            "title": "Api Key",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
           },
           "client_args": {
             "anyOf": [
@@ -8352,6 +8542,19 @@
             "default": true,
             "title": "Enabled",
             "type": "boolean"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           },
           "provider": {
             "maxLength": 64,
@@ -8373,14 +8576,13 @@
           }
         },
         "required": [
-          "provider",
-          "api_key"
+          "provider"
         ],
         "title": "HostedProviderCreateRequest",
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, named by its provider and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``source`` says where the provider is defined. A ``config`` provider comes\nfrom the ``hosted_providers:`` block, has no row and so no ``id`` or\ntimestamps, and is changed by editing the configuration rather than through\nthis API; its models are administered as a stored provider's are.\n``shadows_config`` marks a stored provider that wins over a configuration\nentry of the same provider, which serves again once the row is deleted.",
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -8428,8 +8630,18 @@
             ],
             "title": "Created At"
           },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
           "enabled": {
             "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_api_key": {
+            "default": true,
+            "title": "Has Api Key",
             "type": "boolean"
           },
           "id": {
@@ -8443,6 +8655,10 @@
               }
             ],
             "title": "Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
           },
           "provider": {
             "title": "Provider",
@@ -8488,14 +8704,120 @@
           }
         },
         "required": [
+          "name",
           "provider",
           "enabled"
         ],
         "title": "HostedProviderPublic",
         "type": "object"
       },
+      "HostedProviderTestPublic": {
+        "description": "What a connection test found: whether the provider answered, and how many models it lists.\n\n``discovery_unsupported`` is set for a provider with no model listing,\nwhich a test cannot reach that way although it may still serve.",
+        "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "model_count": {
+            "default": 0,
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "HostedProviderTestPublic",
+        "type": "object"
+      },
+      "HostedProviderTestRequest": {
+        "description": "Credentials to try against a provider without storing them.\n\nThe fields the create body takes. ``name`` naming an existing stored\nprovider lets a field left out fall back to what it stores, so an edit form\ncan test without re-entering the key; pointing the stored key at another\norigin still needs the key typed again, as an update does.",
+        "example": {
+          "api_key": "<your OpenAI API key>",
+          "provider": "openai"
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "HostedProviderTestRequest",
+        "type": "object"
+      },
       "HostedProviderUpdateRequest": {
-        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` is immutable: changing it is a delete plus a create, because\nthe key belongs to the provider it was issued by. Omitting ``api_key``\nleaves the stored credential untouched, so a toggle never re-sends a secret\nthe caller does not have. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it.",
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` and ``name`` are immutable: changing either is a delete plus a\ncreate, because the key belongs to the provider it was issued by and\nrequests address the name. Omitting ``api_key`` leaves the stored\ncredential untouched, so a toggle never re-sends a secret the caller does\nnot have; an explicit null removes it, where the provider can be served\nwithout one. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it.",
         "example": {
           "enabled": false
         },
@@ -8584,6 +8906,30 @@
           "count"
         ],
         "title": "HostedProvidersPublic",
+        "type": "object"
+      },
+      "HostedProvidersReencryptPublic": {
+        "description": "What re-encrypting the stored hosted provider credentials did.\n\n``unreadable`` counts providers no configured key reads, left as they were\nto be re-entered; ``skipped`` those edited while the rotation ran, already\nwritten under the primary key.",
+        "properties": {
+          "reencrypted": {
+            "title": "Reencrypted",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unreadable": {
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reencrypted",
+          "unreadable",
+          "skipped"
+        ],
+        "title": "HostedProvidersReencryptPublic",
         "type": "object"
       },
       "Icon": {
@@ -10048,6 +10394,19 @@
           "model": {
             "title": "Model",
             "type": "string"
+          },
+          "output_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anthropic's output configuration (`effort`, `format`). Forwarded to the provider as `output_config`. An alternative to `output_format`; send one or the other.",
+            "title": "Output Config"
           },
           "output_format": {
             "anyOf": [
@@ -15593,6 +15952,16 @@
             "description": "Underlying any-llm provider type.",
             "title": "Provider Type",
             "type": "string"
+          },
+          "source": {
+            "default": "config",
+            "description": "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML), 'dashboard' for one stored through the deployment providers page.",
+            "enum": [
+              "config",
+              "dashboard"
+            ],
+            "title": "Source",
+            "type": "string"
           }
         },
         "required": [
@@ -17681,6 +18050,18 @@
             "description": "Fetch: true when the provider runs a page's JavaScript before reading it.",
             "title": "Renders Javascript"
           },
+          "reports_final_url": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.",
+            "title": "Reports Final Url"
+          },
           "requires_api_base": {
             "description": "True when this provider has no endpoint of its own, so the tool must say where the backend is.",
             "title": "Requires Api Base",
@@ -18562,6 +18943,30 @@
             "title": "Origin",
             "type": "string"
           },
+          "otel_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OpenTelemetry span id an OTLP span was exported with, in lowercase hex. Null on a span the gateway recorded itself.",
+            "title": "Otel Span Id"
+          },
+          "otel_trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OpenTelemetry trace id an OTLP span was exported with, in lowercase hex. Null on a span the gateway recorded itself.",
+            "title": "Otel Trace Id"
+          },
           "outcome": {
             "enum": [
               "ok",
@@ -18693,6 +19098,8 @@
           "tool_type",
           "tool_call_id",
           "request_id",
+          "otel_trace_id",
+          "otel_span_id",
           "attributes"
         ],
         "title": "SpanPublic",
@@ -19219,6 +19626,53 @@
           "cost"
         ],
         "title": "TokenChargeLine",
+        "type": "object"
+      },
+      "ToolChargeLine": {
+        "additionalProperties": true,
+        "description": "A gateway-run tool's charge line, one per tool and label.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.",
+        "properties": {
+          "cost": {
+            "description": "USD charged for this line.",
+            "title": "Cost",
+            "type": "number"
+          },
+          "label": {
+            "description": "What served the calls: '<provider>:<instance>' for a search or fetch instance, 'builtin:builtin_fetch' for the built-in fetcher, 'org:<provider>' for an organization's own key, or 'otari:<tool>' for any other gateway-run tool.",
+            "title": "Label",
+            "type": "string"
+          },
+          "meter": {
+            "description": "What was metered, e.g. 'request' or 'web_search_calls'.",
+            "title": "Meter",
+            "type": "string"
+          },
+          "unit_rate": {
+            "description": "USD per call.",
+            "title": "Unit Rate",
+            "type": "number"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Calls billed on this meter.",
+            "title": "Units"
+          }
+        },
+        "required": [
+          "meter",
+          "units",
+          "unit_rate",
+          "cost",
+          "label"
+        ],
+        "title": "ToolChargeLine",
         "type": "object"
       },
       "ToolMeter": {
@@ -21194,6 +21648,9 @@
               {
                 "items": {
                   "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ToolChargeLine"
+                    },
                     {
                       "$ref": "#/components/schemas/TokenChargeLine"
                     },
@@ -27537,6 +27994,98 @@
       }
     },
     "/api/v1/end-users": {
+      "delete": {
+        "description": "Delete one end user of the calling service key, or a page of those created before a time.\n\nRequires a service key, and exactly one of ``external_id`` and ``created_before``. ``external_id`` deletes that\nend user, any id, one containing '/' included, and answers 404 when it has none. ``created_before`` deletes up\nto ``limit`` of the oldest end users created before then; call again until ``deleted`` is 0. An end user's\ntelemetry and agent traces are erased with it. The end user's row and spend are kept: a request naming it again\nrevives it with what it had spent, so deleting one cannot clear its budget. A deleted end user is neither listed\nnor counted.",
+        "operationId": "end-users-delete_end_users",
+        "parameters": [
+          {
+            "description": "Delete the end user the service names with this `user` value.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the end user the service names with this `user` value.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Delete the end users created before this time, oldest first, up to `limit` of them.",
+            "in": "query",
+            "name": "created_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the end users created before this time, oldest first, up to `limit` of them.",
+              "title": "Created Before"
+            }
+          },
+          {
+            "description": "The most end users one call deletes with `created_before`.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "The most end users one call deletes with `created_before`.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUsersDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete End Users",
+        "tags": [
+          "end-users"
+        ]
+      },
       "get": {
         "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed. ``external_id`` reads one end user by any id, one containing '/'\nincluded, as a list of zero or one.",
         "operationId": "end-users-list_end_users",
@@ -27807,6 +28356,50 @@
       }
     },
     "/api/v1/end-users/{external_id}": {
+      "delete": {
+        "description": "Delete an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no live end user of the key's user goes by answers 404. The end user's telemetry\nand agent traces are erased; its row and spend are kept, so a request naming it again revives it with what it had\nspent. An id with a '.' or '..' segment is refused with 400; ``DELETE /end-users?external_id=`` takes any id.",
+        "operationId": "end-users-delete_end_user",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete End User",
+        "tags": [
+          "end-users"
+        ]
+      },
       "get": {
         "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404. An id with a '.' or '..'\nsegment is refused with 400; ``GET /end-users?external_id=`` reads any end user.",
         "operationId": "end-users-get_end_user",
@@ -28750,6 +29343,114 @@
         ]
       }
     },
+    "/api/v1/hosted-providers/migration": {
+      "get": {
+        "description": "What moving the deployment providers stored through the dashboard onto hosted providers would do.\n\nWrites nothing and dials nothing.",
+        "operationId": "hosted-providers-preview_deployment_provider_migration",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentProviderMigrationPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview Deployment Provider Migration",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "post": {
+        "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
+        "operationId": "hosted-providers-apply_deployment_provider_migration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentProviderMigrationRequest",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentProviderMigrationPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Apply Deployment Provider Migration",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/reencrypt": {
+      "post": {
+        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/provider-credentials/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+        "operationId": "hosted-providers-reencrypt_hosted_providers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProvidersReencryptPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reencrypt Hosted Providers",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
     "/api/v1/hosted-providers/refresh": {
       "post": {
         "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
@@ -28805,6 +29506,56 @@
           }
         ],
         "summary": "Preview Catalog Refresh",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/test": {
+      "post": {
+        "description": "Ask a provider what it lists on the given credentials, storing nothing.\n\nBacks the form's \"Test connection\". With ``name`` naming a stored provider,\na field left out is read from it, so an edit can be tested without typing\nthe key again; pointing the stored key at another origin still needs it.\nFailure comes back in the body.",
+        "operationId": "hosted-providers-test_hosted_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedProviderTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderTestPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Hosted Provider",
         "tags": [
           "hosted-providers"
         ]
@@ -36286,7 +37037,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -36299,7 +37050,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -36690,7 +37441,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -36703,7 +37454,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -37084,7 +37835,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -37097,7 +37848,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -37455,7 +38206,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -37468,7 +38219,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -41978,7 +42729,7 @@
     },
     "/api/v1/search-tools/{name}/test": {
       "post": {
-        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test\nyet, and answers a 400.",
+        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in\nfetcher, fetches as a fetch tool call does, with no domain policy.",
         "operationId": "search-tools-test_search_tool",
         "parameters": [
           {
@@ -43719,7 +44470,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -43732,7 +44483,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -44123,7 +44874,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -44136,7 +44887,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -44649,7 +45400,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -44662,7 +45413,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -45070,7 +45821,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -45083,7 +45834,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },

@@ -510,8 +510,8 @@ async def test_search_tool(
     """Test a configured or stored instance with one search or one fetch.
 
     Takes ``query`` for a search instance or ``url`` for a fetch instance, and
-    answers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test
-    yet, and answers a 400.
+    answers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in
+    fetcher, fetches as a fetch tool call does, with no domain policy.
     """
     try:
         # The instance may have been stored through another replica.
