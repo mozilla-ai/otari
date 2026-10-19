@@ -50,6 +50,7 @@ def test_metadata() -> None:
     metadata = AnyFetch.get_provider_metadata("deepseek")
     assert (metadata.tier, metadata.env_key, metadata.requires_api_key) == ("production", "DEEPSEEK_API_KEY", True)
     assert (metadata.max_urls_per_call, metadata.renders_javascript, metadata.formats) == (1, False, ["markdown"])
+    assert metadata.reports_final_url is False
     assert metadata.options == []
 
 

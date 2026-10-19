@@ -598,8 +598,8 @@ its own side. Otari checks the requested URL before the call, and the URL the
 provider reports finding the page at after it. Its host must pass the domain
 policy, and may not be `localhost` or an IP address, in any of its forms, that is
 not public. Other hostnames are the provider's to resolve, so Otari does not check
-where they lead, as the built-in fetcher does. Exa and Tabstack answer with the
-URL as asked even after a redirect (`reports_final_url` is false in the provider
+where they lead, as the built-in fetcher does. DeepSeek, Exa and Tabstack answer
+with the URL as asked even after a redirect (`reports_final_url` is false in the provider
 catalog), so a redirect they follow escapes the domain policy; where a workspace's
 domain lists must hold on every hop, keep the fetch tool on `builtin_fetch`. Each
 provider's limits are in the

@@ -117,7 +117,8 @@ passed. It fetches one page per call and returns its title and its text as markd
 URL and nothing else, so there are no native options. DeepSeek has no length cap, so `max_chars`
 cuts the text it returns and sets `text_truncated`, and without `max_chars` the whole page comes
 back. `final_url` is the URL asked for, since DeepSeek follows a redirect without saying where it
-ended, and `content_type` is empty. DeepSeek reports no cost and no date.
+ended, so `reports_final_url` is false: a caller cannot check where a redirect DeepSeek followed
+led. `content_type` is empty. DeepSeek reports no cost and no date.
 
 A failed call raises `ProviderError` with DeepSeek's HTTP status, tagged with the `error.type` of
 its OpenAI-shaped body, or its `error.code` when there is no type; the message is never read. A

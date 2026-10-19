@@ -60,6 +60,8 @@ class DeepSeekProvider(AnyFetch):
         tier="production",
         max_urls_per_call=1,
         renders_javascript=False,
+        # DeepSeek follows a redirect without saying where it led (seen live).
+        reports_final_url=False,
         formats=["markdown"],
         options=[],
     )
