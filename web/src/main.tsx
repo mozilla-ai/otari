@@ -2,7 +2,7 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 
 import App from "@/app/App"
-import { keptBootstrapAt, startDeployment } from "@/app/boot"
+import { openKeptBootstrap, startDeployment } from "@/app/boot"
 import { Provider } from "@/app/provider"
 import { apiFetch } from "@/shared/api/client"
 import {
@@ -21,7 +21,7 @@ if (!container) {
 // whether this URL is a management dashboard, a sign-in screen, or a data-plane
 // gateway's landing page, and painting one of those only to swap it for another
 // is worse than waiting one round trip. A hosted deployment's previous answer
-// is the exception (`keptBootstrapAt`). A failure hands App null, which says the
+// is the exception (`openKeptBootstrap`). A failure hands App null, which says the
 // gateway is unreachable instead of guessing a deployment.
 // Shorter than apiFetch's 30s default, because nothing at all is on screen until
 // this settles: a stalled gateway or proxy would otherwise hold a blank page for
@@ -49,7 +49,7 @@ const root = createRoot(container)
 void startDeployment(
   prepareRequests,
   loadBootstrap,
-  () => keptBootstrapAt(requestPolicy().origin),
+  () => openKeptBootstrap(requestPolicy().origin),
   (bootstrap) => {
     root.render(
       <StrictMode>

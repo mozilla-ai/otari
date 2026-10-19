@@ -45,9 +45,9 @@ export async function startDeployment(
   if (earlier) render(earlier)
   const bootstrap = await current
   kept.write(bootstrap)
-  const replaces =
+  const isDifferentAnswer =
     bootstrap !== null && JSON.stringify(bootstrap) !== JSON.stringify(earlier)
-  if (!earlier || replaces) render(bootstrap)
+  if (!earlier || isDifferentAnswer) render(bootstrap)
 }
 
 const KEPT_BOOTSTRAP_KEY = "otari.dashboard.bootstrap"
@@ -60,7 +60,7 @@ const KEPT_BOOTSTRAP_KEY = "otari.dashboard.bootstrap"
  * same address. A local gateway restarted in another mode would otherwise
  * paint the previous mode's screen first.
  */
-export function keptBootstrapAt(origin: string): KeptBootstrap {
+export function openKeptBootstrap(origin: string): KeptBootstrap {
   return {
     read() {
       try {

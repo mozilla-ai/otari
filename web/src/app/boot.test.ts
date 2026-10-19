@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
-import { type KeptBootstrap, keptBootstrapAt, startDeployment } from "./boot"
+import { type KeptBootstrap, openKeptBootstrap, startDeployment } from "./boot"
 
 const BOOTSTRAP = { deployment_type: "standalone" } as WireBootstrap
 const HOSTED = {
@@ -9,14 +9,14 @@ const HOSTED = {
 } as WireBootstrap
 const MAINTENANCE = { ...HOSTED, maintenance_mode: true } as WireBootstrap
 
-function keeping(bootstrap: WireBootstrap | null = null) {
+function stubKept(bootstrap: WireBootstrap | null = null) {
   return {
     read: vi.fn(() => bootstrap),
     write: vi.fn(),
   } satisfies KeptBootstrap
 }
 
-const settled = async () => {}
+const prepareNothing = async () => {}
 
 afterEach(() => {
   window.localStorage.clear()
@@ -34,7 +34,7 @@ describe("startDeployment", () => {
     })
     const render = vi.fn()
 
-    await startDeployment(prepare, load, () => keeping(), render)
+    await startDeployment(prepare, load, () => stubKept(), render)
 
     expect(order).toEqual(["prepare", "load"])
     expect(render.mock.calls).toEqual([[BOOTSTRAP]])
@@ -42,7 +42,7 @@ describe("startDeployment", () => {
 
   it("renders null and never asks for a bootstrap when the deployment could not be chosen", async () => {
     const load = vi.fn(async () => BOOTSTRAP)
-    const keep = vi.fn(() => keeping(HOSTED))
+    const keep = vi.fn(() => stubKept(HOSTED))
     const render = vi.fn()
 
     await startDeployment(
@@ -63,9 +63,9 @@ describe("startDeployment", () => {
     const render = vi.fn()
 
     await startDeployment(
-      settled,
+      prepareNothing,
       async () => null,
-      () => keeping(),
+      () => stubKept(),
       render,
     )
 
@@ -81,9 +81,9 @@ describe("startDeployment", () => {
     const render = vi.fn()
 
     const started = startDeployment(
-      settled,
+      prepareNothing,
       load,
-      () => keeping(HOSTED),
+      () => stubKept(HOSTED),
       render,
     )
 
@@ -94,11 +94,11 @@ describe("startDeployment", () => {
   })
 
   it("renders the current bootstrap when it differs from the kept one", async () => {
-    const kept = keeping(HOSTED)
+    const kept = stubKept(HOSTED)
     const render = vi.fn()
 
     await startDeployment(
-      settled,
+      prepareNothing,
       async () => MAINTENANCE,
       () => kept,
       render,
@@ -109,11 +109,11 @@ describe("startDeployment", () => {
   })
 
   it("leaves a kept bootstrap on screen and forgets it when the current one never arrives", async () => {
-    const kept = keeping(HOSTED)
+    const kept = stubKept(HOSTED)
     const render = vi.fn()
 
     await startDeployment(
-      settled,
+      prepareNothing,
       async () => null,
       () => kept,
       render,
@@ -132,9 +132,9 @@ describe("startDeployment", () => {
       })
 
     const started = startDeployment(
-      settled,
+      prepareNothing,
       load,
-      () => keptBootstrapAt(origin),
+      () => openKeptBootstrap(origin),
       vi.fn(),
     )
     await vi.waitFor(() => expect(answer).toBeDefined())
@@ -143,26 +143,30 @@ describe("startDeployment", () => {
     answer?.(HOSTED)
     await started
 
-    expect(keptBootstrapAt("https://eu.api.otari.test").read()).toEqual(HOSTED)
-    expect(keptBootstrapAt("").read()).toBeNull()
+    expect(openKeptBootstrap("https://eu.api.otari.test").read()).toEqual(
+      HOSTED,
+    )
+    expect(openKeptBootstrap("").read()).toBeNull()
   })
 })
 
-describe("keptBootstrapAt", () => {
+describe("openKeptBootstrap", () => {
   it("answers the hosted bootstrap kept for the same origin", () => {
-    keptBootstrapAt("https://eu.api.otari.test").write(HOSTED)
+    openKeptBootstrap("https://eu.api.otari.test").write(HOSTED)
 
-    expect(keptBootstrapAt("https://eu.api.otari.test").read()).toEqual(HOSTED)
+    expect(openKeptBootstrap("https://eu.api.otari.test").read()).toEqual(
+      HOSTED,
+    )
   })
 
   it("answers nothing for another origin", () => {
-    keptBootstrapAt("https://eu.api.otari.test").write(HOSTED)
+    openKeptBootstrap("https://eu.api.otari.test").write(HOSTED)
 
-    expect(keptBootstrapAt("").read()).toBeNull()
+    expect(openKeptBootstrap("").read()).toBeNull()
   })
 
   it("keeps no bootstrap but a hosted one", () => {
-    const kept = keptBootstrapAt("")
+    const kept = openKeptBootstrap("")
     kept.write(HOSTED)
     kept.write(BOOTSTRAP)
 
@@ -170,7 +174,7 @@ describe("keptBootstrapAt", () => {
   })
 
   it("forgets what it kept when the bootstrap never arrived", () => {
-    const kept = keptBootstrapAt("")
+    const kept = openKeptBootstrap("")
     kept.write(HOSTED)
     kept.write(null)
 
@@ -180,6 +184,6 @@ describe("keptBootstrapAt", () => {
   it("answers nothing for a kept value it cannot read", () => {
     window.localStorage.setItem("otari.dashboard.bootstrap", "{not json")
 
-    expect(keptBootstrapAt("").read()).toBeNull()
+    expect(openKeptBootstrap("").read()).toBeNull()
   })
 })
