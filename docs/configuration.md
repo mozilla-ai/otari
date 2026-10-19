@@ -1001,8 +1001,11 @@ Rules for instances:
   (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
 - `options` are checked against the provider's options. A search instance may also
   set `max_results` and `time_range`, and a fetch instance `max_chars`, which every
-  provider of that tool takes. A fetch instance's `max_chars` cuts what each fetch
-  tool call returns; in-loop search does not read the search ones yet.
+  provider of that tool takes. In the loop, a search instance's `max_results` can
+  only lower the request's count, and on a direct call it is the count when the
+  request names none. A fetch instance's `max_chars` cuts what each fetch tool call
+  returns, and what an enrichment fetch asks for when it is below the 1,500
+  characters a search result shows.
 - A `search_tools` entry that breaks the name rules, or whose `options` carry a key
   the provider does not know or a value it refuses, still loads, with a warning
   that names the entry and the problem. Fix it: a later release refuses it, and
@@ -1039,23 +1042,18 @@ file or environment, then to the built-in default.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
-  together. Default 10.
+  together. Default 10. A call past it gets a tool error the model can recover
+  from.
 
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
-In this release `web_search_default_tool` picks the tool for a direct
-`POST /api/v1/search` that names none, and `web_fetch_default_tool` the fetch
-instance every fetch tool call runs on. The rest take effect when in-loop search
-moves onto the search instances: the in-loop parts of `web_search_default_tool`
-and `web_search_max_calls`, and the fetch instance that enriches search results,
-a search instance's `fetch_tool` or else `web_fetch_default_tool`.
-
-After that, the old in-loop backend still serves some requests until it is
-removed. In that period `web_fetch_default_tool` governs every fetch tool call,
-while `web_search_max_calls` and `fetch_tool` apply only where the new backend
-serves the request: the old one keeps its fixed limit of 10 calls, its 422 past
-it, and its own enrichment through the built-in fetcher.
+The older in-loop backend still serves some requests until it is removed: a
+search on the legacy settings, or on a Tavily or Brave organization key, and a
+request that declares only the fetch tool. `web_fetch_default_tool` governs every
+fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
+search instance serves the request: the older backend keeps its fixed limit of 10
+calls, its 422 past it, and its own enrichment through the built-in fetcher.
 
 ## Decision providers
 

@@ -88,9 +88,10 @@ search under the workspace's web-search policy and tool pricing.
 
 Whenever Otari runs the search, the rules for a gateway-run search apply: the
 workspace's web-search policy and tool pricing. All of this
-requires a search backend (`web_search_provider` or `web_search_url`); without
-one, the declaration is forwarded unchanged. A function named `web_search` is
-never claimed.
+requires something to search with, the [in-loop default](#web-search): a search
+instance, or the legacy `web_search_provider` or `web_search_url`; without one,
+the declaration is forwarded unchanged. A function named `web_search` is never
+claimed.
 
 ### Anthropic's web fetch
 
@@ -140,8 +141,8 @@ An Anthropic-native declaration is answered in its own vocabulary, a
 model gets the same `[tool error]` string a failed tool produces, and a Chat
 Completions client sees the search in `otari_tool_calls` as `failed`, with the
 tag `call_limit`. Even without
-`max_uses`, requests remain bounded by `max_tool_iterations` and the shared
-[10-call Search and Fetch limit](#web-fetch).
+`max_uses`, requests remain bounded by `max_tool_iterations` and the
+[call limit Search and Fetch share](#web-fetch).
 
 ### Who may read the settings
 
@@ -196,11 +197,19 @@ request on a hosted provider does. A call labeled `otari:<tool>` takes any
 override.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
-when `web_fetch_default_tool` names none. Search instances do not serve the
-in-loop tool yet, and it runs organization keys on the older backend, so the
-gateway's own search lines are labeled `otari:web_search` for now. Searches a
-model's provider runs itself carry the provider's label, as the next section
-says.
+when `web_fetch_default_tool` names none, and so is every in-loop search on a
+search instance. A search on the legacy settings, or on a Tavily or Brave
+organization key, which the older backend still runs, is labeled
+`otari:web_search`. Searches a model's provider runs itself carry the provider's
+label, as the next section says.
+
+A search's enrichment adds only what its fetcher reported, even when the fetch
+instance has a rate of its own, which prices fetch tool calls only. Exa reports
+what a fetch costs; Tabstack and the built-in fetcher report nothing. So hits
+enriched through Tabstack cost the caller nothing more, while the deployment pays
+Tabstack for each page, up to one per hit. Price that into the search instance's
+rate, or keep the instance's enrichment on the built-in fetcher with
+`fetch_tool: builtin_fetch`.
 
 ### Searches a provider runs itself
 
@@ -217,8 +226,8 @@ search on the organization's own provider key takes its override. With
 neither, the searches stay on the row at no cost. Searches across the rounds
 of a gateway tool loop are added up, as the rounds' tokens are. A search Otari runs in the
 model's place, under [interception](#web-search-interception) or the
-`Otari-Web-Search` header, is the provider's no longer, so it bills as
-`otari:web_search` instead and never twice.
+`Otari-Web-Search` header, is the provider's no longer, so it bills under the
+label of what served it, above, instead and never twice.
 
 Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
@@ -565,11 +574,19 @@ limited to 50 KiB of valid UTF-8; the downloaded body is limited to 5 MiB and
 PDF extraction is also bounded by page, time, memory, and intermediate-output
 limits.
 
-Search and Fetch share a limit of 10 attempted calls per request across model
-turns and routing attempts. Invalid, blocked, and failed calls consume that
-allowance. Attempting an eleventh call aborts the tool loop rather than returning
-a `[tool error]` for the model to recover from. Non-streaming requests return
-HTTP `422`; a response that is already streaming emits an error event and ends
+Search and Fetch share a limit of `web_search_max_calls` attempted calls per
+request, 10 unless the operator sets another, across model turns and routing
+attempts. Invalid, blocked, and failed calls consume that allowance; enriching a
+search's results does not. A call past it gets
+`[tool error] web search call limit reached for this request` (or `web fetch`),
+which the model can recover from, and a Chat Completions client sees the call in
+`otari_tool_calls` as `failed` with the tag `call_limit`.
+
+A request the older search backend serves keeps a fixed limit of 10 instead:
+one whose search runs on the legacy settings or on a Tavily or Brave organization
+key, and one that declares Fetch alone. There, an eleventh call aborts the tool
+loop rather than returning a `[tool error]`. Non-streaming requests return HTTP
+`422`; a response that is already streaming emits an error event and ends
 without a completed answer.
 
 Successful Fetch calls are billed as [Pricing a gateway-run
@@ -588,10 +605,10 @@ is unacceptable.
 
 A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
 names a provider for `otari_web_fetch` and for enriching search results.
-`web_fetch_default_tool` names the instance the fetch tool runs on. Enrichment
-does not run on fetch instances yet, so the built-in fetcher above still enriches
-search results. `POST /api/v1/search-tools/{name}/test` with a `url` tries an
-instance.
+`web_fetch_default_tool` names the instance the fetch tool runs on, and the one
+that enriches search results unless the search instance names its own
+`fetch_tool`, so setting it moves enrichment too. `POST
+/api/v1/search-tools/{name}/test` with a `url` tries an instance.
 
 On a fetch instance, the provider fetches the page and follows its redirects on
 its own side. Otari checks the requested URL before the call, and the URL the
@@ -601,7 +618,9 @@ not public. Other hostnames are the provider's to resolve, so Otari does not che
 where they lead, as the built-in fetcher does. Exa and Tabstack answer with the
 URL as asked even after a redirect (`reports_final_url` is false in the provider
 catalog), so a redirect they follow escapes the domain policy; where a workspace's
-domain lists must hold on every hop, keep the fetch tool on `builtin_fetch`. Each
+domain lists must hold on every hop, keep the fetch tool, and enrichment, on
+`builtin_fetch`. Enriching a search's results, Otari applies the same checks
+under the search's own domain rules. Each
 provider's limits are in the
 [any-fetch README](https://github.com/mozilla-ai/otari/tree/main/any-fetch#exa).
 A provider's failure reaches the model as
@@ -622,9 +641,37 @@ one, and never with the provider's own message.
 
 ### Web search
 
-Otari reaches a licensed search API directly. Set `web_search_provider` to
-`tavily` or `brave` and `web_search_provider_api_key` to that provider's key;
-the key stays in the gateway process and never reaches a caller.
+The in-loop tool searches with the deployment's in-loop default:
+`web_search_default_tool` when it names a search instance, else the legacy
+settings below while they are set, else the only search instance when there is
+exactly one (see [Search tools](configuration.md#search-tools)).
+`web_search_default_tool: none` turns it off. A workspace's
+[organization search key](#organization-search-keys) comes before all of them.
+
+On a search instance, the search runs on the instance's
+[provider](#search-providers), key, options and `timeout`, and asks for the
+request's result count, which the workspace's `max_results` may lower and nothing
+else caps: Exa returns up to 100. A provider's failure reaches the model as
+`[tool error] <provider> search failed (<tag>)`, with the HTTP status when there
+is one, and never with the provider's own message; a Chat Completions client sees
+the same fields in `otari_tool_calls`. Results are numbered across a request's
+searches, so a second search's first result follows the first search's last, and
+each shows its date as an ISO date, or date and time when the provider gives one.
+
+A result that comes without page text is enriched through the fetch instance the
+search instance names in `fetch_tool`, else `web_fetch_default_tool`, else the
+built-in fetcher. The built-in fetcher's page replaces the result's snippet, as
+on the legacy settings below. A [fetch instance](#fetch-providers) is asked for
+at most the 1,500 characters a result shows, within the fetch instance's
+`timeout`, and its page follows the snippet rather than replacing it, because a
+provider such as Tabstack answers a site's error page as the page's text. A page
+that cannot be fetched, or that the domain checks refuse, leaves the result its
+snippet.
+
+On the legacy settings, Otari reaches a licensed search API directly. Set
+`web_search_provider` to `tavily` or `brave` and `web_search_provider_api_key` to
+that provider's key; the key stays in the gateway process and never reaches a
+caller.
 
 For evaluation, the bundled SearXNG backend needs no key:
 
@@ -796,6 +843,10 @@ The request, the response and the errors are in the
 [API reference](api-reference.md#search).
 
 ### Search providers
+
+A search instance serves direct search and, as the [in-loop default](#web-search),
+the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool) says.
 
 - **Exa** (`exa`) needs an API key, read from the tool's `api_key`, such as
   `${EXA_API_KEY}`, and reports what each search costs (`costDollars.total`), which

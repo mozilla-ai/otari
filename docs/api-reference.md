@@ -171,7 +171,7 @@ level of the response, beside `choices`. Each entry is one call:
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (the provider's own date string, or `null`); empty when it found none. Never page text. |
-| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses` has `"tag": "call_limit"` and a `null` provider. Absent when Otari can say no more than that the call failed. |
+| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider. Absent when Otari can say no more than that the call failed. |
 
 A response that is not streamed carries the ended entry of every call, across
 all of the tool loop's rounds:
