@@ -97,6 +97,18 @@ without a name.
   it failed, and when the result arrived. Their start is when the step before
   ended, so their duration is marked approximate.
 
+## Sessions and failures
+
+A session's error count is every span in it that ended in an error a fallback
+did not recover: a failed request, a failed provider call, a guardrail or MCP
+failure, and a tool that returned an error. The session series
+(`GET /api/v1/traces/series`, the Sessions chart) counts a session as **failed**
+only when one of those errors is not a tool's. A tool's error, such as a missing
+file or a search that found nothing, goes back to the model, which usually
+carries on, so a run whose requests all succeeded counts as succeeded however
+many tool errors it recovered from. The error count, and the `has_error`
+filter, still include them.
+
 ## Instrumented agents
 
 An agent that exports OpenTelemetry spans to `/otlp/v1/traces` (see

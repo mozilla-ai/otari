@@ -265,7 +265,10 @@ not offer the page at all.
 
 Activity is the per-request log. Sessions lists [agent sessions](traces.md)
 where the deployment records traces (`trace_capture_enabled`, on by default; a
-hybrid gateway records none), and has no entry where it does not. A session
+hybrid gateway records none), and has no entry where it does not. Its chart
+counts sessions per hour or day as succeeded or failed, and its Levels column
+counts each session's errors, tools' errors included; a tool's error alone does
+not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). A session
 opens in a side panel as a tree of its turns, LLM calls and tool calls, a
 timeline of the same spans, or a flat log. The token count in its header breaks
 down into input, the share of it the prompt cache served, and output, for the

@@ -20346,10 +20346,12 @@
             "type": "string"
           },
           "failed": {
+            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error goes back to the model, so it alone does not fail a session.",
             "title": "Failed",
             "type": "integer"
           },
           "succeeded": {
+            "description": "Sessions that started in the bucket and did not fail.",
             "title": "Succeeded",
             "type": "integer"
           }
@@ -20484,7 +20486,7 @@
             "type": "number"
           },
           "error_count": {
-            "description": "Spans that ended in an error no fallback recovered.",
+            "description": "Spans that ended in an error no fallback recovered, including tools' errors, which do not fail the session.",
             "title": "Error Count",
             "type": "integer"
           },

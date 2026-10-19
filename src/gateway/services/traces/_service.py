@@ -225,12 +225,14 @@ def _key(trace: TraceWrite) -> TraceKey:
 def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> TraceGrowth:
     moments = [_span_moment(span, written_at) for span in spans]
     llm = [span for span in spans if span.kind == "llm"]
+    errors = [span for span in spans if span.outcome == "error" and not span.recovered]
     return TraceGrowth(
         workspace_id=key[0],
         trace_id=key[1],
         steps=sum(1 for span in spans if span.kind == "step"),
         spans=len(spans),
-        errors=sum(1 for span in spans if span.outcome == "error" and not span.recovered),
+        errors=len(errors),
+        tool_errors=sum(1 for span in errors if span.kind == "tool"),
         input_tokens=sum(span.input_tokens or 0 for span in llm),
         output_tokens=sum(span.output_tokens or 0 for span in llm),
         cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),

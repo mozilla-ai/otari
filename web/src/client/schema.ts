@@ -16787,9 +16787,15 @@ export interface components {
              * @description Bucket start, ISO 8601 UTC.
              */
             bucket: string;
-            /** Failed */
+            /**
+             * Failed
+             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error goes back to the model, so it alone does not fail a session.
+             */
             failed: number;
-            /** Succeeded */
+            /**
+             * Succeeded
+             * @description Sessions that started in the bucket and did not fail.
+             */
             succeeded: number;
         };
         /** TraceCountPublic */
@@ -16846,7 +16852,7 @@ export interface components {
             cost: number;
             /**
              * Error Count
-             * @description Spans that ended in an error no fallback recovered.
+             * @description Spans that ended in an error no fallback recovered, including tools' errors, which do not fail the session.
              */
             error_count: number;
             /**
