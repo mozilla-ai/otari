@@ -316,6 +316,39 @@ describe("HealthChecksPage", () => {
     expect(screen.queryByText("Saved")).toBeNull()
   })
 
+  it("keeps Save disabled while a save is in flight, even after an edit", async () => {
+    const requests = mockApi(status())
+    const fetchSpy = vi.mocked(globalThis.fetch)
+    const answer = fetchSpy.getMockImplementation()
+    let release: () => void = () => {}
+    fetchSpy.mockImplementation(async (input, init) => {
+      if ((init?.method ?? "GET").toUpperCase() === "PATCH") {
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+      }
+      return answer?.(input, init) ?? new Response("{}")
+    })
+    await renderPage()
+
+    const interval = await screen.findByLabelText("Minutes between runs")
+    await userEvent.clear(interval)
+    await userEvent.type(interval, "30")
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    const saving = await screen.findByRole("button", { name: "Saving…" })
+
+    await userEvent.type(interval, "0")
+
+    expect(saving).toBeDisabled()
+    release()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
+    )
+    // The form now holds 300, which was never sent, so it does not read as saved.
+    expect(screen.queryByText("Saved")).toBeNull()
+    expect(requests.filter((r) => r.method === "PATCH")).toHaveLength(1)
+  })
+
   it("says so before the first run", async () => {
     mockApi(status({ last_run: null, providers: [], results: [] }))
     await renderPage()

@@ -233,11 +233,17 @@ function SettingsCard({ settings }: { settings: HealthCheckSettings }) {
     reasoningMaxTokens: String(settings.reasoning_max_tokens),
     reasoningEvery: String(settings.reasoning_every_runs),
   })
-  const set = (field: keyof typeof draft) => (value: string) => {
-    // "Saved" describes the values that were sent, not an edit made since.
-    update.reset()
+  // The draft the last successful save sent. "Saved" shows only while the form
+  // still holds it, so an edit made since, even during the save, does not read
+  // as saved, and the save in flight keeps Save disabled until it settles.
+  const [saved, setSaved] = useState<typeof draft | null>(null)
+  const set = (field: keyof typeof draft) => (value: string) =>
     setDraft((current) => ({ ...current, [field]: value }))
-  }
+  const showSaved =
+    saved !== null &&
+    (Object.keys(draft) as (keyof typeof draft)[]).every(
+      (field) => draft[field] === saved[field],
+    )
   const problems = {
     interval: countProblem("interval", draft.interval),
     maxTokens: countProblem("maxTokens", draft.maxTokens),
@@ -318,19 +324,23 @@ function SettingsCard({ settings }: { settings: HealthCheckSettings }) {
           <Button
             size="sm"
             isDisabled={invalid || update.isPending}
-            onPress={() =>
-              update.mutate({
-                interval_minutes: Number(draft.interval.trim()),
-                prompt: draft.prompt,
-                max_tokens: Number(draft.maxTokens.trim()),
-                reasoning_max_tokens: Number(draft.reasoningMaxTokens.trim()),
-                reasoning_every_runs: Number(draft.reasoningEvery.trim()),
-              })
-            }
+            onPress={() => {
+              const sent = draft
+              update.mutate(
+                {
+                  interval_minutes: Number(sent.interval.trim()),
+                  prompt: sent.prompt,
+                  max_tokens: Number(sent.maxTokens.trim()),
+                  reasoning_max_tokens: Number(sent.reasoningMaxTokens.trim()),
+                  reasoning_every_runs: Number(sent.reasoningEvery.trim()),
+                },
+                { onSuccess: () => setSaved(sent) },
+              )
+            }}
           >
             {update.isPending ? "Saving…" : "Save"}
           </Button>
-          {update.isSuccess ? (
+          {showSaved ? (
             <span role="status" className="ml-3 text-sm text-success">
               Saved
             </span>
