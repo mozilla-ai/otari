@@ -67,6 +67,7 @@ def _describe(metadata: ProviderMetadata) -> str:
         f"Pages: at most {metadata.max_urls_per_call} per call",
         f"Formats: {', '.join(metadata.formats)}",
         f"Renders JavaScript: {'yes' if metadata.renders_javascript else 'no'}",
+        f"Final URL: {'after redirects' if metadata.reports_final_url else 'the URL as asked, even after a redirect'}",
     ]
     if metadata.tier == "test":
         lines.append("For tests: it answers from canned data and its options, and calls no service.")

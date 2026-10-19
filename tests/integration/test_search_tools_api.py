@@ -350,6 +350,9 @@ def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_h
     assert exa["max_urls_per_call"] == metadata.max_urls_per_call
     assert exa["renders_javascript"] is False
     assert exa["formats"] == metadata.formats
+    # Exa answers with the URL as asked even after a redirect, as Tabstack does.
+    assert exa["reports_final_url"] is False
+    assert catalog["tabstack"]["reports_final_url"] is False
     assert exa["options"] == [option.model_dump() for option in metadata.options]
     assert exa["instances"] == ["exa-fetch"]
     assert exa["max_results"] is None

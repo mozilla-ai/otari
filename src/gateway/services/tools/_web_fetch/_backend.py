@@ -8,6 +8,9 @@ on its own side, so the backend checks the requested URL before the call, and
 the URL the provider reports finding the page at after it: the host must pass
 the policy, and must not name an address the built-in fetcher refuses, as an IP
 address in any form or as ``localhost``. A hostname is the provider's to resolve.
+A provider whose metadata says it does not report its final URL, as Exa and
+Tabstack say, answers with the URL as asked, so a redirect it follows escapes
+the policy; only the built-in fetcher checks every hop.
 
 What the model reads is contract G1's: the page under its source and content
 type, or one fixed ``[tool error]`` text per kind of failure. A provider

@@ -15335,6 +15335,11 @@ export interface components {
              */
             renders_javascript?: boolean | null;
             /**
+             * Reports Final Url
+             * @description Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.
+             */
+            reports_final_url?: boolean | null;
+            /**
              * Requires Api Base
              * @description True when this provider has no endpoint of its own, so the tool must say where the backend is.
              */

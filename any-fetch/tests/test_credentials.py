@@ -16,6 +16,7 @@ KEYED = ProviderMetadata(
     tier="production",
     max_urls_per_call=1,
     renders_javascript=False,
+    reports_final_url=True,
     formats=["text"],
     options=[],
 )
