@@ -123,12 +123,12 @@ describe("the kept organization context", () => {
     organization: { ...organizationContext().organization, name: "Current" },
   })
 
-  function wrapperFor(client: QueryClient) {
+  function createWrapper(client: QueryClient) {
     return ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client }, children)
   }
 
-  function newClient() {
+  function createClient() {
     return new QueryClient({ defaultOptions: { queries: { retry: false } } })
   }
 
@@ -148,7 +148,7 @@ describe("the kept organization context", () => {
     )
 
     const { result } = renderHook(() => useOrganizationContext(), {
-      wrapper: wrapperFor(newClient()),
+      wrapper: createWrapper(createClient()),
     })
 
     expect(result.current.data?.organization.name).toBe("Kept")
@@ -172,7 +172,7 @@ describe("the kept organization context", () => {
       () => new Promise(() => {}),
     )
     const elsewhere = renderHook(() => useOrganizationContext(), {
-      wrapper: wrapperFor(newClient()),
+      wrapper: createWrapper(createClient()),
     })
     expect(elsewhere.result.current.data).toBeUndefined()
 
@@ -181,20 +181,28 @@ describe("the kept organization context", () => {
       JSON.stringify({ origin: "", context: kept }),
     )
     const disabled = renderHook(() => useOrganizationContext(false), {
-      wrapper: wrapperFor(newClient()),
+      wrapper: createWrapper(createClient()),
     })
     expect(disabled.result.current.data).toBeUndefined()
+  })
 
-    // An entry that no longer parses stands in for nothing, and in particular
-    // not for whichever entry was read before it, however often it is read.
+  it("offers nothing for an entry that no longer parses, however often it is read", () => {
+    // In particular not whichever entry was read before it.
+    window.localStorage.setItem(
+      KEPT,
+      JSON.stringify({ origin: "", context: kept }),
+    )
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise(() => {}),
+    )
     const readable = renderHook(() => useOrganizationContext(), {
-      wrapper: wrapperFor(newClient()),
+      wrapper: createWrapper(createClient()),
     })
     expect(readable.result.current.data?.organization.name).toBe("Kept")
     window.localStorage.setItem(KEPT, "{not json")
     for (let read = 0; read < 2; read++) {
       const unreadable = renderHook(() => useOrganizationContext(), {
-        wrapper: wrapperFor(newClient()),
+        wrapper: createWrapper(createClient()),
       })
       expect(unreadable.result.current.data).toBeUndefined()
     }
@@ -214,7 +222,7 @@ describe("the kept organization context", () => {
       )
 
     const { result } = renderHook(() => useOrganizationContext(), {
-      wrapper: wrapperFor(newClient()),
+      wrapper: createWrapper(createClient()),
     })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
@@ -234,10 +242,10 @@ describe("the kept organization context", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       Response.json(current),
     )
-    const client = newClient()
+    const client = createClient()
 
     renderHook(() => useKeepOrganizationContext(true), {
-      wrapper: wrapperFor(client),
+      wrapper: createWrapper(client),
     })
 
     await waitFor(() =>
@@ -270,7 +278,7 @@ describe("the kept organization context", () => {
         useKeepOrganizationContext(false)
         return useOrganizationContext()
       },
-      { wrapper: wrapperFor(newClient()) },
+      { wrapper: createWrapper(createClient()) },
     )
 
     await waitFor(() =>

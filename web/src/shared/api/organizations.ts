@@ -94,7 +94,7 @@ export function useOrganizationContext(enabled = true) {
         throw error
       }
     },
-    placeholderData: enabled ? keptOrganizationContext : undefined,
+    placeholderData: enabled ? readKeptOrganizationContext : undefined,
     staleTime: 60_000,
     retry: retryUnlessNotFound(useQueryClient()),
     enabled,
@@ -107,8 +107,10 @@ let keptRaw: string | null = null
 let keptEntry: { origin?: unknown; context?: OrganizationContext } | null = null
 
 // Parsed once per stored value, so every reader of the placeholder holds the
-// same object, as they would the cached one.
-function keptOrganizationContext(): OrganizationContext | undefined {
+// same object, as they would the cached one. Trusted unchecked because only
+// this module writes the key: an entry from an older bundle stands in for one
+// round trip at most, until the current answer replaces it.
+function readKeptOrganizationContext(): OrganizationContext | undefined {
   try {
     const raw = window.localStorage.getItem(KEPT_CONTEXT_KEY)
     if (raw !== keptRaw) {
@@ -143,10 +145,10 @@ export function forgetOrganizationContext(): void {
  * cache holds, a switch or a rename included, so the next load starts from
  * the organization the caller last left.
  */
-export function useKeepOrganizationContext(hosted: boolean): void {
+export function useKeepOrganizationContext(isHosted: boolean): void {
   const { data, isPlaceholderData } = useOrganizationContext()
   useEffect(() => {
-    if (!hosted) {
+    if (!isHosted) {
       forgetOrganizationContext()
       return
     }
@@ -159,7 +161,7 @@ export function useKeepOrganizationContext(hosted: boolean): void {
     } catch {
       // Private mode or a full store: the next load waits for the answer.
     }
-  }, [hosted, data, isPlaceholderData])
+  }, [isHosted, data, isPlaceholderData])
 }
 
 /**

@@ -30,10 +30,11 @@ If `OTARI_MASTER_KEY` is unset on a new standalone database, Otari generates a
 master key and prints it once. The dashboard exchanges it for an HttpOnly session
 cookie; it does not store the master key in browser storage.
 
-On a hosted deployment the dashboard keeps one thing about your account in
-browser storage: the organization you are in, your role, and the names of your
-workspaces. The next visit shows your pages from it while it asks the server
-again, which answers a round trip sooner. Signing in or out clears it.
+On a hosted deployment the dashboard keeps a copy of who you are in browser
+storage: your name and email, the organization you are in, your role, whether
+you operate the deployment, and the names of your workspaces. The next visit
+shows your pages from it while it asks the server again, which answers a round
+trip sooner. Signing in or out clears it.
 
 Set `OTARI_SECRET_KEY` before saving provider or search-tool credentials through
 the dashboard:

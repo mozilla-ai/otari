@@ -43,6 +43,19 @@ function RepeatableLogoutHarness() {
   )
 }
 
+function SessionHarness() {
+  const { isAuthenticated, login, logout } = useAuth()
+  return isAuthenticated ? (
+    <button type="button" onClick={logout}>
+      Sign out
+    </button>
+  ) : (
+    <button type="button" onClick={login}>
+      Sign in
+    </button>
+  )
+}
+
 describe("AuthProvider", () => {
   beforeEach(() => {
     resetTelemetrySpy()
@@ -111,18 +124,6 @@ describe("AuthProvider", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(null, { status: 204 }),
     )
-    function SessionHarness() {
-      const { isAuthenticated, login, logout } = useAuth()
-      return isAuthenticated ? (
-        <button type="button" onClick={logout}>
-          Sign out
-        </button>
-      ) : (
-        <button type="button" onClick={login}>
-          Sign in
-        </button>
-      )
-    }
     const user = userEvent.setup()
     render(
       <AppProviders>

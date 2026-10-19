@@ -210,7 +210,8 @@ function DeploymentRoot({ hash }: { hash: string }) {
  * Done before the router mounts, so the home page never flashes first.
  */
 function SignedInRoot() {
-  useKeepOrganizationContext(useDeployment().deployment_type === "hosted")
+  const isHosted = useDeployment().deployment_type === "hosted"
+  useKeepOrganizationContext(isHosted)
   useState(() => {
     const modelId = takeRememberedModel()
     const path = window.location.hash.replace(/^#/, "")
