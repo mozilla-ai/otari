@@ -25,8 +25,12 @@ def test_the_digest_ignores_key_order() -> None:
 def test_a_budget_digest_changes_with_any_field() -> None:
     budget = BudgetConfig(max_budget=1.0, reset_alignment="calendar_day")
 
-    assert budget.declaration_digest() == BudgetConfig(max_budget=1.0, reset_alignment="calendar_day").declaration_digest()
-    assert budget.declaration_digest() != BudgetConfig(max_budget=2.0, reset_alignment="calendar_day").declaration_digest()
+    assert (
+        budget.declaration_digest() == BudgetConfig(max_budget=1.0, reset_alignment="calendar_day").declaration_digest()
+    )
+    assert (
+        budget.declaration_digest() != BudgetConfig(max_budget=2.0, reset_alignment="calendar_day").declaration_digest()
+    )
 
 
 def test_a_key_digest_changes_with_its_settings_and_its_secret() -> None:
