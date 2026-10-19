@@ -7,7 +7,7 @@ applies the entry; the first start after this migration applies every entry
 once, as every start did before.
 
 Revision ID: cc92a10774d8
-Revises: 557fc0f5bfda
+Revises: c7e1a3f5b9d2
 Create Date: 2026-10-17 00:00:00.000000
 
 """
@@ -19,7 +19,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "cc92a10774d8"
-down_revision: str | Sequence[str] | None = "557fc0f5bfda"
+down_revision: str | Sequence[str] | None = "c7e1a3f5b9d2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
