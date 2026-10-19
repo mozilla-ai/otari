@@ -385,8 +385,6 @@ export type TestHostedProviderRequest = Schemas["HostedProviderTestRequest"]
 export type HostedProviderTestResult = Schemas["HostedProviderTestPublic"]
 export type ReencryptHostedProvidersResult =
   Schemas["HostedProvidersReencryptPublic"]
-// Moving the deployment providers stored through the dashboard onto hosted
-// providers of the same name: a preview, then the same shape once applied.
 export type DeploymentProviderMigration =
   Schemas["DeploymentProviderMigrationPublic"]
 export type DeploymentProviderMigrationRow =

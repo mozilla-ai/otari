@@ -45,13 +45,7 @@ import {
 
 // The providers this deployment serves inference on with its own keys, for a
 // request that brings no credential of its own. Deployment-scoped, which is
-// what sets it apart from Providers (an organization's own keys). Each is known
-// by its name, which defaults to its implementation; a name of its own serves a
-// second endpoint of one implementation, reached as `name:model`.
-//
-// Below the table, the `providers:` instances the configuration declares are
-// listed read-only, and above it a banner offers to move the deployment
-// providers stored through the older Deployment providers page onto this one.
+// what sets it apart from Providers (an organization's own keys).
 //
 // Operator-only, and the API refuses anyone else with a 404, so the page asks
 // the deployment admin gate first, as Accounts does, and words a refusal as the

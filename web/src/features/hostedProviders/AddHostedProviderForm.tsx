@@ -78,8 +78,6 @@ export function AddHostedProviderForm({
   const selected = detail.data?.id === draft.provider ? detail.data : undefined
   const name = draft.name.trim()
   const apiBase = draft.apiBase.trim()
-  // The server's rule: a key is needed unless the provider needs none or the
-  // provider is pointed at an endpoint of its own.
   const needsKey = (selected?.requires_api_key ?? true) && apiBase === ""
   const nameHasDelimiter = /[:/]/.test(name)
   const effectiveName = name || draft.provider.trim()
@@ -114,8 +112,6 @@ export function AddHostedProviderForm({
     )
     return {
       provider: draft.provider.trim(),
-      // Blank boxes are absent fields: the implementation's own name, the
-      // provider's default endpoint, and no key.
       ...(name && name !== draft.provider.trim() ? { name } : {}),
       ...(draft.apiKey ? { api_key: draft.apiKey } : {}),
       ...(apiBase ? { api_base: apiBase } : {}),

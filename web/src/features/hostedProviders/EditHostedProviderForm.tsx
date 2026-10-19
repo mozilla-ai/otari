@@ -32,8 +32,7 @@ import { movesToAnotherOrigin } from "./endpointOrigin"
 
 // The editor for one hosted provider. Its name and implementation are immutable
 // (the update body cannot change them), so they are named in the description.
-// "Test connection" tries the form's values, the stored key standing in for a
-// blank key box, so an edit can be checked before it is saved. The key box
+// The key box
 // starts empty and stays optional, which is the whole shape of a write-only
 // credential. A stored typed secret arrives masked, so blank there means "keep
 // it" and the mask is echoed back for the server to restore.

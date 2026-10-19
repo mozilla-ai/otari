@@ -10,14 +10,8 @@ import {
   useDeploymentProviderMigrationPreview,
 } from "@/shared/api/hostedProviders"
 
-// Moving the deployment providers stored through the dashboard onto hosted
-// providers of the same name, so `instance:model` keeps working. The preview is
-// read whenever the page is open, because it reads the stored rows only; the
-// banner appears only while there is something to move. Applying asks each
-// provider what it serves, as adding one does, so the confirm can take a while.
-// The last move's report stays beside the banner, which the refreshed preview
-// keeps offering while any deployment provider is left, so one that failed can
-// be moved again once its cause is fixed.
+// The report and the banner are independent so a row that failed can be moved
+// again once its cause is fixed, without reloading the page.
 
 const OUTCOME_LABELS: Record<
   DeploymentProviderMigrationRow["outcome"],
@@ -31,9 +25,7 @@ const OUTCOME_LABELS: Record<
   failed: "Not moved: failed",
 }
 
-// A row copied to a hosted provider whose deployment provider was kept, because
-// the copy offers no model yet, is still served from the old page: it reads
-// apart from a completed move, in the caution color.
+// Copied, but its deployment provider still serves until the copy offers a model.
 function isRetained(row: DeploymentProviderMigrationRow) {
   return row.outcome === "migrated" && !row.source_removed
 }

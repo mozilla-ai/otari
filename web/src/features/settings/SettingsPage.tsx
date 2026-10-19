@@ -527,9 +527,7 @@ function SecretKeyRow() {
   const hostedProviders = useHostedProviders(hostsHosted)
   const reencrypt = useReencryptProviderCredentials()
   const reencryptHosted = useReencryptHostedProviders()
-  // Both stores hold keys under OTARI_SECRET_KEY: the deployment providers
-  // stored through the dashboard and the hosted providers. A configured
-  // hosted provider holds no ciphertext, so only stored ones count.
+  // A configured hosted provider holds no ciphertext, so only stored ones count.
   const storedHosted = (hostedProviders.data?.data ?? []).filter(
     (provider) => provider.source === "database",
   )

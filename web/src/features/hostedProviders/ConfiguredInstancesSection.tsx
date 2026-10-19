@@ -5,13 +5,8 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { HealthPill } from "@/features/providers/HealthPill"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 
-// The `providers:` instances the deployment's configuration declares, in
-// config.yml or OTARI_CONFIG_YAML, listed read-only beside the hosted
-// providers so an operator sees every deployment credential on one page. They
-// are changed in the configuration, and a request naming one is served on it
-// before any organization key or hosted provider, which is why the section says
-// so. The ones stored through the deployment providers page are left out: they
-// are moving onto hosted providers, and the banner above the table moves them.
+// The instances stored through the deployment providers page are left out:
+// the move banner carries them onto hosted providers instead.
 
 export function ConfiguredInstancesSection() {
   const providers = useProviders()
