@@ -7,6 +7,7 @@ from contextlib import aclosing, suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
+import anyio
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.usage import (
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
 S = TypeVar("S")  # Settlement type, opaque to this module
+T = TypeVar("T")
 
 
 DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS = 2.0
@@ -362,9 +364,9 @@ async def streaming_generator(
                                 yield fmt.keepalive
                         settlement = settlement_task.result()
                     else:
-                        settlement = await on_complete(usage)
+                        settlement = await _shielded(on_complete, usage)
                 elif on_no_usage is not None:
-                    await on_no_usage()
+                    await _shielded(on_no_usage)
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
                 logger.error("Failed to log streaming usage for %s: %s", label, log_err)
@@ -386,9 +388,9 @@ async def streaming_generator(
             settled = True
             try:
                 if has_usage:
-                    await on_complete(usage)
+                    await _shielded(on_complete, usage)
                 elif on_no_usage is not None:
-                    await on_no_usage()
+                    await _shielded(on_no_usage)
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
                 logger.error("Failed to log streaming usage for %s: %s", label, log_err)
@@ -398,8 +400,7 @@ async def streaming_generator(
             with suppress(BaseException):
                 await settlement_task
         if not settled and on_incomplete is not None:
-            with suppress(Exception):
-                await on_incomplete()
+            await _settle_incomplete(on_incomplete, label)
         settled = True
         raise
     except Exception as e:
@@ -413,7 +414,7 @@ async def streaming_generator(
             yield fmt.done_marker
         settled = True
         try:
-            await on_error(e)
+            await _shielded(on_error, e)
         except Exception as log_err:
             logger.error("Failed to log streaming error usage: %s", log_err)
         # codeql[py/clear-text-logging-sensitive-data]
@@ -424,11 +425,7 @@ async def streaming_generator(
             with suppress(BaseException):
                 await settlement_task
         if not settled and on_incomplete is not None:
-            try:
-                await on_incomplete()
-            except Exception as log_err:
-                # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
+            await _settle_incomplete(on_incomplete, label)
         # Iterating the source never closes it, so a stream the client abandoned
         # would hold the provider's connection until garbage collection.
         await _close_stream_quietly(stream)
@@ -661,6 +658,28 @@ async def _stitched(first: C, remaining: AsyncIterator[C]) -> AsyncIterator[C]:
 async def _empty_async_iter() -> AsyncIterator[C]:
     return
     yield  # unreachable; makes this a generator
+
+
+async def _shielded(settle: Callable[..., Awaitable[T]], *args: Any) -> T:
+    """Run a settlement callback to the end even when the client has disconnected.
+
+    A disconnect cancels the response's task scope, and anyio then cancels every
+    await left inside it, so a settlement's database writes would be cancelled
+    with the stream and the request would go unbilled. A client that hangs up the
+    moment it reads the last event, as Claude Code's ``WebSearch`` does, lands
+    there on every request.
+    """
+    with anyio.CancelScope(shield=True):
+        result = await settle(*args)
+    return result
+
+
+async def _settle_incomplete(on_incomplete: Callable[[], Awaitable[None]], label: str) -> None:
+    try:
+        await _shielded(on_incomplete)
+    except Exception as log_err:
+        # codeql[py/clear-text-logging-sensitive-data]
+        logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
 
 
 async def _close_stream_quietly(stream: AsyncIterator[Any]) -> None:

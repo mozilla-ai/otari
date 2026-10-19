@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 
+import anyio
 import pytest
 from any_llm.types.completion import CompletionUsage
 
@@ -843,3 +844,92 @@ async def test_a_stream_the_client_abandons_closes_its_source() -> None:
     await gen.aclose()
 
     assert source.closed
+
+
+async def _consume_hanging_up_after(gen: AsyncIterator[str], hang_up: str) -> None:
+    """Read ``gen`` as Starlette does, cancelling the task scope once ``hang_up`` is read.
+
+    A disconnect cancels the scope the response is streamed in, and anyio then cancels
+    every await left inside it, so whatever the generator still has to do runs cancelled.
+    """
+
+    async def _send() -> None:
+        async for event in gen:
+            if event == hang_up:
+                tg.cancel_scope.cancel()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_send)
+
+
+async def _database_write(settled: list[str], name: str) -> None:
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    settled.append(name)
+
+
+async def _then_raises(*values: str) -> AsyncIterator[str]:
+    for value in values:
+        yield value
+    raise RuntimeError(_PROVIDER_CRASHED)
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_hangs_up_mid_stream_is_still_billed() -> None:
+    settled: list[str] = []
+
+    async def _waits_on_the_provider() -> AsyncIterator[str]:
+        yield "chunk"
+        await asyncio.Event().wait()
+        yield "never"
+
+    gen = streaming_generator(
+        stream=_waits_on_the_provider(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        on_incomplete=lambda: _database_write(settled, "incomplete"),
+    )
+    await _consume_hanging_up_after(gen, "data: chunk\n\n")
+
+    assert settled == ["incomplete"]
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_hangs_up_on_the_last_event_is_still_billed() -> None:
+    settled: list[str] = []
+
+    gen = streaming_generator(
+        stream=_items("chunk", "usage"),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=lambda _usage: _database_write(settled, "complete"),
+        on_error=_fail_on_error,
+        label="test:model",
+    )
+    await _consume_hanging_up_after(gen, OPENAI_STREAM_FORMAT.done_marker)
+
+    assert settled == ["complete"]
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_hangs_up_on_the_error_event_is_still_billed() -> None:
+    """Claude Code's ``WebSearch`` hangs up on the error that ends a tool loop at its cap."""
+    settled: list[str] = []
+
+    gen = streaming_generator(
+        stream=_then_raises("chunk"),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=ANTHROPIC_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=lambda _exc: _database_write(settled, "error"),
+        label="test:model",
+    )
+    await _consume_hanging_up_after(gen, ANTHROPIC_STREAM_FORMAT.error_payload)
+
+    assert settled == ["error"]
