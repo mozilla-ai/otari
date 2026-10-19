@@ -63,6 +63,9 @@ context and calls the adapter.
 5. **In the gateway**, nothing in code, since the catalog routes and the settings validation read
    the libraries' metadata. Add the provider's pricing note to `docs/tools.md`, under "Search
    providers" or "Fetch providers", and a compose or `.env.example` line where a key is expected.
+   Then smoke-test it on a local gateway: a direct search or an in-loop fetch on an instance, the
+   pricing row it bills and a refused key. When the provider's name is also an any-llm
+   provider's, configure that provider's models too, and check the two keep apart.
 6. **Update the learnings** below with what the provider taught, and this procedure if a step
    changed.
 
@@ -106,8 +109,7 @@ The four cases a fixture can record:
   answer with neither a page nor a reason raises `unexpected_response`; it is not an empty page.
 - A provider with no error inside a 200 either fails the call for a page it could not fetch or
   returns the text of the site's own error page. Find out which live, with a page that does not
-  exist, and say so in the docstring, the README and `EXPECTED`'s `page_errors`, or
-  `page_errors_fail` when the call fails.
+  exist, and say so in the docstring, the README and `EXPECTED`'s `missing_page`.
 - List the fields the adapter checks in the module's docstring and the README's section on the
   provider.
 - `builtin` is not added here: the host registers it (`AnyFetch.register_builtin`).
@@ -190,7 +192,7 @@ The first search provider with the key in the URL and errors inside a 200.
   PDF and an article live; a field whose format the provider does not hold stays in `raw`, since
   checking it would fail every such call.
 - Not every fetch provider has an error inside a 200. Tabstack returns a 404 page's text with a
-  200 and does not say what status the site answered, hence `page_errors` in the live tests.
+  200 and does not say what status the site answered, hence `missing_page` in the live tests.
 - A provider can be slower than the default 15-second timeout: Tabstack documents up to 15 s at
   its default effort and 15 to 60 s at `max`, and a zero-byte file took 29 s. Say so in the
   option's description, the README and the pricing note, which tells an operator to set the
@@ -203,22 +205,31 @@ The first search provider with the key in the URL and errors inside a 200.
 
 ### 2026-10-18, DeepSeek (both libraries)
 
-The first provider whose search and fetch are one account and one key, and the first fetch
+The first provider whose name and key are also an any-llm provider's, and the first fetch
 provider with no empty page.
 
+- A search or fetch provider can share its name with a model provider. DeepSeek's tools are
+  keyed `deepseek:<tool-name>`, in the pricing key space of its models' `deepseek:<model>`, and
+  gateway code that judged a key by its prefix took one for the other: the hosted catalog sweep
+  kept unoffered model prices as tool rates, config pricing loaded model prices with no
+  `providers:` entry, `deepseek:*` granted paid searches, and the startup warning called the key
+  the search tool read ignored. The gateway now matches tool keys whole. Name instances so no
+  tool name is also a model id (`deepseek`, `deepseek-fetch`), and run step 5's smoke test with
+  the provider's models configured.
 - An error body's fields can differ in how much they say. DeepSeek's OpenAI-shaped body sends
   `code` `invalid_request_error` for every failure, a refused key included, while `type` tells
   them apart (`authentication_error`, `not_found_error`). Record more than one failure before
   choosing which field becomes the tag.
-- An error message can carry part of the key: DeepSeek's 401 quotes its last four characters, so
-  a fixture recorded with a real key that was refused holds them. Record the error fixture with a
-  made-up key, and never read the message.
+- An error message can carry part of the key: DeepSeek's 401 quotes its last four characters
+  after asterisks. The recorders redact that masked form as well as the key; the adapter still
+  never reads the message.
 - A fetch provider can fail the call for every page it cannot use and never answer an empty
   page. DeepSeek answers a 404 `not_found_error` for a missing page, a site's 500, a private
   address, a PDF, a zero-byte file and HTML with an empty body, with nothing saying which. That
   cannot be read as an empty page, since a missing page looks the same, so the provider leaves
-  `empty` out of the conformance scenarios, and `EXPECTED` says `page_errors_fail`. Probe those
-  cases live before deciding: a page with only a title came back with the title as its text.
+  `empty` out of the conformance scenarios (`NO_EMPTY_PAGE`), and `EXPECTED` says
+  `missing_page="fails"`. Probe those cases live before deciding: a page with only a title came
+  back with the title as its text.
 - A provider can have no recency parameter but a query operator: DeepSeek's `after:YYYY-MM-DD`,
   which counts toward its 128-character query limit, so a long query with a `time_range` is
   refused. Check the operator live (it filtered to the week asked for).

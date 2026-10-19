@@ -71,7 +71,7 @@ services:
       # `api_key: ${EXA_API_KEY}`.
       - EXA_API_KEY=${EXA_API_KEY:-}
       - MOJEEK_API_KEY=${MOJEEK_API_KEY:-}
-      # DeepSeek's serves `fetch_tools:` as well.
+      # DeepSeek's key serves `fetch_tools:` as well.
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       # And for fetch providers, under `fetch_tools:` as
       # `api_key: ${TABSTACK_API_KEY}`.
