@@ -57,6 +57,8 @@ class HealthCheckRun(Base):
     started_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True, default=lambda: datetime.now(UTC))
     finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     included_reasoning: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The reasoning models this run left for the next run that includes them.
+    deferred_selectors: Mapped[list[str]] = mapped_column(JSON, default=list)
     total: Mapped[int] = mapped_column(Integer, default=0)
     passed: Mapped[int] = mapped_column(Integer, default=0)
     failed: Mapped[int] = mapped_column(Integer, default=0)
@@ -78,3 +80,23 @@ class HealthCheckResult(Base):
     error: Mapped[str | None] = mapped_column(String, default=None)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     checked_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+
+
+class HealthCheckRecovery(Base):
+    """One outage that ended: a model that failed for a streak of runs and then answered.
+
+    Kept past the results it was read from, which go after 48 hours, so how
+    often and how long a model was down stays on record.
+    """
+
+    __tablename__ = "health_check_recoveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    selector: Mapped[str] = mapped_column(String, index=True)
+    provider: Mapped[str] = mapped_column(String)
+    failing_since: Mapped[datetime] = mapped_column(UtcDateTime())
+    recovered_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)
+    failed_runs: Mapped[int] = mapped_column(Integer)
+    # What the last failing check answered.
+    status_code: Mapped[int | None] = mapped_column(Integer, default=None)
+    error: Mapped[str | None] = mapped_column(String, default=None)

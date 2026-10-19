@@ -7959,6 +7959,21 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthCheckDisabled": {
+        "description": "What switching off the failing models did.",
+        "properties": {
+          "disabled": {
+            "description": "How many models were switched off on their hosted provider.",
+            "title": "Disabled",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "disabled"
+        ],
+        "title": "HealthCheckDisabled",
+        "type": "object"
+      },
       "HealthCheckResultPublic": {
         "description": "What one offering answered in the latest finished run.",
         "properties": {
@@ -29610,6 +29625,36 @@
           }
         ],
         "summary": "Get Health Check Status",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/disable-failing": {
+      "post": {
+        "description": "Stop serving every model the latest run found failing, on its hosted provider.\n\nEach stays listed on the Hosted providers page, priced, to be switched back on there.",
+        "operationId": "health-checks-disable_failing_models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckDisabled"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Disable Failing Models",
         "tags": [
           "health-checks"
         ]

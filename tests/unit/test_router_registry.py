@@ -18,6 +18,7 @@ _DATA_PLANE_NEEDING_CONTROL = {
     "/decisions",
     "/files",
     "/health-checks",
+    "/health-checks/disable-failing",
     "/health-checks/run",
     "/health-checks/settings",
     "/routing/recommend",

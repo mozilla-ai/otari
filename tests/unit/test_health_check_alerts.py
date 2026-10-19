@@ -18,7 +18,13 @@ def _outcome(
     selector: str, status: Literal["pass", "fail", "skip"], status_code: int | None = None, error: str | None = None
 ) -> ProbeOutcome:
     provider = selector.partition(":")[0]
-    return ProbeOutcome(ProbeTarget(selector, provider, False, True), status, status_code, error, 10)
+    return ProbeOutcome(
+        ProbeTarget(selector, provider, False, True, provider, selector.partition(":")[2]),
+        status,
+        status_code,
+        error,
+        10,
+    )
 
 
 def _render(

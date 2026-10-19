@@ -2735,6 +2735,26 @@
           }
         },
         {
+          "name": "Disable Failing Models",
+          "request": {
+            "description": "Stop serving every model the latest run found failing, on its hosted provider.\n\nEach stays listed on the Hosted providers page, priced, to be switched back on there.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "disable-failing"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/disable-failing"
+            }
+          }
+        },
+        {
           "name": "Run Health Checks",
           "request": {
             "description": "Start a run within a minute, whether or not the schedule is on.",

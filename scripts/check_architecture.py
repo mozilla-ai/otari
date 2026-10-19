@@ -1616,6 +1616,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
         "baseline": ("gateway/services/provider_store_service.py",),
     },
+    "gateway.models.health_checks.HealthCheckRecovery": {
+        "repository": "gateway/repositories/health_checks/health_check_recovery_repository.py",
+        "baseline": (),
+    },
     "gateway.models.health_checks.HealthCheckResult": {
         "repository": "gateway/repositories/health_checks/health_check_result_repository.py",
         "baseline": (),

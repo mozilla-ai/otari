@@ -8,13 +8,11 @@ import asyncio
 import re
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from any_llm.exceptions import ModelNotFoundError
 
-from gateway.core.config import GatewayConfig
-from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.providers import acompletion
 
 PROBE_TIMEOUT_SECONDS = 60.0
@@ -34,12 +32,15 @@ _NOT_CHAT_ID = re.compile(r"embed|rerank|bge-|whisper|tts|dall-e|image", re.IGNO
 
 @dataclass(frozen=True)
 class ProbeTarget:
-    """One offering to check: its selector, the instance it names, and how to ask it."""
+    """One offering to check: its selector, the hosted provider it names, and how to reach it."""
 
     selector: str
     provider: str
     reasoning: bool
     chat: bool
+    implementation: str
+    model: str
+    call_kwargs: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True)
@@ -90,21 +91,20 @@ def _describe(exc: BaseException) -> str:
 
 
 async def probe(
-    config: GatewayConfig, target: ProbeTarget, *, prompt: str, max_tokens: int, timeout: float = PROBE_TIMEOUT_SECONDS
+    target: ProbeTarget, *, prompt: str, max_tokens: int, timeout: float = PROBE_TIMEOUT_SECONDS
 ) -> ProbeOutcome:
     """Send ``prompt`` to one offering. Any answer passes; an error or a timeout fails."""
     if not target.chat:
         return ProbeOutcome(target, "skip", None, "not a chat model", 0)
     started = time.monotonic()
     try:
-        resolved = resolve_provider_selector(config, target.selector)
         await asyncio.wait_for(
             acompletion(
-                model=resolved.model,
-                provider=resolved.provider,
+                model=target.model,
+                provider=target.implementation,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
-                **resolved.kwargs,
+                **target.call_kwargs,
             ),
             timeout=timeout,
         )
@@ -116,7 +116,6 @@ async def probe(
 
 
 async def probe_all(
-    config: GatewayConfig,
     targets: Sequence[ProbeTarget],
     *,
     prompt: str,
@@ -129,7 +128,7 @@ async def probe_all(
     async def one(target: ProbeTarget) -> ProbeOutcome:
         async with gate:
             cap = reasoning_max_tokens if target.reasoning else max_tokens
-            return await probe(config, target, prompt=prompt, max_tokens=cap)
+            return await probe(target, prompt=prompt, max_tokens=cap)
 
     return list(await asyncio.gather(*(one(target) for target in targets)))
 

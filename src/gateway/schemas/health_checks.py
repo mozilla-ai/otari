@@ -134,3 +134,21 @@ class HealthCheckStatus(BaseModel):
     last_run: HealthCheckRunPublic | None
     providers: list[ProviderHealthSummary]
     results: list[HealthCheckResultPublic]
+
+
+class HealthCheckDisabled(BaseModel):
+    """What switching off the failing models did."""
+
+    disabled: int = Field(description="How many models were switched off on their hosted provider.")
+
+
+class HealthCheckRecoveryCreate(BaseModel):
+    """One outage a run ended, as it is recorded."""
+
+    selector: str
+    provider: str
+    failing_since: datetime
+    recovered_at: datetime
+    failed_runs: int
+    status_code: int | None
+    error: str | None

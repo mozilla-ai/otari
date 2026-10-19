@@ -1501,6 +1501,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/health-checks/disable-failing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable Failing Models
+         * @description Stop serving every model the latest run found failing, on its hosted provider.
+         *
+         *     Each stays listed on the Hosted providers page, priced, to be switched back on there.
+         */
+        post: operations["health-checks-disable_failing_models"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health-checks/run": {
         parameters: {
             query?: never;
@@ -10823,6 +10845,17 @@ export interface components {
             code?: "invalid_request";
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthCheckDisabled
+         * @description What switching off the failing models did.
+         */
+        HealthCheckDisabled: {
+            /**
+             * Disabled
+             * @description How many models were switched off on their hosted provider.
+             */
+            disabled: number;
         };
         /**
          * HealthCheckResultPublic
@@ -20863,6 +20896,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthCheckStatus"];
+                };
+            };
+        };
+    };
+    "health-checks-disable_failing_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckDisabled"];
                 };
             };
         };

@@ -1,18 +1,23 @@
 """One health check probe: what passes, what fails, and what the stored error may say."""
 
 import asyncio
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from gateway.core.config import GatewayConfig
-from gateway.services.health_checks import is_chat_model
-from gateway.services.health_checks._probe import ProbeTarget, probe
+from gateway.services.health_checks._probe import ProbeTarget, is_chat_model, probe
 
 _PROBE = "gateway.services.health_checks._probe"
-_TARGET = ProbeTarget("openai:gpt-test", "openai", reasoning=False, chat=True)
+_TARGET = ProbeTarget(
+    "openai:gpt-test",
+    "openai",
+    reasoning=False,
+    chat=True,
+    implementation="openai",
+    model="gpt-test",
+    call_kwargs={"api_key": "sk-never-stored-anywhere"},
+)
 
 
 class _StatusError(Exception):
@@ -21,14 +26,9 @@ class _StatusError(Exception):
         self.status_code = status_code
 
 
-def _resolve(_config: GatewayConfig, selector: str) -> SimpleNamespace:
-    provider, _, model = selector.partition(":")
-    return SimpleNamespace(provider=provider, model=model, kwargs={"api_key": "sk-never-stored-anywhere"})
-
-
 async def _run(completion: Any, target: ProbeTarget = _TARGET, timeout: float = 5.0) -> Any:
-    with patch(f"{_PROBE}.resolve_provider_selector", new=_resolve), patch(f"{_PROBE}.acompletion", new=completion):
-        return await probe(GatewayConfig(), target, prompt="ping", max_tokens=8, timeout=timeout)
+    with patch(f"{_PROBE}.acompletion", new=completion):
+        return await probe(target, prompt="ping", max_tokens=8, timeout=timeout)
 
 
 @pytest.mark.asyncio
@@ -83,7 +83,9 @@ async def test_a_model_that_is_not_for_chat_is_skipped_without_a_call() -> None:
     async def never(**_kwargs: Any) -> object:
         raise AssertionError
 
-    outcome = await _run(never, ProbeTarget("openai:text-embedding-3", "openai", reasoning=False, chat=False))
+    outcome = await _run(
+        never, ProbeTarget("openai:text-embedding-3", "openai", False, False, "openai", "text-embedding-3")
+    )
 
     assert outcome.status == "skip"
 

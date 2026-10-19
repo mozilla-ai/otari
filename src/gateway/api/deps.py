@@ -42,6 +42,7 @@ from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, 
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.health_checks import (
+    HealthCheckRecoveryRepository,
     HealthCheckResultRepository,
     HealthCheckRunRepository,
     HealthCheckSettingsRepository,
@@ -1795,6 +1796,8 @@ def build_health_check_service(uow: UnitOfWork, config: GatewayConfig) -> Health
         HealthCheckSettingsRepository(uow),
         HealthCheckRunRepository(uow),
         HealthCheckResultRepository(uow),
+        HealthCheckRecoveryRepository(uow),
+        build_hosted_provider_service(uow, config=config),
         config,
     )
 

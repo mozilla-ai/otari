@@ -103,13 +103,21 @@ function status(overrides: Partial<HealthCheckStatus> = {}): HealthCheckStatus {
   }
 }
 
-function mockApi(answer: HealthCheckStatus | { $status: number }) {
+function mockApi(
+  answer: HealthCheckStatus | { $status: number },
+  { afterDisable }: { afterDisable?: HealthCheckStatus } = {},
+) {
   const requests: Request[] = []
+  let disabled = false
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     requests.push({ url, method, body })
+    if (url.endsWith(`${API_ROOT}/health-checks/disable-failing`)) {
+      disabled = true
+      return jsonResponse({ disabled: 1 })
+    }
     if (url.endsWith(`${API_ROOT}/health-checks/run`)) {
       return jsonResponse(settings({ run_requested: true }), 202)
     }
@@ -122,7 +130,7 @@ function mockApi(answer: HealthCheckStatus | { $status: number }) {
             { detail: "This endpoint requires deployment operator access." },
             answer.$status,
           )
-        : jsonResponse(answer)
+        : jsonResponse(disabled && afterDisable ? afterDisable : answer)
     }
     return jsonResponse({})
   })
@@ -178,6 +186,65 @@ describe("HealthChecksPage", () => {
         "deepinfra:llama",
       ),
     ).toBeInTheDocument()
+  })
+
+  it("pages the failing models", async () => {
+    const failing = Array.from({ length: 30 }, (_, i) => ({
+      ...status().results[0],
+      selector: `bedrock:model-${String(i).padStart(2, "0")}`,
+    }))
+    mockApi(status({ results: failing }))
+    await renderPage()
+
+    const models = await screen.findByRole("grid", { name: "Models" })
+    expect(within(models).getAllByRole("row").slice(1)).toHaveLength(25)
+    expect(within(models).queryByText("bedrock:model-25")).toBeNull()
+
+    await userEvent.click(screen.getByRole("button", { name: "Next page" }))
+
+    const second = screen.getByRole("grid", { name: "Models" })
+    expect(within(second).getAllByRole("row").slice(1)).toHaveLength(5)
+    expect(within(second).getByText("bedrock:model-29")).toBeInTheDocument()
+  })
+
+  it("keeps the pager away while every failing model fits one page", async () => {
+    mockApi(status())
+    await renderPage()
+
+    await screen.findByRole("grid", { name: "Models" })
+    expect(screen.queryByRole("button", { name: "Next page" })).toBeNull()
+  })
+
+  it("switches off every failing model after a confirmation", async () => {
+    const requests = mockApi(status(), {
+      afterDisable: status({
+        results: status().results.filter((r) => r.status !== "fail"),
+      }),
+    })
+    await renderPage()
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Disable all" }),
+    )
+    expect(
+      requests.some((r) => r.url.endsWith("/health-checks/disable-failing")),
+    ).toBe(false)
+    await userEvent.click(
+      screen.getByRole("button", { name: "Disable 1 model" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.filter(
+          (r) =>
+            r.method === "POST" &&
+            r.url.endsWith("/health-checks/disable-failing"),
+        ),
+      ).toHaveLength(1),
+    )
+    expect(await screen.findByText(/1 model switched off/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText("bedrock:claude")).toBeNull())
+    expect(screen.queryByRole("button", { name: "Disable all" })).toBeNull()
   })
 
   it("starts a run on request and says it is starting", async () => {

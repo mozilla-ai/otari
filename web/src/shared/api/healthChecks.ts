@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  HealthCheckDisabled,
   HealthCheckSettings,
   HealthCheckStatus,
   UpdateHealthCheckSettings,
@@ -52,4 +53,20 @@ export function useRunHealthChecks() {
   return useSettingsWrite(() =>
     apiFetch<HealthCheckSettings>("/health-checks/run", { method: "POST" }),
   )
+}
+
+/**
+ * Switch off every model the latest run found failing, on its hosted provider.
+ * The status is read again, so the models leave the failing list at once.
+ */
+export function useDisableFailingModels() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<HealthCheckDisabled>("/health-checks/disable-failing", {
+        method: "POST",
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: [HEALTH_CHECKS] }),
+  })
 }

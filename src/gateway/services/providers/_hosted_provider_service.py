@@ -19,7 +19,7 @@ writes in another.
 import dataclasses
 import functools
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -396,6 +396,15 @@ class HostedProviderService:
                 await self.models.save(model)
         rates = await self.offers.current_rates(provider, [model], implementation=source.implementation)
         return HostedModelPublic.from_row(model, rates=rates.get(model.model))
+
+    async def switch_off_models(self, models: Mapping[str, Collection[str]]) -> int:
+        """Stop serving each named model under its provider, keyed by provider name. Prices and rows stay.
+
+        A provider or model that does not exist, or is already off, is passed
+        over. Returns how many models were switched off.
+        """
+        async with self.uow:
+            return sum([await self.models.switch_off(provider, names) for provider, names in models.items()])
 
     async def remove_model(self, provider: str, model_id: uuid.UUID) -> None:
         """Stop offering a model. Its pricing history stays.

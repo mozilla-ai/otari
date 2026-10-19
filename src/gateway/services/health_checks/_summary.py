@@ -3,7 +3,7 @@
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
@@ -76,6 +76,8 @@ class FailureStreak:
 
     since: datetime
     runs: int
+    # The streak's newest failure, which says what the model last answered.
+    last: HealthCheckResult | None = field(default=None, compare=False)
 
 
 def failure_streaks(runs: Sequence[HealthCheckRun], results: Sequence[HealthCheckResult]) -> dict[str, FailureStreak]:
@@ -98,5 +100,7 @@ def failure_streaks(runs: Sequence[HealthCheckRun], results: Sequence[HealthChec
                 ended.add(result.selector)
                 continue
             previous = streaks.get(result.selector)
-            streaks[result.selector] = FailureStreak(run.started_at, (previous.runs if previous else 0) + 1)
+            streaks[result.selector] = FailureStreak(
+                run.started_at, (previous.runs if previous else 0) + 1, previous.last if previous else result
+            )
     return streaks

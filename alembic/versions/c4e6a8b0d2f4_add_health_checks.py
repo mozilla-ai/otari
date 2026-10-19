@@ -1,11 +1,11 @@
-"""Add the health check settings, runs and results tables.
+"""Add the health check settings, runs, results and recoveries tables.
 
 The settings table holds one row, pinned by a check constraint, which every
 replica's worker polls; the conditional update that moves its ``next_run_at``
 forward is what lets exactly one replica start a run.
 
 Revision ID: c4e6a8b0d2f4
-Revises: 557fc0f5bfda
+Revises: c7e1a3f5b9d2
 Create Date: 2026-10-16
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c4e6a8b0d2f4"
-down_revision: str | Sequence[str] | None = "557fc0f5bfda"
+down_revision: str | Sequence[str] | None = "c7e1a3f5b9d2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -45,6 +45,7 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("included_reasoning", sa.Boolean(), nullable=False),
+        sa.Column("deferred_selectors", sa.JSON(), nullable=False),
         sa.Column("total", sa.Integer(), nullable=False),
         sa.Column("passed", sa.Integer(), nullable=False),
         sa.Column("failed", sa.Integer(), nullable=False),
@@ -67,9 +68,26 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_health_check_results_run_id"), "health_check_results", ["run_id"])
+    op.create_table(
+        "health_check_recoveries",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("selector", sa.String(), nullable=False),
+        sa.Column("provider", sa.String(), nullable=False),
+        sa.Column("failing_since", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("recovered_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("failed_runs", sa.Integer(), nullable=False),
+        sa.Column("status_code", sa.Integer(), nullable=True),
+        sa.Column("error", sa.String(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(op.f("ix_health_check_recoveries_selector"), "health_check_recoveries", ["selector"])
+    op.create_index(op.f("ix_health_check_recoveries_recovered_at"), "health_check_recoveries", ["recovered_at"])
 
 
 def downgrade() -> None:
+    op.drop_index(op.f("ix_health_check_recoveries_recovered_at"), table_name="health_check_recoveries")
+    op.drop_index(op.f("ix_health_check_recoveries_selector"), table_name="health_check_recoveries")
+    op.drop_table("health_check_recoveries")
     op.drop_index(op.f("ix_health_check_results_run_id"), table_name="health_check_results")
     op.drop_table("health_check_results")
     op.drop_index(op.f("ix_health_check_runs_started_at"), table_name="health_check_runs")

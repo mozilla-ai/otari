@@ -2,13 +2,21 @@
 
 Health checks tell an operator which provider is failing before a caller does.
 On a schedule, Otari sends one small completion to every chat model the
-deployment's own providers serve, and the Health page shows what each one
+deployment's hosted providers serve, and the Health page shows what each one
 answered. An alert list is emailed when a model stops answering and again when
 it answers.
 
 Health checks are a standalone feature, for operators only. A hosted control
-plane does not run them, and providers added on the Hosted providers page are
-not checked yet.
+plane does not run them.
+
+## What is checked
+
+A run checks the providers on the **Hosted providers** page, and those declared
+under `hosted_providers:` in `config.yml`. A model is checked when it is switched
+on under a provider that is enabled and whose key the deployment can read: the
+models the deployment would serve a request for. A model listed only because it
+has a price, a model switched off, and a provider switched off are not checked.
+A provider restricted to one organization is checked like any other.
 
 ## The Health page
 
@@ -16,8 +24,12 @@ Open **Deployment → Health** in the dashboard. It shows:
 
 - One row per provider: OK, some failing, or down, how many of its models
   answered, the most common error, and a bar per run over the last 24 hours.
-- The models that failed in the latest run, with the HTTP status, the error and
-  when the model started failing. **Show all** lists every model.
+- The models that are failing, with the HTTP status, the error and when the
+  model started failing, 25 to a page. A model leaves the list as soon as a run
+  finds it answering, or once it is switched off. **Show all** lists every model.
+- **Disable all**, which switches off every failing model on its hosted provider
+  after a confirmation. The models stay listed and priced on the Hosted providers
+  page, where they are switched back on, and are not checked while they are off.
 - **Run now**, which starts a run within a minute whether or not the schedule is on.
 
 ## What a check sends
@@ -27,7 +39,8 @@ default, capped at 16 output tokens. Any answer passes, whatever it says. An
 error, or no answer within 60 seconds, fails. Embedding, image, speech and
 rerank models are skipped.
 
-A check goes straight to the provider with the deployment's own credentials. It
+A check goes straight to the provider with that hosted provider's own key and
+endpoint. It
 writes no usage, is billed to no organization and counts against no budget or
 rate limit, but the provider charges for every request.
 
@@ -48,7 +61,9 @@ Reasoning models spend tokens thinking before they answer, so they get a larger
 cap and, because they cost the most, join only every Nth run.
 
 With several replicas, every replica polls once a minute and exactly one starts
-each run. Results are kept for 48 hours.
+each run. Results are kept for 48 hours. When a model that was failing answers
+again, the outage is recorded in the database (when it started, when it ended,
+how many runs it failed and its last error) and kept for 90 days.
 
 ## Email alerts
 

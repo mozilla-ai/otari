@@ -7,7 +7,12 @@ import type {
   HealthCheckStatus,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
+import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import {
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+} from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
@@ -18,6 +23,7 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import {
+  useDisableFailingModels,
   useHealthCheckStatus,
   useRunHealthChecks,
   useUpdateHealthCheckSettings,
@@ -370,7 +376,10 @@ function AlertsCard({ saved }: { saved: string[] }) {
 export function HealthChecksPage() {
   const status = useHealthCheckStatus()
   const run = useRunHealthChecks()
+  const disable = useDisableFailingModels()
   const [showAll, setShowAll] = useState(false)
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0])
   const data = status.data
 
   if (status.isPending && !data) {
@@ -381,6 +390,16 @@ export function HealthChecksPage() {
   const results = data
     ? data.results.filter((result) => showAll || result.status === "fail")
     : []
+  const failing = data
+    ? data.results.filter((result) => result.status === "fail").length
+    : 0
+  // A run or a disable can shrink the list under the page the operator is on.
+  const lastPage = Math.max(0, Math.ceil(results.length / pageSize) - 1)
+  const shownPage = Math.min(page, lastPage)
+  const pageRows = results.slice(
+    shownPage * pageSize,
+    (shownPage + 1) * pageSize,
+  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -402,14 +421,20 @@ export function HealthChecksPage() {
         Whether every model your providers serve answers, checked with one small
         request each.
       </PageIntro>
-      <ErrorBanner error={status.error ?? run.error} />
+      <ErrorBanner error={status.error ?? run.error ?? disable.error} />
       {data ? (
         <>
           <RunSummary status={data} />
           {data.last_run && data.last_run.total === 0 ? (
             <InfoBanner tone="warning">
-              The last run found no chat model to check. Add a provider on
-              Deployment providers.
+              The last run found no chat model to check. Switch a model on under{" "}
+              <Link
+                to="/admin/hosted-providers"
+                className="text-link hover:underline"
+              >
+                Hosted providers
+              </Link>
+              .
             </InfoBanner>
           ) : null}
           <DataTable
@@ -424,19 +449,64 @@ export function HealthChecksPage() {
             <SettingsGroup
               title={showAll ? "Models" : "Failing models"}
               action={
-                <Button size="sm" onPress={() => setShowAll(!showAll)}>
-                  {showAll ? "Failing only" : "Show all"}
-                </Button>
+                <span className="flex flex-wrap items-center gap-2">
+                  {failing > 0 ? (
+                    <ConfirmButton
+                      confirmLabel={`Disable ${failing} ${failing === 1 ? "model" : "models"}`}
+                      isPending={disable.isPending}
+                      onConfirm={() => disable.mutate()}
+                    >
+                      Disable all
+                    </ConfirmButton>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    onPress={() => {
+                      setShowAll(!showAll)
+                      setPage(0)
+                    }}
+                  >
+                    {showAll ? "Failing only" : "Show all"}
+                  </Button>
+                </span>
               }
             >
+              {disable.data ? (
+                <p role="status" className="py-2 text-sm text-muted">
+                  {disable.data.disabled === 1
+                    ? "1 model switched off."
+                    : `${disable.data.disabled} models switched off.`}{" "}
+                  Switch them back on under{" "}
+                  <Link
+                    to="/admin/hosted-providers"
+                    className="text-link hover:underline"
+                  >
+                    Hosted providers
+                  </Link>
+                  .
+                </p>
+              ) : null}
               <DataTable
                 ariaLabel="Models"
                 columns={RESULT_COLUMNS}
-                rows={results}
+                rows={pageRows}
                 getRowKey={(row) => row.selector}
                 mobileLayout="cards"
                 emptyContent="Every model answered."
               />
+              {results.length > PAGE_SIZE_OPTIONS[0] ? (
+                <TablePagination
+                  page={shownPage}
+                  pageSize={pageSize}
+                  total={results.length}
+                  rowsOnPage={pageRows.length}
+                  onPageChange={setPage}
+                  onPageSizeChange={(size) => {
+                    setPageSize(size)
+                    setPage(0)
+                  }}
+                />
+              ) : null}
             </SettingsGroup>
           ) : null}
           <AlertsCard saved={data.settings.alert_emails} />
