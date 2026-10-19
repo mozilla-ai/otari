@@ -9,6 +9,7 @@ import type {
   HostedModel,
   HostedProvider,
   HostedProviderTestResult,
+  ProviderHealth,
   ProviderInfo,
 } from "@/client"
 import { HostedProvidersPage } from "@/features/hostedProviders/HostedProvidersPage"
@@ -127,6 +128,8 @@ function mockApi(
     configured?: ProviderInfo[]
     /** What a connection test answers. */
     testResult?: HostedProviderTestResult
+    /** The health records GET /providers/health answers. */
+    health?: ProviderHealth[]
   } = {},
 ) {
   const granted = opts.granted ?? true
@@ -164,11 +167,12 @@ function mockApi(
       ])
     }
     if (url.includes(`${API_ROOT}/providers/health`)) {
+      const health = opts.health ?? []
       return jsonResponse({
-        providers: [],
-        healthy: 0,
+        providers: health,
+        healthy: health.filter((row) => row.ok).length,
         degraded: 0,
-        total: 0,
+        total: health.length,
         checked_at: null,
       })
     }
@@ -767,16 +771,34 @@ describe("HostedProvidersPage, named providers and the move", () => {
   })
 
   it("shows no status for a hosted provider a configured instance of its name is dialed under", async () => {
+    const reachable = (instance: string): ProviderHealth => ({
+      instance,
+      ok: true,
+      model_count: 1,
+      error: null,
+      checked_at: "2026-10-19T00:00:00Z",
+      discovery_unsupported: false,
+    })
     mockApi({
-      providers: [hostedProvider({ name: "openai" })],
+      providers: [
+        hostedProvider({ name: "openai" }),
+        hostedProvider({ id: "m", name: "mistral", provider: "mistral" }),
+      ],
       configured: [providerInfo("openai", "config")],
+      health: [reachable("openai"), reachable("mistral")],
     })
     await renderPage()
 
     const table = await screen.findByRole("grid", { name: "Hosted providers" })
     await screen.findByRole("grid", { name: "Configured providers" })
-    expect(within(table).queryByText("Reachable")).toBeNull()
-    expect(within(table).getByText("—")).toBeInTheDocument()
+    const row = (name: string) =>
+      within(table).getByRole("rowheader", { name: new RegExp(`^${name}`) })
+        .parentElement as HTMLElement
+    // The configured instance's record is the one dialed under "openai".
+    expect(within(row("openai")).queryByText("Reachable")).toBeNull()
+    expect(
+      await within(row("mistral")).findByText("Reachable"),
+    ).toBeInTheDocument()
   })
 
   it("names a provider of its own and tests it before saving", async () => {
@@ -953,10 +975,12 @@ describe("HostedProvidersPage, named providers and the move", () => {
     expect(
       await screen.findByText(/Moved 1 of 2 deployment providers/),
     ).toBeInTheDocument()
-    expect(
-      hostedRequests(requests, "POST").filter((request) =>
-        request.url.endsWith("/hosted-providers/migration"),
-      ),
-    ).toHaveLength(1)
+    const moves = hostedRequests(requests, "POST").filter((request) =>
+      request.url.endsWith("/hosted-providers/migration"),
+    )
+    // Only what the preview offered to move, so nothing unreviewed moves.
+    expect(moves.map((request) => request.body)).toEqual([
+      { instances: ["openai-eu"] },
+    ])
   })
 })

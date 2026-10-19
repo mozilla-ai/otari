@@ -74,7 +74,14 @@ export function DeploymentProviderMigration() {
   const [isOpen, setIsOpen] = useState(false)
 
   const rows = preview.data?.rows ?? []
-  const movable = rows.filter((row) => row.outcome === "migrate").length
+  const reviewed = rows
+    .filter((row) => row.outcome === "migrate")
+    .map((row) => row.instance)
+  const movable = reviewed.length
+  // Read again on opening, and confirmed only against that read, so the rows
+  // sent are the rows on screen rather than ones another operator has since
+  // changed.
+  const isPreviewCurrent = preview.isSuccess && !preview.isFetching
 
   return (
     <>
@@ -102,7 +109,13 @@ export function DeploymentProviderMigration() {
                 ? "Move them here to keep serving them once that page goes."
                 : "None can move yet; review why."}
             </span>
-            <Button size="sm" onPress={() => setIsOpen(true)}>
+            <Button
+              size="sm"
+              onPress={() => {
+                void preview.refetch()
+                setIsOpen(true)
+              }}
+            >
               Review the move
             </Button>
           </p>
@@ -127,12 +140,13 @@ export function DeploymentProviderMigration() {
         }
         confirmLabel={`Move ${movable} ${movable === 1 ? "provider" : "providers"}`}
         confirmVariant="primary"
-        isConfirmDisabled={movable === 0}
+        isConfirmDisabled={movable === 0 || !isPreviewCurrent}
         isPending={apply.isPending}
         error={apply.error}
-        onConfirm={() =>
-          apply.mutate(undefined, { onSuccess: () => setIsOpen(false) })
-        }
+        onConfirm={() => {
+          if (!isPreviewCurrent) return
+          apply.mutate(reviewed, { onSuccess: () => setIsOpen(false) })
+        }}
       />
     </>
   )

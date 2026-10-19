@@ -33,14 +33,9 @@ import { useProviderDetail } from "@/shared/api/providers"
 // The form that configures a new hosted provider, in the shape of the
 // organization Providers page's key form: the provider picked from the catalog,
 // the key label spelled the provider's way, its typed credential fields, and the
-// `client_args` JSON escape hatch. The name is optional: left blank, the
-// provider is named after its implementation, and a name of its own lets a
-// second endpoint of one implementation sit beside the first, reached as
-// `name:model`.
-//
-// The key is optional where the provider needs none, and where an endpoint of
-// its own is given, which is called with a placeholder key. "Test connection"
-// asks the provider what it lists on the form's values without saving them.
+// `client_args` JSON escape hatch. The key rule mirrors the server's, which
+// calls a provider pointed at its own endpoint with a placeholder key, so the
+// form never holds back a save the API would accept.
 //
 // On submit the deployment asks the provider what it serves on the new key and
 // offers all of it, so the create can take a few seconds and arrives with its

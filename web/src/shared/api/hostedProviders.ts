@@ -299,16 +299,18 @@ export function useDeploymentProviderMigrationPreview(enabled: boolean) {
 }
 
 /**
- * Moves them. Each move asks the provider what it serves, as a create does,
- * and a moved deployment provider leaves the deployment providers list.
+ * Moves the deployment providers named, the rows of the preview the operator
+ * reviewed; a row the preview did not show is left where it is. Each move asks
+ * the provider what it serves, as a create does.
  */
 export function useApplyDeploymentProviderMigration() {
   const queryClient = useQueryClient()
   const invalidate = useInvalidateHosted()
   return useMutation({
-    mutationFn: () =>
+    mutationFn: (instances: string[]) =>
       apiFetch<DeploymentProviderMigration>("/hosted-providers/migration", {
         method: "POST",
+        body: JSON.stringify({ instances }),
         signal: longRequestSignal(),
       }),
     onSuccess: () => {
