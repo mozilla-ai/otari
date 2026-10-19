@@ -28,7 +28,10 @@ class TraceSummaryPublic(BaseModel):
     last_activity_at: datetime
     step_count: int = Field(description="Requests the gateway served in the session.")
     span_count: int
-    error_count: int = Field(description="Spans that ended in an error no fallback recovered.")
+    error_count: int = Field(
+        description="Spans that ended in an error no fallback recovered, including tools' errors, "
+        "which do not fail the session."
+    )
     input_tokens: int
     output_tokens: int
     cost: float = Field(description="USD, a snapshot of the usage rows' cost. Usage stays the billing record.")
@@ -45,8 +48,11 @@ class TraceCountPublic(BaseModel):
 
 class TraceBucketPublic(BaseModel):
     bucket: str = Field(description="Bucket start, ISO 8601 UTC.")
-    succeeded: int
-    failed: int
+    succeeded: int = Field(description="Sessions that started in the bucket and did not fail.")
+    failed: int = Field(
+        description="Sessions that started in the bucket and hold an unrecovered error other than a tool's. "
+        "A tool's error goes back to the model, so it alone does not fail a session."
+    )
 
 
 class TraceSeriesPublic(BaseModel):
