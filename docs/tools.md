@@ -167,8 +167,9 @@ The dashboard accepts dollars per call. The pricing API stores the value in
 `input_price_per_million`, so one cent per call is `10000`.
 
 With `require_pricing: true`, an unpriced gateway-run tool is refused before the
-model call. For web fetch that check still reads only the `otari:web_fetch` row,
-whichever fetch instance serves the calls. A failed tool invocation is recorded
+model call. For web search and web fetch that check still reads only the
+`otari:web_search` and `otari:web_fetch` rows, whichever instance serves the calls
+and whether or not its provider reports a cost, so price those rows too. A failed tool invocation is recorded
 but not charged. Charges settle on the final usage row alongside model tokens.
 
 The usage row's pricing breakdown has one line per tool and label, and the

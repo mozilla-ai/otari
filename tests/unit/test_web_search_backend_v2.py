@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -501,6 +502,52 @@ async def test_enrichment_takes_no_slot_and_records_no_fetch() -> None:
     assert text.count("\n\nPage.") == 2
     assert cap.used == 1
     assert set(tally.meters()) == {WEB_SEARCH_TOOL_NAME}
+
+
+@pytest.mark.asyncio
+async def test_an_enrichment_instance_whose_key_cannot_be_read_leaves_the_snippets_and_the_search_billed() -> None:
+    """The fetcher is built inside the fetch's own failure handling, so a missing key costs only the enrichment."""
+    search = _search(_config(search={"cost": 0.005}, fetch={}))
+    unreadable = replace(search, enrichment=replace(search.enrichment, provider="tabstack", api_key=""))
+    cap, tally = WebToolCallCap(10), ToolUsageTally()
+    backend = WebSearchBackend(unreadable, cap=cap, max_results=1, tally=tally)
+
+    text = await _search_once(backend)
+
+    assert text == "[1] A (2026-01-15T09:30:00+00:00)\nhttps://example.com/a\nSnippet A."
+    assert tally.meters() == {WEB_SEARCH_TOOL_NAME: {"billed": 1, "errors": 0}}
+    assert tally.label_calls()[0].reported_cost == Decimal("0.005")
+
+
+@pytest.mark.asyncio
+async def test_a_hit_whose_page_text_is_blank_is_enriched(fetcher: AsyncMock) -> None:
+    config = _config(search={"hits": [{"url": "https://example.com/a", "snippet": "Snippet A.", "text": " \n "}]})
+
+    text = await _search_once(_backend(config))
+
+    assert text.endswith("https://example.com/a\nThe page at https://example.com/a.")
+
+
+@pytest.mark.asyncio
+async def test_a_failure_the_backend_does_not_know_is_counted_and_traced_before_it_is_raised() -> None:
+    tally = ToolUsageTally()
+    trace = RequestTrace(
+        request_id="req-1",
+        workspace_id=uuid.uuid4(),
+        user_id="alice",
+        api_key_id="key-1",
+        endpoint="/v1/chat/completions",
+        started_at=datetime.now(UTC),
+        max_spans=10,
+    )
+    backend = _backend(tally=tally, trace=trace)
+    with patch.object(WebSearchBackend, "_enriched", side_effect=RuntimeError("unexpected")):
+        async with backend:
+            with pytest.raises(RuntimeError):
+                await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "otari"})
+
+    assert tally.meters() == {WEB_SEARCH_TOOL_NAME: {"billed": 0, "errors": 1}}
+    assert [span.outcome for span in trace.spans if span.kind == "tool"] == ["error"]
 
 
 # ---------------------------------------------------------------------------

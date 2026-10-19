@@ -41,15 +41,15 @@ from typing import TYPE_CHECKING, Any, Self
 from opentelemetry import trace
 
 import any_search
-from any_fetch import AnyFetch, FetchedPage
+from any_fetch import FetchedPage
 from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
 from gateway.log_config import logger
 from gateway.services.tool_usage import is_tool_error
-from gateway.services.tools._web_display import fetched_url, published_date
+from gateway.services.tools._web_display import published_date
 
 # From the modules rather than the package, which imports the fetch backend, which imports this package.
 from gateway.services.tools._web_fetch._builtin import retrieval_client
-from gateway.services.tools._web_fetch._checks import provider_url_refusal
+from gateway.services.tools._web_fetch._fetch_page import FetchFailure, fetch_page
 from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_PURPOSE_HINT,
@@ -57,7 +57,13 @@ from gateway.services.tools._web_names import (
     web_search_tool_definition,
 )
 from gateway.services.tools._web_search._cap import SEARCH_CALL_LIMIT_TEXT, WebToolCallCap
-from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure
+from gateway.services.tools._web_tool_failure import (
+    CALL_LIMIT_TAG,
+    INTERNAL_ERROR_TAG,
+    MISSING_CREDENTIAL_TAG,
+    UNSUPPORTED_OPTION_TAG,
+    WebToolFailure,
+)
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy, WebURLValidationError, canonicalize_web_url
 
@@ -73,9 +79,6 @@ if TYPE_CHECKING:
 _tracer = trace.get_tracer(__name__)
 
 EMPTY_QUERY_TAG = "empty_query"
-MISSING_CREDENTIAL_TAG = "missing_credential"
-UNSUPPORTED_OPTION_TAG = "unsupported_option"
-INTERNAL_ERROR_TAG = "internal_error"
 
 _EMPTY_QUERY_TEXT = "[tool error] empty query"
 _RESULT_TRUNCATION_NOTICE = "\n\n[Content truncated at the 50 KiB tool-result limit.]"
@@ -195,10 +198,19 @@ class WebSearchBackend:
             span.set_attribute("tool.name", WEB_SEARCH_TOOL_NAME)
             span.set_attribute("tool.type", "otari_web_search")
             span.set_attribute("web_search.provider", self._search.provider)
-            if self._cap.claim():
-                searched = await self._call(arguments)
-            else:
-                searched = _Searched(self._refused(CALL_LIMIT_TAG, SEARCH_CALL_LIMIT_TEXT))
+            try:
+                if self._cap.claim():
+                    searched = await self._call(arguments)
+                else:
+                    searched = _Searched(self._refused(CALL_LIMIT_TAG, SEARCH_CALL_LIMIT_TEXT))
+            except Exception:
+                # Every failure the backend knows is returned; one it does not is counted and
+                # traced as failed before the loop turns it into its generic text.
+                span.set_status(trace.StatusCode.ERROR, INTERNAL_ERROR_TAG)
+                if self._tally is not None:
+                    self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
+                self._record_span(started, ok=False)
+                raise
             if self._last_failure is not None:
                 span.set_status(trace.StatusCode.ERROR, self._last_failure.tag)
             else:
@@ -214,14 +226,14 @@ class WebSearchBackend:
                 cost=searched.cost,
                 enrichment_cost=searched.enrichment_cost,
             )
+        self._record_span(started, ok=not is_tool_error(searched.text))
+        return searched.text
+
+    def _record_span(self, started: datetime, *, ok: bool) -> None:
         if self._trace is not None:
             self._trace.record_tool_call(
-                tool_name=WEB_SEARCH_TOOL_NAME,
-                tool_type="otari_web_search",
-                started=started,
-                ok=not is_tool_error(searched.text),
+                tool_name=WEB_SEARCH_TOOL_NAME, tool_type="otari_web_search", started=started, ok=ok
             )
-        return searched.text
 
     async def _call(self, arguments: dict[str, Any]) -> _Searched:
         query = arguments.get("query")
@@ -275,7 +287,7 @@ class WebSearchBackend:
             async with semaphore:
                 return await self._page(url)
 
-        wanted = [index for index, hit in enumerate(hits) if not hit.text]
+        wanted = [index for index, hit in enumerate(hits) if not _text(hit)]
         pages = await asyncio.gather(*(page(hits[index].url) for index in wanted))
         bodies: dict[int, str] = {}
         costs: list[Decimal] = []
@@ -292,46 +304,22 @@ class WebSearchBackend:
     async def _page(self, url: str) -> FetchedPage | None:
         """The page at a hit's URL, or ``None`` when it cannot be fetched or is refused."""
         enrichment = self._enrichment
-        fetcher: AnyFetch
-        if self._builtin_enrichment:
-            fetcher = AnyFetch.create(
-                enrichment.provider,
-                client=self._retrieval_client,
-                policy=self._policy,
-                allow_private=self._allow_private,
-            )
-        else:
-            try:
-                checked = canonicalize_web_url(url)
-            except WebURLValidationError:
-                return None
-            if provider_url_refusal(checked, self._policy) is not None:
-                return None
-            url = str(checked.url)
-            fetcher = AnyFetch.create(
-                enrichment.provider,
-                api_key=enrichment.api_key,
-                api_base=enrichment.api_base,
-                timeout=enrichment.timeout,
-                client=self._web_provider_client,
-            )
-        max_chars = min(enrichment.max_chars or _ENRICHMENT_MAX_CHARS, _ENRICHMENT_MAX_CHARS)
-        try:
-            async with fetcher:
-                fetched = await fetcher.fetch(url, max_chars=max_chars, **enrichment.options)
-        except Exception as exc:
-            # The class alone: an exception's text can carry the URL.
+        fetched = await fetch_page(
+            enrichment,
+            url,
+            client=self._retrieval_client if self._builtin_enrichment else self._web_provider_client,
+            policy=self._policy,
+            allow_private=self._allow_private,
+            max_chars=min(enrichment.max_chars or _ENRICHMENT_MAX_CHARS, _ENRICHMENT_MAX_CHARS),
+        )
+        if isinstance(fetched, FetchFailure):
             logger.debug(
-                "Enrichment through '%s' (%s) failed: %s", enrichment.name, enrichment.provider, type(exc).__name__
+                "Enrichment through '%s' (%s) left a result its snippet: %s",
+                enrichment.name,
+                enrichment.provider,
+                fetched.failure.tag,
             )
             return None
-        if fetched.error is not None:
-            return None
-        if not self._builtin_enrichment:
-            # Where the provider found the page is held to the same rules as the URL asked for.
-            found = fetched_url(fetched.final_url)
-            if found is None or provider_url_refusal(found, self._policy) is not None:
-                return None
         return fetched
 
     def _raised(self, exc: Exception, tag: str) -> WebToolFailure:
@@ -364,10 +352,15 @@ def _results_text(query: str, hits: list[any_search.SearchHit], bodies: dict[int
     parts: list[str] = []
     for number, (index, hit) in enumerate(enumerate(hits), start=first):
         title = hit.title.strip() or "(untitled)"
-        body = (bodies.get(index) or hit.text or hit.snippet).strip()
+        body = bodies.get(index) or _text(hit) or hit.snippet.strip()
         if len(body) > _BODY_MAX_CHARS:
             body = body[:_BODY_MAX_CHARS].rstrip() + "…"
         date = published_date(hit.published)
         header = f"[{number}] {title}" + (f" ({date})" if date else "")
         parts.append(f"{header}\n{hit.url.strip()}\n{body}".rstrip())
     return "\n\n".join(parts)
+
+
+def _text(hit: any_search.SearchHit) -> str:
+    """The page text a provider gave with a hit, ``""`` when it gave none or only blanks."""
+    return (hit.text or "").strip()

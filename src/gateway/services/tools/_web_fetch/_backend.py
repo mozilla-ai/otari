@@ -3,14 +3,9 @@
 For ``builtin_fetch`` the backend opens the built-in fetcher's retrieval client
 for the request, and the fetcher checks every hop against the request's domain
 policy (contract G2) and never reaches a private host. For a provider instance
-it sends through the app's web provider client. The provider follows redirects
-on its own side, so the backend checks the requested URL before the call, and
-the URL the provider reports finding the page at after it: the host must pass
-the policy, and must not name an address the built-in fetcher refuses, as an IP
-address in any form or as ``localhost``. A hostname is the provider's to resolve.
-A provider whose metadata says it does not report its final URL, as Exa and
-Tabstack say, answers with the URL as asked, so a redirect it follows escapes
-the policy; only the built-in fetcher checks every hop.
+it sends through the app's web provider client, with the checks
+``_fetch_page.py`` makes of the URL asked for and of where the provider found
+the page.
 
 What the model reads is contract G1's: the page under its source and content
 type, or one fixed ``[tool error]`` text per kind of failure. A provider
@@ -34,9 +29,8 @@ from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
 
-from any_fetch import AnyFetch, FetchedPage, MissingCredentialError, ProviderError, UnsupportedParameterError
+from any_fetch import FetchedPage
 from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
-from gateway.log_config import logger
 from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools._web_display import fetched_url
 from gateway.services.tools._web_fetch._builtin import (
@@ -50,7 +44,7 @@ from gateway.services.tools._web_fetch._builtin import (
     URL_INVALID_TAG,
     retrieval_client,
 )
-from gateway.services.tools._web_fetch._checks import provider_url_refusal
+from gateway.services.tools._web_fetch._fetch_page import FetchFailure, fetch_page
 from gateway.services.tools._web_names import (
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
@@ -62,12 +56,7 @@ from gateway.services.tools._web_search._cap import FETCH_CALL_LIMIT_TEXT, WebTo
 from gateway.services.tools._web_search._resolve import ResolvedFetch, builtin_fetch_resolved, resolve_fetch
 from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure
 from gateway.services.web_retrieval_network import truncate_utf8
-from gateway.services.web_retrieval_policy import (
-    CanonicalWebURL,
-    DomainPolicy,
-    WebURLValidationError,
-    canonicalize_web_url,
-)
+from gateway.services.web_retrieval_policy import DomainPolicy
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -100,10 +89,6 @@ _BUILTIN_TEXTS = {
     NETWORK_TAG: "[tool error] Web Fetch network failure",
 }
 _BUILTIN_FAILED_TEXT = "[tool error] Web Fetch failed"
-
-MISSING_CREDENTIAL_TAG = "missing_credential"
-UNSUPPORTED_OPTION_TAG = "unsupported_option"
-INTERNAL_ERROR_TAG = "internal_error"
 
 
 def build_web_fetch_backend(
@@ -244,64 +229,21 @@ class WebFetchBackend:
         url = arguments.get("url")
         if set(arguments) != {"url"} or not isinstance(url, str):
             return self._refused(URL_INVALID_TAG, _URL_INVALID_TEXT)
-        if not self._builtin:
-            # The built-in fetcher checks the URL and every redirect itself; a provider is
-            # asked for the canonical form of the URL checked here.
-            try:
-                checked = canonicalize_web_url(url)
-            except WebURLValidationError:
-                return self._refused(URL_INVALID_TAG, _URL_INVALID_TEXT)
-            if (refusal := self._refusal(checked)) is not None:
-                return refusal
-            url = str(checked.url)
-        resolved = self._resolved
-        try:
-            async with self._fetcher() as fetcher:
-                page = await fetcher.fetch(url, max_chars=resolved.max_chars, **resolved.options)
-        except ProviderError as exc:
-            return self._failed(WebToolFailure.from_provider_error(exc), exc.status)
-        except MissingCredentialError as exc:
-            return self._failed(self._raised(exc, MISSING_CREDENTIAL_TAG), None)
-        except UnsupportedParameterError as exc:
-            return self._failed(self._raised(exc, UNSUPPORTED_OPTION_TAG), None)
-        except Exception as exc:
-            return self._failed(self._raised(exc, INTERNAL_ERROR_TAG), None)
-        if (error := page.error) is not None:
-            return self._failed(WebToolFailure.of(resolved.provider, error.status, error.tag), error.status)
-        if not self._builtin:
-            # Where the provider found the page is checked as the URL asked for was, and a
-            # URL it cannot be checked by is refused rather than trusted.
-            found = fetched_url(page.final_url)
-            refusal = self._refused(URL_INVALID_TAG, _URL_INVALID_TEXT) if found is None else self._refusal(found)
-            if refusal is not None:
-                return refusal
-        self._last_page = page
-        return _page_text(page)
-
-    def _fetcher(self) -> AnyFetch:
-        resolved = self._resolved
-        if self._builtin:
-            return AnyFetch.create(resolved.provider, client=self._client, policy=self._policy, allow_private=False)
-        return AnyFetch.create(
-            resolved.provider,
-            api_key=resolved.api_key,
-            api_base=resolved.api_base,
-            timeout=resolved.timeout,
+        fetched = await fetch_page(
+            self._resolved,
+            url,
             client=self._client,
+            policy=self._policy,
+            allow_private=False,
+            max_chars=self._resolved.max_chars,
         )
-
-    def _raised(self, exc: Exception, tag: str) -> WebToolFailure:
-        # The class alone: an exception's text can carry the URL.
-        logger.warning(
-            "Fetch on instance '%s' (%s) failed: %s", self._resolved.name, self._resolved.provider, type(exc).__name__
-        )
-        return WebToolFailure.of(self._resolved.provider, None, tag)
-
-    def _refusal(self, url: CanonicalWebURL) -> str | None:
-        """The refusal of a URL a provider instance is asked for or reports, ``None`` when it is permitted."""
-        if (tag := provider_url_refusal(url, self._policy)) is None:
-            return None
-        return self._refused(tag, _BUILTIN_TEXTS[tag])
+        if isinstance(fetched, FetchFailure):
+            if fetched.failure.provider is None:
+                # The gateway's own checks of a provider instance's URL refused it.
+                return self._refused(fetched.failure.tag, _BUILTIN_TEXTS[fetched.failure.tag])
+            return self._failed(fetched.failure, fetched.status)
+        self._last_page = fetched
+        return _page_text(fetched)
 
     def _refused(self, tag: str, text: str) -> str:
         """A call the gateway's own checks refused, of the URL asked for or of where a provider found the page."""
