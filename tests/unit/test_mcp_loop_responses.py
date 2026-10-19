@@ -32,6 +32,7 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
+from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services import mcp_loop_responses as responses_loop_module
 from gateway.services.mcp_loop_responses import (
@@ -49,6 +50,9 @@ from gateway.services.tools import (
     WEB_SEARCH_CALL_ID_PREFIX,
     WEB_SEARCH_TOOL_NAME,
     ToolUseBudget,
+    WebSearchBackend,
+    WebToolCallCap,
+    resolve_in_loop_search,
 )
 from gateway.types.code_execution import ResultBlock
 
@@ -1317,6 +1321,36 @@ async def test_a_failed_search_is_announced_as_failed(monkeypatch: pytest.Monkey
         max_iterations=5,
         native_tools=_SEARCH,
     )
+
+    announced = [item for item in (out.output or []) if getattr(item, "type", None) == "web_search_call"]
+    assert [cast(Any, item).status for item in announced] == ["failed"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_search_on_the_libraries_is_announced_as_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The search backend on any-search returns its failure as a tool error, which marks the item failed."""
+    responses = iter(
+        [
+            _response(output=[_function_call("call_1", "web_search", '{"query": "otari gateway"}')]),
+            _response(output=[], status="completed"),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    config = GatewayConfig(search_tools={"exa": {"provider": "fake", "options": {"error": "timeout"}}})
+    search = resolve_in_loop_search(config, None)
+    assert search is not None
+
+    async with WebSearchBackend(search, cap=WebToolCallCap(10), max_results=5) as backend:
+        out = await responses_tool_loop(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=backend,
+            max_iterations=5,
+            native_tools=_SEARCH,
+        )
 
     announced = [item for item in (out.output or []) if getattr(item, "type", None) == "web_search_call"]
     assert [cast(Any, item).status for item in announced] == ["failed"]

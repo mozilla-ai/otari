@@ -23,13 +23,13 @@ call refused before one was called, its HTTP status, a tag and whether a retry
 may help. Beside the providers' own tags, a call fails with
 ``missing_credential`` for an instance whose key cannot be read,
 ``unsupported_option`` for an option its provider does not take, and
-``internal_error`` for any other exception.
+``internal_error`` for any other exception. A call past the request's shared
+search and fetch allowance reads ``[tool error] web fetch call limit reached
+for this request``, its failure tagged ``call_limit`` with no provider.
 """
 
 from __future__ import annotations
 
-import ipaddress
-import socket
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
@@ -50,19 +50,21 @@ from gateway.services.tools._web_fetch._builtin import (
     URL_INVALID_TAG,
     retrieval_client,
 )
+from gateway.services.tools._web_fetch._checks import provider_url_refusal
 from gateway.services.tools._web_names import (
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     web_fetch_tool_definition,
 )
-from gateway.services.tools._web_search import ResolvedFetch, builtin_fetch_resolved, resolve_fetch
-from gateway.services.tools._web_tool_failure import WebToolFailure
-from gateway.services.web_retrieval_network import blocked_address_reason, truncate_utf8
+
+# From the modules rather than the package, which imports the search backend, which imports this package.
+from gateway.services.tools._web_search._cap import FETCH_CALL_LIMIT_TEXT, WebToolCallCap
+from gateway.services.tools._web_search._resolve import ResolvedFetch, builtin_fetch_resolved, resolve_fetch
+from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure
+from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import (
-    CanonicalHost,
     CanonicalWebURL,
     DomainPolicy,
-    IPAddress,
     WebURLValidationError,
     canonicalize_web_url,
 )
@@ -112,10 +114,13 @@ def build_web_fetch_backend(
     web_provider_client: httpx.AsyncClient | None = None,
     tally: ToolUsageTally | None = None,
     trace: RequestTrace | None = None,
+    cap: WebToolCallCap | None = None,
 ) -> WebFetchBackend:
     """One request's fetch tool, on the fetch instance the resolver chooses, or on ``builtin_fetch`` without a config.
 
     No workspace policy is passed to the resolver yet, so no fetch credential serves the call.
+    ``cap`` is the request's shared search and fetch allowance, ``None`` where the old
+    backend claims its own counter before delegating.
     """
     resolved = (
         resolve_fetch(config, None, requested=None, for_search=None) if config is not None else builtin_fetch_resolved()
@@ -127,6 +132,7 @@ def build_web_fetch_backend(
         web_provider_client=web_provider_client,
         tally=tally,
         trace=trace,
+        cap=cap,
     )
 
 
@@ -134,7 +140,8 @@ class WebFetchBackend:
     """One request's ``web_fetch`` tool, on one fetch instance.
 
     Opened around the tool loop as an async context manager. It keeps the last
-    call's page and failure for the renderings, each taken once.
+    call's page and failure for the renderings, each taken once. With a ``cap``,
+    every call takes a slot of it first, and a call past it is refused.
     """
 
     def __init__(
@@ -146,6 +153,7 @@ class WebFetchBackend:
         web_provider_client: httpx.AsyncClient | None = None,
         tally: ToolUsageTally | None = None,
         trace: RequestTrace | None = None,
+        cap: WebToolCallCap | None = None,
     ) -> None:
         self._resolved = resolved
         self._builtin = resolved.provider == BUILTIN_FETCH_PROVIDER
@@ -155,6 +163,7 @@ class WebFetchBackend:
         self._web_provider_client = web_provider_client
         self._tally = tally
         self._trace = trace
+        self._cap = cap
         self._stack = AsyncExitStack()
         self._client: httpx.AsyncClient | None = None
         self._entered = False
@@ -210,7 +219,10 @@ class WebFetchBackend:
         self._last_page = None
         self._last_failure = None
         started = datetime.now(UTC)
-        text = await self._fetch(arguments)
+        if self._cap is not None and not self._cap.claim():
+            text = self._refused(CALL_LIMIT_TAG, FETCH_CALL_LIMIT_TEXT)
+        else:
+            text = await self._fetch(arguments)
         if self._tally is not None:
             # Under what served it (design L): the instance's label and rate keys, and the
             # provider's reported cost, which ``None`` leaves to the rate.
@@ -287,15 +299,9 @@ class WebFetchBackend:
 
     def _refusal(self, url: CanonicalWebURL) -> str | None:
         """The refusal of a URL a provider instance is asked for or reports, ``None`` when it is permitted."""
-        host = url.origin.host
-        if not self._policy.permits(host):
-            return self._refused(DOMAIN_POLICY_TAG, _DOMAIN_POLICY_TEXT)
-        # The provider resolves a hostname itself, so only an address the URL names, and
-        # localhost, can be checked here, by the built-in fetcher's rule for an address.
-        address = _named_address(host)
-        if _is_localhost(host) or (address is not None and blocked_address_reason(address) is not None):
-            return self._refused(URL_INVALID_TAG, _URL_INVALID_TEXT)
-        return None
+        if (tag := provider_url_refusal(url, self._policy)) is None:
+            return None
+        return self._refused(tag, _BUILTIN_TEXTS[tag])
 
     def _refused(self, tag: str, text: str) -> str:
         """A call the gateway's own checks refused, of the URL asked for or of where a provider found the page."""
@@ -314,21 +320,6 @@ class WebFetchBackend:
         if failure.tag == HTTP_STATUS_TAG and status is not None:
             return f"[tool error] destination returned HTTP {status}"
         return _BUILTIN_TEXTS.get(failure.tag, _BUILTIN_FAILED_TEXT)
-
-
-def _named_address(host: CanonicalHost) -> IPAddress | None:
-    """The address a host names: an IP literal, or an IPv4 shorthand a resolver reads too, such as ``127.1``."""
-    if host.ip is not None:
-        return host.ip
-    try:
-        return ipaddress.ip_address(socket.inet_aton(host.value))
-    except OSError:
-        return None
-
-
-def _is_localhost(host: CanonicalHost) -> bool:
-    """``localhost`` or a name under it, which resolves to loopback (RFC 6761)."""
-    return host.value == "localhost" or host.value.endswith(".localhost")
 
 
 def _page_text(page: FetchedPage) -> str:
