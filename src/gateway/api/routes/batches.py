@@ -23,7 +23,7 @@ from gateway.api.deps import (
     model_provider_port_on,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._helpers import missing_credential_error, resolve_user_id
 from gateway.api.routes._pipeline import (
     PROVIDER_CREDENTIALS_DETAIL,
     _raise_for_unresolvable_model,
@@ -211,14 +211,8 @@ def _resolve_batch_provider(
     try:
         require_declared_credential(config, impl.value, impl, kwargs)
     except MissingApiKeyError as exc:
-        raise _not_configured(exc) from exc
+        raise missing_credential_error(MissingCredential.from_error(exc)) from exc
     return impl, kwargs
-
-
-def _not_configured(exc: MissingApiKeyError) -> HTTPException:
-    """The 424 a ``MissingApiKeyError`` maps to."""
-    missing = MissingCredential.from_error(exc)
-    return HTTPException(status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code))
 
 
 async def _lifecycle_workspace_id(db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None) -> uuid.UUID:
@@ -464,11 +458,8 @@ async def create_batch(
                 surface=MANAGED_SURFACE_BATCHES,
             )
         except ManagedCredentialUnsupportedError as managed_exc:
-            managed = MissingCredential.from_error(managed_exc)
-            raise HTTPException(
-                status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
-            ) from exc
-        raise _not_configured(exc) from exc
+            raise missing_credential_error(MissingCredential.from_error(managed_exc)) from exc
+        raise missing_credential_error(MissingCredential.from_error(exc)) from exc
 
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
     # into users.spend, at create time and again when results are accounted.

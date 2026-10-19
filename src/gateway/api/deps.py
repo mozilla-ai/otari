@@ -158,6 +158,21 @@ def record_auth_failure(reason: str) -> None:
     AUTH_FAILURES.labels(reason=reason).inc()
 
 
+def _invalid_api_key(reason: str) -> HTTPException:
+    """Record ``reason`` and return the 401 a refused key answers, which never says which check failed."""
+    record_auth_failure(reason)
+    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+
+def _authentication_unavailable(reason: str) -> HTTPException:
+    """Record ``reason`` and return the 503 for a credential that could not be checked right now."""
+    record_auth_failure(reason)
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Authentication temporarily unavailable, please retry",
+    )
+
+
 def _as_utc(value: datetime | None) -> datetime | None:
     """Return ``value`` as a timezone-aware datetime in UTC.
 
@@ -295,30 +310,18 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: A
                 detail=misdirected_key_detail(host),
             )
         case Malformed():
-            record_auth_failure("invalid_format")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid API key",
-            )
+            raise _invalid_api_key("invalid_format")
 
     key_hash = hash_key(token)
 
     try:
         result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
     except DATABASE_ERRORS as e:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from e
+        raise _authentication_unavailable("db_error") from e
     api_key = result.scalar_one_or_none()
 
     if not api_key:
-        record_auth_failure("invalid_key")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
-        )
+        raise _invalid_api_key("invalid_key")
 
     return await _admit_api_key(api_key)
 
@@ -375,24 +378,14 @@ async def _verify_federated_token(request: Request, db: AsyncSession, token: str
         )
         api_key = await ApiKeyRepository(db).get(match.api_key_id)
     except FederationUnavailableError as exc:
-        record_auth_failure("federation_unavailable")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("federation_unavailable") from exc
     except FederationRefusedError as exc:
-        record_auth_failure(exc.reason)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key") from exc
+        raise _invalid_api_key(exc.reason) from exc
     except DATABASE_ERRORS as exc:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("db_error") from exc
     # Internal keys hold a stored credential and are never anyone's to present; a rule on one is refused too.
     if api_key is None or api_key.internal_secret is not None:
-        record_auth_failure("federation_no_rule")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+        raise _invalid_api_key("federation_no_rule")
     logger.debug(
         "Federated token from %s matched rule(s) %s of API key %s",
         identity.issuer,
@@ -417,17 +410,11 @@ async def _verify_access_token(db: AsyncSession, token: str, config: GatewayConf
             raise FederationRefusedError("federation_unknown_issuer")
         api_key = await ApiKeyRepository(db).get(claims.api_key_id)
     except FederationRefusedError as exc:
-        record_auth_failure(exc.reason)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key") from exc
+        raise _invalid_api_key(exc.reason) from exc
     except DATABASE_ERRORS as exc:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("db_error") from exc
     if api_key is None or api_key.internal_secret is not None:
-        record_auth_failure("federation_rule_gone")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+        raise _invalid_api_key("federation_rule_gone")
     return await _admit_api_key(api_key)
 
 
@@ -541,11 +528,7 @@ async def get_session_identity(
     try:
         return await resolve_dashboard_session(db, token)
     except DATABASE_ERRORS as exc:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("db_error") from exc
 
 
 def refuse_ended_session(request: Request, config: GatewayConfig) -> None:
@@ -586,11 +569,7 @@ async def _load_generated_master_key_hash(config: GatewayConfig, db: AsyncSessio
     try:
         stored_hash = await load_master_key_hash(db)
     except DATABASE_ERRORS as exc:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("db_error") from exc
     config._master_key_hash = stored_hash
     return stored_hash
 
