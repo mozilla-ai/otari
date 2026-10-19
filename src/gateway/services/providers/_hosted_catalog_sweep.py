@@ -29,9 +29,9 @@ from gateway.services.providers._hosted_credentials import ResolvedHostedProvide
 from gateway.services.providers._hosted_offers import HostedOffers
 from gateway.services.providers._hosted_sources import HostedSource, HostedSources
 
-# A provider, the connection it serves on, and the models configuration
-# declares for it when it cannot list them.
-Dial = Callable[[str, ResolvedHostedProvider, tuple[str, ...]], Awaitable[ProviderDiscovery]]
+# A provider's name and implementation, the connection it serves on, and the
+# models configuration declares for it when it cannot list them.
+Dial = Callable[[str, str, ResolvedHostedProvider, tuple[str, ...]], Awaitable[ProviderDiscovery]]
 LiveByoPairs = Callable[[Collection[str]], Awaitable[set[tuple[uuid.UUID, str]]]]
 
 UNDECRYPTABLE = (
@@ -95,7 +95,7 @@ class HostedCatalogSweep:
                 (
                     source,
                     source.credential(),
-                    await self.models.names_for_provider(source.provider),
+                    await self.models.names_for_provider(source.name),
                 )
                 for source in await self.sources.all()
                 if source.enabled
@@ -106,13 +106,15 @@ class HostedCatalogSweep:
         defaults: dict[str, dict[str, ModelPricing]] = {}
         if apply:
             for (source, _, offered), answer in zip(serving, dialed, strict=True):
-                defaults[source.provider] = await self.offers.defaults_for(source.provider, [*answer.added, *offered])
+                defaults[source.name] = await self.offers.defaults_for(
+                    source.name, [*answer.added, *offered], implementation=source.implementation
+                )
 
         async with self.uow:
             # Read again rather than carried across: a provider removed while
             # the dials ran must not get rows with nothing to own them.
             sources = await self.sources.all()
-            defined = {source.provider for source in sources}
+            defined = {source.name for source in sources}
             # A roster outlives what defined its provider (a config entry taken
             # out, say), and serves nothing; it is not offered, and an apply
             # removes it with the prices it was keeping.
@@ -121,7 +123,7 @@ class HostedCatalogSweep:
             # by another source mid-dial listed, so the preview classifies the
             # prices exactly as the apply, and a listing is never credited to a
             # credential that did not answer it.
-            present = {source.provider: source.identity for source in sources if source.enabled}
+            present = {source.name: source.identity for source in sources if source.enabled}
             for (source, _, _), answer in zip(serving, dialed, strict=True):
                 if present.get(answer.provider) != source.identity:
                     answer.added = []
@@ -205,12 +207,12 @@ class HostedCatalogSweep:
         self, source: HostedSource, credential: ResolvedHostedProvider | None, offered: set[str]
     ) -> HostedCatalogProviderRefreshPublic:
         """Ask one provider what it serves, reporting a refusal rather than raising."""
-        provider = source.provider
+        provider = source.name
         if credential is None:
             return HostedCatalogProviderRefreshPublic(
                 provider=provider, added=[], error=UNDECRYPTABLE, credential_unreadable=True, source=source.source
             )
-        discovery = await self.dial(provider, credential, source.declared_models)
+        discovery = await self.dial(provider, source.implementation, credential, source.declared_models)
         if discovery.error is not None or discovery.discovery_unsupported:
             return HostedCatalogProviderRefreshPublic(
                 provider=provider,

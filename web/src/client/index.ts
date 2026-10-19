@@ -136,16 +136,6 @@ export type UsageGroupRow = Schemas["UsageGroupRow"]
 export type UsageSeriesPoint = Schemas["UsageSeriesPoint"]
 export type UsageGroupedSeries = Schemas["UsageGroupedSeries"]
 export type UsageGroupedSeriesPoint = Schemas["UsageGroupedSeriesPoint"]
-export type UsageDeleteResult = Schemas["UsageDeleteResult"]
-export type UsageMutationSelection = Defaulted<
-  Schemas["UsageDeleteRequest"],
-  "by_filter"
->
-export type UsageSetPriceRequest = Defaulted<
-  Schemas["UsageSetPriceRequest"],
-  "by_filter"
->
-export type UsageSetPriceResult = Schemas["UsageSetPriceResult"]
 export type InFlightRequest = Schemas["InFlightEntry"]
 export type InFlightResponse = Schemas["InFlightResponse"]
 
@@ -391,6 +381,16 @@ export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
 export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
 export type HostedCatalogProviderRefresh =
   Schemas["HostedCatalogProviderRefreshPublic"]
+export type TestHostedProviderRequest = Schemas["HostedProviderTestRequest"]
+export type HostedProviderTestResult = Schemas["HostedProviderTestPublic"]
+export type ReencryptHostedProvidersResult =
+  Schemas["HostedProvidersReencryptPublic"]
+export type DeploymentProviderMigration =
+  Schemas["DeploymentProviderMigrationPublic"]
+export type DeploymentProviderMigrationRow =
+  Schemas["DeploymentProviderMigrationRowPublic"]
+export type DeploymentProviderMigrationReviewedRow =
+  Schemas["DeploymentProviderMigrationReviewedRow"]
 
 // ---------------------------------------------------------------------------
 // Routing

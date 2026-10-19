@@ -18,6 +18,7 @@ from gateway.core.error_codes import (
     PRICING_REQUIRED,
     PROVIDER_NOT_CONFIGURED,
 )
+from gateway.ports.model_provider_port import NO_ORGANIZATION
 from gateway.services.provider_kwargs import (
     MANAGED_SURFACE_ROUTING_POLICY,
     ManagedCredentialUnsupported,
@@ -121,10 +122,11 @@ async def test_a_provider_the_hosted_port_serves_is_not_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_hosted_port_is_not_asked_without_an_organization() -> None:
+async def test_without_an_organization_the_hosted_port_is_asked_as_one_no_restriction_names() -> None:
+    """A request with no organization is served on what is restricted to none, so that is what it is asked."""
     port = _hosted("cohere")
-    assert await missing_provider_credential(_CONFIG, _cohere({}), hosted=port, organization_id=None) is not None
-    port.get_hosted_models.assert_not_awaited()
+    assert await missing_provider_credential(_CONFIG, _cohere({}), hosted=port, organization_id=None) is None
+    port.get_hosted_models.assert_awaited_once_with(organization_id=NO_ORGANIZATION)
 
 
 @pytest.mark.asyncio
@@ -193,13 +195,20 @@ async def test_an_advertised_model_set_names_the_model() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_port_is_not_asked_for_a_credentialed_candidate_or_no_organization() -> None:
+async def test_the_port_is_not_asked_for_a_credentialed_candidate() -> None:
     port = _hosted("cohere")
     assert not await managed_only_candidates(
         _CONFIG, [_cohere({"api_key": "k"})], hosted=lambda: port, organization_id=_ORG
     )
-    assert not await managed_only_candidates(_CONFIG, [_cohere({})], hosted=lambda: port, organization_id=None)
     port.get_hosted_models.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_without_an_organization_a_managed_candidate_is_classified_on_what_no_restriction_names() -> None:
+    port = _hosted("cohere")
+    managed = await managed_only_candidates(_CONFIG, [_cohere({})], hosted=lambda: port, organization_id=None)
+    assert managed == {("cohere", "rerank-v3.5")}
+    port.get_hosted_models.assert_awaited_once_with(organization_id=NO_ORGANIZATION)
 
 
 @pytest.mark.asyncio

@@ -228,6 +228,29 @@ export function formatTokens(value: number): string {
   return String(value)
 }
 
+const tokensCompact = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumSignificantDigits: 3,
+})
+
+// Three significant figures for a count shortened to fit a narrow lane:
+// 1234567890 -> "1.23B", 98765432 -> "98.8M".
+export function formatTokensCompact(value: number): string {
+  return tokensCompact.format(value)
+}
+
+const usdCompactNotation = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumSignificantDigits: 3,
+})
+
+// Money shortened the same way: 12345678.9 -> "$12.3M", 100000 -> "$100K".
+export function formatUsdCompact(value: number): string {
+  return usdCompactNotation.format(value)
+}
+
 const scoreFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 })
 
 // A guardrail vendor's score, which is whatever scale that vendor uses: shown

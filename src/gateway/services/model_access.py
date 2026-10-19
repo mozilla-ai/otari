@@ -29,7 +29,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
 from gateway.services.catalog import dated_builds
-from gateway.services.provider_kwargs import split_selector
+from gateway.services.provider_kwargs import reaches_organization_key, split_selector
 from gateway.services.tenancy.org_provider_key_service import cached_org_key_offer, cached_org_model_restriction
 
 
@@ -277,6 +277,28 @@ def key_model_refusal(allowlist: list[str] | None, canonical_key: str | None, *,
     return ModelRefusal(
         code=MODEL_NOT_ALLOWED, status_code=HTTPStatus.FORBIDDEN, detail=model_not_allowed_detail(selector)
     )
+
+
+def organization_key_refusal(
+    config: GatewayConfig,
+    workspace_id: uuid.UUID | None,
+    instance: str,
+    provider: str,
+    model: str,
+    *,
+    selector: str,
+    through_alias: bool,
+) -> ModelRefusal | None:
+    """:func:`org_model_refusal` for a candidate that can be served on an organization key, else ``None``.
+
+    Only a selector that names neither a configured instance nor a named
+    hosted provider reaches an organization key (``reaches_organization_key``),
+    so only it is subject to that key's allow-list; a request with no
+    workspace has no organization key to ask about.
+    """
+    if workspace_id is None or not reaches_organization_key(config, instance):
+        return None
+    return org_model_refusal(workspace_id, provider, model, selector=selector, through_alias=through_alias)
 
 
 def org_model_refusal(

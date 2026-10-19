@@ -142,7 +142,9 @@ def _discovery(monkeypatch: pytest.MonkeyPatch, *models: str, error: str | None 
 def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]) -> None:
     """Make the community dataset price exactly ``rates``, and nothing else."""
 
-    def _stub(provider: str | None, model: str, as_of: object) -> ModelPricing | None:
+    def _stub(
+        provider: str | None, model: str, as_of: object, *, implementation: str | None = None
+    ) -> ModelPricing | None:
         if model not in rates:
             return None
         input_rate, output_rate = rates[model]

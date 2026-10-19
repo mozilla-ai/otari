@@ -35,7 +35,7 @@ from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_N
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
-from gateway.services.model_access import is_model_allowed, org_model_refusal
+from gateway.services.model_access import is_model_allowed, organization_key_refusal
 from gateway.services.provider_kwargs import (
     credential_ladder_exhausted,
     resolve_catalog_fallback,
@@ -428,24 +428,23 @@ def _resolve_candidates(
         if not is_model_allowed(allowlist, canonical):
             dropped.append(DroppedCandidate(selector, "not_allowed", "is not in allowed_models for this caller"))
             continue
-        # Organization-scoped model restriction (otari#643), same disjointness
-        # condition `provider_kwargs.get_provider_kwargs` uses: only a selector
-        # that named no configured instance can have resolved through an
-        # organization key, so only that case is subject to its restriction.
-        # Every candidate is checked here, not only the plan's head, so a
+        # Organization-scoped model restriction (otari#643), applied where
+        # `organization_key_refusal` says the candidate can reach an
+        # organization key. Every candidate is checked here, not only the plan's head, so a
         # `router`/`on_failure` fallover cannot serve a model the workspace's
         # organization key excludes just because the head candidate passed.
-        if workspace_id is not None and resolved.instance not in config.providers:
-            refusal = org_model_refusal(
-                workspace_id,
-                resolved.provider.value,
-                resolved.model,
-                selector=selector,
-                through_alias=resolved.alias is not None,
-            )
-            if refusal is not None:
-                dropped.append(DroppedCandidate(selector, "not_allowed", _ORG_REFUSAL_FRAGMENTS[refusal.code]))
-                continue
+        refusal = organization_key_refusal(
+            config,
+            workspace_id,
+            resolved.instance,
+            resolved.provider.value,
+            resolved.model,
+            selector=selector,
+            through_alias=resolved.alias is not None,
+        )
+        if refusal is not None:
+            dropped.append(DroppedCandidate(selector, "not_allowed", _ORG_REFUSAL_FRAGMENTS[refusal.code]))
+            continue
         seen.add(canonical)
         attempts.append(
             Attempt(

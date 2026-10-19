@@ -8,12 +8,19 @@ are still in the flat modules beside `services/`, and move here when the
 domain's migration reaches them (`DOMAINS.md`).
 """
 
+from gateway.services.providers._hosted_name_index import (
+    hosted_implementation,
+    load_hosted_names_at_startup,
+    reset_hosted_name_index,
+    run_hosted_name_refresher,
+)
 from gateway.services.providers._hosted_provider_service import (
     HostedProviderService,
     LiveByoPairs,
     OrganizationExists,
     ResolvedHostedProvider,
 )
+from gateway.services.providers._hosted_runtime import hosted_credential_for, hosted_models_for, organization_to_serve
 from gateway.services.providers._hosted_sources import HostedSources, refuse_unsafe_configured_endpoints
 from gateway.services.providers._missing_credential import (
     managed_only_candidates,
@@ -53,16 +60,23 @@ __all__ = [
     "amessages",
     "aresponses",
     "cached_owned_endpoint",
+    "hosted_credential_for",
+    "hosted_implementation",
+    "hosted_models_for",
+    "load_hosted_names_at_startup",
     "load_provider_endpoints_at_startup",
     "managed_only_candidates",
     "missing_provider_credential",
+    "organization_to_serve",
     "owned_endpoint_http_client",
     "provider_for",
     "refuse_managed_candidate",
     "refuse_managed_only",
     "refresh_provider_endpoint_cache",
     "refuse_unsafe_configured_endpoints",
+    "reset_hosted_name_index",
     "reset_provider_endpoint_cache",
+    "run_hosted_name_refresher",
     "run_provider_endpoint_refresher",
     "unpriced_model_refusal",
 ]

@@ -14,7 +14,7 @@ at all.
 """
 
 import asyncio
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from any_llm import LLMProvider
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -113,6 +113,13 @@ class ProviderInfoSchema(BaseModel):
     env_key: str | None = Field(default=None, description="Env var the credential is read from.")
     pricing_urls: list[str] = Field(default_factory=list)
     capabilities: ProviderCapabilitiesSchema
+    source: Literal["config", "dashboard"] = Field(
+        default="config",
+        description=(
+            "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML), 'dashboard' for one "
+            "stored through the deployment providers page."
+        ),
+    )
 
 
 class ProvidersResponse(BaseModel):
@@ -124,6 +131,7 @@ class ProvidersResponse(BaseModel):
 def _to_schema(info: ProviderInfo) -> ProviderInfoSchema:
     caps = info.capabilities
     return ProviderInfoSchema(
+        source=info.source,
         instance=info.instance,
         provider_type=info.provider_type,
         name=info.name,

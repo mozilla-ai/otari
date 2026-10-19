@@ -11,7 +11,6 @@ import {
 import { FiActivity, FiEdit2, FiTrash2 } from "react-icons/fi"
 import type {
   CreateStoredProviderRequest,
-  ProviderHealth,
   ProviderInfo,
   StoredProvider,
   TestProviderResult,
@@ -49,7 +48,8 @@ import {
 } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
 import { formatRelative } from "@/shared/helpers/format"
-
+import { ConnectionTestButton, ConnectionTestResult } from "./ConnectionTest"
+import { HealthPill } from "./HealthPill"
 import {
   type CredentialFieldValues,
   credentialFieldsFor,
@@ -65,88 +65,6 @@ import {
   ProviderCredentialFields,
   parseClientArgs,
 } from "./providerFields"
-
-// Testing the form's credentials before they are saved, in two nodes because
-// they belong in two places: the button sits in the footer beside the submit,
-// its outcome at the end of the body. The unverified case below is four lines
-// plus the provider's own reply, and a footer that grows shoves the form up
-// under the operator's hands; in the body it scrolls with everything else.
-type ConnectionTestState = ReturnType<typeof useTestProviderCredentials>
-
-// `getPayload` returns null when the minimum fields for a test are not filled
-// in yet, which disables the button.
-function ConnectionTestButton({
-  test,
-  getPayload,
-}: {
-  test: ConnectionTestState
-  getPayload: () => CreateStoredProviderRequest | null
-}) {
-  const payload = getPayload()
-  return (
-    <Button
-      variant="ghost"
-      isDisabled={payload === null || test.isPending}
-      onPress={() => {
-        if (payload) test.mutate(payload)
-      }}
-    >
-      {test.isPending ? "Testing…" : "Test connection"}
-    </Button>
-  )
-}
-
-function ConnectionTestResult({ test }: { test: ConnectionTestState }) {
-  const answered = test.data ?? test.error
-  const ref = useRef<HTMLSpanElement | null>(null)
-  // The body scrolls, and this is its last child: on an `lg` dialog in an 800px
-  // window the custom tab's own fields already fill it, so a verdict rendered
-  // here can land below the fold with the footer button back to "Test
-  // connection" and nothing else, to a sighted operator, having happened.
-  useEffect(() => {
-    if (answered) ref.current?.scrollIntoView({ block: "nearest" })
-  }, [answered])
-  return (
-    // No wrapper, and `empty:hidden` rather than a conditional render: the
-    // parent's `gap-4` would otherwise reserve a row before a test is ever run,
-    // and the live region has to exist before it has something to say.
-    <span
-      ref={ref}
-      role="status"
-      aria-live="polite"
-      className="flex flex-col gap-1.5 empty:hidden"
-    >
-      {test.isPending ? null : test.error ? (
-        <span className="text-xs text-danger">{errorMessage(test.error)}</span>
-      ) : test.data ? (
-        test.data.ok ? (
-          <span className="text-xs font-medium text-success">
-            Connected. {test.data.model_count} model
-            {test.data.model_count === 1 ? "" : "s"} available.
-          </span>
-        ) : test.data.discovery_unsupported ? (
-          // No /v1/models on this backend: the test cannot confirm the key, but
-          // it is not evidence the key is wrong either (issue #447). The error is
-          // kept because this is the form where the operator just typed api_base,
-          // and a wrong one 404s exactly like an absent listing endpoint.
-          <span className="block max-w-md break-words text-xs text-warning">
-            This provider does not list models, so the key could not be verified
-            here. Save it and use the provider; declare its model ids under{" "}
-            <code>models:</code> to have them show up in the catalog. If you did
-            not expect this, check the provider's reply below.
-            {test.data.error ? (
-              <span className="mt-0.5 block text-muted">{test.data.error}</span>
-            ) : null}
-          </span>
-        ) : (
-          <span className="block max-w-md break-words text-caption text-danger">
-            {test.data.error ?? "Connection failed."}
-          </span>
-        )
-      ) : null}
-    </span>
-  )
-}
 
 // Everything the operator can change on each tab, as one value per tab. The
 // drafts outlive the components that render them (only the active tab mounts),
@@ -890,58 +808,6 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   return (
     <span className="block max-w-xs break-words text-caption text-danger">
       {state.error ?? "Connection failed."}
-    </span>
-  )
-}
-
-// A provider's reachability, from the shared model-discovery health path. Config
-// providers (no per-row Test button) get a status here too, not just stored ones.
-// Semantic status surface: raw Tailwind palette classes, matching TestOutcome and
-// ErrorBanner rather than the page's own chrome. A provider that answers no model
-// listing (its backend never implemented /v1/models) is not unreachable: only
-// discovery is broken, and it may still serve requests, so it gets the amber
-// warning state rather than the red one (issue #447).
-// A repeated column's words, in their own casing. The uppercase these carried
-// was emphasis applied to every row alike, including the reachable ones, which
-// is the state a column watching for failures wants to draw the eye to least.
-// Same treatment, and same reasoning, as Activity's status column.
-const HEALTH_LABELS = {
-  ok: "Reachable",
-  degraded: "No model discovery",
-  unreachable: "Unreachable",
-} as const
-
-function HealthPill({ health }: { health: ProviderHealth | undefined }) {
-  if (!health) {
-    return <span className="text-caption">—</span>
-  }
-  const isDegraded = !health.ok && health.discovery_unsupported
-  // Only a real failure colors its text. Degraded is a provider that answers
-  // requests but lists no models, which is a fact about discovery rather than an
-  // outage, so it reads on the muted rung with the danger dot that says "worth
-  // noticing" without the ink that says "broken".
-  const styles = health.ok || isDegraded ? "text-muted" : "text-danger"
-  const dot = health.ok ? "bg-success" : "bg-danger"
-  // The last-checked time lives in the top summary banner; the row just shows the
-  // status. The error (and time) stay available on hover as the pill's tooltip.
-  const checked = health.checked_at
-    ? `Last checked ${formatRelative(health.checked_at)}`
-    : "Not checked yet"
-  const reason = isDegraded
-    ? `${health.error ?? "This provider does not list models."} Requests to it may still work.`
-    : (health.error ?? "Unreachable")
-  const title = health.ok ? checked : `${reason} · ${checked}`
-  return (
-    <span
-      title={title}
-      className={`flex items-center gap-2 text-mono-caption ${styles}`}
-    >
-      <Dot className={dot} />
-      {
-        HEALTH_LABELS[
-          health.ok ? "ok" : isDegraded ? "degraded" : "unreachable"
-        ]
-      }
     </span>
   )
 }

@@ -119,7 +119,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import (
     is_model_allowed,
     model_not_allowed_detail,
-    org_model_refusal,
+    organization_key_refusal,
     resolve_request_allowlist,
     unresolvable_model_detail,
 )
@@ -560,30 +560,29 @@ async def run_passthrough(
         )
 
     # Organization-scoped model restriction (otari#643): mirrors `_pipeline.py`'s
-    # equivalent gate. Applies only when the selector did not name a
-    # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
-    # uses to decide whether to consult the organization overlay at all.
-    if workspace_id is not None and resolved.instance not in config.providers:
-        refusal = org_model_refusal(
-            workspace_id,
-            resolved.provider.value,
-            resolved.model,
-            selector=model,
-            through_alias=resolved.alias is not None,
+    # equivalent gate; `organization_key_refusal` decides when it applies.
+    refusal = organization_key_refusal(
+        config,
+        workspace_id,
+        resolved.instance,
+        resolved.provider.value,
+        resolved.model,
+        selector=model,
+        through_alias=resolved.alias is not None,
+    )
+    if refusal is not None:
+        await refund_reservation(db, reservation)
+        await _log_rejection(
+            refusal.detail,
+            row_model=resolved.model,
+            row_provider=resolved.instance,
+            status_code=refusal.status_code,
         )
-        if refusal is not None:
-            await refund_reservation(db, reservation)
-            await _log_rejection(
-                refusal.detail,
-                row_model=resolved.model,
-                row_provider=resolved.instance,
-                status_code=refusal.status_code,
-            )
-            raise HTTPException(
-                status_code=refusal.status_code,
-                detail=refusal.detail,
-                headers=error_headers(refusal.code),
-            )
+        raise HTTPException(
+            status_code=refusal.status_code,
+            detail=refusal.detail,
+            headers=error_headers(refusal.code),
+        )
 
     # Managed credentials serve only the completion routes.
     await _refuse_managed_only(resolved, reservation)

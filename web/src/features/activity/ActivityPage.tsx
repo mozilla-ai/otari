@@ -5,18 +5,14 @@ import type {
   UsageEntry,
   UsageFilters,
   UsageGroupRow,
-  UsageMutationSelection,
 } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
-import { BulkActionBar } from "@/design-system/data/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
   PAGE_SIZE_OPTIONS,
   TablePagination,
 } from "@/design-system/data/TablePagination"
-import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
@@ -37,25 +33,15 @@ import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { useSetPricing } from "@/shared/api/pricing"
 import {
-  useDeleteUsage,
   useInFlightRequests,
   useLiveUsageCount,
   useRequestGroups,
-  useSetUsagePrice,
   useUsageCount,
   useUsageLogs,
   useUsageScope,
   useUsageSummary,
 } from "@/shared/api/usage"
-import {
-  formatDateTime,
-  formatNumber,
-  formatRelative,
-} from "@/shared/helpers/format"
-import {
-  resolveSelectedIds,
-  useTableSelection,
-} from "@/shared/helpers/tableSelection"
+import { formatNumber } from "@/shared/helpers/format"
 import {
   ACTIVITY_DEFAULT_KEY,
   ACTIVITY_PRESETS,
@@ -69,15 +55,11 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { ActivityTimeline } from "./ActivityTimeline"
 import {
   describeSource,
-  displayStatus,
   findGroupsMissingEarlierAttempts,
   formatLatencyCell,
-  formatToolUsage,
-  formatUSD,
   getActivityRowClassName,
   getActivityRowKey,
   indexGroupOutcomes,
-  listToolUsage,
   PRICED_OPTIONS,
   resolveExtentWindow,
   resolveWindow,
@@ -88,8 +70,15 @@ import { InFlightControl } from "./InFlightControl"
 import { RequestDetail } from "./RequestDetail"
 import { RequestTraceLink } from "./RequestTraceLink"
 import { RoutingCell } from "./RoutingCell"
-import { StatusMark } from "./StatusMark"
-import { TokenBar } from "./TokenBar"
+import {
+  API_KEY_COLUMN,
+  COST_COLUMN,
+  INPUT_TOKENS_COLUMN,
+  MODEL_COLUMN,
+  OUTPUT_TOKENS_COLUMN,
+  STATUS_COLUMN,
+  TIME_COLUMN,
+} from "./requestColumns"
 
 // The only breakdown this page asks the summary for: whether the window contains
 // gateway-run tool calls, which decides if the Tool filter is worth offering.
@@ -158,9 +147,8 @@ export function ActivityPage() {
   const providerFilter = url.get("provider")
   const toolFilter = url.get("tool")
   const page = Math.max(0, url.getNumber("page"))
-  // Snap URL-supplied sizes to the nearest offered option: selection latency
-  // grows linearly with rows on the page, so an old bookmark with size=500
-  // must not resurrect second-long checkbox clicks, and a hand-edited size=0
+  // Snap URL-supplied sizes to the nearest offered option: an old bookmark
+  // with size=500 must not render a page of 500 rows, and a hand-edited size=0
   // or size=-5 must not reach the API as an invalid limit (or leave the
   // rows-per-page select showing a value it does not offer).
   const rawPageSize = url.getNumber("size")
@@ -275,28 +263,25 @@ export function ActivityPage() {
     ],
   )
 
-  const selection = useTableSelection()
-
-  // Any change to the filter set returns to the first page and drops the
-  // selection, but not on mount, so a shared URL keeps its page.
+  // Any change to the filter set returns to the first page, but not on mount,
+  // so a shared URL keeps its page.
   const filtersKey = JSON.stringify(filters)
   const prevFiltersKey = useRef(filtersKey)
   useEffect(() => {
     if (prevFiltersKey.current !== filtersKey) {
       prevFiltersKey.current = filtersKey
       url.patch({ page: 0 })
-      selection.clear()
     }
-  }, [filtersKey, url, selection])
+  }, [filtersKey, url])
 
   const usage = useUsageLogs(filters, page, pageSize)
   const count = useUsageCount(filters)
 
-  // Which usage surface this caller reads, and with it the three things on this
-  // page that stay the deployment operator's: the in-flight strip, the bulk
-  // delete / reprice controls, and the per-row "price this model" button. The
-  // log and its aggregates are organization-scoped for everyone else
-  // (otari#837), so the page is theirs; these three are not.
+  // Which usage surface this caller reads, and with it the two things on this
+  // page that stay the deployment operator's: the in-flight strip and the
+  // per-row "price this model" button. The log and its aggregates are
+  // organization-scoped for everyone else (otari#837), so the page is theirs;
+  // these two are not.
   const scope = useUsageScope()
 
   // Requests in progress, read unfiltered: the endpoint has no filters, because a
@@ -554,7 +539,7 @@ export function ActivityPage() {
 
   // Rows that have landed since this page was drawn, as the gap between the polled
   // count and the pinned one. Clamped at zero because the gap can close from the
-  // other side: a bulk delete makes the live figure the smaller one, and "-14 new"
+  // other side: a delete makes the live figure the smaller one, and "-14 new"
   // is not a thing to show an operator.
   //
   // Gated on the same condition as the poll: `page` is not part of the live count's
@@ -726,67 +711,14 @@ export function ActivityPage() {
       : []),
   ]
 
-  // Selection targets imported rows only. `bulk_editable` is the server's own answer
-  // to "can a bulk delete or set-price reach this row", so the checkbox and the
-  // mutation's WHERE clause cannot disagree; deriving it here from
-  // `counts_toward_budget` alone offered a checkbox for budget-exempt gateway traffic
-  // that the delete then silently skipped (#781).
-  const selectableKeys = useMemo(
-    () => rows.filter((entry) => entry.bulk_editable).map((entry) => entry.id),
-    [rows],
-  )
-  const disabledKeys = useMemo(
-    () => rows.filter((entry) => !entry.bulk_editable).map((entry) => entry.id),
-    [rows],
-  )
-  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
-  const pageSelectedCount = selectedIds.length
-  const hasSelection = selection.allMatching || pageSelectedCount > 0
-
-  // Total imported rows matching the filter, for the "select all N" affordance
-  // and the bulk-op copy; only fetched once there is a selection.
-  const importedFilters = useMemo<UsageFilters>(
-    () => ({ ...filters, counts_toward_budget: false }),
-    [filters],
-  )
-  const importedCount = useUsageCount(importedFilters, hasSelection)
-  const matchingTotal = importedCount.isSuccess
-    ? (importedCount.data?.total ?? null)
-    : null
-  const allPageSelected =
-    selectableKeys.length > 0 && pageSelectedCount === selectableKeys.length
-  const canSelectAllMatching =
-    allPageSelected &&
-    matchingTotal != null &&
-    matchingTotal > pageSelectedCount
-  const effectiveCount = selection.allMatching
-    ? (matchingTotal ?? pageSelectedCount)
-    : pageSelectedCount
-  // Only offer the selection column when something on the page can actually be
-  // selected. A deployment with no imported usage has none: every checkbox would
-  // render disabled, which reads as a broken control rather than as "these rows
-  // are not eligible". Kept while "all matching" is live so the affordance does
-  // not vanish under an operator mid-bulk-op.
-  // Deleting and repricing usage rows are deployment-wide writes, so a caller
-  // who cannot make them is not offered the selection that leads to them: the
-  // bulk bar is rendered off `hasSelection`, which this gates.
-  const showSelection =
-    scope.isDeploymentWide &&
-    (selectableKeys.length > 0 || selection.allMatching)
-
-  const deleteUsage = useDeleteUsage()
-  const setPrice = useSetUsagePrice()
   const setModelPrice = useSetPricing()
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [priceOpen, setPriceOpen] = useState(false)
-  // Bumped on every open of either price dialog and used as its key, so the
+  // Bumped on every open of the price dialog and used as its key, so the
   // rates are cleared on the way in. Clearing them on close would blank the
   // fields while the dialog is still animating away, and these values set
   // money.
   const [priceOpenCount, setPriceOpenCount] = useState(0)
   // The model selector whose price is being set from a request detail, and
-  // unset when that dialog is closed. Distinct from `priceOpen` above, which
-  // reprices already-logged imported rows rather than setting a model's price.
+  // unset when that dialog is closed.
   const [modelPriceKey, setModelPriceKey] = useState<string>()
   const [modelPriceUnit, setModelPriceUnit] = useState<PricingUnit>("tokens")
   const [expandedId, setExpandedId] = useState<string>()
@@ -801,7 +733,7 @@ export function ActivityPage() {
   const renderDetail = useCallback(
     (entry: UsageEntry) => (
       <div>
-        <div className="flex items-center justify-between border-b border-border px-4 py-2">
+        <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
           {/* Left, by the title: the header spans the table's scroll width,
               so its right end can sit off screen. */}
           <div className="flex items-center gap-3">
@@ -833,52 +765,6 @@ export function ActivityPage() {
     [scope.isDeploymentWide],
   )
 
-  // A bulk op targets either the current page selection (ids) or, once the operator
-  // opted into "all matching", the filter itself (by_filter). The server scopes
-  // either to imported rows.
-  //
-  // Every filter that scopes the table has to be forwarded here. "All matching" is
-  // counted client-side from the full filter set but re-derived server-side from
-  // this body, so any filter left out widens the delete/reprice past the rows the
-  // operator was shown (a session drill-down would wipe every other session).
-  //
-  // The entity filters travel as the sets they are: the selection body takes the same
-  // repeatable form as the read filters, so "all N matching" targets exactly the rows
-  // the count was taken over (see UsageSelection).
-  const selectionBody = (): UsageMutationSelection =>
-    selection.allMatching
-      ? {
-          by_filter: true,
-          // First, because it is the widest of them: the switcher scopes the
-          // whole shell, so leaving it out would delete or reprice every other
-          // workspace's imported rows from a view the operator had narrowed to
-          // one. `UsageSelection.workspace_id` exists on the server for exactly
-          // this case.
-          workspace_id: filters.workspace_id,
-          model: filters.model,
-          user_id: filters.user_id,
-          api_key_id: filters.api_key_id,
-          status: filters.status,
-          source: filters.source,
-          source_label: filters.source_label,
-          endpoint: filters.endpoint,
-          provider: filters.provider,
-          tool: filters.tool,
-          start_date: filters.start_date,
-          end_date: filters.end_date,
-          priced: filters.priced,
-        }
-      : { ids: selectedIds }
-
-  const onDeleteConfirm = () => {
-    deleteUsage.mutate(selectionBody(), {
-      onSuccess: () => {
-        setDeleteOpen(false)
-        selection.clear()
-      },
-    })
-  }
-
   // Sets the model's own price (a ModelPricing row), which is what future
   // requests are billed at. Deliberately does not touch the rows already logged:
   // a gateway row's cost is what it was served at, and rewriting history from an
@@ -900,17 +786,6 @@ export function ActivityPage() {
         unit: rates.unit ?? "tokens",
       },
       { onSuccess: () => setModelPriceKey(undefined) },
-    )
-
-  const onSetPrice = (rates: ManualRates) =>
-    setPrice.mutateAsync(
-      { ...selectionBody(), ...rates },
-      {
-        onSuccess: () => {
-          setPriceOpen(false)
-          selection.clear()
-        },
-      },
     )
 
   // Refresh means "same view, newer rows", so it deliberately does *not* re-anchor
@@ -965,68 +840,27 @@ export function ActivityPage() {
   // Memoized on its per-render inputs (the roster labels and the routing
   // outcomes, both themselves memoized) so DataTable's per-row cache holds: a
   // fresh array every render would rebuild all rows per click.
-  const columns = useMemo<DataTableColumn<UsageEntry>[]>(() => {
-    const apiKeyLabel = (entry: UsageEntry): string =>
-      entry.api_key_id === null
-        ? "—"
-        : (entry.api_key_name ?? `${entry.api_key_id.slice(0, 8)}…`)
-    return [
-      {
-        id: "time",
-        header: "Time",
-        // Relative time reads better in a scan than a full timestamp; the
-        // absolute value stays available as a tooltip.
-        cell: (entry) => (
-          <span title={formatDateTime(entry.timestamp)} className="text-muted">
-            {formatRelative(entry.timestamp)}
-          </span>
-        ),
-      },
+  const columns = useMemo<DataTableColumn<UsageEntry>[]>(
+    () => [
+      TIME_COLUMN,
       {
         id: "user",
         header: "User",
-        cell: (entry) =>
-          entry.user_id === null
-            ? "—"
-            : userDisplay(entry.user_id, entry.user_alias, memberLabels).label,
-      },
-      {
-        id: "model",
-        header: "Model",
-        isRowHeader: true,
-        // The tool marker lives here rather than in a column of its own: a ninth
-        // column would compete with the token bar for the row's only graphic slot
-        // and push the failure-forward Status pill off a narrow viewport. Text, not
-        // color alone, so it survives the same accessibility bar as TokenBar.
         cell: (entry) => {
-          const tools = listToolUsage(entry)
-          if (!tools.length) return entry.model
-          const calls = tools.reduce(
-            (sum, tool) => sum + tool.billed + tool.errors,
-            0,
+          if (entry.user_id === null) return "—"
+          const { label } = userDisplay(
+            entry.user_id,
+            entry.user_alias,
+            memberLabels,
           )
-          const detail = tools.map(formatToolUsage).join(" \u00b7 ")
           return (
-            <span className="inline-flex items-center gap-1.5">
-              {entry.model}
-              {/* A marker, not a badge: an accent dot and the count in mono
-                  uppercase, on the same terms as every other marker in the
-                  product. A generic span does not reliably expose aria-label,
-                  so it takes the img role; the label is the whole meaning and
-                  the count inside is a summary of it. */}
-              <span
-                role="img"
-                className="inline-flex items-center gap-1.5 text-mono-overline text-muted"
-                title={detail}
-                aria-label={`Gateway tools: ${detail}`}
-              >
-                <Dot className="bg-accent" />
-                {calls} {calls === 1 ? "tool" : "tools"}
-              </span>
+            <span className="block truncate" title={label}>
+              {label}
             </span>
           )
         },
       },
+      MODEL_COLUMN,
       {
         id: "routing",
         header: "Routing",
@@ -1041,38 +875,20 @@ export function ActivityPage() {
           />
         ),
       },
-      {
-        id: "api_key",
-        header: "API key",
-        cell: (entry) => (
-          <span className="text-muted">{apiKeyLabel(entry)}</span>
-        ),
-      },
-      {
-        id: "tokens",
-        header: "Tokens",
-        align: "end",
-        cell: (entry) => <TokenBar entry={entry} />,
-      },
-      {
-        id: "cost",
-        header: "Cost",
-        align: "end",
-        cell: (entry) => formatUSD(entry.cost),
-      },
+      API_KEY_COLUMN,
+      INPUT_TOKENS_COLUMN,
+      OUTPUT_TOKENS_COLUMN,
+      COST_COLUMN,
       {
         id: "latency",
         header: "Total time",
         align: "end",
         cell: (entry) => formatLatencyCell(entry.latency_ms),
       },
-      {
-        id: "status",
-        header: "Status",
-        cell: (entry) => <StatusMark status={displayStatus(entry)} />,
-      },
-    ]
-  }, [groupOutcomes, memberLabels])
+      STATUS_COLUMN,
+    ],
+    [groupOutcomes, memberLabels],
+  )
 
   return (
     <div className="flex flex-col">
@@ -1227,116 +1043,52 @@ export function ActivityPage() {
         </FilterChips>
       </div>
 
-      {/* Both, not just `hasSelection`: that reads the selection state, which
-          does not clear when the operator answer flips. An operator who selects
-          rows and is then found not to be one (the context refetches on its own
-          cadence) would keep Delete and Set price on screen over a hidden
-          checkbox column. The server refuses either way, so this is a confusing
-          control rather than an escalation, but it is one nobody should be
-          offered. */}
-      {showSelection && hasSelection ? (
-        <BulkActionBar
-          selectedCount={effectiveCount}
-          allMatching={selection.allMatching}
-          matchingTotal={matchingTotal}
-          canSelectAllMatching={canSelectAllMatching}
-          onSelectAllMatching={selection.enableAllMatching}
-          onClear={selection.clear}
-        >
-          <Button
-            size="sm"
-            variant="primary"
-            onPress={() => {
-              setPriceOpenCount((count) => count + 1)
-              setPriceOpen(true)
-            }}
-          >
-            Set price
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            onPress={() => setDeleteOpen(true)}
-          >
-            Delete
-          </Button>
-        </BulkActionBar>
-      ) : null}
+      <div className="flex flex-col gap-3">
+        <TableScrollFrame className="otari-activity-table">
+          <DataTable
+            mobileLayout="cards"
+            ariaLabel="Activity log"
+            columns={columns}
+            rows={rows}
+            getRowKey={getActivityRowKey}
+            isLoading={usage.isLoading}
+            emptyContent={
+              anyFilter
+                ? "No requests match these filters."
+                : "No requests recorded yet."
+            }
+            onRowAction={(key) =>
+              setExpandedId((current) => (current === key ? undefined : key))
+            }
+            rowClassName={getActivityRowClassName}
+            detailKey={expandedId}
+            renderDetail={renderDetail}
+          />
+        </TableScrollFrame>
 
-      <TableScrollFrame className="otari-activity-table">
-        <DataTable
-          mobileLayout="cards"
-          ariaLabel="Activity log"
-          columns={columns}
-          rows={rows}
-          getRowKey={getActivityRowKey}
-          isLoading={usage.isLoading}
-          emptyContent={
-            anyFilter
-              ? "No requests match these filters."
-              : "No requests recorded yet."
-          }
-          selectionMode={showSelection ? "multiple" : "none"}
-          selectedKeys={selection.selectedKeys}
-          onSelectionChange={selection.onSelectionChange}
-          disabledKeys={disabledKeys}
-          onRowAction={(key) =>
-            setExpandedId((current) => (current === key ? undefined : key))
-          }
-          rowClassName={getActivityRowClassName}
-          detailKey={expandedId}
-          renderDetail={renderDetail}
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          rowsOnPage={rows.length}
+          // Paging re-reads the count as well as the rows. The total is a property of
+          // the filters, not of the page, so it is not in the count's key and a frozen
+          // page would carry whichever value it loaded with. That understates a table
+          // traffic has grown, and `TablePagination` derives `isLast` from the total
+          // whenever it has one, so the operator hits a wall short of the real end and
+          // the oldest rows sit past it, unreachable until a manual refresh. Paging is
+          // a deliberate act, so re-reading here keeps the total describing a set the
+          // operator can actually navigate, without putting a self-moving number under
+          // a table that deliberately holds still.
+          onPageChange={(next) => {
+            url.patch({ page: next })
+            void count.refetch()
+          }}
+          onPageSizeChange={(size) => url.patch({ size, page: 0 })}
+          isFetching={usage.isFetching}
+          hasNextFallback={rows.length === pageSize}
         />
-      </TableScrollFrame>
-
-      <TablePagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        rowsOnPage={rows.length}
-        // Paging re-reads the count as well as the rows. The total is a property of
-        // the filters, not of the page, so it is not in the count's key and a frozen
-        // page would carry whichever value it loaded with. That understates a table
-        // traffic has grown, and `TablePagination` derives `isLast` from the total
-        // whenever it has one, so the operator hits a wall short of the real end and
-        // the oldest rows sit past it, unreachable until a manual refresh. Paging is
-        // a deliberate act, so re-reading here keeps the total describing a set the
-        // operator can actually navigate, without putting a self-moving number under
-        // a table that deliberately holds still.
-        onPageChange={(next) => {
-          url.patch({ page: next })
-          void count.refetch()
-        }}
-        onPageSizeChange={(size) => url.patch({ size, page: 0 })}
-        isFetching={usage.isFetching}
-        hasNextFallback={rows.length === pageSize}
-      />
-
-      <ConfirmDialog
-        isOpen={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        heading="Delete usage rows"
-        body={`Delete ${formatNumber(effectiveCount)} imported ${
-          effectiveCount === 1 ? "row" : "rows"
-        }? Only imported rows are removed, and this cannot be undone.`}
-        confirmLabel="Delete"
-        isPending={deleteUsage.isPending}
-        error={deleteUsage.error}
-        onConfirm={onDeleteConfirm}
-      />
-
-      {/* Keyed on the open count, so each open remounts a blank form. */}
-      <SetPriceDialog
-        key={`repricing-${priceOpenCount}`}
-        isOpen={priceOpen}
-        onOpenChange={setPriceOpen}
-        targetCount={effectiveCount}
-        onSubmit={onSetPrice}
-        submitLabel="Set price"
-        // The object rather than the verb: the submit and its trigger are both
-        // "Set price", so the default title was a third copy of that string.
-        title="Imported row costs"
-      />
+      </div>
 
       <SetPriceDialog
         key={`model-${priceOpenCount}`}
@@ -1351,9 +1103,7 @@ export function ActivityPage() {
         chooseUnit
         initialUnit={modelPriceUnit}
         title="Price this model"
-        description={() =>
-          "Set what this model costs, taken from the request you were looking at. Requests from now on are costed at these rates and counted against budgets; rows already logged keep the cost they were served with."
-        }
+        description="Set what this model costs, taken from the request you were looking at. Requests from now on are costed at these rates and counted against budgets; rows already logged keep the cost they were served with."
       />
     </div>
   )

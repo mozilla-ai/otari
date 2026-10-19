@@ -20,6 +20,7 @@ Otari never guesses that two requests belong together from their content.
 | The `session_label` request field | `"session_label": "chat-42"` | `client` |
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | The agent harness's own session id | Claude Code's `x-claude-code-session-id`, sent on every request | `harness` |
+| The agent harness's own session id | Codex's `thread-id`, or `session-id` without one, on a request whose `originator` or `User-Agent` starts with `codex` | `harness` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
 
@@ -31,8 +32,8 @@ same label get two sessions, and a session id never reaches another workspace.
 
 ## Sessions from your own agent
 
-Claude Code is recognized on its own. An agent or harness of your own needs two
-things on its requests to read well as a trace.
+Claude Code and Codex are recognized on their own. An agent or harness of your own
+needs two things on its requests to read well as a trace.
 
 **Send one session id on every request of a run.** The `Otari-Conversation-Id`
 header is the one to use: it works the same on every completion endpoint, and it
@@ -58,9 +59,13 @@ session's harness: `my-agent/1.4.0` shows `my-agent`. An SDK's default
 Turns and the tools your agent runs are read from each request's input, so they
 need nothing extra when the request carries the conversation as usual: the
 user's message last when a turn starts, the tool results last when the model's
-tool calls are answered, each with the call id the model gave it. A Responses
-request that continues with `previous_response_id` carries only the new items,
-so its tools are recorded without a name.
+tool calls are answered, each with the call id the model gave it. In a Messages
+request, any `system` messages after them are skipped; Claude Code sends one on
+almost every request. A Claude Code subagent sends its parent's session id and
+an `x-claude-code-agent-id` of its own, and its requests open no turn, since it
+works inside its parent's turn. A Responses request that continues with
+`previous_response_id` carries only the new items, so its tools are recorded
+without a name.
 
 ## Turns, steps and tools
 
@@ -85,7 +90,10 @@ An agent that exports OpenTelemetry spans to `/otlp/v1/traces` (see
 [Importing external usage](external-usage.md)) has every span kept on its
 trace, including its own `invoke_agent` and `execute_tool` spans, with the span
 tree it sent. Span names and attribute values are kept only when they are
-identifier-shaped.
+identifier-shaped. The read API returns each of these spans with the
+`otel_trace_id` and `otel_span_id` it was exported with, in lowercase hex, so it
+can be joined back to the same trace in another backend. A span the gateway
+records itself has neither.
 
 ## Reading traces
 

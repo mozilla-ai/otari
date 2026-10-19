@@ -36,14 +36,16 @@ _CACHE_RATE_FIELDS = (
 _RATE_FIELDS = ("input_price_per_million", "output_price_per_million", *_CACHE_RATE_FIELDS)
 
 
-def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> dict[str, ModelPricing]:
+def _resolve_defaults(
+    provider: str, models: Sequence[str], as_of: datetime, implementation: str | None
+) -> dict[str, ModelPricing]:
     """Community default rates for several models. Synchronous; run off the loop."""
     # Deferred: the flat pricing module imports this package, so a top-level import closes a cycle.
     from gateway.services.pricing_service import default_model_pricing
 
     resolved: dict[str, ModelPricing] = {}
     for model in models:
-        default = default_model_pricing(provider, model, as_of)
+        default = default_model_pricing(provider, model, as_of, implementation=implementation)
         if default is not None:
             resolved[model] = default
     return resolved
@@ -78,17 +80,21 @@ class DeploymentPricingService:
         async with self.uow:
             return await self.pricing.latest_versions(model_keys)
 
-    async def defaults_for(self, provider: str, models: Collection[str]) -> dict[str, ModelPricing]:
+    async def defaults_for(
+        self, provider: str, models: Collection[str], *, implementation: str | None = None
+    ) -> dict[str, ModelPricing]:
         """Today's community rate for each model that has one, keyed by the bare model name.
 
-        Transient rows, never added to a session. The dataset walk is
-        synchronous and runs per model, so it runs off the loop, and a caller
-        keeps it outside any transaction.
+        Each rate is keyed ``provider:model``. ``implementation`` names the
+        any-llm implementation to look the model up as, for a provider name
+        that is not one. Transient rows, never added to a session. The dataset
+        walk is synchronous and runs per model, so it runs off the loop, and a
+        caller keeps it outside any transaction.
         """
         wanted = sorted(set(models))
         if not wanted:
             return {}
-        return await asyncio.to_thread(_resolve_defaults, provider, wanted, datetime.now(UTC))
+        return await asyncio.to_thread(_resolve_defaults, provider, wanted, datetime.now(UTC), implementation)
 
     async def store_defaults(self, defaults: Mapping[str, ModelPricing], effective_at: datetime) -> None:
         """Store community defaults as versions carrying ``SEED_ORIGIN``, one per ``model_key``.

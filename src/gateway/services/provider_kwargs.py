@@ -41,7 +41,7 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -301,6 +301,23 @@ def hosted_lookup(provider: LLMProvider) -> HostedLookup:
 _uncredentialed_warned: set[str] = set()
 
 
+def _no_hosted_names(_name: str) -> str | None:
+    return None
+
+
+# The implementation serving a hosted provider whose name is not an
+# implementation's own (``openai-eu``), registered at startup by the
+# composition root (``configure_hosted_names``) as pricing's provider types
+# are: the names live in ``services/providers``, which imports this module.
+_hosted_names: Callable[[str], str | None] = _no_hosted_names
+
+
+def configure_hosted_names(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup from a hosted provider's name to its implementation; None unregisters it."""
+    global _hosted_names  # noqa: PLW0603
+    _hosted_names = resolver or _no_hosted_names
+
+
 def uncredentialed_env_names(config: GatewayConfig, instance: str, entry: Mapping[str, Any]) -> tuple[str, ...] | None:
     """The variables a ``providers:`` entry could have taken its credential from, or ``None``.
 
@@ -427,6 +444,16 @@ def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
         # codeql[py/clear-text-logging-sensitive-data]
         variable,
     )
+
+
+def reaches_organization_key(config: GatewayConfig, instance: str) -> bool:
+    """Whether a selector naming ``instance`` can be served on an organization's own key.
+
+    Neither a ``providers:`` instance nor a hosted provider named otherwise than
+    its implementation ever consults one, so neither is subject to an
+    organization key's model restrictions.
+    """
+    return instance not in config.providers and _hosted_names(instance) is None
 
 
 def get_provider_kwargs(
@@ -820,7 +847,12 @@ def resolve_provider_selector(
         # organization's own offerings may answer. Relabeled like an alias: the
         # caller sees the spelling they sent, and pricing keys on the target.
         alias = resolve_catalog_selector(model_selector, workspace_id=workspace_id)
-    if alias is None and (written := split_selector(model_selector)) is not None and written[0] not in config.providers:
+    if (
+        alias is None
+        and (written := split_selector(model_selector)) is not None
+        and written[0] not in config.providers
+        and _hosted_names(written[0]) is None
+    ):
         # An organization key serves only the ids it offers, so a provider's
         # undated name reaches its one dated build there. A ``providers:``
         # instance sends any id as written and is never rewritten.
@@ -842,6 +874,21 @@ def resolve_provider_selector(
     if split is not None and split[0] in config.providers:
         instance, model = split
         provider = LLMProvider(config.provider_instance_type(instance))
+        return ResolvedProvider(
+            instance=instance,
+            provider=provider,
+            model=model,
+            kwargs=get_provider_kwargs(config, provider, instance=instance),
+            alias=model_selector if alias is not None else None,
+        )
+
+    if split is not None and (implementation := _hosted_names(split[0])) is not None:
+        # A hosted provider named otherwise than its implementation. Reached by
+        # its name alone: an organization key for the implementation would send
+        # the request to another endpoint, so none is consulted, and the
+        # credential is the hosted rung's to resolve.
+        instance, model = split
+        provider = LLMProvider(implementation)
         return ResolvedProvider(
             instance=instance,
             provider=provider,

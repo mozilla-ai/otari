@@ -16,7 +16,8 @@ join client-side.
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Literal
 
 from any_llm import AnyLLM, LLMProvider
 
@@ -24,6 +25,7 @@ from gateway.core.config import KEYLESS_SELF_HOSTED_PROVIDERS, GatewayConfig
 from gateway.log_config import logger
 from gateway.services.pricing import ModelsDevPrice, current_index
 from gateway.services.provider_kwargs import AMBIENT_CREDENTIAL_PROVIDERS
+from gateway.services.provider_store_service import stored_instances
 
 
 @dataclass
@@ -55,6 +57,8 @@ class ProviderInfo:
     env_key: str | None = None
     pricing_urls: list[str] = field(default_factory=list)
     capabilities: ProviderCapabilities = field(default_factory=ProviderCapabilities)
+    # Where the instance is defined: the configuration, or the deployment providers page.
+    source: Literal["config", "dashboard"] = "config"
 
 
 def _any_llm_metadata(provider_type: str) -> object | None:
@@ -135,9 +139,13 @@ def provider_info(config: GatewayConfig, instance: str) -> ProviderInfo:
 
 
 def list_provider_info(config: GatewayConfig) -> list[ProviderInfo]:
-    """Static metadata for every configured provider, sorted by instance name."""
+    """Static metadata for every configured provider, sorted by instance name, each with its source."""
+    stored = stored_instances()
     return sorted(
-        (provider_info(config, instance) for instance in config.providers),
+        (
+            replace(provider_info(config, instance), source="dashboard" if instance in stored else "config")
+            for instance in config.providers
+        ),
         key=lambda info: info.instance,
     )
 

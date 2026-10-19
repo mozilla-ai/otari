@@ -688,7 +688,7 @@ reworded.
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
 | `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
 | `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
-| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason`, or the connection carrying it was cut. The output received so far is truncated | |
+| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
 
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
@@ -718,7 +718,14 @@ applies (`upstream_rate_limited`, `context_length_exceeded`),
 finished, otherwise `provider_error` when the provider failed the stream. On
 Chat Completions a stream is finished once a choice reports its
 `finish_reason`; one that closes without any, even after sending content, ends
-in this error event rather than in a bare `data: [DONE]`. Its message is the `detail` the same failure would carry as an HTTP
+in this error event rather than in a bare `data: [DONE]`. On Responses from a
+provider with its own Responses API, a stream is finished once the provider sends
+`response.completed`, `response.incomplete` or `response.failed`, and one that
+closes before them ends the same way. A Responses stream Otari
+[translates from a chat completion](#responses-on-providers-without-a-responses-api)
+always ends in `response.completed`, or in `response.incomplete` when the
+provider stopped for length or a content filter, so one the provider cut short
+is not caught and closes as a success. The error event's message is the `detail` the same failure would carry as an HTTP
 error where that names a cause (a rejected parameter, the provider's own
 explanation of a rejected request, redacted as described above, or what
 happened upstream, such as the provider's error status), and a fixed

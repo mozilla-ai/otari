@@ -23,7 +23,7 @@ async function renderDialog(
 }
 
 describe("SetPriceDialog", () => {
-  it("offers no unit when repricing imported rows, which are costed by token", async () => {
+  it("offers no unit unless asked to, and prices by token", async () => {
     await renderDialog()
 
     expect(screen.queryByRole("radio", { name: "Requests" })).toBeNull()

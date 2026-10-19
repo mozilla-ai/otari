@@ -22,6 +22,7 @@ import {
 } from "./activityModel"
 import { DetailField } from "./DetailField"
 import { RoutingPlan } from "./RoutingPlan"
+import { apiKeyLabel } from "./requestColumns"
 
 // The detail panel for one request: the failure diagnostic plus the metadata
 // that does not fit the row. The stored `error_message` is shown as stored: the
@@ -58,8 +59,12 @@ export function RequestDetail({
   const isUnpricedServed = entry.status === "success" && entry.cost === null
   const pricingKey = findPricingSelector(entry)
   const isSkipped = isSkippedAttempt(entry)
+  const user =
+    entry.user_id === null
+      ? null
+      : userDisplay(entry.user_id, entry.user_alias, memberLabels)
   return (
-    <div className="flex flex-col gap-4 px-4 py-4">
+    <div className="flex flex-col gap-5 px-3 pt-3 pb-4">
       {/* A skip is the walk moving past a full model, not a failure, so it is
           worded and styled as a note rather than an error. */}
       {isSkipped ? (
@@ -86,7 +91,10 @@ export function RequestDetail({
       {entry.policy_name !== null && entry.policy_name !== undefined ? (
         <RoutingPlan entry={entry} />
       ) : null}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+        {/* In full: the row's Model and API key lanes cut them short, and a
+            title is no help to a keyboard or a touch screen. */}
+        <DetailField label="Model">{entry.model}</DetailField>
         <DetailField label="Provider">
           {entry.provider ? providerDisplayName(entry.provider) : "—"}
         </DetailField>
@@ -98,18 +106,15 @@ export function RequestDetail({
         {/* The name reads, the id stays copyable: this is the one place an
             operator goes for the raw id, so naming the person here must not
             take it away. */}
-        <DetailField label="User" copyValue={entry.user_id} copyLabel="user id">
-          {entry.user_id === null
-            ? "—"
-            : userDisplay(entry.user_id, entry.user_alias, memberLabels).label}
-        </DetailField>
         <DetailField
-          label="API key"
-          copyValue={entry.api_key_id}
-          copyLabel="api key id"
+          label="User"
+          copyValue={entry.user_id}
+          copyLabel="user id"
+          isId={user !== null && user.id === undefined}
         >
-          {entry.api_key_id ?? "—"}
+          {user?.label ?? "—"}
         </DetailField>
+        <DetailField label="API key">{apiKeyLabel(entry)}</DetailField>
         <DetailField label="Prompt tokens">
           {formatTokenCount(entry.prompt_tokens)}
         </DetailField>
@@ -119,11 +124,11 @@ export function RequestDetail({
         <DetailField label="Total tokens">
           {formatTokenCount(entry.total_tokens)}
         </DetailField>
-        {/* The Tokens column's number, spelled out here because it can exceed the
-            provider-reported total above: the row's composition counts the cache
-            buckets, which an additive-convention provider reports outside the prompt. */}
+        {/* The row's Input and Output added up, spelled out here because it can
+            exceed the provider-reported total above: the cache buckets count, and
+            an additive-convention provider reports them outside the prompt. */}
         <DetailField label="Billed tokens">
-          <span title="Fresh input, cache reads and writes, and output: the tokens this request was priced on, and the total the activity row's bar splits.">
+          <span title="Fresh input, cache reads and writes, and output: the tokens this request was priced on, which the row splits into Input and Output.">
             {formatTokenCount(buildTokenComposition(entry)?.total ?? null)}
           </span>
         </DetailField>
@@ -168,7 +173,19 @@ export function RequestDetail({
         <DetailField label="Provider time">
           {formatLatencyCell(entry.provider_latency_ms)}
         </DetailField>
-        <DetailField label="Request ID" copyValue={entry.id}>
+      </div>
+      {/* The two ids on a row of their own, each half the panel: a 36-character
+          id does not fit a quarter of it beside its copy control. */}
+      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        <DetailField
+          label="API key ID"
+          copyValue={entry.api_key_id}
+          copyLabel="api key id"
+          isId
+        >
+          {entry.api_key_id ?? "—"}
+        </DetailField>
+        <DetailField label="Request ID" copyValue={entry.id} isId>
           {entry.id}
         </DetailField>
       </div>
@@ -205,7 +222,7 @@ export function RequestDetail({
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">
           <span className="text-overline">Billed meters</span>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
             {sortChargeLines(entry.pricing_breakdown).map((line) => {
               // A line of neither known shape was written by an older gateway.
               // Its cost is still real, so it is shown as a charge with no rate

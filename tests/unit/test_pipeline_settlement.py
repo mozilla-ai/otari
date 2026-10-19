@@ -1880,7 +1880,8 @@ async def test_cancellation_while_settling_leaves_the_report_running(
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
         yield _usage_chunk("u1", 10, finishes=True)
 
-    iterator = _build_platform_stream(stream())
+    # The canceled stream lets its settlement wait out the inline budget before the cancellation surfaces.
+    iterator = _build_platform_stream(stream(), config=GatewayConfig(platform={"usage_inline_timeout_ms": 50}))
     pending = asyncio.ensure_future(iterator.__anext__())
     await asyncio.wait_for(reporter.started.wait(), timeout=1)
 

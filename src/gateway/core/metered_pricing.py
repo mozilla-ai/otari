@@ -73,6 +73,11 @@ TIER_THRESHOLD_FIELD = "min_input_tokens"
 
 TOKENS_PER_PRICING_UNIT = Decimal(1_000_000)
 
+# Anthropic bills a 1h cache write at twice base input, against 1.25x for a 5m
+# one. No price source carries a 1h rate (models.dev has no field for it), so
+# a Claude model's is derived from its input rate.
+CLAUDE_1H_CACHE_WRITE_INPUT_MULTIPLE = Decimal(2)
+
 # The rounding this module defines, and the two column scales it matches.
 #
 # A settled cost is rounded once, half-up, to the micro-dollar: that is the
@@ -117,6 +122,8 @@ class Rates:
     output_price_per_million: Decimal
     cache_read_price_per_million: Decimal | None
     cache_write_price_per_million: Decimal | None
+    cache_write_1h_price_per_million: Decimal | None
+    """``None`` when a 1h write bills at ``cache_write_price_per_million`` like any other write."""
 
 
 def to_decimal(value: typing.Any) -> Decimal | None:
@@ -291,11 +298,31 @@ def _applicable_tier(
     return max(reached, key=lambda item: item[0])[1]
 
 
+def _is_claude(pricing: typing.Any) -> bool:
+    """Whether ``pricing`` prices an Anthropic Claude model, on whichever provider serves it.
+
+    Read from the model half of ``model_key``, because the provider half names
+    an instance rather than a vendor, and an Anthropic-compatible endpoint can
+    serve another vendor's model. ``anthropic:claude-haiku-5-5``,
+    ``bedrock:us.anthropic.claude-haiku-5-5`` and
+    ``vertexaianthropic:claude-haiku-5-5@default`` all qualify.
+    """
+    model_key = getattr(pricing, "model_key", None)
+    if not isinstance(model_key, str):
+        return False
+    provider, separator, model = model_key.partition(":")
+    return "claude" in (model if separator else provider).lower()
+
+
 def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
     """Resolve the rates for a request, applying any threshold tier it reaches.
 
     A tier overrides only the rate fields it names, so a tier that reprices
     input alone leaves the cache and output rates on their base values.
+
+    A Claude model whose cache writes are priced above zero bills a 1h write at
+    twice the input rate the request reaches. Any other rate bills a 1h write as
+    an ordinary cache write.
     """
     values: dict[str, Decimal | None] = {field: to_decimal(getattr(pricing, field, None)) for field in RATE_FIELDS}
 
@@ -313,11 +340,15 @@ def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
         # a broken rate object rather than a priceable one. Defaulting to zero
         # would bill the request at nothing and say so nowhere.
         raise ValueError("Pricing carries no usable input or output rate")
+    cache_write_rate = values["cache_write_price_per_million"]
     return Rates(
         input_price_per_million=input_rate,
         output_price_per_million=output_rate,
         cache_read_price_per_million=values["cache_read_price_per_million"],
-        cache_write_price_per_million=values["cache_write_price_per_million"],
+        cache_write_price_per_million=cache_write_rate,
+        cache_write_1h_price_per_million=input_rate * CLAUDE_1H_CACHE_WRITE_INPUT_MULTIPLE
+        if cache_write_rate and _is_claude(pricing)
+        else None,
     )
 
 
@@ -388,11 +419,13 @@ def _price_meters(
     sub-amounts into one row can sum them exactly and round the row once.
 
     Each input token bills exactly once, under whichever meter it belongs to: a
-    cache read, a cache write on either TTL (one rate), or fresh input. A meter with no
-    configured rate leaves its tokens in the fresh-input bucket, so an unpriced
-    cache meter costs the input rate instead of nothing.
+    cache read, a cache write, a 1h cache write where it has a rate of its own,
+    or fresh input. A meter with no configured rate leaves its tokens in the
+    fresh-input bucket, so an unpriced cache meter costs the input rate instead
+    of nothing.
     """
     rates = effective_rates(pricing, usage.total_input_tokens)
+    one_hour_write_tokens = usage.cache_write_1h_tokens if rates.cache_write_1h_price_per_million is not None else 0
 
     fresh_input_tokens = usage.total_input_tokens
     if rates.cache_read_price_per_million is not None:
@@ -423,7 +456,9 @@ def _price_meters(
     if rates.cache_read_price_per_million is not None:
         charge("cache_read", usage.cache_read_tokens, rates.cache_read_price_per_million)
     if rates.cache_write_price_per_million is not None:
-        charge("cache_write", usage.cache_write_tokens, rates.cache_write_price_per_million)
+        charge("cache_write", usage.cache_write_tokens - one_hour_write_tokens, rates.cache_write_price_per_million)
+    if rates.cache_write_1h_price_per_million is not None:
+        charge("cache_write_1h", one_hour_write_tokens, rates.cache_write_1h_price_per_million)
     return cost, meters, lines
 
 
@@ -499,8 +534,10 @@ def estimate_metered_cost(
 
     Every estimated prompt token is billed as exactly one of fresh input, a
     cache read, or a cache write, so the upper bound for the input side is the
-    token count times the dearest of those three rates. Every one of them is
-    considered, including the cache-read rate: it is normally a discount, but
+    token count times the dearest rate any of them bills at. A ``1h`` TTL means
+    at least one block asked for a 1h write, so the others may still write for
+    5m, and both write rates are candidates. Every rate is considered,
+    including the cache-read rate: it is normally a discount, but
     nothing in the schema requires that, and assuming it made the estimate an
     under-bound for a rate card that priced a cache read above fresh input. An
     under-bound is a budget hole rather than a rounding difference, because the
@@ -518,16 +555,16 @@ def estimate_metered_cost(
     output_tokens = max(estimated_output_tokens, 0)
     rates = effective_rates(pricing, input_tokens)
 
-    cache_write_rate = rates.cache_write_price_per_million if cache_write_ttl is not None else None
-
     # An unpriced meter bills at the input rate (its tokens stay in the fresh
     # bucket), so the input rate is the floor and every configured rate a prompt
     # token could attract raises it.
     candidate_rates = [rates.input_price_per_million]
     if rates.cache_read_price_per_million is not None:
         candidate_rates.append(rates.cache_read_price_per_million)
-    if cache_write_rate is not None:
-        candidate_rates.append(cache_write_rate)
+    if cache_write_ttl is not None and rates.cache_write_price_per_million is not None:
+        candidate_rates.append(rates.cache_write_price_per_million)
+    if cache_write_ttl == "1h" and rates.cache_write_1h_price_per_million is not None:
+        candidate_rates.append(rates.cache_write_1h_price_per_million)
     per_input_token_rate = max(candidate_rates)
 
     estimate = meter_cost(input_tokens, per_input_token_rate) + meter_cost(

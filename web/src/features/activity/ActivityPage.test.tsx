@@ -29,7 +29,8 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
-    expect(within(row).getByText("1,500")).toBeInTheDocument()
+    expect(within(row).getByText("1,200")).toBeInTheDocument()
+    expect(within(row).getByText("300")).toBeInTheDocument()
     expect(within(row).getByText("842 ms")).toBeInTheDocument()
     expect(within(row).getByText("$0.0123")).toBeInTheDocument()
     // Status is a dot plus an uppercase word now, not a pill.
@@ -405,9 +406,9 @@ describe("ActivityPage", () => {
     )
   })
 
-  it("shows a row's token composition rather than one uninformative total", async () => {
+  it("shows a row's input and output apart, with the cache share on the input", async () => {
     // A cached agent request: the total is ~98% cache read, so the total alone
-    // makes every row look alike. The bar carries the split.
+    // makes every row look alike.
     mockApi({
       rows: [
         entry({
@@ -430,25 +431,16 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
-    expect(within(row).getByText("100,500")).toBeInTheDocument()
-    const bar = within(row).getByRole("img", { name: /Token composition/ })
-    expect(bar).toHaveAccessibleName(
-      "Token composition: Fresh input 500, Cache read 98,000, Cache write 1,500, Output 500",
+    expect(within(row).getByText("100,000")).toHaveAttribute(
+      "title",
+      "Fresh input 500, cache read 98,000, cache write 1,500",
     )
-
-    // Four segments, widest being the cache read, so the shape is what the eye
-    // compares between rows.
-    const widths = [...bar.querySelectorAll("rect")].map((r) =>
-      Number(r.getAttribute("width")),
-    )
-    expect(widths).toHaveLength(4)
-    expect(Math.max(...widths)).toBeCloseTo((98_000 / 100_500) * 100, 5)
-    expect(widths.reduce((a, b) => a + b, 0)).toBeCloseTo(100, 5)
+    expect(within(row).getByText("500")).toBeInTheDocument()
   })
 
-  it("explains the column's total in the detail panel when it exceeds the raw one", async () => {
+  it("explains the row's billed tokens in the detail panel when they exceed the raw total", async () => {
     // An additive-convention row reports its cache buckets outside the prompt, so
-    // the billed total the column shows is far above the stored `total_tokens`.
+    // the billed tokens the row shows are far above the stored `total_tokens`.
     // Both are spelled out, or the two numbers look like a bug.
     const user = userEvent.setup()
     mockApi({
@@ -479,11 +471,12 @@ describe("ActivityPage", () => {
       screen.getByText(label).parentElement!.textContent ?? ""
     expect(field("Total tokens")).toContain("1,200")
     expect(field("Billed tokens")).toContain("100,700")
-    // Which is the number the row itself shows.
-    expect(within(row).getByText("100,700")).toBeInTheDocument()
+    // Which is what the row's Input and Output add up to.
+    expect(within(row).getByText("100,500")).toBeInTheDocument()
+    expect(within(row).getByText("200")).toBeInTheDocument()
   })
 
-  it("splits an unmetered row from its raw columns, and shows no bar without usage", async () => {
+  it("splits an unmetered row from its raw columns, and shows no count without usage", async () => {
     // An unpriced row carries no billing meters, so the composition falls back to
     // the raw columns (cache read counted inside the prompt).
     mockApi({
@@ -511,19 +504,21 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     const unpriced = (await screen.findByText("unpriced-model")).closest("tr")!
-    expect(
-      within(unpriced).getByRole("img", { name: /Token composition/ }),
-    ).toHaveAccessibleName(
-      "Token composition: Fresh input 600, Cache read 400, Output 200",
+    expect(within(unpriced).getByText("1,000")).toHaveAttribute(
+      "title",
+      "Fresh input 600, cache read 400",
     )
+    expect(within(unpriced).getByText("200")).toBeInTheDocument()
 
-    // A request that failed before the provider reported usage has nothing to
-    // compose, so the cell stays an em-dash instead of drawing an empty bar.
+    // A request that failed before the provider reported usage has no count to
+    // show, so both cells are an em-dash rather than a zero.
     const failed = screen.getByText("failed-model").closest("tr")!
-    expect(
-      within(failed).queryByRole("img", { name: /Token composition/ }),
-    ).not.toBeInTheDocument()
-    expect(within(failed).getByText("—")).toBeInTheDocument()
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent)
+    for (const column of ["Input", "Output"]) {
+      expect(failed.cells[headers.indexOf(column)]).toHaveTextContent("—")
+    }
   })
 
   it("opens a bookmarked deep page on that page", async () => {
@@ -763,270 +758,18 @@ describe("ActivityPage", () => {
     expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled()
   })
 
-  it("only lets imported rows be selected", async () => {
+  it("offers no row selection, even to an operator over imported rows", async () => {
     mockApi({
-      rows: [
-        entry({ id: "gw", model: "gateway-model", counts_toward_budget: true }),
-        entry({
-          id: "imp",
-          model: "imported-model",
-          source: "claude_code",
-          counts_toward_budget: false,
-        }),
-        entry({
-          id: "gw-exempt",
-          model: "exempt-model",
-          source: "gateway",
-          counts_toward_budget: false,
-        }),
-      ],
+      rows: [entry({ counts_toward_budget: false, source: "claude_code" })],
+      deploymentOperator: true,
     })
     renderPage(<ActivityPage />)
 
-    const gatewayRow = (await screen.findByText("gateway-model")).closest("tr")!
-    const importedRow = screen.getByText("imported-model").closest("tr")!
-    const exemptRow = screen.getByText("exempt-model").closest("tr")!
-    expect(within(gatewayRow).getByRole("checkbox")).toBeDisabled()
-    expect(within(importedRow).getByRole("checkbox")).toBeEnabled()
-    // Traffic this gateway served on an exclude_from_budget key. Budget-exempt like
-    // an import, so selecting on `counts_toward_budget` alone offered it, and the
-    // delete then refused it and reported a smaller number than the dialog promised.
-    expect(within(exemptRow).getByRole("checkbox")).toBeDisabled()
-  })
-
-  it("deletes the selected imported rows by id", async () => {
-    const user = userEvent.setup()
-    const { calls } = mockApi({
-      rows: [
-        entry({
-          id: "imp-1",
-          model: "imported-model",
-          source: "claude_code",
-          counts_toward_budget: false,
-        }),
-      ],
-      total: 1,
-    })
-    renderPage(<ActivityPage />)
-
-    const row = (await screen.findByText("imported-model")).closest("tr")!
-    await user.click(within(row).getByRole("checkbox"))
-
-    // Bulk bar appears with the page selection count.
-    expect(await screen.findByText("1 selected")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Delete" }))
-
-    // Confirm in the dialog.
-    const dialog = await screen.findByRole("alertdialog")
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
-
-    await waitFor(() => {
-      const del = calls.find(
-        (c) => c.url.endsWith(`${API_ROOT}/usage`) && c.method === "DELETE",
-      )
-      expect(del).toBeTruthy()
-      expect(del!.body).toContain("imp-1")
-    })
-  })
-
-  it("carries the drill-down filters into an 'all matching' delete", async () => {
-    // The count that sizes "select all N" is taken under the source/session/provider
-    // scope, so the delete body has to repeat it. If it does not, the server
-    // re-derives a wider set: omitting `source` alone widened the target from one
-    // imported source to every imported row in the window.
-    const user = userEvent.setup()
-    const { calls } = mockApi({
-      rows: [
-        entry({
-          id: "imp-1",
-          model: "imported-model",
-          source: "claude_code",
-          counts_toward_budget: false,
-        }),
-      ],
-      total: 5,
-    })
-    renderPage(
-      <ActivityPage />,
-      "/activity?source=claude_code&source_label=task-42&provider=anthropic&endpoint=external",
-    )
-
-    const row = (await screen.findByText("imported-model")).closest("tr")!
-    await user.click(within(row).getByRole("checkbox"))
-    await user.click(
-      await screen.findByRole("button", { name: /Select all 5 matching/ }),
-    )
-
-    await user.click(screen.getByRole("button", { name: "Delete" }))
-    const dialog = await screen.findByRole("alertdialog")
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
-
-    await waitFor(() => {
-      const del = calls.find(
-        (c) => c.url.endsWith(`${API_ROOT}/usage`) && c.method === "DELETE",
-      )
-      expect(del).toBeTruthy()
-      const body = JSON.parse(del!.body ?? "{}")
-      expect(body.by_filter).toBe(true)
-      expect(body.source).toBe("claude_code")
-      expect(body.source_label).toBe("task-42")
-      expect(body.provider).toBe("anthropic")
-      expect(body.endpoint).toBe("external")
-    })
-  })
-
-  it("carries the selected workspace into an 'all matching' delete", async () => {
-    // The widest scope on the page, and the only one not set by a control on it:
-    // the sidebar's switcher narrows the table, so the count that sizes "select
-    // all N" is taken inside one workspace. A delete body that omits it is
-    // re-derived server-side without the scope and destroys every other
-    // workspace's imported rows from a view the operator had narrowed to one.
-    const user = userEvent.setup()
-    const workspaceId = "11111111-2222-3333-4444-555555555555"
-    const { calls } = mockApi({
-      rows: [
-        entry({
-          id: "imp-1",
-          model: "imported-model",
-          source: "claude_code",
-          counts_toward_budget: false,
-        }),
-      ],
-      total: 5,
-      workspace: workspaceId,
-    })
-    renderPage(<ActivityPage />)
-
-    const row = (await screen.findByText("imported-model")).closest("tr")!
-    await user.click(within(row).getByRole("checkbox"))
-    await user.click(
-      await screen.findByRole("button", { name: /Select all 5 matching/ }),
-    )
-
-    await user.click(screen.getByRole("button", { name: "Delete" }))
-    const dialog = await screen.findByRole("alertdialog")
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
-
-    await waitFor(() => {
-      const del = calls.find(
-        (c) => c.url.endsWith(`${API_ROOT}/usage`) && c.method === "DELETE",
-      )
-      expect(del).toBeTruthy()
-      const body = JSON.parse(del!.body ?? "{}")
-      expect(body.by_filter).toBe(true)
-      expect(body.workspace_id).toBe(workspaceId)
-    })
-
-    // The count the operator confirmed was taken under the same scope, which is
-    // what makes "all 5 matching" mean the same set on both sides.
-    const counts = calls.filter((c) =>
-      c.url.includes(`${API_ROOT}/usage/count`),
-    )
+    await screen.findByText("gpt-4o")
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
     expect(
-      counts.some((c) => c.url.includes(`workspace_id=${workspaceId}`)),
-    ).toBe(true)
-  })
-
-  it("carries a multi-value filter into an 'all matching' delete", async () => {
-    // The dangerous case for repeatable filters: the operator confirms a count taken
-    // over two models, so the delete body has to name both. A body that dropped the
-    // extra value (or sent one of the two) would delete a different set than the
-    // count promised, in the one direction that loses rows.
-    const user = userEvent.setup()
-    const { calls } = mockApi({
-      rows: [
-        entry({
-          id: "imp-1",
-          model: "imported-model",
-          source: "claude_code",
-          counts_toward_budget: false,
-        }),
-      ],
-      total: 5,
-    })
-    renderPage(<ActivityPage />, "/activity?model=gpt-4o&model=claude-sonnet-5")
-
-    const row = (await screen.findByText("imported-model")).closest("tr")!
-    await user.click(within(row).getByRole("checkbox"))
-    await user.click(
-      await screen.findByRole("button", { name: /Select all 5 matching/ }),
-    )
-
-    await user.click(screen.getByRole("button", { name: "Delete" }))
-    const dialog = await screen.findByRole("alertdialog")
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
-
-    await waitFor(() => {
-      const del = calls.find(
-        (c) => c.url.endsWith(`${API_ROOT}/usage`) && c.method === "DELETE",
-      )
-      expect(del).toBeTruthy()
-      const body = JSON.parse(del!.body ?? "{}")
-      expect(body.by_filter).toBe(true)
-      expect(body.model).toEqual(["gpt-4o", "claude-sonnet-5"])
-    })
-
-    // The count that sized "all matching" was scoped to the same two models.
-    const counts = calls.filter((c) =>
-      c.url.includes(`${API_ROOT}/usage/count`),
-    )
-    expect(
-      counts.some(
-        (c) =>
-          c.url.includes("model=gpt-4o") &&
-          c.url.includes("model=claude-sonnet-5"),
-      ),
-    ).toBe(true)
-  })
-
-  it("sets a manual price on the selected imported rows", async () => {
-    const user = userEvent.setup()
-    const { calls } = mockApi({
-      rows: [
-        entry({
-          id: "imp-1",
-          model: "imported-model",
-          source: "claude_code",
-          counts_toward_budget: false,
-        }),
-      ],
-      total: 1,
-    })
-    renderPage(<ActivityPage />)
-
-    const row = (await screen.findByText("imported-model")).closest("tr")!
-    await user.click(within(row).getByRole("checkbox"))
-    await user.click(screen.getByRole("button", { name: "Set price" }))
-
-    const dialog = await screen.findByRole("dialog")
-    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "3")
-    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "15")
-    await user.click(within(dialog).getByRole("button", { name: "Set price" }))
-
-    await waitFor(() => {
-      const priceCall = calls.find(
-        (c) =>
-          c.url.includes(`${API_ROOT}/usage/set-price`) && c.method === "POST",
-      )
-      expect(priceCall).toBeTruthy()
-      expect(priceCall!.body).toContain("imp-1")
-      expect(priceCall!.body).toContain('"input_price_per_million":3')
-      expect(priceCall!.body).toContain('"output_price_per_million":15')
-    })
-  })
-
-  it("hides the selection column when nothing on the page can be selected", async () => {
-    // A gateway-only deployment has no imported rows, so every checkbox would
-    // render disabled: a column of dead controls rather than an explanation.
-    mockApi({
-      rows: [
-        entry({ id: "gw", model: "gateway-model", counts_toward_budget: true }),
-      ],
-    })
-    renderPage(<ActivityPage />)
-
-    await screen.findByText("gateway-model")
-    expect(screen.queryAllByRole("checkbox")).toHaveLength(0)
+      screen.queryByRole("toolbar", { name: "Bulk actions" }),
+    ).not.toBeInTheDocument()
   })
 
   it("prices the model from a request that carried no cost", async () => {
@@ -1665,10 +1408,10 @@ describe("ActivityPage", () => {
 })
 
 describe("ActivityPage gateway-run tools", () => {
-  it("marks a row that ran tools and keeps its token bar", async () => {
+  it("marks a row that ran tools and keeps its token counts", async () => {
     // A row can carry tool meters while its tokens were never metered (an unpriced
     // model still owes for the searches it ran). Keying the token split off the
-    // presence of `billing_meters` rather than each key made the bar vanish here.
+    // presence of `billing_meters` rather than each key made the counts vanish here.
     mockApi({
       rows: [
         entry({
@@ -1688,10 +1431,9 @@ describe("ActivityPage gateway-run tools", () => {
     const pill = within(row).getByLabelText(/Gateway tools/)
     expect(pill).toHaveTextContent("4 tools")
     expect(pill).toHaveAccessibleName("Gateway tools: web search ×3, 1 failed")
-    // The bar still renders from the raw columns.
-    expect(
-      within(row).getByRole("img", { name: /Token composition/ }),
-    ).toBeInTheDocument()
+    // The counts still come from the raw columns.
+    expect(within(row).getByText("1,200")).toBeInTheDocument()
+    expect(within(row).getByText("300")).toBeInTheDocument()
   })
 
   it("reads each charge line by the rate it carries, and neither by the other", async () => {
@@ -1883,16 +1625,24 @@ describe("ActivityPage table-scan avoidance", () => {
     ).toBe(false)
   })
 
-  it("falls back to a short id when the row carries no key name", async () => {
-    // The label is null whenever the key was deleted or never named, so the
-    // column must not render an empty cell for a row that does have a key.
-    mockApi({
-      rows: [entry({ api_key_id: "abcdef123456", api_key_name: null })],
-    })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+  it.each([null, ""])(
+    "falls back to a short id when the key name is %j",
+    async (name) => {
+      // The label is null whenever the key was deleted or never named, and the
+      // API accepts an empty name, so the column must not render an empty cell
+      // for a row that does have a key.
+      mockApi({
+        rows: [entry({ api_key_id: "abcdef123456", api_key_name: name })],
+      })
+      renderPage(<ActivityPage />, "/activity?range=24h")
 
-    expect(await screen.findByText("abcdef12…")).toBeInTheDocument()
-  })
+      // Shortened in the cell, whole on hover.
+      expect(await screen.findByText("abcdef12…")).toHaveAttribute(
+        "title",
+        "abcdef123456",
+      )
+    },
+  )
 })
 
 describe("ActivityPage user naming", () => {
@@ -2523,33 +2273,6 @@ describe("ActivityPage for a tenant who does not operate the deployment", () => 
 
     await screen.findByText("gpt-4o")
     expect(calls.some((c) => c.url.includes("/usage/in-flight"))).toBe(false)
-  })
-
-  it("offers no row selection, because the bulk writes are not theirs", async () => {
-    // Deleting and repricing usage are deployment-wide. The bulk bar hangs off
-    // the selection, so withholding the selection withholds both.
-    const { calls } = mockApi({
-      rows: [entry({ counts_toward_budget: false, source: "claude_code" })],
-      deploymentOperator: false,
-    })
-    renderPage(<ActivityPage />)
-
-    await screen.findByText("gpt-4o")
-    expect(calls).not.toHaveLength(0)
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
-  })
-
-  it("still offers the selection to an operator, so the case above is not vacuous", async () => {
-    mockApi({
-      rows: [entry({ counts_toward_budget: false, source: "claude_code" })],
-      deploymentOperator: true,
-    })
-    renderPage(<ActivityPage />)
-
-    await screen.findByText("gpt-4o")
-    await waitFor(() =>
-      expect(screen.queryAllByRole("checkbox")).not.toHaveLength(0),
-    )
   })
 })
 

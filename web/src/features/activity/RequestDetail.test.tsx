@@ -31,6 +31,27 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("names the model and the API key in full, which the row cuts short", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          model: "claude-sonnet-4-5-20250929",
+          api_key_id: "key-1",
+          api_key_name: "production-backend-service",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    const field = (label: string): string =>
+      screen.getByText(label, { exact: true }).parentElement!.textContent ?? ""
+    expect(field("Model")).toContain("claude-sonnet-4-5-20250929")
+    expect(field("API key")).toContain("production-backend-service")
+    expect(field("API key ID")).toContain("key-1")
+  })
+
   it("shows a skipped candidate as a note, not as an error", async () => {
     mockApi()
     renderPage(
@@ -82,6 +103,29 @@ describe("RequestDetail", () => {
     expect(
       screen.getByTitle(/the tokens this request was priced on/),
     ).toHaveTextContent("1,200")
+  })
+
+  it("shows a named user's whole name, while the copy keeps the id", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
+          user_alias: "Aleksandra Wiśniewska-Kowalczyk",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    // The detail is where a name the row cut short is read in full, so it
+    // wraps. jsdom cannot measure truncation, so the wrapping class is pinned.
+    expect(screen.getByText("Aleksandra Wiśniewska-Kowalczyk")).toHaveClass(
+      "wrap-anywhere",
+    )
+    expect(
+      screen.getByRole("button", { name: "Copy user id" }),
+    ).toBeInTheDocument()
   })
 
   it("shows the reasoning tokens, and a dash for a row that never recorded them", async () => {

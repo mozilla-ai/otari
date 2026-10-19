@@ -94,7 +94,7 @@ from gateway.services.tools import (
     ToolUseBudget,
 )
 from gateway.services.traces import read_turn
-from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
+from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 
@@ -251,6 +251,16 @@ def _usage_to_completion_usage(
     )
 
 
+def _ends_a_response(chunk: Any) -> bool:
+    """Whether ``chunk`` is an event that ends a response.
+
+    A stream is complete when its last chunk is one: a provider sends nothing after
+    it, and the gateway's tool loop forwards only its final round's, after
+    everything else.
+    """
+    return getattr(chunk, "type", None) in RESPONSES_TERMINAL_EVENTS
+
+
 def _ensure_provider_supports_responses(provider: LLMProvider) -> None:
     if not serves_responses(provider):
         raise HTTPException(
@@ -296,9 +306,9 @@ class _ResponsesAdapter:
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        # Not checked yet: the chat-completions bridge synthesizes the terminal
-        # event whatever the upstream sent, so it cannot tell a cut stream here.
-        return None
+        # The chat-completions bridge emits a terminal event whatever its upstream
+        # sent, so this catches a cut native stream and not a cut bridged one.
+        return _ends_a_response
 
     def stream_error_payload(self, exc: BaseException) -> str:
         return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))

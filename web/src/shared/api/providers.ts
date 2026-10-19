@@ -69,13 +69,14 @@ export function useProviderDetail(providerId: string) {
 // automatic probe infrequent; operators can still force an immediate re-check.
 export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000
 
-export function useProviderHealth() {
+export function useProviderHealth(enabled = true) {
   return useQuery({
     ...NO_RETRY,
     queryKey: [PROVIDER_HEALTH],
     queryFn: () => apiFetch<ProviderHealthResponse>("/providers/health"),
     staleTime: PROVIDER_HEALTH_REFRESH_MS,
     refetchInterval: PROVIDER_HEALTH_REFRESH_MS,
+    enabled,
   })
 }
 

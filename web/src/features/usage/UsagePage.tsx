@@ -120,8 +120,8 @@ const TABLE_TOP_N = 15
 // the Anthropic console, Grafana-style tooling): one main time-series chart, a
 // metric selector, and a group-by dimension that splits the series into stacked
 // bars. Ungrouped views use the richest encoding each metric has: tokens stack
-// their billed composition (the same encoding as the Activity token bar),
-// requests split success/error. Dragging across the chart zooms the window.
+// their billed composition, requests split success/error. Dragging across the
+// chart zooms the window.
 
 type ChartMetric = "cost" | "tokens" | "requests"
 

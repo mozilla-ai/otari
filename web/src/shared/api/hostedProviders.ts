@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   CreateHostedModelRequest,
   CreateHostedProviderRequest,
+  DeploymentProviderMigration,
+  DeploymentProviderMigrationReviewedRow,
   HostedAvailableModels,
   HostedCatalogRefresh,
   HostedModel,
@@ -10,6 +12,9 @@ import type {
   HostedModelsRefresh,
   HostedProvider,
   HostedProviders,
+  HostedProviderTestResult,
+  ReencryptHostedProvidersResult,
+  TestHostedProviderRequest,
   UpdateHostedModelRequest,
   UpdateHostedProviderRequest,
 } from "@/client"
@@ -22,6 +27,9 @@ import {
   MODELS,
   NO_RETRY,
   PRICING,
+  PROVIDER_HEALTH,
+  PROVIDERS,
+  STORED_PROVIDERS,
 } from "@/shared/api/queryKeys"
 
 // The providers this deployment serves on its own keys, for a request that
@@ -29,7 +37,8 @@ import {
 // answers a non-operator 404, which is why the page asks the deployment admin
 // gate before it asks for this list.
 //
-// Everything is addressed by provider name, the row's identity. Each write that
+// Everything is addressed by the provider's name (`name`, which defaults to its
+// implementation `provider`), the row's identity. Each write that
 // can change a price or what is served also invalidates the catalog reads,
 // because a hosted model's rate is the deployment price list's.
 //
@@ -38,8 +47,8 @@ import {
 // rather than the default request deadline.
 
 /**
- * The API's maximum: one row per provider implementation, a closed set well
- * inside it, so one page is the whole list.
+ * The API's maximum. An operator adds hosted providers by hand, so one page is
+ * the whole list.
  */
 const PROVIDER_PAGE_LIMIT = 1000
 
@@ -53,6 +62,7 @@ function useInvalidateHosted() {
     void queryClient.invalidateQueries({ queryKey: [PRICING] })
     void queryClient.invalidateQueries({ queryKey: [MODELS] })
     void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+    void queryClient.invalidateQueries({ queryKey: [PROVIDER_HEALTH] })
   }
 }
 
@@ -243,5 +253,72 @@ export function useHostedCatalogRefresh() {
         signal: longRequestSignal(),
       }),
     onSuccess: invalidate,
+  })
+}
+
+/**
+ * Credentials tried against the provider without storing them. With `name`
+ * naming a stored provider, a field left out is read from it, so an edit can be
+ * tested without typing the key again. Dials the upstream.
+ */
+export function useTestHostedProvider() {
+  return useMutation({
+    mutationFn: (body: TestHostedProviderRequest) =>
+      apiFetch<HostedProviderTestResult>("/hosted-providers/test", {
+        method: "POST",
+        body: JSON.stringify(body),
+        signal: longRequestSignal(),
+      }),
+  })
+}
+
+/** Re-encrypts every stored hosted provider key under the primary `OTARI_SECRET_KEY`. */
+export function useReencryptHostedProviders() {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<ReencryptHostedProvidersResult>("/hosted-providers/reencrypt", {
+        method: "POST",
+      }),
+    onSuccess: invalidate,
+  })
+}
+
+/**
+ * What moving the deployment providers stored through the dashboard onto
+ * hosted providers would do. Reads the stored rows only and dials nothing, so
+ * it is cheap enough to ask whenever the page is open.
+ */
+export function useDeploymentProviderMigrationPreview(enabled: boolean) {
+  return useQuery({
+    queryKey: [HOSTED_PROVIDERS, "migration"],
+    queryFn: () =>
+      apiFetch<DeploymentProviderMigration>("/hosted-providers/migration"),
+    staleTime: 30_000,
+    enabled,
+  })
+}
+
+/**
+ * Moves the deployment providers named, the rows of the preview the operator
+ * reviewed at the versions shown; a row the preview did not show, or one
+ * changed since, is left where it is. Each move asks
+ * the provider what it serves, as a create does.
+ */
+export function useApplyDeploymentProviderMigration() {
+  const queryClient = useQueryClient()
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (rows: DeploymentProviderMigrationReviewedRow[]) =>
+      apiFetch<DeploymentProviderMigration>("/hosted-providers/migration", {
+        method: "POST",
+        body: JSON.stringify({ rows }),
+        signal: longRequestSignal(),
+      }),
+    onSuccess: () => {
+      invalidate()
+      void queryClient.invalidateQueries({ queryKey: [STORED_PROVIDERS] })
+      void queryClient.invalidateQueries({ queryKey: [PROVIDERS] })
+    },
   })
 }

@@ -137,6 +137,17 @@ gateway process rather than to any organization on it:
   `hosted_providers:` block of `config.yml` carries a `config.yml` badge and
   cannot be edited, switched or removed here, while its models can; adding a
   provider of the same name overrides it, which the form warns about.
+  A provider takes an optional name, which defaults to its implementation; a
+  name of its own (`openai-eu`) serves a second endpoint of one implementation,
+  reached as `openai-eu:<model>`. The key is optional for a provider that needs
+  none and for one pointed at an endpoint of its own. Test connection, in the
+  add and edit dialogs, asks the provider what it lists on the dialog's values
+  without saving them, the stored key standing in for a blank key box. Below
+  the table, Configured providers lists the `providers:` instances of
+  `config.yml` read-only, with their reachability. While deployment providers
+  stored through the Deployment providers page remain, a banner offers to move
+  them here under the same names, listing what each becomes before anything
+  moves.
 
 Accounts and Hosted providers are listed only for a deployment operator, and
 answer anyone else that they are not available to them.

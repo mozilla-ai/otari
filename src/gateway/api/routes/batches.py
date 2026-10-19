@@ -58,7 +58,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import (
     is_model_allowed,
     model_not_allowed_detail,
-    org_model_refusal,
+    organization_key_refusal,
     resolve_request_allowlist,
 )
 from gateway.services.pricing_service import find_model_pricing
@@ -428,19 +428,22 @@ async def create_batch(
         )
 
     # Organization-scoped model restriction (otari#643): mirrors `_pipeline.py`'s
-    # equivalent gate. Applies only when the selector did not name a
-    # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
-    # uses to decide whether to consult the organization overlay at all.
-    if workspace_id is not None and resolved.instance not in config.providers:
-        refusal = org_model_refusal(
-            workspace_id, provider.value, model, selector=request.model, through_alias=resolved.alias is not None
+    # equivalent gate; `organization_key_refusal` decides when it applies.
+    refusal = organization_key_refusal(
+        config,
+        workspace_id,
+        resolved.instance,
+        provider.value,
+        model,
+        selector=request.model,
+        through_alias=resolved.alias is not None,
+    )
+    if refusal is not None:
+        raise HTTPException(
+            status_code=refusal.status_code,
+            detail=refusal.detail,
+            headers=error_headers(refusal.code),
         )
-        if refusal is not None:
-            raise HTTPException(
-                status_code=refusal.status_code,
-                detail=refusal.detail,
-                headers=error_headers(refusal.code),
-            )
 
     # Validate provider supports batch operations
     provider_class = AnyLLM.get_provider_class(provider)
