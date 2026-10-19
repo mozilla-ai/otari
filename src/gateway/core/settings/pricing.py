@@ -87,7 +87,7 @@ class PricingSettings(BaseModel):
             "Reject requests for models, and direct searches, that have no configured pricing (fail-closed, default). "
             "When False, unpriced models are served and logged without cost (legacy behavior), and unpriced "
             "searches are served at the cost their provider reports, if any. "
-            "Audio and moderation endpoints are always exempt — they have no token-based pricing."
+            "Audio and moderation endpoints are always exempt: they have no token-based pricing."
         ),
     )
     default_pricing: Annotated[bool, Shown(SettingsGroup.METERING)] = Field(
