@@ -61,7 +61,11 @@ Without interception, a request can choose for itself with the
   model runs the keyword natively, Otari's on an attempt whose model does not.
   Only Anthropic's dated keyword (`web_search_<date>`) on `/api/v1/messages`
   against an Anthropic model, and OpenAI's `web_search` / `web_search_preview`
-  on `/api/v1/responses` against an OpenAI model, count as native. So a request
+  on `/api/v1/responses` against an OpenAI model, count as native. DeepSeek runs
+  both on its compatible APIs: the dated keyword on `/api/v1/messages` with any
+  of its models, and `web_search` on `/api/v1/responses` with `deepseek-v4-pro`
+  only, since `deepseek-flash` ignores it there and answers without searching.
+  So a request
   written for Claude's search keeps searching when its model is swapped, or
   falls back, to one with no search of its own, and on Messages a dated keyword
   is still answered with `server_tool_use` / `web_search_tool_result` blocks. A

@@ -44,6 +44,48 @@ def test_native_only_in_the_providers_own_wire_format(
     assert provider_runs_web_search_natively(entry, provider=provider, dialect=dialect) is native
 
 
+@pytest.mark.parametrize(
+    ("entry", "dialect", "model", "native"),
+    [
+        (ANTHROPIC_DATED, Dialect.MESSAGES, "deepseek-flash", True),
+        (ANTHROPIC_DATED, Dialect.MESSAGES, "deepseek-v4-pro", True),
+        (ANTHROPIC_DATED, Dialect.MESSAGES, None, True),
+        (OPENAI_BARE, Dialect.RESPONSES, "deepseek-v4-pro", True),
+        # deepseek-flash ignores the keyword on Responses and answers without searching.
+        (OPENAI_BARE, Dialect.RESPONSES, "deepseek-flash", False),
+        (OPENAI_BARE, Dialect.RESPONSES, None, False),
+        ({"type": "web_search_preview"}, Dialect.RESPONSES, "deepseek-v4-pro", False),
+        (ANTHROPIC_DATED, Dialect.RESPONSES, "deepseek-v4-pro", False),
+        (OPENAI_BARE, Dialect.MESSAGES, "deepseek-v4-pro", False),
+        (ANTHROPIC_DATED, Dialect.CHAT, "deepseek-v4-pro", False),
+    ],
+)
+def test_deepseek_runs_both_keywords_on_the_matching_api_and_responses_on_v4_pro_only(
+    entry: dict[str, str], dialect: Dialect, model: str | None, native: bool
+) -> None:
+    assert provider_runs_web_search_natively(entry, provider="deepseek", dialect=dialect, model=model) is native
+
+
+def test_auto_decides_each_deepseek_candidate_by_its_model() -> None:
+    config = GatewayConfig(web_search_url="http://search.invalid")
+    declarations = read_web_declarations([OPENAI_BARE], web_search_header="auto", config=config, uniform=False)
+    decided = decide_candidate_tools(
+        declarations,
+        providers=["deepseek", "deepseek"],
+        models=["deepseek-v4-pro", "deepseek-flash"],
+        dialect=Dialect.RESPONSES,
+    )
+    assert [WEB_SEARCH_TOOL_NAME in candidate.native for candidate in decided] == [True, False]
+    assert [WEB_SEARCH_TOOL_NAME in candidate.claimed for candidate in decided] == [False, True]
+
+
+def test_without_models_no_candidate_runs_a_search_only_some_models_run() -> None:
+    config = GatewayConfig(web_search_url="http://search.invalid")
+    declarations = read_web_declarations([OPENAI_BARE], web_search_header="auto", config=config, uniform=False)
+    (decided,) = decide_candidate_tools(declarations, providers=["deepseek"], dialect=Dialect.RESPONSES)
+    assert WEB_SEARCH_TOOL_NAME in decided.claimed
+
+
 @pytest.fixture(autouse=True)
 def _no_search_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("OTARI_WEB_SEARCH_URL", "OTARI_WEB_SEARCH_INTERCEPT", "OTARI_WEB_SEARCH_PROVIDER"):
