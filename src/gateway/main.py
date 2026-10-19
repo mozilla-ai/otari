@@ -108,16 +108,20 @@ from gateway.services.pricing_refresh_service import (
     run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
-from gateway.services.provider_kwargs import warn_about_ignored_provider_variables
+from gateway.services.provider_kwargs import configure_hosted_names, warn_about_ignored_provider_variables
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
     reset_provider_cache,
     run_provider_refresher,
 )
 from gateway.services.providers import (
+    hosted_implementation,
+    load_hosted_names_at_startup,
     load_provider_endpoints_at_startup,
     refuse_unsafe_configured_endpoints,
+    reset_hosted_name_index,
     reset_provider_endpoint_cache,
+    run_hosted_name_refresher,
     run_provider_endpoint_refresher,
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
@@ -356,6 +360,9 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         "provider endpoint",
         lambda _config, _container: run_provider_endpoint_refresher(),
         reset_provider_endpoint_cache,
+    ),
+    _LifespanWorker(
+        "hosted provider name", lambda config, _container: run_hosted_name_refresher(config), reset_hosted_name_index
     ),
     # Not a cache of rows like its neighbours: this holds constructed vendor
     # clients, so its tick rebuilds only what a write moved and its reset gives
@@ -771,7 +778,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # implementation it actually dispatches to. Deliberately not
         # ``provider_instance_type``: that normalizes ``openai-compatible`` to
         # ``openai``, which names a wire protocol rather than a vendor.
-        configure_provider_types(config.provider_pricing_implementation)
+        # A named hosted provider is priced as its implementation, as an instance
+        # declaring a ``provider_type`` is.
+        configure_provider_types(
+            lambda name: config.provider_pricing_implementation(name) or hosted_implementation(name)
+        )
+        configure_hosted_names(hosted_implementation)
         _validate_provider_user_identifier_key(config)
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
@@ -855,6 +867,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # vendor handshake.
             await load_guardrail_runner_at_startup()
             await load_provider_endpoints_at_startup()
+            await load_hosted_names_at_startup(config)
             # On a Unit of Work of its own, after the session above has closed.
             await _report_hosted_providers_config(config)
             container: Container = app.state.container

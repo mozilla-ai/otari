@@ -48,8 +48,8 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         learns nothing about a credential kept from it. ``workspace_id`` is
         attribution only and unused.
 
-        ``provider`` is the caller's *instance* name, which equals the any-llm
-        implementation for a bare selector. A ``config.yml`` instance of its own
+        ``provider`` is the caller's *instance* name: the any-llm
+        implementation for a bare selector, or a hosted provider's own name. A ``config.yml`` instance of its own
         name is credentialed upstream of this port and never reaches it. An
         accepted alias (``openai-compatible``) is served by the provider it
         folds to, and is answered under that provider's name.
@@ -68,6 +68,7 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
             # nothing prices. Equal to ``provider`` for anything but an alias.
             response_provider=resolved.name or provider,
             client_args=resolved.client_args,
+            implementation=resolved.implementation,
         )
 
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:

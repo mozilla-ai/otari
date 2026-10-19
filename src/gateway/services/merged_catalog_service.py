@@ -28,7 +28,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
-from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
+from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
 from gateway.services.catalog import apply_model_limits, load_catalog_metadata
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
@@ -446,12 +446,6 @@ class CatalogScope:
     ``deployment_supplied_providers`` for an operator, who may price a hosted
     model and so sees it unflagged, but still does not hold its key.
     """
-
-
-# An organization no hosted-provider restriction names, so the port's answer for
-# it is what every organization reaches. ``None`` is the deployment's own view,
-# which sees restricted providers too.
-NO_ORGANIZATION = uuid.UUID(int=0)
 
 
 def served_on_deployment_key(hosted_models: HostedModels, model_key: str) -> bool:

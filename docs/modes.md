@@ -111,7 +111,13 @@ A hosted provider is a credential the deployment's operator configures for the
 deployment to serve requests on, under a name that defaults to its provider
 (a name of its own, such as `openai-eu`, lets two endpoints of one provider
 be served side by side), with a roster of the models offered on it and the rate
-each is charged at on the deployment price list.
+each is charged at on the deployment price list. A hosted provider named after its
+provider is reached by a bare `provider:model` request once neither a
+`providers:` instance nor the organization's own key answers. One with a name
+of its own is reached only by that name (`openai-eu:gpt-4o`): an organization's
+key for the provider never serves it, because that key belongs to another
+endpoint. A request whose workspace belongs to no organization is served only
+on a hosted provider restricted to no organization.
 Only a model switched on in that roster is served on the hosted credential: a
 model switched off, or one the roster does not list, is refused with `424`. The
 deployment settles the upstream bill for a hosted model, which is why its rate

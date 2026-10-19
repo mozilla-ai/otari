@@ -205,7 +205,7 @@ from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
-from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
+from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedAccessDeniedError, ModelProviderPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import (
     BudgetMinuteLimits,
@@ -1547,7 +1547,7 @@ async def _prepare_for_dispatch(
     if ctx.plan is not None and len(ctx.plan.attempts) > 1:
         try:
             ctx.managed_only = await managed_only_candidates(
-                ctx.config, ctx.plan.attempts, hosted=lambda: port, organization_id=ctx.organization_id
+                ctx.config, ctx.plan.attempts, hosted=lambda: port, organization_id=_hosted_organization(ctx)
             )
         except asyncio.CancelledError:
             await release_reservation(ctx)
@@ -1562,6 +1562,16 @@ async def _prepare_for_dispatch(
         await _hold_at_deployment_paid_rate(ctx, served, adapter=adapter)
     await _admit_or_refuse(ctx, served, adapter=adapter, billing=billing)
     return served
+
+
+def _hosted_organization(ctx: RequestContext) -> uuid.UUID:
+    """The organization the hosted rung asks for this request.
+
+    A request with no organization (its workspace belongs to none) is served on
+    what is restricted to no organization, so it is asked as one no restriction
+    names; billing then has no organization to charge, and charges none.
+    """
+    return ctx.organization_id if ctx.organization_id is not None else NO_ORGANIZATION
 
 
 def hosted_model_not_offered_detail(selector: str) -> str:
@@ -1582,10 +1592,8 @@ async def _refuse_if_hosted_model_switched_off(
     the ordinary missing-credential answer, so nothing here says whether such a
     provider exists.
     """
-    if ctx.organization_id is None:
-        return
     try:
-        served = await port.get_hosted_models(organization_id=ctx.organization_id)
+        served = await port.get_hosted_models(organization_id=_hosted_organization(ctx))
     except Exception:
         # Best effort: the request then fails as it would have without this check.
         logger.warning("Could not list hosted models for %s:%s", resolved.instance, resolved.model)
@@ -1882,15 +1890,9 @@ async def _serve_from_hosted_credential(
     else:
         return resolved
     lookup = hosted_lookup(resolved.provider)
-    if ctx.organization_id is None:
-        # The port keys its access decision on the organization alone, so a
-        # request with no organization (no workspace resolved for it) has
-        # nothing to ask about.
-        raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
-
     try:
         credential = await port.resolve_hosted_credential(
-            organization_id=ctx.organization_id,
+            organization_id=_hosted_organization(ctx),
             workspace_id=ctx.workspace_id,
             # The instance rather than the implementation: that is the name
             # pricing, budgets and usage key on, and for a bare selector it is
@@ -1987,7 +1989,7 @@ async def _serve_from_hosted_credential(
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
 
     try:
-        upstream = LLMProvider(credential.response_provider)
+        upstream = LLMProvider(credential.implementation or credential.response_provider)
     except ValueError as exc:
         # The adapter named an upstream any-llm does not implement, so nothing
         # can be dispatched. That is a defect in this build rather than caller
@@ -2999,7 +3001,12 @@ async def resolve_request_context(
         if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
             await refund_reservation(db, reservation)
             refusal = await unpriced_model_refusal(
-                config, model, resolved_provider, plan=plan, hosted=model_provider, organization_id=organization_id
+                config,
+                model,
+                resolved_provider,
+                plan=plan,
+                hosted=model_provider,
+                organization_id=organization_id if organization_id is not None else NO_ORGANIZATION,
             )
             # Record the rejection after the refund, so an operator who flipped
             # require_pricing on can see that live traffic is being dropped.
