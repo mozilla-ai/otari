@@ -893,9 +893,10 @@ when it reports one, and at the rate otherwise. A search a workspace's
 organization search key served is priced under `otari:web_search` instead, since
 the deployment cannot price the organization's own provider account. With
 `require_pricing` on, a direct search whose row is missing is refused with a
-402 naming it, even on a provider that reports its charge; a zero rate is a
-valid row. With it off, such a search holds no dollars, though it still holds
-one request against a request-count budget.
+402 naming it, even on a provider that reports its charge, unless the key is
+exempt from budgets; a zero rate is a valid row. With it off, such a search
+holds no dollars, though it still holds one request against a request-count
+budget.
 
 A fetch instance's rate is keyed the same way (`tabstack:tabstack` for an
 instance named `tabstack` backed by `tabstack`), and so is the built-in
