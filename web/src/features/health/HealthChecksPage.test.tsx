@@ -27,7 +27,7 @@ function settings(
   overrides: Partial<HealthCheckSettings> = {},
 ): HealthCheckSettings {
   return {
-    enabled: true,
+    schedule_enabled: true,
     interval_minutes: 60,
     prompt: "Reply with the single word: pong",
     max_tokens: 16,

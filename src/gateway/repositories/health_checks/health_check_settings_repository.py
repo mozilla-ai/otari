@@ -40,7 +40,7 @@ class HealthCheckSettingsRepository(
                 HealthCheckSettings.id == SETTINGS_ROW_ID,
                 or_(
                     HealthCheckSettings.run_requested.is_(True),
-                    HealthCheckSettings.enabled.is_(True)
+                    HealthCheckSettings.schedule_enabled.is_(True)
                     & or_(HealthCheckSettings.next_run_at.is_(None), HealthCheckSettings.next_run_at <= now),
                 ),
             )

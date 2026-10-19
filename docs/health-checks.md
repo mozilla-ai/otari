@@ -7,7 +7,9 @@ answered. An alert list is emailed when a model stops answering and again when
 it answers.
 
 Health checks are a standalone feature, for operators only. A hosted control
-plane does not run them.
+plane does not run them. `health_checks_enabled: false` in `config.yml` (or
+`OTARI_HEALTH_CHECKS_ENABLED=false`) removes the page, its routes and its worker;
+it is read at startup, so changing it needs a restart.
 
 ## What is checked
 

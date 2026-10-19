@@ -1790,7 +1790,11 @@ RateLimitServiceDep = Annotated[RateLimitService, Depends(get_rate_limit_service
 
 
 def build_health_check_service(uow: UnitOfWork, config: GatewayConfig) -> HealthCheckService:
-    """Build the health checks service on a unit of work: a request's, or the worker's own."""
+    """Build the health checks service on a request's Unit of Work, or the worker's own.
+
+    The service is handed the Unit of Work, never the session under it, with its own domain's repositories and
+    the providers domain's service for the hosted roster, as DOMAINS.md's constructor injection asks.
+    """
     return HealthCheckService(
         uow,
         HealthCheckSettingsRepository(uow),
@@ -1806,7 +1810,7 @@ def get_health_check_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> HealthCheckService:
-    """Build the health checks service on the request's unit of work."""
+    """The request's service. The poll builds its own through ``build_health_check_service``."""
     return build_health_check_service(uow, config)
 
 

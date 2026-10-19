@@ -8120,10 +8120,6 @@
             "title": "Alert Emails",
             "type": "array"
           },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
           "interval_minutes": {
             "title": "Interval Minutes",
             "type": "integer"
@@ -8159,10 +8155,14 @@
           "run_requested": {
             "title": "Run Requested",
             "type": "boolean"
+          },
+          "schedule_enabled": {
+            "title": "Schedule Enabled",
+            "type": "boolean"
           }
         },
         "required": [
-          "enabled",
+          "schedule_enabled",
           "interval_minutes",
           "prompt",
           "max_tokens",
@@ -8179,8 +8179,8 @@
         "additionalProperties": false,
         "description": "Settings to change. An omitted field keeps its value.",
         "example": {
-          "enabled": true,
-          "interval_minutes": 60
+          "interval_minutes": 60,
+          "schedule_enabled": true
         },
         "properties": {
           "alert_emails": {
@@ -8202,18 +8202,6 @@
               "type": "string"
             },
             "title": "Alert Emails"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Run the checks on a schedule.",
-            "title": "Enabled"
           },
           "interval_minutes": {
             "anyOf": [
@@ -8284,6 +8272,18 @@
             ],
             "description": "Output cap for a reasoning model.",
             "title": "Reasoning Max Tokens"
+          },
+          "schedule_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run the checks on a schedule.",
+            "title": "Schedule Enabled"
           }
         },
         "title": "HealthCheckSettingsUpdate",

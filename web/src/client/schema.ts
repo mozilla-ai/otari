@@ -10924,8 +10924,6 @@ export interface components {
         HealthCheckSettingsPublic: {
             /** Alert Emails */
             alert_emails: string[];
-            /** Enabled */
-            enabled: boolean;
             /** Interval Minutes */
             interval_minutes: number;
             /** Max Tokens */
@@ -10940,13 +10938,15 @@ export interface components {
             reasoning_max_tokens: number;
             /** Run Requested */
             run_requested: boolean;
+            /** Schedule Enabled */
+            schedule_enabled: boolean;
         };
         /**
          * HealthCheckSettingsUpdate
          * @description Settings to change. An omitted field keeps its value.
          * @example {
-         *       "enabled": true,
-         *       "interval_minutes": 60
+         *       "interval_minutes": 60,
+         *       "schedule_enabled": true
          *     }
          */
         HealthCheckSettingsUpdate: {
@@ -10955,11 +10955,6 @@ export interface components {
              * @description Who is emailed when a model stops answering and when it answers again. An empty list emails nobody.
              */
             alert_emails?: string[] | null;
-            /**
-             * Enabled
-             * @description Run the checks on a schedule.
-             */
-            enabled?: boolean | null;
             /**
              * Interval Minutes
              * @description Minutes between scheduled runs.
@@ -10985,6 +10980,11 @@ export interface components {
              * @description Output cap for a reasoning model.
              */
             reasoning_max_tokens?: number | null;
+            /**
+             * Schedule Enabled
+             * @description Run the checks on a schedule.
+             */
+            schedule_enabled?: boolean | null;
         };
         /**
          * HealthCheckStatus

@@ -2804,7 +2804,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"enabled\": true,\n  \"interval_minutes\": 60\n}"
+              "raw": "{\n  \"interval_minutes\": 60,\n  \"schedule_enabled\": true\n}"
             },
             "description": "Change the settings. Turning the schedule on starts a run within a minute.",
             "header": [

@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.create_table(
         "health_check_settings",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
+        sa.Column("schedule_enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("interval_minutes", sa.Integer(), server_default="60", nullable=False),
         sa.Column("prompt", sa.String(), nullable=False),
         sa.Column("max_tokens", sa.Integer(), server_default="16", nullable=False),

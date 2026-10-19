@@ -28,6 +28,8 @@ from gateway.services.health_checks._service import HostedRoster
 from gateway.services.mail import MailDelivery, Mailer, MailMessage
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
+from .conftest import build_test_client
+
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 _CHECKS = f"{API_ROOT}/health-checks"
 _PROBE = "gateway.services.health_checks._probe"
@@ -132,18 +134,20 @@ def test_the_schedule_is_off_until_an_operator_turns_it_on(client: TestClient) -
     response = client.get(f"{_CHECKS}/settings", headers=_MASTER)
 
     assert response.status_code == 200
-    assert response.json()["enabled"] is False
+    assert response.json()["schedule_enabled"] is False
     assert response.json()["next_run_at"] is None
 
 
 def test_turning_the_schedule_on_makes_a_run_due_now(client: TestClient) -> None:
     before = datetime.now(UTC)
 
-    response = client.patch(f"{_CHECKS}/settings", json={"enabled": True, "interval_minutes": 30}, headers=_MASTER)
+    response = client.patch(
+        f"{_CHECKS}/settings", json={"schedule_enabled": True, "interval_minutes": 30}, headers=_MASTER
+    )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["enabled"] is True
+    assert body["schedule_enabled"] is True
     assert body["interval_minutes"] == 30
     assert datetime.fromisoformat(body["next_run_at"]) >= before - timedelta(seconds=1)
 
@@ -163,7 +167,7 @@ def test_run_now_is_requested_even_with_the_schedule_off(client: TestClient) -> 
 
     assert response.status_code == 202
     assert response.json()["run_requested"] is True
-    assert response.json()["enabled"] is False
+    assert response.json()["schedule_enabled"] is False
 
 
 def test_the_status_is_empty_before_any_run(client: TestClient) -> None:
@@ -242,7 +246,7 @@ async def test_a_due_run_is_claimed_once(async_db: AsyncSession, test_config: Ga
     """The claim moves ``next_run_at`` forward, so the next poll, on this replica or another, finds nothing due."""
     clock = _Clock()
     service = _service(async_db, test_config, clock)
-    await service.update_settings(HealthCheckSettingsUpdate(enabled=True, interval_minutes=60))
+    await service.update_settings(HealthCheckSettingsUpdate(schedule_enabled=True, interval_minutes=60))
 
     with patch(f"{_PROBE}.acompletion", new=_completion):
         first = await service.run_if_due(_offerings)
@@ -620,3 +624,15 @@ def test_disable_failing_answers_with_the_count(client: TestClient) -> None:
     assert response.status_code == 200, response.text
     assert response.json() == {"disabled": 0}
     assert client.post(f"{_CHECKS}/disable-failing").status_code == 401
+
+
+def test_switched_off_the_page_and_its_routes_are_gone(test_config: GatewayConfig) -> None:
+    config = test_config.model_copy(update={"health_checks_enabled": False})
+    for client in build_test_client(config):
+        assert "health_checks" not in client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
+        assert client.get(_CHECKS, headers=_MASTER).status_code == 404
+        assert client.post(f"{_CHECKS}/run", headers=_MASTER).status_code == 404
+
+
+def test_switched_on_the_page_is_published(client: TestClient) -> None:
+    assert "health_checks" in client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]

@@ -78,6 +78,7 @@ _SETTING_NAMES = frozenset(
         "files_url",
         "forwarded_allow_ips",
         "guardrail_thread_pool_size",
+        "health_checks_enabled",
         "guardrails_url",
         "host",
         "hosted_providers",

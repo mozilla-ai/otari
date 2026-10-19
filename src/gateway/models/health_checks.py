@@ -26,7 +26,8 @@ class HealthCheckSettings(Base):
     __table_args__ = (CheckConstraint(f"id = {SETTINGS_ROW_ID}", name="ck_health_check_settings_one_row"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=SETTINGS_ROW_ID)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # The schedule's switch. Whether the feature runs at all is ``health_checks_enabled``, a startup setting.
+    schedule_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     interval_minutes: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
     prompt: Mapped[str] = mapped_column(String, default="Reply with the single word: pong")
     max_tokens: Mapped[int] = mapped_column(Integer, default=16, server_default="16")

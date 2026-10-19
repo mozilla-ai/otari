@@ -80,7 +80,7 @@ def _served(result: HealthCheckResult, served: Mapping[str, frozenset[str]]) -> 
 
 def _settings_public(row: HealthCheckSettings) -> HealthCheckSettingsPublic:
     return HealthCheckSettingsPublic(
-        enabled=row.enabled,
+        schedule_enabled=row.schedule_enabled,
         interval_minutes=row.interval_minutes,
         prompt=row.prompt,
         max_tokens=row.max_tokens,
@@ -152,7 +152,7 @@ class HealthCheckService:
         changes = request.model_dump(exclude_unset=True, exclude_none=True)
         async with self._uow:
             row = await self._settings.get_or_create()
-            if changes.get("enabled") and not row.enabled:
+            if changes.get("schedule_enabled") and not row.schedule_enabled:
                 changes["next_run_at"] = now
             elif "interval_minutes" in changes and row.next_run_at is not None:
                 changes["next_run_at"] = min(row.next_run_at, now + timedelta(minutes=changes["interval_minutes"]))

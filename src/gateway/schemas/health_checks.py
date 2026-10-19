@@ -13,7 +13,7 @@ MAX_ALERT_EMAILS = 20
 class HealthCheckSettingsPublic(BaseModel):
     """Whether the checks run, how often, and what they send."""
 
-    enabled: bool
+    schedule_enabled: bool
     interval_minutes: int
     prompt: str
     max_tokens: int
@@ -27,9 +27,11 @@ class HealthCheckSettingsPublic(BaseModel):
 class HealthCheckSettingsUpdate(BaseModel):
     """Settings to change. An omitted field keeps its value."""
 
-    model_config = ConfigDict(extra="forbid", json_schema_extra={"example": {"enabled": True, "interval_minutes": 60}})
+    model_config = ConfigDict(
+        extra="forbid", json_schema_extra={"example": {"schedule_enabled": True, "interval_minutes": 60}}
+    )
 
-    enabled: bool | None = Field(default=None, description="Run the checks on a schedule.")
+    schedule_enabled: bool | None = Field(default=None, description="Run the checks on a schedule.")
     interval_minutes: int | None = Field(default=None, ge=15, le=1440, description="Minutes between scheduled runs.")
     prompt: str | None = Field(
         default=None,

@@ -3,12 +3,24 @@
 Every model the deployment's hosted providers serve is sent one small
 completion on a schedule, and what each answered is kept for 48 hours. Not
 ``/health``, which answers whether this process is up. Operator-gated and
-standalone only.
+standalone only, and listed in ``CORE_FEATURES`` as ``FEATURE`` below.
+
+A failed check's error is the provider's message cut to its first line, with
+anything shaped like a key or a bearer token replaced, and at most 300
+characters (``services/health_checks/_probe.py``), before it is stored, shown
+or emailed.
 """
 
 from fastapi import APIRouter, Depends, status
 
-from gateway.api.deps import HealthCheckServiceDep, require_deployment_operator
+from gateway.api.deps import (
+    HealthCheckServiceDep,
+    build_health_check_service,
+    build_hosted_provider_service,
+    require_deployment_operator,
+)
+from gateway.core.config import GatewayConfig
+from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.schemas.health_checks import (
     HealthCheckDisabled,
@@ -16,14 +28,13 @@ from gateway.schemas.health_checks import (
     HealthCheckSettingsUpdate,
     HealthCheckStatus,
 )
+from gateway.services.health_checks import run_health_check_worker
 
 router = APIRouter(
     prefix="/health-checks",
     tags=["health-checks"],
     dependencies=[Depends(require_deployment_operator)],
 )
-
-SURFACE = Surface("health_checks", hosted=False)
 
 
 @router.get("")
@@ -59,3 +70,21 @@ async def update_health_check_settings(
 ) -> HealthCheckSettingsPublic:
     """Change the settings. Turning the schedule on starts a run within a minute."""
     return await service.update_settings(body)
+
+
+async def _poll(config: GatewayConfig) -> None:
+    await run_health_check_worker(
+        lambda uow: build_health_check_service(uow, config),
+        lambda uow: build_hosted_provider_service(uow, config=config),
+        config,
+    )
+
+
+FEATURE = CoreFeature(
+    name="health_checks",
+    surface=Surface("health_checks", hosted=False),
+    # A hosted control plane sends no inference of its own to check, so the deployment mode is asked too.
+    enabled=lambda config: config.health_checks_enabled and not config.is_hosted_mode,
+    routers=lambda config: (router,),
+    worker=_poll,
+)

@@ -103,8 +103,9 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
     assert response.json() == {
         "deployment_type": "standalone",
         "session_type": "local_operator",
-        # The trace explorer is a core feature, published on top of the declared surfaces while it is on.
-        "surfaces": sorted({*STANDALONE_SURFACES, "traces"}),
+        # The trace explorer and the Health page are core features, published on top of the declared surfaces
+        # while they are on.
+        "surfaces": sorted({*STANDALONE_SURFACES, "health_checks", "traces"}),
         "sign_in_methods": ["master_key"],
         "management_url": None,
         "data_plane_url": None,
@@ -412,7 +413,6 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "health_checks",
         "playground",
         "providers",
         "traces",
@@ -437,7 +437,6 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
     # The rest of the hosted set is unchanged by the address: this is one row's
     # availability, not a different edition.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "health_checks",
         "providers",
         "traces",
     }

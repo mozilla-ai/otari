@@ -185,7 +185,7 @@ const RESULT_COLUMNS: DataTableColumn<HealthCheckResult>[] = [
 
 function RunSummary({ status }: { status: HealthCheckStatus }) {
   const { last_run: last, running, settings } = status
-  const next = settings.enabled
+  const next = settings.schedule_enabled
     ? settings.next_run_at
       ? `Next run ${formatDateTimeMinutes(settings.next_run_at)}.`
       : "Next run within a minute."
@@ -238,8 +238,8 @@ function SettingsCard({ settings }: { settings: HealthCheckSettings }) {
             </p>
           </div>
           <Toggle
-            isSelected={settings.enabled}
-            onChange={(enabled) => update.mutate({ enabled })}
+            isSelected={settings.schedule_enabled}
+            onChange={(enabled) => update.mutate({ schedule_enabled: enabled })}
             label="Run the checks on a schedule"
             isDisabled={update.isPending}
           />
