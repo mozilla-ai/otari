@@ -9,10 +9,9 @@
  * happened to point, which is a deployment nobody selected (web/AGENTS.md: do
  * not guess a deployment when that request fails).
  *
- * A bootstrap kept from an earlier load renders first, while the current one is
- * read, and the current one renders again when it differs. One that never
- * arrives leaves the kept answer on screen, where each page's own requests
- * report their failure, and forgets it, so the next load waits and says so.
+ * A current bootstrap that never arrives does not take the screen from a kept
+ * one, which may already be in use; each page's own requests report the
+ * failure, and forgetting the kept one makes the next load wait and say so.
  *
  * Separate from `main.tsx` so the order is a function a test can call; that
  * file renders on import.
@@ -21,8 +20,8 @@
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 
 export interface KeptBootstrap {
-  read(): WireBootstrap | null
-  write(bootstrap: WireBootstrap | null): void
+  read(): WireBootstrap | undefined
+  write(bootstrap: WireBootstrap | undefined): void
 }
 
 export async function startDeployment(
@@ -44,7 +43,7 @@ export async function startDeployment(
   const earlier = kept.read()
   if (earlier) render(earlier)
   const bootstrap = await current
-  kept.write(bootstrap)
+  kept.write(bootstrap ?? undefined)
   const isDifferentAnswer =
     bootstrap !== null && JSON.stringify(bootstrap) !== JSON.stringify(earlier)
   if (!earlier || isDifferentAnswer) render(bootstrap)
@@ -70,9 +69,9 @@ export function openKeptBootstrap(origin: string): KeptBootstrap {
         return kept?.origin === origin &&
           kept.bootstrap?.deployment_type === "hosted"
           ? kept.bootstrap
-          : null
+          : undefined
       } catch {
-        return null
+        return undefined
       }
     },
     write(bootstrap) {

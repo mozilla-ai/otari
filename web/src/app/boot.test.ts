@@ -9,7 +9,7 @@ const HOSTED = {
 } as WireBootstrap
 const MAINTENANCE = { ...HOSTED, maintenance_mode: true } as WireBootstrap
 
-function stubKept(bootstrap: WireBootstrap | null = null) {
+function stubKept(bootstrap?: WireBootstrap) {
   return {
     read: vi.fn(() => bootstrap),
     write: vi.fn(),
@@ -120,7 +120,7 @@ describe("startDeployment", () => {
     )
 
     expect(render.mock.calls).toEqual([[HOSTED]])
-    expect(kept.write).toHaveBeenCalledWith(null)
+    expect(kept.write).toHaveBeenCalledWith(undefined)
   })
 
   it("keeps the bootstrap under the origin it was asked from", async () => {
@@ -146,7 +146,7 @@ describe("startDeployment", () => {
     expect(openKeptBootstrap("https://eu.api.otari.test").read()).toEqual(
       HOSTED,
     )
-    expect(openKeptBootstrap("").read()).toBeNull()
+    expect(openKeptBootstrap("").read()).toBeUndefined()
   })
 })
 
@@ -162,7 +162,7 @@ describe("openKeptBootstrap", () => {
   it("answers nothing for another origin", () => {
     openKeptBootstrap("https://eu.api.otari.test").write(HOSTED)
 
-    expect(openKeptBootstrap("").read()).toBeNull()
+    expect(openKeptBootstrap("").read()).toBeUndefined()
   })
 
   it("keeps no bootstrap but a hosted one", () => {
@@ -170,20 +170,20 @@ describe("openKeptBootstrap", () => {
     kept.write(HOSTED)
     kept.write(BOOTSTRAP)
 
-    expect(kept.read()).toBeNull()
+    expect(kept.read()).toBeUndefined()
   })
 
   it("forgets what it kept when the bootstrap never arrived", () => {
     const kept = openKeptBootstrap("")
     kept.write(HOSTED)
-    kept.write(null)
+    kept.write(undefined)
 
-    expect(kept.read()).toBeNull()
+    expect(kept.read()).toBeUndefined()
   })
 
   it("answers nothing for a kept value it cannot read", () => {
     window.localStorage.setItem("otari.dashboard.bootstrap", "{not json")
 
-    expect(openKeptBootstrap("").read()).toBeNull()
+    expect(openKeptBootstrap("").read()).toBeUndefined()
   })
 })
