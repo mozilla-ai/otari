@@ -208,7 +208,11 @@ def refuse_unpriced_direct_search(
 
 
 def _unpriced_detail(tool: str, rate_key: str, *, organization_key: bool) -> str:
-    # The dashboard prices otari:web_search on its Tools & Guardrails screen, and no instance's row yet.
+    """The 402's text: the row ``rate_key`` that prices a search on ``tool``, and where to add it.
+
+    The dashboard prices ``otari:web_search`` on its Tools & Guardrails screen,
+    and no instance's row yet.
+    """
     if organization_key:
         missing = "which has no pricing"
         where = (

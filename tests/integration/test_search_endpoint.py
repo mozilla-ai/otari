@@ -1286,7 +1286,7 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
     assert f"POST {API_ROOT}/pricing" in detail
     # The dashboard prices no instance's row yet.
     assert "Tools & Guardrails" not in detail
-    run.assert_not_awaited()
+    run.assert_not_called()
     (row,) = _search_rows(strict_client, master_key_header, "unpriced-search")
     assert (row["status"], row["status_code"], row["error_message"]) == ("error", 402, detail)
     assert (row["model"], row["provider"]) == ("fake-fast", "fake")
@@ -1295,6 +1295,7 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
 
 
 def test_a_zero_rate_prices_a_search(strict_client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A rate of 0 is a price: the search is served and bills nothing."""
     headers = _keyed(strict_client, master_key_header, "zero-rate-search")
     _price(strict_client, master_key_header, "fake:fake-fast", 0.0)
 
@@ -1383,6 +1384,7 @@ def test_an_organizations_own_override_does_not_bill_an_instances_search(
 
 @pytest.fixture
 def strict_default_tool_client(test_config: GatewayConfig, _secret_key: None) -> Generator[TestClient]:
+    """``require_pricing`` on, with ``fake-search`` serving unnamed calls."""
     yield from _client_on(test_config, require_pricing=True, web_search_default_tool="fake-search")
 
 
@@ -1397,7 +1399,7 @@ def test_a_search_the_workspaces_own_key_serves_needs_the_web_search_row(
     keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
     with patch("gateway.services.search_backend.run_keyed_search", keyed):
         refused = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
-        keyed.assert_not_awaited()
+        keyed.assert_not_called()
         _price(client, master_key_header, "otari:web_search", 0.0)
         served = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 

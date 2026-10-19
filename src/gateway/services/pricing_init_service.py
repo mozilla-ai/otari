@@ -75,8 +75,8 @@ async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: Asyn
         return
     if config.require_pricing:
         consequence = (
-            f"require_pricing is on, so POST {API_ROOT}/search refuses their searches with HTTP 402, except "
-            "on keys exempt from budgets. Add a rate for the model key, 0 included"
+            f"require_pricing is on, so POST {API_ROOT}/search refuses their searches with HTTP 402, except on "
+            "keys exempt from budgets. Add a rate for the model key, 0 included"
         )
     else:
         consequence = (
@@ -84,10 +84,11 @@ async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: Asyn
             "cap can overshoot by one search. Add a rate for the model key"
         )
     logger.warning(
-        f"No flat per-request rate is configured for search tool(s): %s. {consequence} (config `pricing` "
-        f"section or POST {API_ROOT}/pricing); the convention is USD per million requests, so 5000.0 charges "
-        "$0.005 per search.",
+        "No flat per-request rate is configured for search tool(s): %s. %s (config `pricing` section or POST "
+        "%s/pricing); the convention is USD per million requests, so 5000.0 charges $0.005 per search.",
         ", ".join(sorted(unpriced)),
+        consequence,
+        API_ROOT,
     )
 
 
