@@ -227,8 +227,10 @@ search on the organization's own provider key takes its override. With
 neither, the searches stay on the row at no cost. Searches across the rounds
 of a gateway tool loop are added up, as the rounds' tokens are. A search Otari runs in the
 model's place, under [interception](#web-search-interception) or the
-`Otari-Web-Search` header, is the provider's no longer, so it bills under the
-label of what served it, above, instead and never twice.
+`Otari-Web-Search` header, is not the provider's. It is billed once, under the
+label of what served it in Otari (see
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)), and never also as
+`<provider>:web_search`.
 
 Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
