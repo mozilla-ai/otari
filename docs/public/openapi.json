@@ -36359,7 +36359,7 @@
     },
     "/api/v1/organizations/me/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, so a session whose only errors are tools' counts as succeeded.",
         "operationId": "organization-traces-trace_series",
         "parameters": [
           {
@@ -43744,7 +43744,7 @@
     },
     "/api/v1/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, so a session whose only errors are tools' counts as succeeded.",
         "operationId": "traces-trace_series",
         "parameters": [
           {
