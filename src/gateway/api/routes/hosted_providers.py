@@ -137,10 +137,12 @@ async def apply_deployment_provider_migration(
 
     Each is created as a hosted provider, offering what it lists as a create
     does, and the deployment provider is removed once the hosted one offers a
-    model. One that cannot move is reported and left in place. ``instances``
-    limits the move to the rows of the preview the caller reviewed.
+    model. One that cannot move is reported and left in place. ``rows``
+    limits the move to the rows of the preview the caller reviewed, at the
+    versions it was shown them.
     """
-    return await service.migrate_deployment_providers(apply=True, instances=body.instances)
+    reviewed = None if body.rows is None else {row.instance: row.updated_at for row in body.rows}
+    return await service.migrate_deployment_providers(apply=True, reviewed=reviewed)
 
 
 @router.get("/refresh/preview")

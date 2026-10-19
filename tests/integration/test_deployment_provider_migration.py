@@ -192,7 +192,7 @@ def test_a_name_a_hosted_provider_cannot_take_says_how_to_move_it(
 
     assert row["outcome"] == "invalid"
     assert "names another provider" in row["detail"]
-    assert "under another name" in row["detail"]
+    assert "Keep the deployment provider serving it" in row["detail"]
 
 
 def test_a_row_no_configured_key_reads_is_left_where_it_is(
@@ -228,15 +228,40 @@ def test_a_row_the_reviewed_preview_did_not_show_is_left_where_it_is(
 ) -> None:
     """Another operator's row added after the preview loaded is not moved under this one's confirm."""
     _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111")
+    previewed = _rows(client.get(PATH, headers=master_key_header))
+    reviewed = [{"instance": "openai", "updated_at": previewed["openai"]["updated_at"]}]
+
+    # Another operator stores a deployment provider after this preview loaded.
     _deployment_provider(client, master_key_header, "groq", api_key="sk-groq-3333")
 
-    rows = _rows(client.post(PATH, json={"instances": ["openai"]}, headers=master_key_header))
+    rows = _rows(client.post(PATH, json={"rows": reviewed}, headers=master_key_header))
 
     assert (rows["openai"]["outcome"], rows["openai"]["source_removed"]) == ("migrated", True)
     assert rows["groq"]["outcome"] == "migrate"
     assert "not in the reviewed preview" in rows["groq"]["detail"]
     db_session.expire_all()
     assert [row.instance for row in db_session.execute(select(ProviderCredential)).scalars()] == ["groq"]
+
+
+def test_a_row_edited_after_the_preview_is_left_where_it_is(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+) -> None:
+    """The operator reviewed one key and endpoint; a row since edited is not moved under that confirm."""
+    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111")
+    previewed = _rows(client.get(PATH, headers=master_key_header))
+    reviewed = [{"instance": "openai", "updated_at": previewed["openai"]["updated_at"]}]
+    edited = client.patch(
+        f"{API_ROOT}/provider-credentials/openai", json={"api_key": "sk-openai-9999"}, headers=master_key_header
+    )
+    assert edited.status_code == 200, edited.text
+
+    [row] = _rows(client.post(PATH, json={"rows": reviewed}, headers=master_key_header)).values()
+
+    assert row["outcome"] == "migrate"
+    assert "changed after the preview" in row["detail"]
+    assert dials == []
+    db_session.expire_all()
+    assert db_session.execute(select(HostedProvider)).scalars().all() == []
 
 
 def test_the_migration_is_operator_only(client: TestClient, api_key_header: dict[str, str]) -> None:

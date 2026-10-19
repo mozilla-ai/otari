@@ -46,6 +46,7 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
         provider=lookup_name(declared),
         api_base=public_api_base(credential.api_base),
         outcome="migrate",
+        updated_at=credential.updated_at,
     )
     try:
         implementation = normalize_provider(declared)
@@ -58,8 +59,8 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
     except TenancyError as exc:
         public.outcome = "invalid"
         public.detail = (
-            f"{exc}, so a hosted provider cannot keep it. Add it on the Hosted providers page under another "
-            "name, point its callers at that name, then remove the deployment provider."
+            f"{exc}, so a hosted provider cannot keep it. Keep the deployment provider serving it; if its callers "
+            f"can use '{implementation}:<model>', add a hosted provider of that name instead."
         )
         return PlannedMove(public)
     if name in hosted_names:

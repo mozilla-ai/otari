@@ -6017,18 +6017,21 @@
         "type": "object"
       },
       "DeploymentProviderMigrationRequest": {
-        "description": "Which deployment providers to move: the ones the caller reviewed.\n\n``instances`` names the rows of the preview the caller saw; a row the\npreview did not show is left where it is, so nothing moves that nobody\nreviewed. Omitted, every row that can move does.",
+        "description": "Which deployment providers to move: the ones the caller reviewed, as reviewed.\n\n``rows`` names the rows of the preview the caller saw, each with the\n``updated_at`` it was shown at. A row the preview did not show, or one\nchanged since, is left where it is, so nothing moves that nobody reviewed.\nOmitted, every row that can move does.",
         "example": {
-          "instances": [
-            "openai-eu"
+          "rows": [
+            {
+              "instance": "openai-eu",
+              "updated_at": "2026-10-19T09:00:00Z"
+            }
           ]
         },
         "properties": {
-          "instances": {
+          "rows": {
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/DeploymentProviderMigrationReviewedRow"
                 },
                 "type": "array"
               },
@@ -6036,10 +6039,36 @@
                 "type": "null"
               }
             ],
-            "title": "Instances"
+            "title": "Rows"
           }
         },
         "title": "DeploymentProviderMigrationRequest",
+        "type": "object"
+      },
+      "DeploymentProviderMigrationReviewedRow": {
+        "description": "One row of the preview the caller reviewed: its instance and the version it was shown at.",
+        "properties": {
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "DeploymentProviderMigrationReviewedRow",
         "type": "object"
       },
       "DeploymentProviderMigrationRowPublic": {
@@ -6116,6 +6145,19 @@
             "default": false,
             "title": "Source Removed",
             "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The deployment provider's version, which an apply names to move this row as shown.",
+            "title": "Updated At"
           }
         },
         "required": [
@@ -29141,7 +29183,7 @@
         ]
       },
       "post": {
-        "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``instances``\nlimits the move to the rows of the preview the caller reviewed.",
+        "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
         "operationId": "hosted-providers-apply_deployment_provider_migration",
         "requestBody": {
           "content": {

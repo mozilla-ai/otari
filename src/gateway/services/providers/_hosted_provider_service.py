@@ -19,8 +19,9 @@ writes in another.
 import dataclasses
 import functools
 import uuid
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from any_llm.types.model import Model
 
@@ -537,7 +538,7 @@ class HostedProviderService:
         return HostedProvidersReencryptPublic(reencrypted=reencrypted_count, unreadable=unreadable, skipped=skipped)
 
     async def migrate_deployment_providers(
-        self, *, apply: bool, instances: Collection[str] | None = None
+        self, *, apply: bool, reviewed: Mapping[str, datetime | None] | None = None
     ) -> DeploymentProviderMigrationPublic:
         """Move the deployment providers stored through the dashboard onto hosted providers, or preview it.
 
@@ -548,8 +549,9 @@ class HostedProviderService:
         name a hosted provider already holds, a key no configured key reads)
         is reported and left where it is; so is one edited while this ran.
 
-        ``instances`` binds an apply to the preview the caller reviewed: a row
-        it does not name is reported and left where it is.
+        ``reviewed`` binds an apply to the preview the caller reviewed, by
+        instance and the version it was shown at: a row it does not name, or
+        one changed since, is reported and left where it is.
         """
         async with self.uow:
             hosted_names = {row.name for row in await self.providers.list_all()}
@@ -559,9 +561,15 @@ class HostedProviderService:
         if apply:
             removed: set[str] = set()
             for plan in plans:
-                if instances is not None and plan.row.instance not in instances and plan.create is not None:
-                    plan.row.detail = "It was not in the reviewed preview, so it was not moved. Review the move again."
-                    continue
+                if reviewed is not None and plan.create is not None:
+                    if plan.row.instance not in reviewed:
+                        plan.row.detail = (
+                            "It was not in the reviewed preview, so it was not moved. Review the move again."
+                        )
+                        continue
+                    if not _same_version(reviewed[plan.row.instance], plan.updated_at):
+                        plan.row.detail = "It changed after the preview, so it was not moved. Review the move again."
+                        continue
                 if await self._move(plan):
                     removed.add(plan.row.instance)
             if removed:
@@ -753,6 +761,17 @@ class HostedProviderService:
 
 async def _undecryptable(provider: str) -> ProviderDiscovery:
     return ProviderDiscovery(provider=provider, models=[], error=UNDECRYPTABLE)
+
+
+def _same_version(shown: datetime | None, stored: datetime | None) -> bool:
+    """Whether a reviewed version is the stored one, a naive time read as UTC as SQLite stores it."""
+    if shown is None or stored is None:
+        return shown is stored
+    return _as_utc(shown) == _as_utc(stored)
+
+
+def _as_utc(moment: datetime) -> datetime:
+    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
 
 
 def _listed(discovery: ProviderDiscovery) -> set[str]:

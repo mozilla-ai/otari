@@ -572,19 +572,32 @@ class DeploymentProviderMigrationRowPublic(SQLModel):
     models: int | None = None
     source_removed: bool = False
     notes: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = Field(
+        default=None, description="The deployment provider's version, which an apply names to move this row as shown."
+    )
+
+
+class DeploymentProviderMigrationReviewedRow(SQLModel):
+    """One row of the preview the caller reviewed: its instance and the version it was shown at."""
+
+    instance: str
+    updated_at: datetime | None = None
 
 
 class DeploymentProviderMigrationRequest(SQLModel):
-    """Which deployment providers to move: the ones the caller reviewed.
+    """Which deployment providers to move: the ones the caller reviewed, as reviewed.
 
-    ``instances`` names the rows of the preview the caller saw; a row the
-    preview did not show is left where it is, so nothing moves that nobody
-    reviewed. Omitted, every row that can move does.
+    ``rows`` names the rows of the preview the caller saw, each with the
+    ``updated_at`` it was shown at. A row the preview did not show, or one
+    changed since, is left where it is, so nothing moves that nobody reviewed.
+    Omitted, every row that can move does.
     """
 
-    model_config = {"json_schema_extra": {"example": {"instances": ["openai-eu"]}}}
+    model_config = {
+        "json_schema_extra": {"example": {"rows": [{"instance": "openai-eu", "updated_at": "2026-10-19T09:00:00Z"}]}}
+    }
 
-    instances: list[str] | None = None
+    rows: list[DeploymentProviderMigrationReviewedRow] | None = None
 
 
 class DeploymentProviderMigrationPublic(SQLModel):
@@ -830,6 +843,7 @@ __all__ = [
     "DeploymentProviderMigrationOutcome",
     "DeploymentProviderMigrationPublic",
     "DeploymentProviderMigrationRequest",
+    "DeploymentProviderMigrationReviewedRow",
     "DeploymentProviderMigrationRowPublic",
     "HostedAvailableModelsPublic",
     "HostedCatalogKeptGroupPublic",

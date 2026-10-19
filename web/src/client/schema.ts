@@ -1606,8 +1606,9 @@ export interface paths {
          *
          *     Each is created as a hosted provider, offering what it lists as a create
          *     does, and the deployment provider is removed once the hosted one offers a
-         *     model. One that cannot move is reported and left in place. ``instances``
-         *     limits the move to the rows of the preview the caller reviewed.
+         *     model. One that cannot move is reported and left in place. ``rows``
+         *     limits the move to the rows of the preview the caller reviewed, at the
+         *     versions it was shown them.
          */
         post: operations["hosted-providers-apply_deployment_provider_migration"];
         delete?: never;
@@ -9747,20 +9748,34 @@ export interface components {
         };
         /**
          * DeploymentProviderMigrationRequest
-         * @description Which deployment providers to move: the ones the caller reviewed.
+         * @description Which deployment providers to move: the ones the caller reviewed, as reviewed.
          *
-         *     ``instances`` names the rows of the preview the caller saw; a row the
-         *     preview did not show is left where it is, so nothing moves that nobody
-         *     reviewed. Omitted, every row that can move does.
+         *     ``rows`` names the rows of the preview the caller saw, each with the
+         *     ``updated_at`` it was shown at. A row the preview did not show, or one
+         *     changed since, is left where it is, so nothing moves that nobody reviewed.
+         *     Omitted, every row that can move does.
          * @example {
-         *       "instances": [
-         *         "openai-eu"
+         *       "rows": [
+         *         {
+         *           "instance": "openai-eu",
+         *           "updated_at": "2026-10-19T09:00:00Z"
+         *         }
          *       ]
          *     }
          */
         DeploymentProviderMigrationRequest: {
-            /** Instances */
-            instances?: string[] | null;
+            /** Rows */
+            rows?: components["schemas"]["DeploymentProviderMigrationReviewedRow"][] | null;
+        };
+        /**
+         * DeploymentProviderMigrationReviewedRow
+         * @description One row of the preview the caller reviewed: its instance and the version it was shown at.
+         */
+        DeploymentProviderMigrationReviewedRow: {
+            /** Instance */
+            instance: string;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * DeploymentProviderMigrationRowPublic
@@ -9798,6 +9813,11 @@ export interface components {
              * @default false
              */
             source_removed: boolean;
+            /**
+             * Updated At
+             * @description The deployment provider's version, which an apply names to move this row as shown.
+             */
+            updated_at?: string | null;
         };
         /**
          * DeploymentUserOrganizationPublic

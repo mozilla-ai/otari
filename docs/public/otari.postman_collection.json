@@ -2784,9 +2784,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"instances\": [\n    \"openai-eu\"\n  ]\n}"
+              "raw": "{\n  \"rows\": [\n    {\n      \"instance\": \"openai-eu\",\n      \"updated_at\": \"2026-10-19T09:00:00Z\"\n    }\n  ]\n}"
             },
-            "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``instances``\nlimits the move to the rows of the preview the caller reviewed.",
+            "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
             "header": [
               {
                 "key": "Content-Type",
