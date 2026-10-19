@@ -216,10 +216,7 @@ def resolve_fetch(
 
 
 def builtin_fetch_resolved() -> ResolvedFetch:
-    """``builtin_fetch`` as :func:`resolve_fetch` answers it, for code that holds no config.
-
-    The old backend built directly, outside a request, fetches with it.
-    """
+    """``builtin_fetch`` as :func:`resolve_fetch` answers it, for code that holds no config."""
     return _fetch_on_instance(BUILTIN_FETCH_INSTANCE)
 
 
