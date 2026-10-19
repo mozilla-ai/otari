@@ -10380,6 +10380,19 @@
             "title": "Model",
             "type": "string"
           },
+          "output_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anthropic's output configuration (`effort`, `format`). Forwarded to the provider as `output_config`. An alternative to `output_format`; send one or the other.",
+            "title": "Output Config"
+          },
           "output_format": {
             "anyOf": [
               {

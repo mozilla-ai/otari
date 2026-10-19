@@ -245,6 +245,16 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
     metadata: AnthropicRequestMetadata = None
+    # Declared so the published contract carries Anthropic's wire name; the
+    # validator below moves it into ``output_format``, so it is never set or forwarded.
+    output_config: dict[str, Any] | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Anthropic's output configuration (`effort`, `format`). Forwarded to the provider as "
+            "`output_config`. An alternative to `output_format`; send one or the other."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
