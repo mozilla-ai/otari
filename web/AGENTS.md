@@ -21,7 +21,10 @@ foundations, components with their states, and the page archetypes as artboards.
 ## Runtime contract
 
 `src/main.tsx` fetches unauthenticated `GET /api/v1/bootstrap` before mounting
-React. Do not guess a deployment when that request fails.
+React. Do not guess a deployment when that request fails. The one exception to
+waiting is a hosted deployment's bootstrap kept from the previous load
+(`app/boot.ts`): it renders while the current one is read, and the current one
+replaces it, or renders as unreachable when it never arrives.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through

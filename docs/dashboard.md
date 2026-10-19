@@ -15,7 +15,9 @@ server rather than duplicated in the frontend.
 
 The dashboard reads `GET /api/v1/bootstrap` before rendering. That response controls
 the available sign-in methods and navigation surfaces, so a page that is not
-available in the current mode is not offered.
+available in the current mode is not offered. A hosted deployment's dashboard
+renders from the response it read on the previous visit while it reads the
+current one, which replaces it.
 
 ## Sign-in and secrets
 
