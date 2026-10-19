@@ -6,8 +6,9 @@ reached for this request``. The search runs through the app's web provider
 client with the resolved key, options and timeout, and always asks for the
 request's count. Its hits are held to the search declaration's domain rules and
 cut to the count, and a hit that came without page text is enriched through the
-fetch instance the resolver chose for it, under the same domain rules; a page
-that cannot be fetched leaves the hit its snippet. Enrichment is part of the
+fetch instance the resolver chose for it, under the same domain rules, the
+first 20 of a search at most; a page that cannot be fetched leaves the hit its
+snippet. Enrichment is part of the
 search call: it takes no slot and records no fetch, and only the cost its
 fetcher reports is kept, beside the search's own.
 
@@ -86,8 +87,10 @@ _RESULT_TRUNCATION_NOTICE = "\n\n[Content truncated at the 50 KiB tool-result li
 _BODY_MAX_CHARS = 1500
 # One more than a hit's body shows, so an enriched page longer than that still ends in the ellipsis.
 _ENRICHMENT_MAX_CHARS = _BODY_MAX_CHARS + 1
-# How many of one search's pages are fetched at once.
+# How many of one search's pages are fetched at once, and at most in all: the older backend's
+# ceiling of 20 results a search, so a count above it shows the rest by their snippets.
 _ENRICHMENT_CONCURRENCY = 5
+_ENRICHMENT_MAX_HITS = 20
 
 
 @dataclass(frozen=True)
@@ -287,7 +290,7 @@ class WebSearchBackend:
             async with semaphore:
                 return await self._page(url)
 
-        wanted = [index for index, hit in enumerate(hits) if not _text(hit)]
+        wanted = [index for index, hit in enumerate(hits) if not _text(hit)][:_ENRICHMENT_MAX_HITS]
         pages = await asyncio.gather(*(page(hits[index].url) for index in wanted))
         bodies: dict[int, str] = {}
         costs: list[Decimal] = []

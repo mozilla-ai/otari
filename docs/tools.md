@@ -665,7 +665,8 @@ each shows its date as an ISO date, or date and time when the provider gives one
 
 A result that comes without page text is enriched through the fetch instance the
 search instance names in `fetch_tool`, else `web_fetch_default_tool`, else the
-built-in fetcher. The built-in fetcher's page replaces the result's snippet, as
+built-in fetcher, for the first 20 such results of a search; the rest show their
+snippets. The built-in fetcher's page replaces the result's snippet, as
 on the legacy settings below. A [fetch instance](#fetch-providers) is asked for
 at most the 1,500 characters a result shows, within the fetch instance's
 `timeout`, and its page follows the snippet rather than replacing it, because a

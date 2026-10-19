@@ -496,6 +496,24 @@ async def test_enrichment_asks_for_no_more_than_a_hit_shows(own: int | None, ask
 
 
 @pytest.mark.asyncio
+async def test_a_search_enriches_its_first_results_up_to_the_bound_and_shows_the_rest_by_their_snippets(
+    fetcher: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bound is 20; the fake provider answers at most 10 results, so the case lowers it to 3."""
+    import gateway.services.tools._web_search._backend as backend_module
+
+    assert backend_module._ENRICHMENT_MAX_HITS == 20
+    monkeypatch.setattr(backend_module, "_ENRICHMENT_MAX_HITS", 3)
+    hits = [{"url": f"https://example.com/{index}", "snippet": f"Snippet {index}."} for index in range(5)]
+
+    text = await _search_once(_backend(_config(search={"hits": hits})))
+
+    assert fetcher.await_count == 3
+    assert "https://example.com/2\nThe page at https://example.com/2." in text
+    assert "https://example.com/3\nSnippet 3." in text
+
+
+@pytest.mark.asyncio
 async def test_enrichment_takes_no_slot_and_records_no_fetch() -> None:
     cap, tally = WebToolCallCap(1), ToolUsageTally()
 
