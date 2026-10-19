@@ -7508,7 +7508,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -7646,7 +7646,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -7778,7 +7778,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -7904,7 +7904,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -11174,7 +11174,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -11329,7 +11329,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -11541,7 +11541,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -11699,7 +11699,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""

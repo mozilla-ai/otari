@@ -368,7 +368,7 @@ from gateway.services.tools import (
     validate_web_declarations,
     web_search_intercept_enabled,
 )
-from gateway.services.traces import RequestTrace, TurnFacts, harness_of, is_subagent, resolve_session
+from gateway.services.traces import RequestTrace, SessionRef, TurnFacts, harness_of, is_subagent, resolve_session
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import (
     WEB_FETCH_TOOL_NAME,
@@ -1274,6 +1274,7 @@ class RequestContext:
         tags: dict[str, str] | None = None,
         upstream_user: str | None = None,
         trace: RequestTrace | None = None,
+        source_label: str | None = None,
     ) -> None:
         self.config = config
         # The request's trace while it is served; None where nothing records one.
@@ -1305,6 +1306,9 @@ class RequestContext:
         # The caller's request tags, written onto every usage row the request
         # writes once this context exists.
         self.tags = tags
+        # The trace id of the request's session, written onto its usage rows as
+        # ``source_label`` so usage groups by the sessions the Sessions page lists.
+        self.source_label = source_label
         # Standalone-only, `None` in hybrid mode: the workspace this request
         # bills to, resolved once in the preamble (`resolve_workspace_id`) and
         # reused here for the rare fallback resolve in `resolve_dispatch_provider`,
@@ -2064,6 +2068,7 @@ async def _bill_vision_side_call(
     counts_toward_budget: bool = True,
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
+    source_label: str | None = None,
 ) -> None:
     """Meter and bill a vision describe side-call made during normalization.
 
@@ -2101,6 +2106,7 @@ async def _bill_vision_side_call(
         counts_toward_budget=counts_toward_budget,
         request_id=request_id,
         tags=tags,
+        source_label=source_label,
     )
     # Commit the spend directly via an unreserved handle (no held estimate to
     # release): this just adds the actual cost to users.spend. When the request is
@@ -2529,6 +2535,15 @@ async def _budget_minute_limits(
     return await get_budget_service(uow, db).minute_limits(user_id, strategy=strategy)
 
 
+def _session_trace_id(
+    session: SessionRef | None, workspace_id: uuid.UUID | None, user_id: str | None, api_key_id: str | None
+) -> str | None:
+    """The trace id the request's session is recorded under, or None without a session or a local workspace."""
+    if session is None or workspace_id is None:
+        return None
+    return session.trace_id(workspace_id, user_id, api_key_id)
+
+
 async def resolve_request_context(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -2617,6 +2632,7 @@ async def resolve_request_context(
     rate_limit_grant: RateLimitGrant | None = None
     upstream_user: str | None = None
     request_id: str
+    session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
 
     if hybrid_mode:
         # Refuse a policy name before the resolve call rather than after. Hybrid
@@ -3091,6 +3107,7 @@ async def resolve_request_context(
                         counts_toward_budget=not budget_exempt,
                         request_id=request_id,
                         tags=tags,
+                        source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
                     )
                 # Attachments expanded the payload, so the stored inputs must
                 # follow or a later fallover would reprice against the pre-
@@ -3158,7 +3175,6 @@ async def resolve_request_context(
     # Opened beside the in-flight entry, for the same requests, and closed by the
     # trace middleware once the response is sent. A request with no local workspace
     # (every hybrid request) records nothing here yet.
-    session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
     trace: RequestTrace | None = None
     if config.trace_capture_enabled and workspace_id is not None:
         trace = RequestTrace(
@@ -3206,6 +3222,7 @@ async def resolve_request_context(
         tags=tags,
         upstream_user=upstream_user,
         trace=trace,
+        source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
     )
 
 
@@ -4517,6 +4534,7 @@ async def record_usage(
     tags: dict[str, str] | None = None,
     prices: RequestPrices | None = None,
     deployment_paid: bool = False,
+    source_label: str | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -4580,6 +4598,9 @@ async def record_usage(
         deployment_paid: The request was admitted as deployment-paid
             (``RequestContext.deployment_charge`` is set), stored as-is, and
             priced from no override the organization wrote itself.
+        source_label: The trace id of the session the request belongs to
+            (``RequestContext.source_label``), so usage groups by the same
+            session the Sessions page shows; None when it names no session.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -4609,6 +4630,7 @@ async def record_usage(
         request_group_id=attribution.request_group_id if attribution else request_id,
         tags=tags,
         deployment_paid=deployment_paid,
+        source_label=source_label,
     )
 
     usage_data = usage_override
@@ -5074,6 +5096,7 @@ async def _log_failure_and_refund(
         workspace_id=ctx.workspace_id,
         request_id=ctx.request_id,
         tags=ctx.tags,
+        source_label=ctx.source_label,
         deployment_paid=ctx.deployment_charge is not None,
     )
     if ctx.reservation is not None:
@@ -5447,6 +5470,7 @@ def build_streaming_response(
     prices: RequestPrices | None = None,
     tool_loop: bool = False,
     deployment_charge: DeploymentCharge | None = None,
+    source_label: str | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -5551,6 +5575,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            source_label=source_label,
             prices=prices,
             deployment_paid=deployment_paid,
         )
@@ -5613,6 +5638,7 @@ def build_streaming_response(
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
+                source_label=source_label,
                 prices=prices,
                 deployment_paid=deployment_paid,
             )
@@ -5637,6 +5663,7 @@ def build_streaming_response(
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
+                source_label=source_label,
                 deployment_paid=deployment_paid,
             )
             # "Free" is about the tokens the provider never reported, not about
@@ -5669,6 +5696,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            source_label=source_label,
             deployment_paid=deployment_paid,
         )
         # The estimate covers the unreported tokens; log_usage adds any tool cost on
@@ -5737,6 +5765,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            source_label=source_label,
             deployment_paid=deployment_paid,
         )
         if reservation is not None:
@@ -5782,6 +5811,7 @@ def build_streaming_response(
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
+                source_label=source_label,
                 deployment_paid=deployment_paid,
             )
             await _charge(abandoned_cost, expects_cost=reported_usage is not None)
@@ -6160,6 +6190,7 @@ async def run_single_attempt_stream(
         attribution=stream_attribution,
         tool_tally=tool_ctx.tally,
         tags=ctx.tags,
+        source_label=ctx.source_label,
         tool_loop=served_tools.use_tool_loop,
         deployment_charge=ctx.deployment_charge,
     )
@@ -6716,6 +6747,7 @@ async def log_exhausted_plan(
         tool_tally=tool_tally,
         workspace_id=ctx.workspace_id,
         tags=ctx.tags,
+        source_label=ctx.source_label,
     )
     ctx.tool_charge = cost or Decimal(0)
 
@@ -6813,6 +6845,7 @@ async def _log_absorbed_row(
             attribution=_attribution_for(ctx, attempt, absorbed=True),
             workspace_id=ctx.workspace_id,
             tags=ctx.tags,
+            source_label=ctx.source_label,
         )
     except Exception:
         logger.warning(
@@ -6973,6 +7006,7 @@ async def run_standalone_non_stream(
                     workspace_id=ctx.workspace_id,
                     request_id=ctx.request_id,
                     tags=ctx.tags,
+                    source_label=ctx.source_label,
                     prices=ctx.prices,
                     deployment_paid=ctx.deployment_charge is not None,
                 )

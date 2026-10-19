@@ -93,6 +93,7 @@ from gateway.services.tools._mcp_admission import (
     duplicate_mcp_server_name_detail,
 )
 from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL
+from gateway.services.traces import SessionRef
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -565,6 +566,7 @@ def _build(
     request_id: str | None = None,
     deployment_charge: DeploymentCharge | None = None,
     db: Any = None,
+    source_label: str | None = None,
 ) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
@@ -583,6 +585,7 @@ def _build(
         tool_tally=tool_tally,
         request_id=request_id,
         deployment_charge=deployment_charge,
+        source_label=source_label,
     )
 
 
@@ -830,6 +833,20 @@ async def test_completed_stream_row_carries_the_request_id(monkeypatch: pytest.M
     assert logged["request_id"] == "req-1"
 
 
+@pytest.mark.asyncio
+async def test_completed_stream_row_carries_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+
+    await _drain(_build(stream(), GatewayConfig(), source_label="s-abc"))
+
+    (logged,) = settlement.logged
+    assert logged["source_label"] == "s-abc"
+
+
 def _no_pricing(monkeypatch: pytest.MonkeyPatch) -> None:
     """A successful row resolves its model's rate even without usage, in case it is priced per request."""
 
@@ -905,6 +922,39 @@ async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row(
     (row,) = writer.put_rows
     assert row.request_group_id == "req-1"
     assert row.policy_name is None
+
+
+def test_a_usage_row_names_its_session_by_the_trace_id_it_is_traced_under() -> None:
+    session = SessionRef(source="client", key="chat-42")
+    workspace_id = uuid.uuid4()
+
+    assert pipeline._session_trace_id(session, workspace_id, "user-1", "key-1") == session.trace_id(
+        workspace_id, "user-1", "key-1"
+    )
+    assert pipeline._session_trace_id(None, workspace_id, "user-1", "key-1") is None
+    # A hybrid request has no local workspace, and so no trace to name.
+    assert pipeline._session_trace_id(session, None, "user-1", "key-1") is None
+
+
+@pytest.mark.asyncio
+async def test_log_usage_stores_the_session_as_the_source_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gateway row names its session, so usage groups by the sessions the Sessions page lists."""
+    _no_pricing(monkeypatch)
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        source_label="s-abc",
+    )
+
+    (row,) = writer.put_rows
+    assert row.source_label == "s-abc"
 
 
 @pytest.mark.parametrize("paid", [False, True])

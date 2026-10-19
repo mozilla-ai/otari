@@ -24783,7 +24783,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -24849,7 +24849,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -24915,7 +24915,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -24979,7 +24979,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -28130,7 +28130,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -28229,7 +28229,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -28379,7 +28379,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -28476,7 +28476,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;

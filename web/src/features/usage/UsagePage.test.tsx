@@ -121,7 +121,7 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
         requests: 9_200,
         is_other: false,
       },
-      // Gateway traffic carries no session label: a real group with a null key,
+      // Traffic that named no session: a real group with a null key,
       // not the synthesized fold.
       {
         key: null,

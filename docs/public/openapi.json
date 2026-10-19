@@ -36847,7 +36847,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -36860,7 +36860,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -37251,7 +37251,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -37264,7 +37264,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -37645,7 +37645,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -37658,7 +37658,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -38016,7 +38016,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -38029,7 +38029,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -44280,7 +44280,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -44293,7 +44293,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -44684,7 +44684,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -44697,7 +44697,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -45210,7 +45210,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -45223,7 +45223,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -45631,7 +45631,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -45644,7 +45644,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },

@@ -30,6 +30,13 @@ client's requests, send one of the signals above.
 A session belongs to the user whose API key sent it: two people who choose the
 same label get two sessions, and a session id never reaches another workspace.
 
+A gateway request's usage row records its session's trace id as `source_label`,
+so Usage's spend by session, and `by_source_label` in `GET /api/v1/usage/summary`,
+group the same sessions this page lists, whether or not traces are captured. The
+id is the one a session's entry shows, so a row in one finds its match in the
+other. A request that names no session reads as "(no session)" there. Usage
+imported from outside the gateway keeps the label it was sent with.
+
 ## Sessions from your own agent
 
 Claude Code and Codex are recognized on their own. An agent or harness of your own
