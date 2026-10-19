@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/shared/api/client"
 import {
   deploymentOperatorAnswer,
+  useKeepOrganizationContext,
+  useOrganizationContext,
   useSwitchOrganization,
 } from "@/shared/api/organizations"
 import { ORGANIZATION_CONTEXT, workspaceMeta } from "@/shared/api/queryKeys"
@@ -108,5 +110,172 @@ describe("useSwitchOrganization", () => {
     await waitFor(() => expect(reads.trace).toBe(2))
     expect(reads.left).toBe(1)
     expect(client.getQueryState(["left", LEFT])?.isInvalidated).toBe(true)
+  })
+})
+
+describe("the kept organization context", () => {
+  const KEPT = "otari.dashboard.organizationContext"
+  const kept = organizationContext({
+    deployment_operator: false,
+    organization: { ...organizationContext().organization, name: "Kept" },
+  })
+  const current = organizationContext({
+    organization: { ...organizationContext().organization, name: "Current" },
+  })
+
+  function wrapperFor(client: QueryClient) {
+    return ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+  }
+
+  function newClient() {
+    return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("stands in while the current context loads, then gives way to it", async () => {
+    window.localStorage.setItem(
+      KEPT,
+      JSON.stringify({ origin: "", context: kept }),
+    )
+    let answer: (response: Response) => void = () => {}
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise((resolve) => (answer = resolve)),
+    )
+
+    const { result } = renderHook(() => useOrganizationContext(), {
+      wrapper: wrapperFor(newClient()),
+    })
+
+    expect(result.current.data?.organization.name).toBe("Kept")
+    expect(result.current.isPlaceholderData).toBe(true)
+    // Settled at once, so nothing that waits on the answer waits a round trip.
+    expect(deploymentOperatorAnswer(result.current)).toBe("not-operator")
+
+    act(() => answer(Response.json(current)))
+    await waitFor(() =>
+      expect(result.current.data?.organization.name).toBe("Current"),
+    )
+    expect(result.current.isPlaceholderData).toBe(false)
+  })
+
+  it("is not offered to another API origin, or to a read that is disabled", () => {
+    window.localStorage.setItem(
+      KEPT,
+      JSON.stringify({ origin: "https://eu.example.com", context: kept }),
+    )
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise(() => {}),
+    )
+    const elsewhere = renderHook(() => useOrganizationContext(), {
+      wrapper: wrapperFor(newClient()),
+    })
+    expect(elsewhere.result.current.data).toBeUndefined()
+
+    window.localStorage.setItem(
+      KEPT,
+      JSON.stringify({ origin: "", context: kept }),
+    )
+    const disabled = renderHook(() => useOrganizationContext(false), {
+      wrapper: wrapperFor(newClient()),
+    })
+    expect(disabled.result.current.data).toBeUndefined()
+
+    // An entry that no longer parses stands in for nothing, and in particular
+    // not for whichever entry was read before it, however often it is read.
+    const readable = renderHook(() => useOrganizationContext(), {
+      wrapper: wrapperFor(newClient()),
+    })
+    expect(readable.result.current.data?.organization.name).toBe("Kept")
+    window.localStorage.setItem(KEPT, "{not json")
+    for (let read = 0; read < 2; read++) {
+      const unreadable = renderHook(() => useOrganizationContext(), {
+        wrapper: wrapperFor(newClient()),
+      })
+      expect(unreadable.result.current.data).toBeUndefined()
+    }
+  })
+
+  it("reports a failed read instead of the kept context, and forgets it", async () => {
+    // A caller removed from their organization since the last load: the
+    // kept answer must not survive the 404, nor come back on a refetch.
+    window.localStorage.setItem(
+      KEPT,
+      JSON.stringify({ origin: "", context: kept }),
+    )
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ detail: "No active membership" }, { status: 404 }),
+      )
+
+    const { result } = renderHook(() => useOrganizationContext(), {
+      wrapper: wrapperFor(newClient()),
+    })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.data).toBeUndefined()
+    expect(deploymentOperatorAnswer(result.current)).toBe("no-organization")
+    expect(window.localStorage.getItem(KEPT)).toBeNull()
+
+    fetchMock.mockImplementation(() => new Promise(() => {}))
+    act(() => {
+      void result.current.refetch()
+    })
+    await waitFor(() => expect(result.current.isFetching).toBe(true))
+    expect(result.current.data).toBeUndefined()
+  })
+
+  it("keeps a hosted deployment's answer, including one a switch wrote", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(current),
+    )
+    const client = newClient()
+
+    renderHook(() => useKeepOrganizationContext(true), {
+      wrapper: wrapperFor(client),
+    })
+
+    await waitFor(() =>
+      expect(JSON.parse(window.localStorage.getItem(KEPT) ?? "null")).toEqual({
+        origin: "",
+        context: current,
+      }),
+    )
+
+    act(() => client.setQueryData(ORGANIZATION_CONTEXT, kept))
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.localStorage.getItem(KEPT) ?? "null")?.context
+          .organization.name,
+      ).toBe("Kept"),
+    )
+  })
+
+  it("keeps nothing for a deployment that is not hosted", async () => {
+    window.localStorage.setItem(
+      KEPT,
+      JSON.stringify({ origin: "", context: kept }),
+    )
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(current),
+    )
+
+    const { result } = renderHook(
+      () => {
+        useKeepOrganizationContext(false)
+        return useOrganizationContext()
+      },
+      { wrapper: wrapperFor(newClient()) },
+    )
+
+    await waitFor(() =>
+      expect(result.current.data?.organization.name).toBe("Current"),
+    )
+    expect(window.localStorage.getItem(KEPT)).toBeNull()
   })
 })

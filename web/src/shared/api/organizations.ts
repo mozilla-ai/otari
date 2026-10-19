@@ -7,6 +7,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
+import { useEffect } from "react"
 import type {
   AcceptInvitationRequest,
   AcceptInvitationResult,
@@ -44,6 +45,7 @@ import {
   longRequestSignal,
   retryUnlessNotFound,
 } from "@/shared/api/client"
+import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   CATALOG,
@@ -75,14 +77,89 @@ const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
 // (see `isNoOrganizationError`), and asking again only holds every page that
 // waits on this answer behind the backoff. Any other failure keeps the
 // dashboard's own retry policy.
+//
+// While it loads, the context kept from the previous load stands in for it as
+// placeholder data (see `useKeepOrganizationContext`), so the pages that wait
+// on it start their own reads a round trip sooner. Placeholder rather than
+// initial data because it is never cached: a failed read reports the failure
+// instead of the kept answer, and forgets it.
 export function useOrganizationContext(enabled = true) {
   return useQuery({
     queryKey: ORGANIZATION_CONTEXT,
-    queryFn: () => apiFetch<OrganizationContext>("/organizations/me"),
+    queryFn: async () => {
+      try {
+        return await apiFetch<OrganizationContext>("/organizations/me")
+      } catch (error) {
+        forgetOrganizationContext()
+        throw error
+      }
+    },
+    placeholderData: enabled ? keptOrganizationContext : undefined,
     staleTime: 60_000,
     retry: retryUnlessNotFound(useQueryClient()),
     enabled,
   })
+}
+
+const KEPT_CONTEXT_KEY = "otari.dashboard.organizationContext"
+
+let keptRaw: string | null = null
+let keptEntry: { origin?: unknown; context?: OrganizationContext } | null = null
+
+// Parsed once per stored value, so every reader of the placeholder holds the
+// same object, as they would the cached one.
+function keptOrganizationContext(): OrganizationContext | undefined {
+  try {
+    const raw = window.localStorage.getItem(KEPT_CONTEXT_KEY)
+    if (raw !== keptRaw) {
+      keptEntry = raw ? JSON.parse(raw) : null
+      keptRaw = raw
+    }
+    return keptEntry?.origin === requestPolicy().origin
+      ? keptEntry.context
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Drops the kept context: on sign-in, on sign-out, and on a failed read. */
+export function forgetOrganizationContext(): void {
+  try {
+    window.localStorage.removeItem(KEPT_CONTEXT_KEY)
+  } catch {
+    // Storage refused: nothing was kept either.
+  }
+}
+
+/**
+ * Keeps the caller's current context in this browser for the next load, keyed
+ * by the API origin it came from, so a region chosen later never reads
+ * another's.
+ *
+ * Only on a hosted deployment, where the round trip crosses the internet. A
+ * local gateway rebuilt on a fresh database would otherwise ask, for one round
+ * trip, about workspaces that no longer exist. Written from every answer the
+ * cache holds, a switch or a rename included, so the next load starts from
+ * the organization the caller last left.
+ */
+export function useKeepOrganizationContext(hosted: boolean): void {
+  const { data, isPlaceholderData } = useOrganizationContext()
+  useEffect(() => {
+    if (!hosted) {
+      forgetOrganizationContext()
+      return
+    }
+    if (!data || isPlaceholderData) return
+    try {
+      window.localStorage.setItem(
+        KEPT_CONTEXT_KEY,
+        JSON.stringify({ origin: requestPolicy().origin, context: data }),
+      )
+    } catch {
+      // Private mode or a full store: the next load waits for the answer.
+    }
+  }, [hosted, data, isPlaceholderData])
 }
 
 /**

@@ -102,6 +102,42 @@ describe("AuthProvider", () => {
     })
   })
 
+  it("forgets the kept organization context on sign-out and on sign-in", async () => {
+    // Kept for the next load (see `useKeepOrganizationContext`), so it must not
+    // reach whoever signs in next in this browser.
+    const KEPT = "otari.dashboard.organizationContext"
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    window.localStorage.setItem(KEPT, "{}")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 204 }),
+    )
+    function SessionHarness() {
+      const { isAuthenticated, login, logout } = useAuth()
+      return isAuthenticated ? (
+        <button type="button" onClick={logout}>
+          Sign out
+        </button>
+      ) : (
+        <button type="button" onClick={login}>
+          Sign in
+        </button>
+      )
+    }
+    const user = userEvent.setup()
+    render(
+      <AppProviders>
+        <SessionHarness />
+      </AppProviders>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Sign out" }))
+    expect(window.localStorage.getItem(KEPT)).toBeNull()
+
+    window.localStorage.setItem(KEPT, "{}")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+    expect(window.localStorage.getItem(KEPT)).toBeNull()
+  })
+
   it("marks isSigningOut while the revocation is in flight, and clears it once resolved", async () => {
     window.localStorage.setItem("otari.dashboard.hasSession", "1")
     let resolveDelete!: () => void

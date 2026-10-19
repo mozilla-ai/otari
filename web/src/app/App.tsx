@@ -20,6 +20,7 @@ import {
   publicCatalogPath,
   takeRememberedModel,
 } from "@/features/models/publicCatalog"
+import { useKeepOrganizationContext } from "@/shared/api/organizations"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -209,6 +210,7 @@ function DeploymentRoot({ hash }: { hash: string }) {
  * Done before the router mounts, so the home page never flashes first.
  */
 function SignedInRoot() {
+  useKeepOrganizationContext(useDeployment().deployment_type === "hosted")
   useState(() => {
     const modelId = takeRememberedModel()
     const path = window.location.hash.replace(/^#/, "")

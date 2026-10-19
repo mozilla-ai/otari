@@ -123,6 +123,12 @@ are not icons, the product mark and a chart's own marks.
 TanStack Query owns server state. Query keys, mutation invalidation, pagination,
 and loading behavior follow the frontend standards topic guides.
 
+A hosted deployment's organization context (`GET /organizations/me`), the read
+every signed-in page waits on, is kept across loads by
+`useKeepOrganizationContext`. It stands in as placeholder data, never cached
+data, until the current answer arrives; a failed read, sign-in and sign-out
+forget it.
+
 Import API shapes from `@/client`, not directly from the generated schema.
 `src/client/schema.ts` is generated from `docs/public/openapi.json` and
 committed. Keep `src/client/local.ts` limited to shapes OpenAPI cannot own.

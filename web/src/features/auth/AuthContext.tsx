@@ -11,6 +11,7 @@ import {
 } from "react"
 
 import { deleteSession, setUnauthorizedHandler } from "@/shared/api/client"
+import { forgetOrganizationContext } from "@/shared/api/organizations"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
@@ -99,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Drop any admin data cached under the old session so it can't render to a
     // later, possibly different, session in the same tab.
     queryClient.clear()
+    forgetOrganizationContext()
     try {
       window.localStorage.removeItem(STORAGE_KEY)
     } catch {
@@ -123,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(() => {
     // Clear any cache from a prior session before the new session's queries run.
     queryClient.clear()
+    forgetOrganizationContext()
     setAuthenticated(true)
     // A new session to end: the next `logout` records again.
     sessionOpenRef.current = true
