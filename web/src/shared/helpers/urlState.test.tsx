@@ -122,3 +122,43 @@ describe("useUrlState.patch with arrays", () => {
     expect(result.current.getAll("model")).toEqual([])
   })
 })
+
+describe("useUrlState with untracked keys", () => {
+  const PEEK_DEFAULTS = { peek: "", span: "" } as const
+  const UNTRACKED = ["span"] as const
+
+  async function countedState(url: string) {
+    let renders = 0
+    const { result } = renderHook(
+      () => {
+        renders += 1
+        return useUrlState(PEEK_DEFAULTS, { untracked: UNTRACKED })
+      },
+      { wrapper: withRouter({ url }) },
+    )
+    await flushRouter()
+    return { result, renders: () => renders }
+  }
+
+  it("reads an untracked key from the URL it starts on", async () => {
+    const { result } = await countedState("/?peek=t-1&span=s-1")
+    expect(result.current.get("span")).toBe("s-1")
+  })
+
+  it("writes an untracked key without re-rendering, and reads it at the next tracked change", async () => {
+    const { result, renders } = await countedState("/?peek=t-1")
+    const before = renders()
+
+    await act(async () => {
+      result.current.patch({ span: "s-2" })
+    })
+    expect(renders()).toBe(before)
+
+    await act(async () => {
+      result.current.patch({ peek: "t-2" })
+    })
+    expect(renders()).toBeGreaterThan(before)
+    expect(result.current.get("peek")).toBe("t-2")
+    expect(result.current.get("span")).toBe("s-2")
+  })
+})

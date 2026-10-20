@@ -61,6 +61,9 @@ const URL_DEFAULTS = {
   peek_workspace: "",
   span: "",
 } as const
+// The panel holds the picked span itself, so picking one need not re-render
+// the list, its chart and its pager.
+const UNTRACKED = ["span"] as const
 const LEVEL_OPTIONS = [
   { value: "", label: "All levels" },
   { value: "failed", label: "Errors" },
@@ -174,7 +177,7 @@ interface TimeWindow {
 const iso = (ms: number) => new Date(ms).toISOString()
 
 export function SessionsPage() {
-  const url = useUrlState(URL_DEFAULTS)
+  const url = useUrlState(URL_DEFAULTS, { untracked: UNTRACKED })
   const { selected: workspace } = useSelectedWorkspace()
   const isMobile = useIsMobile()
   const [now, setNow] = useState(() => Date.now())
