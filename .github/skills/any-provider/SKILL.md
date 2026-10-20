@@ -63,9 +63,10 @@ context and calls the adapter.
 5. **In the gateway**, nothing in code, since the catalog routes and the settings validation read
    the libraries' metadata. Add the provider's pricing note to `docs/tools.md`, under "Search
    providers" or "Fetch providers", and a compose or `.env.example` line where a key is expected.
-   Then smoke-test it on a local gateway: a direct search or an in-loop fetch on an instance, the
-   pricing row it bills and a refused key. When the provider's name is also an any-llm
-   provider's, configure that provider's models too, and check the two keep apart.
+   Then smoke-test it on a local gateway: a direct search and an in-loop search or fetch on an
+   instance, the price each bills (the instance's `price_per_call`) and a refused key. When the
+   provider's name is also an any-llm provider's, configure that provider's models too, and
+   check that the tool's price and access stay apart from the models'.
 6. **Update the learnings** below with what the provider taught, and this procedure if a step
    changed.
 
@@ -208,14 +209,17 @@ The first search provider with the key in the URL and errors inside a 200.
 The first provider whose name and key are also an any-llm provider's, and the first fetch
 provider with no empty page.
 
-- A search or fetch provider can share its name with a model provider. DeepSeek's tools are
-  keyed `deepseek:<tool-name>`, in the pricing key space of its models' `deepseek:<model>`, and
-  gateway code that judged a key by its prefix took one for the other: the hosted catalog sweep
-  kept unoffered model prices as tool rates, config pricing loaded model prices with no
-  `providers:` entry, `deepseek:*` granted paid searches, and the startup warning called the key
-  the search tool read ignored. The gateway now matches tool keys whole. Name instances so no
-  tool name is also a model id (`deepseek`, `deepseek-fetch`), and run step 5's smoke test with
-  the provider's models configured.
+- A search or fetch provider can share its name with a model provider. DeepSeek's tools were
+  priced and allow-listed as `deepseek:<tool-name>`, in the key space of its models'
+  `deepseek:<model>`, and gateway code that judged a key by its prefix took one for the other:
+  the hosted catalog sweep kept unoffered model prices as tool rates, `deepseek:*` granted paid
+  searches, and the startup warning called the key the search tool read ignored. So tool prices
+  now have a kind of their own, keyed by the instance's name (`price_per_call` on its entry), and
+  search tools an access list of their own (`allowed_tools`), and a provider's tools and models no
+  longer share a key. What is left to the next author: instance names are unique across
+  `search_tools` and `fetch_tools`, so a provider that searches and fetches needs two
+  (`deepseek`, `deepseek-fetch`), and step 5's smoke test configures the provider's models beside
+  its tools and checks that a model's price or allow-list entry reaches neither.
 - An error body's fields can differ in how much they say. DeepSeek's OpenAI-shaped body sends
   `code` `invalid_request_error` for every failure, a refused key included, while `type` tells
   them apart (`authentication_error`, `not_found_error`). Record more than one failure before

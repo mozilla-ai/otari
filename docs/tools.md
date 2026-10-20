@@ -685,8 +685,9 @@ one, and never with the provider's own message.
   such as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. Name the
   instance apart from a DeepSeek search tool, such as `deepseek-fetch`, since names
   are unique across `search_tools` and `fetch_tools`. It reports no cost, so a
-  fetch is billed at the instance's rate, `deepseek:<fetch-tool-name>`, else
-  `otari:web_fetch`. DeepSeek's [pricing](https://api-docs.deepseek.com/guides/search),
+  fetch is billed at the instance's own rate (its `price_per_call`, or a `fetch`
+  price set through the API), else `otari:web_fetch`; a price for one of
+  DeepSeek's models never prices it. DeepSeek's [pricing](https://api-docs.deepseek.com/guides/search),
   read 2026-10-19, is $0.75 per 1,000 successful fetches, with at most 25
   fetches a second per account, apart from searches, and a limit per domain; its
   free period covers only calls through DeepSeek's own Harness, Claude Code or
@@ -920,8 +921,10 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 
 - **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such as
   `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no cost, so a
-  search is billed at the tool's rate, `deepseek:<search-tool-name>`. DeepSeek's
-  [pricing](https://api-docs.deepseek.com/guides/search), read 2026-10-19, is $0.75
+  search is billed at the tool's own rate (its `price_per_call`, or a `search` price
+  set through the API); a price for one of DeepSeek's models never prices it. Name
+  it apart from a DeepSeek fetch instance, such as `deepseek` and `deepseek-fetch`.
+  DeepSeek's [pricing](https://api-docs.deepseek.com/guides/search), read 2026-10-19, is $0.75
   per 1,000 successful searches, whatever the number of results, with at most 100
   searches a second per account, apart from fetches; its free period covers only
   calls through DeepSeek's own Harness, Claude Code or Codex, not Otari's. DeepSeek
