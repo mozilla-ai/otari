@@ -443,7 +443,7 @@ def test_only_the_operators_override_prices_an_in_loop_search_on_an_instance(
 def test_an_organizations_override_still_prices_a_search_on_the_legacy_settings(
     strict_pricing_client: TestClient, test_db: Session
 ) -> None:
-    """The old backend records no label, so its calls take any override, as before."""
+    """The old backend records its calls with no label, so any organization override prices them."""
     _override(strict_pricing_client, test_db, "otari:web_search", origin=API_ORIGIN)
     provider = AsyncMock(side_effect=RuntimeError("provider down"))
 

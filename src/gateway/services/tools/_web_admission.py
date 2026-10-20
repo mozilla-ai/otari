@@ -10,6 +10,7 @@ policy, read once for the whole request, and resolves what the admitted tools ru
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -311,7 +312,7 @@ class AdmittedWebTools:
     fetch_tool_entry: dict[str, Any] | None
     fetch_policy: DomainPolicy
     search_url: str | None = None
-    search_auth_token: str | None = None
+    search_auth_token: str | None = dataclasses.field(default=None, repr=False)
     # The workspace's own search key, set only where it declared a search.
     search_credential: WebSearchCredential | None = None
     in_loop_search: InLoopSearch | None = None

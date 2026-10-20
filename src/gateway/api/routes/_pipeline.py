@@ -4178,12 +4178,8 @@ async def _admit_claims(
         budget_exempt=ctx.reservation is not None and not ctx.reservation.counts_toward_budget,
     )
     if (unpriced := await _unpriced_tool(ctx, priced)) is not None:
-        refusal = GatewayToolPricingRequiredError(unpriced_tool_detail(unpriced.name))
-        # Same kind and code the model gate uses for its own 402, so both no-pricing
-        # rejections map to one wire shape per format.
-        error = adapter.error(
-            refusal.status_code, refusal.message, ErrorKind.INVALID_REQUEST, error_headers(refusal.error_code)
-        )
+        # The model gate's kind and code, so both no-pricing refusals have one wire shape per format.
+        error = domain_error(adapter, GatewayToolPricingRequiredError(unpriced_tool_detail(unpriced.name)))
         return _ToolRefusal(error, unpriced_tool=unpriced.name)
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
 

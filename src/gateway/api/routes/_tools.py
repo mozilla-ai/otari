@@ -21,6 +21,7 @@ from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools import (
     build_web_fetch_backend,
     builtin_fetch_resolved,
+    resolve_fetch,
     retargeted_tool_choice,
     web_search_max_results_baseline,
 )
@@ -121,6 +122,13 @@ def _resolve_web_search_purpose_hint(
     )
 
 
+def _fetch_default(config: GatewayConfig | None) -> ResolvedFetch:
+    """The fetch tool's instance with no workspace policy: the fetch default, or ``builtin_fetch`` without a config."""
+    return (
+        resolve_fetch(config, None, requested=None, for_search=None) if config is not None else builtin_fetch_resolved()
+    )
+
+
 def _build_web_retrieval_backend(
     *,
     base_url: str | None,
@@ -152,9 +160,10 @@ def _build_web_retrieval_backend(
     search provider instead, which the backend then calls directly.
 
     A declared fetch tool runs on the fetch backend the tools domain builds on
-    ``fetch``, the instance resolved when the request was admitted, or on
-    ``builtin_fetch`` when none was; the old backend delegates its fetch calls
-    to it. A provider instance sends through ``web_provider_client``, the app's.
+    ``fetch``, the instance resolved when the request was admitted, or, for a
+    caller that resolved none, on the fetch default; the old backend delegates
+    its fetch calls to it. A provider instance sends through
+    ``web_provider_client``, the app's.
     """
     kwargs: dict[str, Any] = {
         "base_url": base_url,
@@ -227,7 +236,7 @@ def _build_web_retrieval_backend(
     kwargs["counter"] = counter
     if fetch_tool_entry is not None:
         kwargs["fetch_backend"] = build_web_fetch_backend(
-            fetch if fetch is not None else builtin_fetch_resolved(),
+            fetch if fetch is not None else _fetch_default(config),
             policy=fetch_policy,
             trust_env_proxy=kwargs["trust_env_proxy"],
             web_provider_client=web_provider_client,

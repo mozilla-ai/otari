@@ -49,6 +49,7 @@ from gateway.services.tools import (
     WebFetchBackend,
     WebSearchBackend,
     owning_backend,
+    tools_to_price,
 )
 
 from .conftest import declared_test_providers
@@ -464,8 +465,15 @@ def test_an_unpriced_tool_skips_only_the_fallback_that_needs_it(
     async def unpriced(_ctx: Any, tools: Any) -> Any:
         return next((priced for priced in tools if priced.name == _NAMES[tool]), None)
 
+    def checked(**kwargs: Any) -> Any:
+        # The module's client runs with require_pricing off, which an unpriced model needs.
+        return tools_to_price(**{**kwargs, "require_pricing": True})
+
     body = _messages_body("claude-then-vertex", _DECLARATIONS[tool])
-    with patch("gateway.api.routes._pipeline._unpriced_tool", new=unpriced):
+    with (
+        patch("gateway.api.routes._pipeline.tools_to_price", new=checked),
+        patch("gateway.api.routes._pipeline._unpriced_tool", new=unpriced),
+    ):
         served, _ = _post_messages(client, _auto(api_key_header, tool), body)
         failed, seen = _post_messages(client, _auto(api_key_header, tool), body, provider_fails=True)
 
