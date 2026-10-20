@@ -1,0 +1,5 @@
+root: ./
+
+structure:
+  readme: deployment.md
+  summary: SUMMARY.md

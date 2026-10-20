@@ -1,0 +1,5 @@
+root: ./
+
+structure:
+  readme: access-control.md
+  summary: SUMMARY.md
