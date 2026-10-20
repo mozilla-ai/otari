@@ -43,6 +43,9 @@ class LlmCall:
     input_tokens: int | None
     output_tokens: int | None
     cost: Decimal | None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
     policy_name: str | None = None
     selection_reason: str | None = None
     attempt_position: int | None = None
@@ -161,6 +164,9 @@ class RequestTrace:
                 provider=identifier_or_none(call.provider),
                 input_tokens=call.input_tokens,
                 output_tokens=call.output_tokens,
+                cache_read_tokens=call.cache_read_tokens,
+                cache_write_tokens=call.cache_write_tokens,
+                reasoning_tokens=call.reasoning_tokens,
                 cost_snapshot=call.cost,
                 request_id=self.request_id,
                 attributes=attributes,

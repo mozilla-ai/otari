@@ -267,7 +267,9 @@ Activity is the per-request log. Sessions lists [agent sessions](traces.md)
 where the deployment records traces (`trace_capture_enabled`, on by default; a
 hybrid gateway records none), and has no entry where it does not. A session
 opens in a side panel as a tree of its turns, LLM calls and tool calls, a
-timeline of the same spans, or a flat log; before a span is picked, the panel
+timeline of the same spans, or a flat log. The token count in its header breaks
+down into input, the share of it the prompt cache served, and output, for the
+session or the span picked. Before a span is picked, the panel
 shows what the session cost against its key's own spend ceiling and where the
 gateway stepped in. A request in Activity whose session was recorded links to it:
 **View trace** in the request's detail opens the session on that LLM call. Usage provides aggregates and time series; its spend by session groups requests by the same sessions, keyed by trace id. Routed requests share a request-group ID, so the

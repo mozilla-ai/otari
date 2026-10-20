@@ -102,6 +102,44 @@ def test_a_usage_row_becomes_an_llm_span_with_what_billing_recorded() -> None:
     assert span.start_time == _T0 + timedelta(milliseconds=100)
 
 
+@pytest.mark.parametrize(
+    ("prompt_tokens", "cache_tokens_in_prompt"),
+    [
+        pytest.param(300, False, id="anthropic-adds-cached-tokens-on-top"),
+        pytest.param(48_210, True, id="openai-counts-them-inside"),
+    ],
+)
+def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_provider_reported_its_cache(
+    prompt_tokens: int, cache_tokens_in_prompt: bool
+) -> None:
+    trace = _trace()
+
+    trace.record_llm_call(
+        _llm_call(
+            _usage_row(
+                prompt_tokens=prompt_tokens,
+                cache_read_tokens=41_900,
+                cache_write_tokens=6_010,
+                cache_tokens_in_prompt=cache_tokens_in_prompt,
+                reasoning_tokens=12,
+            )
+        )
+    )
+
+    [span] = trace.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (48_210, 41_900, 6_010)
+    assert (span.output_tokens, span.reasoning_tokens) == (20, 12)
+
+
+def test_a_failed_attempt_reports_no_prompt() -> None:
+    trace = _trace()
+
+    trace.record_llm_call(_llm_call(_usage_row(status="error", prompt_tokens=None, completion_tokens=None)))
+
+    [span] = trace.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (None, None, None)
+
+
 def test_an_absorbed_attempt_is_a_recovered_error() -> None:
     """A failover the next candidate made up for is visible, and does not fail the request."""
     trace = _trace()

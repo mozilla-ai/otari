@@ -16355,6 +16355,16 @@ export interface components {
             attributes: {
                 [key: string]: string | number | boolean;
             };
+            /**
+             * Cache Read Tokens
+             * @description Input tokens read from the prompt cache.
+             */
+            cache_read_tokens: number | null;
+            /**
+             * Cache Write Tokens
+             * @description Input tokens written to the prompt cache.
+             */
+            cache_write_tokens: number | null;
             /** Cost */
             cost: number | null;
             /** Duration Ms */
@@ -16363,7 +16373,10 @@ export interface components {
             end_time: string | null;
             /** Error Class */
             error_class: string | null;
-            /** Input Tokens */
+            /**
+             * Input Tokens
+             * @description The whole prompt, cached tokens included.
+             */
             input_tokens: number | null;
             /** Kind */
             kind: string;
@@ -16401,6 +16414,11 @@ export interface components {
             parent_span_id: string | null;
             /** Provider */
             provider: string | null;
+            /**
+             * Reasoning Tokens
+             * @description Output tokens spent reasoning.
+             */
+            reasoning_tokens: number | null;
             /** Recovered */
             recovered: boolean;
             /** Request Id */
@@ -16880,6 +16898,8 @@ export interface components {
          * @description One user prompt and the steps it caused.
          */
         TurnPublic: {
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
             /**
              * Continued
              * @description True for steps a session started with before any prompt was seen.

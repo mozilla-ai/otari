@@ -73,8 +73,11 @@ class SpanPublic(BaseModel):
     opens_turn: bool
     model: str | None
     provider: str | None
-    input_tokens: int | None
+    input_tokens: int | None = Field(description="The whole prompt, cached tokens included.")
     output_tokens: int | None
+    cache_read_tokens: int | None = Field(description="Input tokens read from the prompt cache.")
+    cache_write_tokens: int | None = Field(description="Input tokens written to the prompt cache.")
+    reasoning_tokens: int | None = Field(description="Output tokens spent reasoning.")
     cost: float | None
     tool_name: str | None
     tool_type: str | None
@@ -105,6 +108,7 @@ class TurnPublic(BaseModel):
     errors: int
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int
     cost: float
 
 
@@ -167,6 +171,9 @@ def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
         provider=span.provider,
         input_tokens=span.input_tokens,
         output_tokens=span.output_tokens,
+        cache_read_tokens=span.cache_read_tokens,
+        cache_write_tokens=span.cache_write_tokens,
+        reasoning_tokens=span.reasoning_tokens,
         cost=as_float(span.cost_snapshot),
         tool_name=span.tool_name,
         tool_type=span.tool_type,
@@ -191,6 +198,7 @@ def _turn_public(turn: TurnView) -> TurnPublic:
         errors=turn.errors,
         input_tokens=turn.input_tokens,
         output_tokens=turn.output_tokens,
+        cache_read_tokens=turn.cache_read_tokens,
         cost=as_float(turn.cost) or 0.0,
     )
 

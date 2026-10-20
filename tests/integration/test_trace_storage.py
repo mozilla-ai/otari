@@ -103,6 +103,9 @@ async def test_a_write_creates_the_trace_and_totals_its_spans(
                     parent_span_id="req-1",
                     input_tokens=100,
                     output_tokens=20,
+                    cache_read_tokens=60,
+                    cache_write_tokens=30,
+                    reasoning_tokens=5,
                     cost_snapshot=Decimal("0.0049"),
                 ),
                 _span("tool-1", kind="tool", minutes=1, tool_name="Bash", outcome="error"),
@@ -120,6 +123,8 @@ async def test_a_write_creates_the_trace_and_totals_its_spans(
     assert summary.started_at == _T0
     assert summary.last_activity_at == _T0 + timedelta(minutes=1, seconds=2)
     assert [span.span_id for span in detail.spans] == ["llm-1", "req-1", "tool-1"]
+    llm = detail.spans[0]
+    assert (llm.cache_read_tokens, llm.cache_write_tokens, llm.reasoning_tokens) == (60, 30, 5)
     assert detail.truncated is False
 
 

@@ -19312,6 +19312,30 @@
             "title": "Attributes",
             "type": "object"
           },
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input tokens read from the prompt cache.",
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input tokens written to the prompt cache.",
+            "title": "Cache Write Tokens"
+          },
           "cost": {
             "anyOf": [
               {
@@ -19366,6 +19390,7 @@
                 "type": "null"
               }
             ],
+            "description": "The whole prompt, cached tokens included.",
             "title": "Input Tokens"
           },
           "kind": {
@@ -19476,6 +19501,18 @@
             ],
             "title": "Provider"
           },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output tokens spent reasoning.",
+            "title": "Reasoning Tokens"
+          },
           "recovered": {
             "title": "Recovered",
             "type": "boolean"
@@ -19560,6 +19597,9 @@
           "provider",
           "input_tokens",
           "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "reasoning_tokens",
           "cost",
           "tool_name",
           "tool_type",
@@ -20553,6 +20593,10 @@
       "TurnPublic": {
         "description": "One user prompt and the steps it caused.",
         "properties": {
+          "cache_read_tokens": {
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
           "continued": {
             "description": "True for steps a session started with before any prompt was seen.",
             "title": "Continued",
@@ -20640,6 +20684,7 @@
           "errors",
           "input_tokens",
           "output_tokens",
+          "cache_read_tokens",
           "cost"
         ],
         "title": "TurnPublic",

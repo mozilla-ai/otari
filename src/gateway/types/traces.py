@@ -175,6 +175,9 @@ class SpanRecord:
     provider: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
     cost_snapshot: Decimal | None = None
     tool_name: str | None = None
     tool_type: str | None = None

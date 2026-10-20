@@ -8,7 +8,8 @@ path, so these tests wait for the rows to land rather than assuming they have.
 
 import time
 from collections.abc import AsyncIterator, Callable
-from typing import Any
+from decimal import Decimal
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -21,7 +22,7 @@ from any_llm.types.completion import (
     ChunkChoice,
     CompletionUsage,
 )
-from any_llm.types.messages import MessageResponse
+from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -122,6 +123,68 @@ def test_a_completion_records_its_step_and_llm_call(
     with db_session_factory() as session:
         trace = session.scalars(select(Trace).where(Trace.trace_id == request_id)).one()
     assert (trace.session_source, trace.step_count, trace.input_tokens) == ("none", 1, 10)
+
+
+def test_an_anthropic_call_counts_its_cached_prompt_and_costs_what_its_usage_row_does(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Anthropic reports cache reads and writes beside ``input_tokens``; the span counts the whole prompt."""
+    model = "anthropic:claude-3-5-sonnet-20241022"
+    pricing = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": model,
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "cache_read_price_per_million": 0.3,
+            "cache_write_price_per_million": 3.75,
+            "effective_at": "2020-01-01T00:00:00Z",
+        },
+        headers=master_key_header,
+    )
+    assert pricing.status_code == 200
+    reply = MessageResponse(
+        id="msg_trace",
+        type="message",
+        role="assistant",
+        model="claude-3-5-sonnet-20241022",
+        content=[TextBlock(type="text", text="hi", citations=None)],
+        stop_reason=cast(Any, "end_turn"),
+        stop_sequence=None,
+        usage=MessageUsage(
+            input_tokens=5,
+            output_tokens=2,
+            cache_read_input_tokens=300,
+            cache_creation_input_tokens=40,
+            cache_creation=None,
+            server_tool_use=None,
+            service_tier=None,
+        ),
+        container=None,
+    )
+
+    async def fake_amessages(**_: Any) -> MessageResponse:
+        return reply
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        response = client.post(
+            f"{API_ROOT}/messages",
+            json={"model": model, "messages": _MESSAGES, "max_tokens": 16},
+            headers=api_key_header,
+        )
+    assert response.status_code == 200
+    request_id = response.headers[REQUEST_ID_HEADER]
+
+    llm = _by_kind(_wait_for_spans(db_session_factory, request_id, 2))["llm"]
+
+    assert (llm.input_tokens, llm.cache_read_tokens, llm.cache_write_tokens) == (345, 300, 40)
+    with db_session_factory() as session:
+        row = session.scalars(select(UsageLog).where(UsageLog.request_group_id == request_id)).one()
+    # 5 fresh at $3, 300 read at $0.30, 40 written at $3.75 and 2 out at $15, per million.
+    assert llm.cost_snapshot == row.cost == Decimal("0.000285")
 
 
 def test_no_prompt_text_reaches_the_trace(
