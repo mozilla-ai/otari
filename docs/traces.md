@@ -135,8 +135,9 @@ backend. A span the gateway records itself has neither.
 ### Claude Code without routing
 
 Claude Code can export its own spans, so a session is traced without sending
-its model traffic through Otari. Use a budget-exempt API key, as for
-[importing its usage](use-with-claude-code.md#import-claude-code-usage-without-routing):
+its model traffic through Otari. [Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari)
+has the whole setup, guardrail checks included. In short, with a budget-exempt
+API key:
 
 ```bash
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
