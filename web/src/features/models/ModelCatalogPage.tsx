@@ -777,7 +777,16 @@ export function ModelCatalogView({
                 : "No models match these filters."}
             </EmptyMessage>
           ) : (
-            <ul aria-label="Models" className="flex flex-col gap-3">
+            // On trial: from md up the list scrolls inside the viewport cap a
+            // table uses, so the pager below stays in reach; the padding and
+            // its negative margin give a focused card's ring room inside the
+            // scroll. Reverting is these classes. Keyed by page so each page
+            // opens at its top.
+            <ul
+              key={page}
+              aria-label="Models"
+              className="flex flex-col gap-3 md:not-print:-m-1 md:not-print:max-h-(--table-max-height) md:not-print:overflow-y-auto md:not-print:scroll-py-1 md:not-print:p-1"
+            >
               {pageRows.map((model) => (
                 <li key={model.id}>
                   <ModelCard model={model} publicView={publicView} />
