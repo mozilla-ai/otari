@@ -462,6 +462,21 @@ def test_moving_an_end_user_onto_a_capped_keys_budget_takes_a_place(
     assert within.status_code == 200, within.text
 
 
+def test_a_key_with_no_default_counts_end_users_on_no_budget(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A request naming no budget starts an end user on none, and that still takes a place."""
+    _budgets(client, master_key_header)
+    mlpa = _key(client, master_key_header, "mlpa", is_service_key=True, end_user_budget_ids=["eu-ai"], max_end_users=1)
+
+    first = _chat(client, mlpa, "a")
+    second = _chat(client, mlpa, "b")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 403
+    assert second.headers["Otari-Error-Code"] == "end_user_limit_reached"
+
+
 def test_the_cap_is_read_and_changed_through_the_keys_api(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

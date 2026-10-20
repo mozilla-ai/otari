@@ -203,15 +203,20 @@ class _EndUsers:
         another key of the same owner started. A move between the key's own
         budgets, or for a key that counts every budget, adds nothing.
         """
-        counted = api_key.assignable_end_user_budgets()
-        if api_key.max_end_users is None or not counted or user.budget_id in counted:
+        counted, unbudgeted = _counted(api_key)
+        if api_key.max_end_users is None or counted is None or user.budget_id in counted:
+            return
+        if user.budget_id is None and unbudgeted:
             return
         await self._repositories.end_users.lock_owner(owner_user_id)
         await self._refuse_when_full(api_key, owner_user_id, api_key.max_end_users)
 
     async def _refuse_when_full(self, api_key: APIKey, owner_user_id: str, max_end_users: int) -> None:
-        budgets = api_key.assignable_end_user_budgets() or None
-        if await self._repositories.end_users.count_live_on_budgets(owner_user_id, budgets) >= max_end_users:
+        counted, unbudgeted = _counted(api_key)
+        live = await self._repositories.end_users.count_live_on_budgets(
+            owner_user_id, counted, with_unbudgeted=unbudgeted
+        )
+        if live >= max_end_users:
             raise EndUserLimitReachedError()
 
     async def _available_owner(self, api_key: APIKey) -> str:
@@ -301,6 +306,18 @@ def _put_on_budget(user: User, budget: Budget) -> None:
     window = budget_window(now, budget)
     user.budget_id = budget.budget_id
     user.budget_started_at, user.next_budget_reset_at = window if window is not None else (now, None)
+
+
+def _counted(api_key: APIKey) -> tuple[list[str] | None, bool]:
+    """The budgets a key's ``max_end_users`` counts (None for every one), and whether it counts end users on none.
+
+    A key with a list and no default starts an end user on no budget when a
+    request names none, so those are its end users too.
+    """
+    budgets = api_key.assignable_end_user_budgets()
+    if not budgets:
+        return None, False
+    return budgets, api_key.end_user_budget_id is None
 
 
 def _new_end_user(owner_user_id: str, external_id: str, budget: Budget | None) -> User:

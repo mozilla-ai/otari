@@ -2,7 +2,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import ColumnElement, func, select, update
+from sqlalchemy import ColumnElement, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -87,11 +87,17 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
         """
         await self.db.execute(select(User.user_id).where(User.user_id == owner_user_id).with_for_update())
 
-    async def count_live_on_budgets(self, owner_user_id: str, budget_ids: list[str] | None) -> int:
-        """Count the owner's live end users on these budgets, or on any budget when ``budget_ids`` is None."""
+    async def count_live_on_budgets(
+        self, owner_user_id: str, budget_ids: list[str] | None, *, with_unbudgeted: bool = False
+    ) -> int:
+        """Count the owner's live end users on these budgets, or on any budget when ``budget_ids`` is None.
+
+        ``with_unbudgeted`` also counts the ones on no budget.
+        """
         conditions = _live_end_users(owner_user_id, external_id=None, budget_id=None, blocked=None)
         if budget_ids is not None:
-            conditions.append(User.budget_id.in_(budget_ids))
+            on_budgets = User.budget_id.in_(budget_ids)
+            conditions.append(or_(on_budgets, User.budget_id.is_(None)) if with_unbudgeted else on_budgets)
         result = await self.db.execute(select(func.count()).select_from(User).where(*conditions))
         return int(result.scalar_one())
 

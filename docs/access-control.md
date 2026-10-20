@@ -249,15 +249,18 @@ default, is no cap, and `0` admits no new end user at all.
 
 The cap counts the end users of the key's user that are on a budget the key may
 assign (its `end_user_budget_ids`, or its default alone), or every end user of
-that user when the key assigns none. So two service keys of one user, each with
-budgets of its own, such as one for signed-in users and one for guests, keep
-separate caps. An end user moved to a budget outside the key's list stops
+that user when the key assigns none. A key with a list and no default also
+counts the end users on no budget, which is where a request naming none starts
+one. So two service keys of one user, each with budgets of its own, such as one
+for signed-in users and one for guests, keep separate caps. For a key with
+budgets of its own, an end user moved to a budget outside its list stops
 counting toward it, and moving one onto the list from outside takes a place, so
-that move is refused with `end_user_limit_reached` when the key is full.
+that move is refused with `end_user_limit_reached` when the key is full. A key
+that assigns no budget counts every end user wherever it is moved.
 
-Replicas admitting end users at once cannot exceed the cap: each new end user
-is counted and created while the key's user is locked. Requests from end users
-that already exist never take that lock.
+Replicas admitting end users at once cannot exceed the cap: each new or revived
+end user is counted and created while the key's user is locked. Requests from
+live end users never take that lock.
 
 ### Several budgets on one key
 
