@@ -81,6 +81,7 @@ describe("a build that replaces the nav-item module", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
+      "Subagent router",
       "Health",
       "Credit grants",
     ])

@@ -16,6 +16,7 @@ import {
   FiRepeat,
   FiServer,
   FiShield,
+  FiShuffle,
   FiSliders,
   FiTool,
   FiUserCheck,
@@ -449,6 +450,16 @@ const DEPLOYMENT_SECTIONS = [
         surface: "hosted_providers",
         operatorOnly: "unlisted",
         icon: FiCpu,
+      },
+      // The decision model that picks a coding agent's subagent model, on the
+      // deployment's own key for it. Unlisted for the reason Hosted providers
+      // is: its API refuses a non-operator with the same 404.
+      {
+        to: "/admin/subagent-router",
+        label: "Subagent router",
+        surface: "subagent_router",
+        operatorOnly: "unlisted",
+        icon: FiShuffle,
       },
       {
         to: "/health-checks",

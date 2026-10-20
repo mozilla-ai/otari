@@ -93,6 +93,7 @@ describe("nav registry", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
+      "Subagent router",
       "Health",
     ])
   })
@@ -135,6 +136,7 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/subagent-router",
       "/health-checks",
     ])
   })
@@ -155,6 +157,7 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/subagent-router",
       "/health-checks",
     ])
     // And on neither of the others. A destination drawn on two rails would
@@ -165,6 +168,7 @@ describe("nav registry", () => {
     expect(others).not.toContain("/settings")
     expect(others).not.toContain("/admin/accounts")
     expect(others).not.toContain("/admin/hosted-providers")
+    expect(others).not.toContain("/admin/subagent-router")
     expect(others).not.toContain("/health-checks")
   })
 
@@ -179,6 +183,7 @@ describe("nav registry", () => {
       ["/settings", "settings", "refused"],
       ["/admin/accounts", "admin", "unlisted"],
       ["/admin/hosted-providers", "hosted_providers", "unlisted"],
+      ["/admin/subagent-router", "subagent_router", "unlisted"],
       ["/health-checks", "health_checks", "refused"],
     ] as const) {
       const item = navItemForPath(to)
