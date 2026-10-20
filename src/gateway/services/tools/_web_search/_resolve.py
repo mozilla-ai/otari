@@ -60,7 +60,6 @@ from gateway.core.settings.tools import (
     default_api_base,
     effective_fetch_instances,
     effective_search_instances,
-    in_loop_default,
     option_problems,
     validate_search_tool_transport,
 )
@@ -79,6 +78,7 @@ from gateway.models.tools import (
     WebToolCredentialSource,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools._web_search._default import in_loop_default
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import (
     ORGANIZATION_KEY_LABEL_PREFIX,

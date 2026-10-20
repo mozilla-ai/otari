@@ -16,6 +16,8 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
 ``run_connection_test`` tests an instance with one search or fetch.
+``web_search_configured`` answers whether the in-loop default yields a search, and ``warn_about_tool_instances``
+logs at startup what the instance rules let load but an operator should fix.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
 ``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
 and ``builtin_fetch_resolved`` answers ``builtin_fetch``'s without a config. ``WebFetchBackend`` runs the fetch
@@ -143,6 +145,8 @@ from gateway.services.tools._web_search import (
     resolve_in_loop_search,
     resolve_search,
     run_direct_search,
+    warn_about_tool_instances,
+    web_search_configured,
 )
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
@@ -259,4 +263,6 @@ __all__ = [
     "refuse_unpriced_direct_search",
     "resolve_direct_search",
     "run_direct_search",
+    "warn_about_tool_instances",
+    "web_search_configured",
 ]

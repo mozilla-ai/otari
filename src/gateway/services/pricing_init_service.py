@@ -23,7 +23,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
-from gateway.services.tools import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME, web_search_configured
 from gateway.types.tool_charges import instance_rate_key
 
 
@@ -119,7 +119,7 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
     configured: list[str] = []
     if config.web_fetch_enabled:
         configured.append(WEB_FETCH_TOOL_NAME)
-    if config.web_search_configured():
+    if web_search_configured(config):
         configured.append(WEB_SEARCH_TOOL_NAME)
     if config.sandbox_configured():
         configured.append(CODE_EXECUTION_TOOL_NAME)

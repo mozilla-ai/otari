@@ -380,6 +380,7 @@ from gateway.services.tools import (
     read_web_search_max_uses,
     refuse_shadowed_builtin_tools,
     validate_web_declarations,
+    web_search_configured,
     web_search_intercept_enabled,
 )
 from gateway.services.traces import RequestTrace, SessionRef, TurnFacts, harness_of, is_subagent, resolve_session
@@ -3608,7 +3609,7 @@ class ToolContext:
         backend, the keyword was forwarded and any block in the transcript came from
         the provider that ran the search (see ``routes/messages.py``).
         """
-        return web_search_intercept_enabled(self.config) and self.config.web_search_configured()
+        return web_search_intercept_enabled(self.config) and web_search_configured(self.config)
 
     @property
     def use_tool_loop(self) -> bool:

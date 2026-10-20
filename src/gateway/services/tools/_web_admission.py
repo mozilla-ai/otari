@@ -196,7 +196,7 @@ def read_web_declarations(
         raise WebToolDeclarationError(WEB_FETCH_HEADER_INVALID_DETAIL) from None
     provider_search_entry = first_provider_web_search_tool(tools)
     intercept_web_search = web_search_intercept_enabled(config)
-    backend_configured = config.web_search_configured()
+    backend_configured = _web_search_tool.TOOL.configured(config)
     if (
         provider_search_entry is not None
         and backend_configured
@@ -280,7 +280,7 @@ def extract_web_tools(
         except ValueError as exc:
             raise WebToolDeclarationError(WEB_FETCH_REQUEST_DOMAIN_INVALID_DETAIL) from exc
     if search_tool_entry is not None:
-        if not config.web_search_configured():
+        if not _web_search_tool.TOOL.configured(config):
             raise WebToolDeclarationError(WEB_SEARCH_NOT_CONFIGURED_DETAIL)
         try:
             _canonicalize_request_domains(search_tool_entry)

@@ -27,7 +27,6 @@ from gateway.core.settings.tools import (
     ToolInstance,
     effective_fetch_instances,
     effective_search_instances,
-    in_loop_default,
 )
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.models.tools import SearchToolCredential
@@ -36,6 +35,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.search_tool_store_service import refresh_tool_instances, reset_search_tool_cache
 from gateway.services.secret_box import generate_secret_key
+from gateway.services.tools._web_search import in_loop_default
 from gateway.services.web_fetch_service import WebFetchHTTPStatusError, WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_network import (
     ContentDecodingError,
