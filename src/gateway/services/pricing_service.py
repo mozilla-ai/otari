@@ -357,6 +357,7 @@ async def load_organization_override_index(
 
 
 def _override_period(row: OrganizationModelPricing) -> OverridePeriod:
+    """One override row as the period, rate and origin resolution reads."""
     # ``effective_to`` keeps its ``None``: an open-ended period means "no end",
     # where ``normalize_effective_at`` would read it as "ends now".
     effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
@@ -429,6 +430,7 @@ def legacy_tool_price_keys(config: GatewayConfig) -> set[str]:
 
 
 async def _find_by_model_key(db: AsyncSession, model_key: str, as_of: datetime) -> ModelPricing | None:
+    """The newest model version of ``model_key`` in effect at ``as_of``."""
     stmt = (
         select(ModelPricing)
         .where(
@@ -1009,6 +1011,11 @@ def _first_tool_rate(
     deployment: Mapping[tuple[str, str], ModelPricing],
     as_of: datetime,
 ) -> ToolRate | None:
+    """The first of ``lookup``'s rate keys that has a price, its overrides in every spelling ahead of its row.
+
+    The provider's list price applies only when no key has one and default
+    pricing is on.
+    """
     for rate_key in lookup.rate_keys:
         forms = _rate_key_forms(rate_key)
         for kind, key in forms:

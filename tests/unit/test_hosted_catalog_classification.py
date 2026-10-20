@@ -26,6 +26,7 @@ def _verdicts(
     owned_endpoints: set[str] = set(),  # noqa: B006
     unlisted_providers: set[str] = set(),  # noqa: B006
 ) -> dict[str, tuple[str, str | None]]:
+    """Each priced key's verdict and reason, for the deployment the arguments describe."""
     results = classify_priced_keys(
         priced,
         offered=frozenset(offered),

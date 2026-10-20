@@ -149,6 +149,7 @@ async def test_gateway_tool_warning_omits_disabled_fetch(
 
 
 def _tool_row(key: str, *, kind: str = "model") -> ModelPricing:
+    """A per-request rate of $0.005 stored under ``key``, a model row unless ``kind`` says otherwise."""
     return ModelPricing(
         kind=kind,
         model_key=key,

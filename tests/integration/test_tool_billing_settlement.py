@@ -412,6 +412,7 @@ async def test_a_search_on_an_instance_takes_its_search_row_and_an_operator_over
         assert response.status_code == 200, response.text
 
     def billed() -> tuple[str, float]:
+        """The label and cost of the newest usage row's search line."""
         row = _latest_row(db_session_factory, api_key_obj["user_id"])
         [line] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls"]
         return line["label"], line["cost"]

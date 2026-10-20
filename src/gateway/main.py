@@ -845,8 +845,11 @@ async def _run_feature_worker(name: str, worker: Worker, config: GatewayConfig) 
 
 
 def _create_lifespan() -> Callable[[FastAPI], Any]:
+    """The app's lifespan: startup's checks, migrations and seeding, then shutdown's cleanup."""
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        """Prepare the database, prices and background tasks for ``app``, and stop them when it ends."""
         # From the app, not a closure: app.state.config is what get_config hands
         # every request, so startup reads the same object.
         config: GatewayConfig = app.state.config

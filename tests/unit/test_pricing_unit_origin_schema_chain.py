@@ -74,6 +74,7 @@ def _insert_legacy_row(engine: Engine, model_key: str) -> None:
 
 
 def _unit_and_origin(engine: Engine, model_key: str) -> tuple[str, str | None]:
+    """The stored ``unit`` and ``origin`` of ``model_key``'s row."""
     with engine.connect() as connection:
         unit, origin = connection.execute(
             text("SELECT unit, origin FROM model_pricing WHERE model_key = :key"), {"key": model_key}

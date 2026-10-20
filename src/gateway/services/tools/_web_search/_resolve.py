@@ -270,6 +270,7 @@ def _search_on_instance(
     workspace: Mapping[str, Any] = _NO_OPTIONS,
     request: Mapping[str, Any],
 ) -> ResolvedSearch:
+    """A search on ``instance``: its runner, its layered options and the rate keys it is billed under."""
     runner: Runner = "library" if instance.library_backed else "old"
     own = dict(instance.options)
     # Contract C8: a searxng instance that names no engines searches the deployment's.
@@ -409,6 +410,7 @@ def _instance_rate_keys(
 
 
 def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
+    """A fetch on ``instance``: its checked options, its label and the rate keys it is billed under."""
     options = _layered(
         "fetch",
         instance.provider,

@@ -32,6 +32,7 @@ _RATE_TYPE = sa.Numeric(18, 8)
 
 
 def _kind_column() -> sa.Column[str]:
+    """The ``kind`` column, every existing row reading as a ``model`` one."""
     return sa.Column(_KIND, sa.String(length=16), nullable=False, server_default="model")
 
 

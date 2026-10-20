@@ -38,6 +38,7 @@ class PricedKind(BaseModel):
 
     @model_validator(mode="after")
     def validate_tool_kind(self) -> Self:
+        """Hold a search or fetch price to a bare instance name and a per-call unit, ``requests`` by default."""
         if self.row_kind == MODEL_KIND:
             return self
         if not is_tool_price_key(self.model_key):

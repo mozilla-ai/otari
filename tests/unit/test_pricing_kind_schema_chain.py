@@ -23,6 +23,7 @@ _AT = "2026-05-20 00:00:00.000000"
 
 
 def _alembic_config(database_url: str) -> Config:
+    """An Alembic configuration on this repository's revisions and ``database_url``."""
     config = Config()
     config.set_main_option("script_location", str(_ALEMBIC_DIR))
     config.set_main_option("sqlalchemy.url", database_url)
@@ -32,6 +33,7 @@ def _alembic_config(database_url: str) -> Config:
 
 @pytest.fixture
 def sqlite_before(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
+    """A SQLite database migrated to the revision just before ``kind`` arrives."""
     database_url = f"sqlite:///{tmp_path / 'kind.db'}"
     config = _alembic_config(database_url)
     command.upgrade(config, _BEFORE)
@@ -43,6 +45,7 @@ def sqlite_before(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
 
 
 def _insert(engine: Engine, model_key: str, kind: str | None = None) -> None:
+    """Store a per-request price row with raw SQL, with ``kind`` only when the schema has it."""
     columns = "kind, " if kind else ""
     values = ":kind, " if kind else ""
     with engine.begin() as connection:
