@@ -13,7 +13,10 @@ from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choi
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.models.tenancy import Workspace
+from gateway.models.traces import Trace
 from gateway.models.users import User
 
 from .conftest import MODEL_NAME
@@ -249,6 +252,9 @@ def test_only_a_service_key_authenticates(client: TestClient, master_key_header:
         ("PUT", f"{END_USERS}?external_id=org%2Falice", {"budget_id": "eu-ai"}),
         ("PATCH", f"{END_USERS}?external_id=org%2Falice", {"blocked": True}),
         ("GET", END_USER_BUDGETS, None),
+        ("DELETE", f"{END_USERS}/alice", None),
+        ("DELETE", f"{END_USERS}?external_id=alice", None),
+        ("DELETE", f"{END_USERS}?created_before=2999-01-01T00:00:00Z", None),
     ]
 
     for method, url, body in requests:
@@ -339,6 +345,9 @@ def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
         ("PUT", url, {"budget_id": "eu-memories"}),
         ("PATCH", url, {"blocked": False, "budget_id": "eu-memories"}),
         ("GET", END_USER_BUDGETS, None),
+        ("DELETE", url, None),
+        ("DELETE", f"{END_USERS}?external_id=alice", None),
+        ("DELETE", f"{END_USERS}?created_before=2999-01-01T00:00:00Z", None),
     ]
     for method, target, body in requests:
         refused = client.request(method, target, json=body, headers=mlpa)
@@ -435,3 +444,56 @@ def test_a_service_key_cannot_delete_another_users_end_user(
 
     assert refused.status_code == 404
     assert [user["external_id"] for user in client.get(END_USERS, headers=other).json()] == ["theirs"]
+
+
+def test_deleting_an_end_user_erases_its_agent_traces(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    doomed = client.put(f"{END_USERS}/doomed", json={"budget_id": "eu-ai"}, headers=mlpa).json()["user_id"]
+    kept = client.put(f"{END_USERS}/kept", json={"budget_id": "eu-ai"}, headers=mlpa).json()["user_id"]
+    workspace = db_session.query(Workspace).first()
+    assert workspace is not None
+    now = datetime.now(UTC)
+    for trace_id, user_id in (("s-doomed", doomed), ("s-kept", kept)):
+        db_session.add(
+            Trace(
+                workspace_id=workspace.id,
+                trace_id=trace_id,
+                user_id=user_id,
+                session_source="none",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+    db_session.commit()
+
+    deleted = client.delete(f"{END_USERS}/doomed", headers=mlpa)
+
+    assert deleted.status_code == 204, deleted.text
+    db_session.expire_all()
+    assert [row.trace_id for row in db_session.query(Trace).all()] == ["s-kept"]
+
+
+def test_an_end_user_stays_live_when_its_telemetry_cannot_be_erased(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Erasure runs before the soft-delete, so a failed one deletes nothing and the call can be repeated."""
+    _budgets(client, master_key_header)
+    mlpa = _service_key(client, master_key_header, "mlpa")
+    client.put(f"{END_USERS}/guest", json={"budget_id": "eu-ai"}, headers=mlpa)
+
+    # Patched onto the class, so it is called bound and takes the instance.
+    async def _boom(_self: DatabaseTelemetryStorageAdapter, *, user_id: str) -> int:
+        raise RuntimeError("telemetry store unreachable")
+
+    with patch.object(DatabaseTelemetryStorageAdapter, "purge_user", _boom):
+        by_path = client.delete(f"{END_USERS}/guest", headers=mlpa)
+        by_age = client.delete(END_USERS, params={"created_before": "2999-01-01T00:00:00Z"}, headers=mlpa)
+
+    assert by_path.status_code == 500
+    assert "telemetry" in by_path.json()["detail"].lower()
+    assert by_age.status_code == 500
+    assert [user["external_id"] for user in client.get(END_USERS, headers=mlpa).json()] == ["guest"]
+    assert client.delete(f"{END_USERS}/guest", headers=mlpa).status_code == 204
