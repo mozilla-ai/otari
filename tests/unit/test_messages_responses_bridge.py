@@ -20,6 +20,7 @@ from gateway.services.inference import (
     reasoning_signature,
     usage_unreported,
     with_responses_instance,
+    without_unstreamable_effort,
 )
 from gateway.services.inference._messages_responses_bridge import (
     CONVERSATION_CACHE_KEY_FIELD,
@@ -32,6 +33,7 @@ from gateway.services.mcp_loop_messages import anthropic_tool_loop, anthropic_to
 _ARESPONSES = "gateway.services.inference._messages_responses_bridge.aresponses"
 _MODEL = "openai:gpt-5"
 _INSTANCE = "openai"
+_STRUCTURED = {"type": "json_schema", "schema": {"type": "object"}}
 _USAGE = {
     "input_tokens": 100,
     "input_tokens_details": {"cached_tokens": 40},
@@ -137,6 +139,26 @@ async def test_marked_call_to_a_provider_without_a_responses_api_stays_native() 
     kwargs = with_responses_instance({"model": "mistral:mistral-small-latest", "messages": []}, _INSTANCE)
     assert await call_messages(native, kwargs) == "native"
     assert RESPONSES_INSTANCE_FIELD not in sent
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "forwarded"),
+    [
+        # Claude Code's shape: any-llm refuses a stream with any output_format for openai.
+        ({"model": "openai:gpt-5"}, False),
+        ({"model": "anthropic:claude"}, True),
+        ({"model": "openai:gpt-5", "output_format": {"effort": "low", "format": _STRUCTURED}}, True),
+        ({"model": "openai:gpt-5", "output_format": _STRUCTURED}, True),
+        # The Responses bridge applies the effort.
+        (with_responses_instance({"model": "openai:gpt-5"}, _INSTANCE), True),
+        (with_responses_instance({"model": "mistral:mistral-small-latest"}, _INSTANCE), False),
+    ],
+)
+def test_a_stream_drops_an_effort_only_output_format_where_any_llm_refuses_it(
+    kwargs: dict[str, Any], forwarded: bool
+) -> None:
+    kwargs = {"output_format": {"effort": "low"}, **kwargs}
+    assert ("output_format" in without_unstreamable_effort(kwargs)) is forwarded
 
 
 def test_only_an_opted_in_instance_marks_the_kwargs() -> None:

@@ -36,6 +36,7 @@ from gateway.services.inference._messages_responses_bridge import (
     reasoning_signature,
     usage_unreported,
     with_responses_instance,
+    without_unstreamable_effort,
 )
 from gateway.services.inference._passthrough_usage import (
     EMBEDDINGS_BILLING,
@@ -155,6 +156,7 @@ __all__ = [
     "transcription_usage",
     "uses_chat_completions_bridge",
     "with_responses_instance",
+    "without_unstreamable_effort",
     "with_upstream_user",
     "EMPTY_COMPLETION_DETAIL",
     "EmptyCompletionError",

@@ -33,7 +33,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 
 from any_llm import AnyLLM, LLMProvider
-from any_llm.exceptions import UnsupportedParameterError
+from any_llm.exceptions import InvalidRequestError, UnsupportedParameterError
 from any_llm.types.messages import (
     ContentBlockDeltaEvent,
     ContentBlockStartEvent,
@@ -46,6 +46,7 @@ from any_llm.types.messages import (
     MessageStreamEvent,
     MessageUsage,
 )
+from any_llm.utils.structured_output import normalize_output_config
 from pydantic import BaseModel
 
 from gateway.log_config import logger
@@ -204,6 +205,32 @@ def _provider_of(kwargs: dict[str, Any]) -> str | None:
     except Exception:  # noqa: BLE001 - any-llm raises its own types for an unknown provider
         return None
     return provider.value if isinstance(provider, LLMProvider) else str(provider)
+
+
+def without_unstreamable_effort(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``kwargs`` for a streamed call, less an effort-only ``output_format`` any-llm would refuse.
+
+    any-llm refuses ``output_format`` on a stream for a provider that cannot stream
+    structured output, effort alone included, while Claude Code streams every request
+    with ``output_config.effort``. Dropping a config that sets no format lets the call
+    run without the effort; one with a format still reaches any-llm, which refuses it.
+    A call bound for a Responses API keeps it, since that bridge applies the effort.
+    """
+    output_format = kwargs.get("output_format")
+    provider = _provider_of(kwargs)
+    if not isinstance(output_format, dict) or provider is None:
+        return kwargs
+    if isinstance(kwargs.get(RESPONSES_INSTANCE_FIELD), str) and serves_responses_natively(provider):
+        return kwargs
+    try:
+        if normalize_output_config(output_format).get("format") is not None:
+            return kwargs
+        provider_class = AnyLLM.get_provider_class(LLMProvider(provider))
+    except (InvalidRequestError, ValueError, ImportError):
+        return kwargs
+    if getattr(provider_class, "SUPPORTS_MESSAGES_STRUCTURED_OUTPUT_STREAMING", False):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key != "output_format"}
 
 
 def _as_dict(value: Any) -> Any:

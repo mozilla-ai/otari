@@ -472,7 +472,10 @@ SDK's default outside a policy that can fall over.
 ### Messages through the Responses API
 
 A request to `/v1/messages` for a model with no Anthropic Messages API of its
-own is served as a chat completion by default. An OpenAI instance (or any
+own is served as a chat completion by default. A chat completion has no effort
+setting, so `output_config.effort` is not applied there, and a streamed request
+whose `output_config` sets only an effort (as Claude Code's do) is served
+without it rather than refused. An OpenAI instance (or any
 instance whose provider has a Responses API, such as Azure OpenAI) can serve it
 through the Responses API instead:
 

@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from any_llm import AnyLLM, amessages
 
-from gateway.api.routes.messages import _serves_messages_natively, _split_client_betas, _with_upstream_user
+from gateway.api.routes.messages import _ADAPTER, _serves_messages_natively, _split_client_betas, _with_upstream_user
 from gateway.services.inference import UPSTREAM_USER_FIELD
 from gateway.services.mcp_loop_messages import MCP_CLIENT_BETA
 
@@ -151,6 +151,14 @@ class _BedrockRuntime:
         self.calls["converse"] = kwargs
         raise _Stop
 
+    def invoke_model_with_response_stream(self, **kwargs: Any) -> None:
+        self.calls["invoke_model"] = kwargs
+        raise _Stop
+
+    def converse_stream(self, **kwargs: Any) -> None:
+        self.calls["converse"] = kwargs
+        raise _Stop
+
 
 async def _dispatch_to_bedrock(model: str, betas: list[str] | None = None, **extra: Any) -> dict[str, dict[str, Any]]:
     """Send a Messages request with betas and an end-user identifier through any-llm's Bedrock provider."""
@@ -209,6 +217,29 @@ async def test_bedrock_claude_with_structured_output_reaches_converse_with_reque
     request = calls["converse"]
     assert request["requestMetadata"] == {"otari_user": "id"}
     assert "anthropic_beta" not in json.dumps(request)
+
+
+@pytest.mark.asyncio
+async def test_bedrock_claude_streamed_with_effort_alone_reaches_invoke_model_with_its_identifier() -> None:
+    client = _BedrockRuntime()
+    kwargs = {
+        "model": BEDROCK_CLAUDE_PROFILE,
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+        "betas": [THINKING_BETA],
+        "output_format": {"effort": "low"},
+        UPSTREAM_USER_FIELD: "id",
+        "client_args": {"client": client, "region_name": "us-east-1"},
+    }
+    with pytest.raises(_Stop):
+        async for _ in await _ADAPTER.open_provider_stream(kwargs):
+            pass
+
+    body = json.loads(client.calls["invoke_model"]["body"])
+    assert body["anthropic_beta"] == [THINKING_BETA]
+    assert body["metadata"] == {"user_id": "id"}
+    assert "output_config" not in body
 
 
 CONTEXT_MANAGEMENT = {"edits": [{"type": "clear_tool_uses_20250919"}]}

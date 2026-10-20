@@ -99,6 +99,7 @@ from gateway.services.inference import (
     usage_unreported,
     with_responses_instance,
     with_upstream_user,
+    without_unstreamable_effort,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
@@ -770,7 +771,7 @@ class _MessagesAdapter:
         return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
-        provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
+        provider_kwargs, _ = _split_client_betas(_with_upstream_user(without_unstreamable_effort(kwargs)))
         return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     def prepare_stream_kwargs(
@@ -823,7 +824,7 @@ class _MessagesAdapter:
         use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
-        provider_kwargs, emit_native_mcp = _split_client_betas(_with_upstream_user(kwargs))
+        provider_kwargs, emit_native_mcp = _split_client_betas(_with_upstream_user(without_unstreamable_effort(kwargs)))
         extra: dict[str, Any] = {}
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
