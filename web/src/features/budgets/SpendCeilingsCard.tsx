@@ -216,7 +216,7 @@ export function SpendCeilingsCard({
             isLoading={ceilings.isPending && !ceilings.data}
             emptyContent="Nothing is capped yet. Add a ceiling to hold an organization or a workspace to a budget."
           />
-          <div className="px-4 pb-3">
+          <div className="px-4 [&:has(.otari-pagination)]:pb-3">
             <TablePagination
               page={page}
               pageSize={pageSize}

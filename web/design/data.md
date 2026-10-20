@@ -156,7 +156,10 @@ non-counting endpoint says there is more.
 `TablePagination` carries the range, the page size and two bare arrows. Page sizes
 are `PAGE_SIZE_OPTIONS` (15, 30, 45, 60); do not invent a fifth, and read a size
 from a URL through `snapPageSize`. A page past the end moves to the last page
-that holds rows once the total is known. There is no rule
+that holds rows once the total is known. The controls hide while every row fits
+one page at the smallest size and nothing promises more, so a short table has
+no pager to explain; the range stays as an unseen live region, which is what a
+screen reader hears a result count from. There is no rule
 under it, because the page ends there.
 
 Known cost, accepted: with the boxes gone, "which arrow can I press" rests on

@@ -115,6 +115,31 @@ export function TablePagination({
     setPageText(String(page + 1))
   }
 
+  // Nothing to page: the page in hand is every row, at the smallest size, and
+  // nothing promises more, so neither the arrows nor the size picker could
+  // change what is on screen. A known total counts only when the page agrees
+  // with it, since a count read separately can trail the rows. An unknown
+  // total is read from the page: a short first page with no promise of more
+  // is the same answer, which also keeps a first load or a refiltered count
+  // from showing a pager only to take it away again.
+  const smallest = Math.min(...pageSizeOptions)
+  const known =
+    total != null &&
+    total <= smallest &&
+    rowsOnPage <= total &&
+    !hasNextFallback
+  const unknownButShort =
+    total == null && !hasNextFallback && rowsOnPage < smallest
+  if (page === 0 && (known || unknownButShort)) {
+    // The controls go and the range stays, unseen: it is the live region a
+    // screen reader hears a search or a filter's result count from.
+    return (
+      <span role="status" aria-live="polite" className="sr-only">
+        {summary}
+      </span>
+    )
+  }
+
   const commitPage = () => {
     const parsed = Number.parseInt(pageText, 10)
     if (Number.isNaN(parsed)) {

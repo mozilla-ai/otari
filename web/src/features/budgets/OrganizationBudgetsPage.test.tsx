@@ -462,6 +462,7 @@ describe("OrganizationBudgetsPage", () => {
     renderPage()
 
     await screen.findByRole("grid", { name: "Organization spend ceilings" })
+    // The pager waits for the count, so a short list never flashes one.
     await user.click(
       await screen.findByRole("button", { name: "Next page, spend ceilings" }),
     )
@@ -498,6 +499,7 @@ describe("OrganizationBudgetsPage", () => {
     const { switchTo } = renderPage()
 
     await screen.findByRole("grid", { name: "Organization spend ceilings" })
+    // The pager waits for the count, so a short list never flashes one.
     await user.click(
       await screen.findByRole("button", { name: "Next page, spend ceilings" }),
     )

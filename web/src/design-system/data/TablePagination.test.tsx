@@ -141,4 +141,47 @@ describe("TablePagination", () => {
     expect(snapPageSize(-5)).toBe(15)
     expect(snapPageSize(Number.NaN)).toBe(15)
   })
+
+  it("keeps only the unseen range when every row fits one page at the smallest size", () => {
+    setup({ total: 15, rowsOnPage: 15, pageSize: 15 })
+    expect(screen.getByRole("status")).toHaveTextContent("1–15 of 15")
+    expect(screen.getByRole("status")).toHaveClass("sr-only")
+    expect(
+      screen.queryByRole("button", { name: "Next page" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps the controls once there is a second page at the smallest size", () => {
+    // Read against the smallest size, not the current one: at 60 a 16-row
+    // table is one page, and hiding the pager there would leave no way back.
+    setup({ total: 16, rowsOnPage: 16, pageSize: 60 })
+    expect(
+      screen.getByRole("button", { name: "Next page" }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the controls when the rows outrun a count read separately", () => {
+    // A count of 12 against 15 rows that promise more: sessions landed between
+    // the two reads.
+    setup({ total: 12, rowsOnPage: 15, pageSize: 15, hasNextFallback: true })
+    expect(
+      screen.getByRole("button", { name: "Next page" }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the controls with an unknown total and a page that promises more", () => {
+    setup({ total: null, rowsOnPage: 15, pageSize: 15, hasNextFallback: true })
+    expect(
+      screen.getByRole("button", { name: "Next page" }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps only the unseen range with an unknown total and a short first page", () => {
+    // A first load, or a count still in flight: controls shown and then taken
+    // away once the count lands would be a pager that flashes.
+    setup({ total: null, rowsOnPage: 3, hasNextFallback: false })
+    expect(
+      screen.queryByRole("button", { name: "Next page" }),
+    ).not.toBeInTheDocument()
+  })
 })
