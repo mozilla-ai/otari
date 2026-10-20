@@ -217,8 +217,8 @@ interface BreakdownProps {
   // subset of what the row counted.
   onDrill?: (key: string) => void
   loading: boolean
-  /** Returns the table to its first page; the page's filters, not the rows. */
-  resetKey: unknown
+  /** Returns the table to its first page: the serialized filters, never the rows. */
+  resetKey: string
 }
 
 // One breakdown dimension. Rows are spend-ranked with an inline share-of-total
@@ -373,7 +373,7 @@ function ToolBreakdownTable({
   // Optional for the reason BreakdownTable's is.
   onDrill?: (tool: string) => void
   loading: boolean
-  resetKey: unknown
+  resetKey: string
 }) {
   const { pageRows, pagination } = useClientPagination(rows, resetKey)
   const columns: DataTableColumn<UsageSummary["by_tool"][number]>[] = [
@@ -592,6 +592,10 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
       apiKeyFilters,
     ],
   )
+
+  // What returns the tables to their first page: the filters as a string, so
+  // the reset follows what they say rather than an object's identity.
+  const filtersKey = JSON.stringify(filters)
 
   // The immediately-preceding window of equal length, for period-over-period
   // deltas. Every preset is bounded, so a comparison always exists.
@@ -1548,7 +1552,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
               </div>
               <BreakdownTable
                 key={primaryDim}
-                resetKey={filters}
+                resetKey={filtersKey}
                 dimensionLabel={activePrimary.label}
                 rows={activePrimary.rows}
                 totalCost={totals?.cost ?? 0}
@@ -1582,7 +1586,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
               </div>
               <BreakdownTable
                 key={secondaryDim}
-                resetKey={filters}
+                resetKey={filtersKey}
                 dimensionLabel={activeSecondary.label}
                 rows={activeSecondary.rows}
                 totalCost={totals?.cost ?? 0}
@@ -1617,7 +1621,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 </p>
               </div>
               <ToolBreakdownTable
-                resetKey={filters}
+                resetKey={filtersKey}
                 rows={toolRows}
                 totalCost={totals?.cost ?? 0}
                 onDrill={orgWide ? undefined : (tool) => drillTo({ tool })}
