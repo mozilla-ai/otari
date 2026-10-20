@@ -419,6 +419,49 @@ def test_two_keys_of_one_owner_count_their_own_budgets(client: TestClient, maste
     assert _chat(client, guest, "guest2:ai-guest").status_code == 403
 
 
+def test_moving_an_end_user_onto_a_capped_keys_budget_takes_a_place(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """An end user another key of the owner started counts once it is moved onto this key's budgets."""
+    _budgets(client, master_key_header)
+    other = _key(
+        client,
+        master_key_header,
+        "mlpa",
+        is_service_key=True,
+        end_user_budget_ids=["eu-ai"],
+        end_user_budget_id="eu-ai",
+    )
+    capped = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "mlpa-guest",
+            "user_id": "mlpa",
+            "is_service_key": True,
+            "end_user_budget_ids": ["eu-memories", "eu-other"],
+            "end_user_budget_id": "eu-memories",
+            "max_end_users": 1,
+        },
+        headers=master_key_header,
+    ).json()
+    guest = {API_KEY_HEADER: f"Bearer {capped['key']}"}
+    for external_id in ("a", "b"):
+        assert client.put(f"{END_USERS}/{external_id}", json={"budget_id": "eu-ai"}, headers=other).status_code == 201
+
+    moved = client.put(f"{END_USERS}/a", json={"budget_id": "eu-memories"}, headers=guest)
+    by_put = client.put(f"{END_USERS}/b", json={"budget_id": "eu-memories"}, headers=guest)
+    by_patch = client.patch(f"{END_USERS}/b", json={"budget_id": "eu-memories"}, headers=guest)
+    within = client.patch(f"{END_USERS}/a", json={"budget_id": "eu-other"}, headers=guest)
+
+    assert moved.status_code == 200, moved.text
+    assert by_put.status_code == 403
+    assert by_put.json()["code"] == "end_user_limit_reached"
+    assert by_patch.status_code == 403
+    assert by_patch.json()["code"] == "end_user_limit_reached"
+    # A move between the key's own budgets takes no new place.
+    assert within.status_code == 200, within.text
+
+
 def test_the_cap_is_read_and_changed_through_the_keys_api(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

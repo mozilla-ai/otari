@@ -97,6 +97,8 @@ class _EndUsers:
         user = await self._repositories.end_users.find(owner_user_id, external_id)
         if user is None or user.deleted_at is not None:
             user = await self._admitted(api_key, owner_user_id, external_id, user)
+        elif user.budget_id != budget.budget_id:
+            await self._admit_move(api_key, owner_user_id, user)
         if user is None:
             user = _new_end_user(owner_user_id, external_id, budget)
             if await self._repositories.end_users.add(user):
@@ -115,6 +117,7 @@ class _EndUsers:
         if budget_id is not None:
             budget = await self._listed_budget(api_key, budget_id)
             if user.budget_id != budget.budget_id:
+                await self._admit_move(api_key, str(api_key.user_id), user)
                 _put_on_budget(user, budget)
         if blocked is not None:
             user.blocked = blocked
@@ -190,10 +193,26 @@ class _EndUsers:
         found = await self._repositories.end_users.find(owner_user_id, external_id)
         if found is not None and found.deleted_at is None:
             return found
-        budgets = api_key.assignable_end_user_budgets() or None
-        if await self._repositories.end_users.count_live_on_budgets(owner_user_id, budgets) >= api_key.max_end_users:
-            raise EndUserLimitReachedError()
+        await self._refuse_when_full(api_key, owner_user_id, api_key.max_end_users)
         return found
+
+    async def _admit_move(self, api_key: APIKey, owner_user_id: str, user: User) -> None:
+        """Refuse moving a live end user onto the key's budgets from outside them when the key is full.
+
+        Such a move adds to the key's count as a new end user does, typically one
+        another key of the same owner started. A move between the key's own
+        budgets, or for a key that counts every budget, adds nothing.
+        """
+        counted = api_key.assignable_end_user_budgets()
+        if api_key.max_end_users is None or not counted or user.budget_id in counted:
+            return
+        await self._repositories.end_users.lock_owner(owner_user_id)
+        await self._refuse_when_full(api_key, owner_user_id, api_key.max_end_users)
+
+    async def _refuse_when_full(self, api_key: APIKey, owner_user_id: str, max_end_users: int) -> None:
+        budgets = api_key.assignable_end_user_budgets() or None
+        if await self._repositories.end_users.count_live_on_budgets(owner_user_id, budgets) >= max_end_users:
+            raise EndUserLimitReachedError()
 
     async def _available_owner(self, api_key: APIKey) -> str:
         """The key's user, refused when it is blocked or deleted, since its end users bill through it."""

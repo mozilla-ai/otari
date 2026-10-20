@@ -252,7 +252,8 @@ assign (its `end_user_budget_ids`, or its default alone), or every end user of
 that user when the key assigns none. So two service keys of one user, each with
 budgets of its own, such as one for signed-in users and one for guests, keep
 separate caps. An end user moved to a budget outside the key's list stops
-counting toward it.
+counting toward it, and moving one onto the list from outside takes a place, so
+that move is refused with `end_user_limit_reached` when the key is full.
 
 Replicas admitting end users at once cannot exceed the cap: each new end user
 is counted and created while the key's user is locked. Requests from end users
