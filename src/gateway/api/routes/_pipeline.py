@@ -115,7 +115,11 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
-from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
+from gateway.api.routes._tools import (
+    _build_web_retrieval_backend,
+    _resolve_sandbox_purpose_hint,
+    _resolve_web_search_purpose_hint,
+)
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
@@ -153,6 +157,7 @@ from gateway.core.metered_pricing import (
     quantize_cost,
 )
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.core.settings.tools import effective_web_search_max_calls
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -176,8 +181,11 @@ from gateway.exceptions.tools_exceptions import (
     McpServerConfigurationError,
     McpServerDeclarationError,
     McpServerResolutionFailedError,
+    SearchToolMisconfiguredError,
     WebAccessRefusedError,
+    WebSearchCredentialRefusedError,
     WebSearchInterceptedError,
+    WebSearchOptionRefusedError,
     WebSearchPolicyResolutionFailedError,
     WebSearchPolicyResolutionFailure,
     WebToolDeclarationError,
@@ -352,11 +360,16 @@ from gateway.services.tools import (
     DeclaredCodeExecution,
     DeclaredWebTools,
     Dialect,
+    InLoopSearch,
     ProviderToolDeclaration,
     ToolUseBudget,
     WebClaims,
+    WebFetchBackend,
+    WebSearchBackend,
+    WebToolCallCap,
     admit_mcp_servers,
     admit_web_access,
+    build_web_search_backends,
     decide_candidate_tools,
     declare_code_execution,
     declares_code_execution,
@@ -3269,6 +3282,7 @@ class ToolContext:
         web_search_url: str | None,
         web_search_auth_token: str | None,
         web_search_credential: WebSearchCredential | None = None,
+        web_search: InLoopSearch | None = None,
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
@@ -3319,6 +3333,9 @@ class ToolContext:
         self.web_search_auth_token = web_search_auth_token
         # The workspace's own search key, which its searches use in place of the deployment's.
         self.web_search_credential = web_search_credential
+        # What the request's searches run on through the libraries, resolved at admission;
+        # None where the old backend serves them.
+        self.web_search = web_search
         self.use_web_fetch = use_web_fetch
         self.web_fetch_tool_entry = web_fetch_tool_entry
         self.web_fetch_policy = web_fetch_policy or DomainPolicy()
@@ -3338,14 +3355,19 @@ class ToolContext:
         # other attempts spend, where they are dispatched with tools of their own.
         if shared is None:
             caps = _tool_use_caps(self.web_search_tool_entry, self.web_fetch_tool_entry)
-            shared = SharedToolUse(use_budget=ToolUseBudget(caps) if caps else None)
+            shared = SharedToolUse(
+                use_budget=ToolUseBudget(caps) if caps else None,
+                web_call_cap=WebToolCallCap(effective_web_search_max_calls(config)),
+            )
         self.tally: ToolUsageTally = shared.tally
         # The request's trace, handed to each backend beside the tally for the same reasons.
         self.trace = trace
         # Successful calls spend the caller's caps across all routing attempts.
         self.use_budget: ToolUseBudget | None = shared.use_budget
-        # Search and Fetch share a separate attempted-call cap across routing attempts.
+        # On the old backend, Search and Fetch share a fixed attempted-call cap across routing attempts.
         self.web_retrieval_counter: WebRetrievalCounter = shared.web_retrieval_counter
+        # On the libraries, they share the deployment's ``web_search_max_calls`` across routing attempts.
+        self.web_call_cap: WebToolCallCap = shared.web_call_cap
         # Each candidate's tools by its provider and model, where the request's candidates are not all dispatched alike.
         self.candidate_variants: dict[tuple[str | None, str | None], CandidateVariant] = {}
         # The built-in tool names no MCP server may expose: those any attempt of the request runs here.
@@ -3509,6 +3531,29 @@ class ToolContext:
     def use_tool_loop(self) -> bool:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search or self.use_web_fetch
 
+    def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
+        """Build the request's web tool backends: on the libraries where its search runs on one, else the old backend.
+
+        On the libraries, the search and fetch backends are two members of the
+        request's pool, sharing its call allowance. A request that declared only
+        the fetch tool keeps the old backend, which delegates its fetches.
+        """
+        if self.web_search is None:
+            return [self.build_web_retrieval_backend()]
+        search_tool_entry = self.web_search_tool_entry or {}
+        return build_web_search_backends(
+            self.config,
+            self.web_search,
+            search_tool_entry=search_tool_entry,
+            fetch_declared=self.use_web_fetch,
+            fetch_policy=self.web_fetch_policy,
+            cap=self.web_call_cap,
+            purpose_hint=_resolve_web_search_purpose_hint(search_tool_entry, self.config),
+            web_provider_client=self.web_provider_client,
+            tally=self.tally,
+            trace=self.trace,
+        )
+
     def build_web_retrieval_backend(self) -> WebRetrievalBackend:
         """Build the request's shared Search and Fetch backend."""
         return _build_web_retrieval_backend(
@@ -3533,6 +3578,8 @@ class SharedToolUse:
     tally: ToolUsageTally = field(default_factory=ToolUsageTally)
     use_budget: ToolUseBudget | None = None
     web_retrieval_counter: WebRetrievalCounter = field(default_factory=WebRetrievalCounter)
+    # Sized by the deployment's ``web_search_max_calls`` when the request is admitted.
+    web_call_cap: WebToolCallCap = field(kw_only=True)
 
 
 def _tool_use_caps(search_entry: dict[str, Any] | None, fetch_entry: dict[str, Any] | None) -> dict[str, int]:
@@ -3866,7 +3913,10 @@ async def prepare_gateway_tools(
     caps: dict[str, int] = {}
     for answer in admitted.values():
         caps |= _tool_use_caps(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
-    shared = SharedToolUse(use_budget=ToolUseBudget(caps) if caps else None)
+    shared = SharedToolUse(
+        use_budget=ToolUseBudget(caps) if caps else None,
+        web_call_cap=WebToolCallCap(effective_web_search_max_calls(ctx.config)),
+    )
 
     def _tool_context(answer: _AdmittedTools) -> ToolContext:
         code, web, web_access = answer.code, answer.web, answer.web_access
@@ -3887,6 +3937,7 @@ async def prepare_gateway_tools(
             web_search_url=web_access.search_url,
             web_search_auth_token=web_access.search_auth_token,
             web_search_credential=web_access.search_credential,
+            web_search=web_access.in_loop_search,
             use_web_fetch=web.fetch_tool_entry is not None,
             web_fetch_tool_entry=web.fetch_tool_entry,
             web_fetch_policy=web_access.fetch_policy,
@@ -4208,6 +4259,7 @@ class _AdmittedWebAccess:
     search_tool_entry: dict[str, Any] | None
     search_url: str | None
     search_credential: WebSearchCredential | None = None
+    in_loop_search: InLoopSearch | None = None
 
 
 async def _admit_web_access(
@@ -4242,12 +4294,15 @@ async def _admit_web_access(
         raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
         raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
+    except (WebSearchOptionRefusedError, WebSearchCredentialRefusedError, SearchToolMisconfiguredError) as exc:
+        raise domain_error(adapter, exc) from exc
     return _AdmittedWebAccess(
         fetch_policy=grant.fetch_policy,
         search_auth_token=search_auth_token,
         search_tool_entry=grant.search_tool_entry,
         search_url=search_url,
         search_credential=grant.search_credential,
+        in_loop_search=grant.in_loop_search,
     )
 
 
@@ -5212,7 +5267,7 @@ async def _open_tool_backends(
             raise domain_error(adapter, exc) from exc
     backends: list[ToolBackend] = []
     if tool_ctx.use_web_search or tool_ctx.use_web_fetch:
-        backends.append(await stack.enter_async_context(tool_ctx.build_web_retrieval_backend()))
+        backends.extend([await stack.enter_async_context(backend) for backend in tool_ctx.build_web_backends()])
     sandbox: SandboxBackend | None = None
     if tool_ctx.use_sandbox:
         sandbox = await stack.enter_async_context(tool_ctx.build_sandbox_backend())

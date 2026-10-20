@@ -1,6 +1,7 @@
 """Per-request accounting for tools the gateway runs itself.
 
-A gateway-run tool call (``otari_web_search`` → :class:`~gateway.services.web_search_backend.WebSearchBackend`,
+A gateway-run tool call (``otari_web_search`` → the tools domain's ``WebSearchBackend``, or the older
+:class:`~gateway.services.web_retrieval_backend.WebRetrievalBackend`,
 ``otari_code_execution`` → :class:`~gateway.services.sandbox_backend.SandboxBackend`,
 or any MCP tool) costs the operator real money at a search provider, a sandbox,
 or an MCP server, and until now none of it was recorded: the request's usage row
@@ -19,10 +20,11 @@ the stream is exhausted, and ``streaming_generator`` only awaits ``on_complete``
 afterwards. A tally stashed on the backend would be read after teardown.
 
 Billable vs failed is decided on the ``[tool error]`` sentinel rather than on an
-exception, because the backends disagree about which they use: ``MCPClientPool``
-and ``SandboxBackend`` return the sentinel as a normal value, ``WebSearchBackend``
-returns it for an empty query but raises ``WebSearchNotReachableError`` when the
-backend is unreachable. A failed call is counted and never billed.
+exception, because the backends disagree about which they use: ``MCPClientPool``,
+``SandboxBackend`` and the web search and fetch backends on the libraries return the
+sentinel as a normal value, while the older ``WebRetrievalBackend`` returns it for an
+empty query but raises ``WebSearchNotReachableError`` when its search backend is
+unreachable. A failed call is counted and never billed.
 """
 
 from __future__ import annotations

@@ -16,7 +16,16 @@ from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes.messages import _strip_gateway_minted_blocks
 from gateway.core.config import GatewayConfig
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
-from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX
+from gateway.services.tools import (
+    SERVER_TOOL_USE_ID_PREFIX,
+    WEB_SEARCH_TOOL_NAME,
+    Dialect,
+    NativeCall,
+    WebSearchBackend,
+    WebToolCallCap,
+    native_rendering,
+    resolve_in_loop_search,
+)
 
 
 def test_strips_the_minted_pair_but_keeps_the_text() -> None:
@@ -127,6 +136,36 @@ def test_gate_is_off_when_opted_in_without_a_backend(monkeypatch: pytest.MonkeyP
     config = GatewayConfig(web_search_intercept=True)
     assert config.web_search_url is None
     assert _tool_ctx(config).intercepts_web_search is False
+
+
+def test_gate_is_on_when_opted_in_with_a_search_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployment whose only search is one instance can intercept to it."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    instance = {"exa": {"provider": "fake"}}
+    assert _tool_ctx(GatewayConfig(web_search_intercept=True, search_tools=instance)).intercepts_web_search is True
+    turned_off = GatewayConfig(web_search_intercept=True, search_tools=instance, web_search_default_tool="none")
+    assert _tool_ctx(turned_off).intercepts_web_search is False
+
+
+@pytest.mark.asyncio
+async def test_a_pair_minted_from_a_library_search_is_stripped() -> None:
+    """The search backend on any-search keeps the hits the Messages rendering mints its pair from, under its prefix."""
+    config = GatewayConfig(search_tools={"exa": {"provider": "fake"}}, web_search_extract=False)
+    search = resolve_in_loop_search(config, None)
+    assert search is not None
+    call = NativeCall(WEB_SEARCH_TOOL_NAME, "toolu_1", {"query": "python"})
+    async with WebSearchBackend(search, cap=WebToolCallCap(10), max_results=5) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, dict(call.arguments))
+        rendering = native_rendering(WEB_SEARCH_TOOL_NAME, Dialect.MESSAGES)
+        assert rendering is not None
+        pair = [block.model_dump(exclude_none=True) for block in rendering.ran(call, backend)]
+    messages: list[dict[str, Any]] = [
+        {"role": "assistant", "content": [*pair, {"type": "text", "text": "Python 3.14."}]},
+    ]
+
+    assert pair[0]["id"].startswith(SERVER_TOOL_USE_ID_PREFIX)
+    assert _strip_gateway_minted_blocks(messages)[0]["content"] == [{"type": "text", "text": "Python 3.14."}]
 
 
 # --- provenance: only our own blocks are stripped -----------------------------

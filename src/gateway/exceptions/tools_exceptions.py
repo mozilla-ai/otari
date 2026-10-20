@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from fastapi import status
 
+from gateway.core.error_codes import PRICING_REQUIRED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -399,6 +400,17 @@ class DirectSearchFailedError(TenancyError):
         super().__init__(message)
         self.headers = headers
         self.upstream_status = upstream_status
+
+
+class DirectSearchPricingRequiredError(TenancyError):
+    """A direct search refused because ``require_pricing`` is on and no pricing row prices it.
+
+    ``message`` names the row to add; the route returns it to the caller and
+    writes it on the usage row.
+    """
+
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+    error_code: str = PRICING_REQUIRED
 
 
 class WebSearchOptionRefusedError(TenancyValidationError):
