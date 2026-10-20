@@ -63,11 +63,15 @@ Adding a provider offers every model its key lists. A model the deployment
 price list already prices is switched on at that rate. Otherwise, where
 `default_pricing` is on, the model is seeded with its models.dev rate and
 switched on; where it is off, or models.dev does not price the model, the model
-is offered switched off until the operator prices it. Refreshing a provider's
-models moves a seeded rate nobody has changed to the current default, and
-leaves a rate the operator set alone. The API never returns a hosted provider's
-key, only its last four characters, and it masks credentials in `client_args`
-and in the base URL.
+is offered switched off until it is priced, by the operator or by a later
+refresh once models.dev prices it. Refreshing a provider's models moves a
+seeded rate nobody has changed to the current default, leaves a rate the
+operator set alone, and never switches on a model the operator switched off.
+A model switched on without a price on purpose stays on through a refresh: one
+a moved or copied provider lists, one an operator switched on while nothing
+priced it, and every model of a provider that serves models not on its list.
+The API never returns a hosted provider's key, only its last four characters,
+and it masks credentials in `client_args` and in the base URL.
 
 ## Organizations and workspaces
 
