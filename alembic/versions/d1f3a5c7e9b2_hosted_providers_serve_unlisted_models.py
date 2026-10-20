@@ -1,9 +1,7 @@
 """Let a hosted provider serve a model its roster does not list.
 
-A deployment provider stored through the dashboard served any model a request
-named, as a ``config.yml`` instance does. ``serves_unlisted_models`` gives a
-hosted provider the same reach, so one moved from there keeps serving what it
-served; a model its roster lists but switches off is still refused.
+``serves_unlisted_models`` serves any model a request names, as a
+``config.yml`` instance does; a model the roster switches off is still refused.
 
 Revision ID: d1f3a5c7e9b2
 Revises: c4e6a8b0d2f4
