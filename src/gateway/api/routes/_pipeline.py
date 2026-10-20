@@ -1465,7 +1465,7 @@ def _server_timing(ctx: RequestContext) -> dict[str, str]:
     now = time.monotonic()
     metrics = (
         ("otari", ctx.dispatched_at - ctx.started_at, "Otari before the provider"),
-        ("upstream", now - ctx.dispatched_at, "Provider, to its answer or first chunk"),
+        ("upstream", now - ctx.dispatched_at, "Provider until its answer or first chunk"),
         ("total", now - ctx.started_at, "Otari and the provider"),
     )
     return {
