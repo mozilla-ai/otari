@@ -9,7 +9,7 @@ existing row is a ``model`` one: a tool rate written under ``<provider>:<instanc
 keeps its key and is still read, as a deprecated form, until a later release.
 
 Revision ID: d8b2f6a4c0e9
-Revises: e3a5c7f9b1d4
+Revises: c0e83c6fe801
 Create Date: 2026-10-19
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d8b2f6a4c0e9"
-down_revision: str | Sequence[str] | None = "e3a5c7f9b1d4"
+down_revision: str | Sequence[str] | None = "c0e83c6fe801"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

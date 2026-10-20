@@ -18,7 +18,7 @@ from sqlalchemy import Engine, create_engine, inspect, text
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "d8b2f6a4c0e9"
-_BEFORE = "e3a5c7f9b1d4"
+_BEFORE = "c0e83c6fe801"
 _AT = "2026-05-20 00:00:00.000000"
 
 
