@@ -1,16 +1,21 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from decimal import Decimal
 from typing import Never
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
-from gateway.models.budgets import Budget, BudgetResetLog
+from gateway.models.budgets import BUDGET_ORIGIN_CONFIG, Budget, BudgetResetLog
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
+
+
+def _in_reach_of(organization_id: uuid.UUID) -> ColumnElement[bool]:
+    """Match a budget the deployment owns, or one this organization owns."""
+    return or_(Budget.organization_id.is_(None), Budget.organization_id == organization_id)
 
 
 class BudgetRepository(BaseRepository[Budget, Never, Never]):
@@ -84,6 +89,24 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         )
         return result.scalar_one_or_none()
 
+    async def get_in_reach_of(self, budget_id: str, organization_id: uuid.UUID) -> Budget | None:
+        """Return the budget with this ID when the deployment or this organization owns it, otherwise None."""
+        result = await self.db.execute(
+            select(Budget).where(Budget.budget_id == budget_id, _in_reach_of(organization_id))
+        )
+        return result.scalar_one_or_none()
+
+    async def list_in_reach_of(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
+        """Return a page of the budgets the deployment owns and this organization owns, oldest first."""
+        result = await self.db.execute(
+            select(Budget)
+            .where(_in_reach_of(organization_id))
+            .order_by(Budget.created_at, Budget.budget_id)
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def get_many(self, budget_ids: Sequence[str]) -> dict[str, Budget]:
         """Return the budgets with these IDs, keyed on ID, omitting an ID that names none."""
         result = await self.db.execute(select(Budget).where(Budget.budget_id.in_(budget_ids)))
@@ -121,3 +144,38 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
             await self.db.flush()
         except IntegrityError:
             raise BudgetStillReferencedError(budget_id) from None
+
+    async def set_declared_digest(self, budget_id: str, digest: str) -> None:
+        """Record the digest of the config.yml entry just written over this budget."""
+        await self.db.execute(
+            update(Budget)
+            .where(Budget.budget_id == budget_id)
+            .values(declared_digest=digest)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def mark_declared(self, budget_ids: Collection[str]) -> None:
+        """Mark these budgets as declared in config.yml, and clear the mark from every other budget.
+
+        A budget losing the mark loses its digest too, so declaring it again writes
+        the entry back over whatever the API did to it meanwhile.
+
+        Only rows whose mark changes are written, so a restart with nothing changed locks none.
+        """
+        declared = list(budget_ids)
+        if declared:
+            await self.db.execute(
+                update(Budget)
+                .where(
+                    Budget.budget_id.in_(declared),
+                    or_(Budget.origin.is_(None), Budget.origin != BUDGET_ORIGIN_CONFIG),
+                )
+                .values(origin=BUDGET_ORIGIN_CONFIG)
+                .execution_options(synchronize_session=False)
+            )
+        await self.db.execute(
+            update(Budget)
+            .where(Budget.origin == BUDGET_ORIGIN_CONFIG, Budget.budget_id.not_in(declared))
+            .values(origin=None, declared_digest=None)
+            .execution_options(synchronize_session=False)
+        )

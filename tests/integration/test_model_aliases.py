@@ -10,6 +10,8 @@ from collections.abc import AsyncIterator, Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
+import openai
 import pytest
 from any_llm.types.completion import (
     ChatCompletion,
@@ -23,6 +25,8 @@ from any_llm.types.completion import (
     Embedding,
     Usage,
 )
+from any_llm.types.rerank import RerankResponse, RerankResult
+from any_llm.utils.exception_handler import convert_exception
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
@@ -70,7 +74,7 @@ def client(alias_config: GatewayConfig) -> Generator[TestClient]:
 
 @pytest.fixture
 def default_priced_client(alias_config: GatewayConfig) -> Generator[TestClient]:
-    """A gateway that meters unpriced models off the genai-prices fallback."""
+    """A gateway that meters unpriced models off the models.dev fallback."""
     yield from build_test_client(alias_config.model_copy(update={"default_pricing": True}))
 
 
@@ -202,7 +206,6 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
         "output_price_per_million": 2.0,
         "cache_read_price_per_million": None,
         "cache_write_price_per_million": None,
-        "cache_write_1h_price_per_million": None,
         "pricing_tiers": [],
         "unit": "tokens",
     }
@@ -519,6 +522,27 @@ async def test_embeddings_response_model_echoes_alias(client: TestClient) -> Non
 
 
 @pytest.mark.asyncio
+async def test_rerank_response_model_echoes_alias(client: TestClient) -> None:
+    _create_user(client)
+
+    mock_response = RerankResponse(
+        id="rerank-alias",
+        model="claude-opus-4",  # what the provider returns
+        results=[RerankResult(index=0, relevance_score=0.9)],
+    )
+
+    with patch("gateway.api.routes.rerank.arerank", new_callable=AsyncMock, return_value=mock_response):
+        resp = client.post(
+            f"{API_ROOT}/rerank",
+            json={"model": "myopusmodel", "query": "q", "documents": ["a"], "user": "test-user"},
+            headers=HEADERS,
+        )
+    assert resp.status_code == 200
+    # The caller sees the alias they sent, not the underlying model name.
+    assert resp.json()["model"] == "myopusmodel"
+
+
+@pytest.mark.asyncio
 async def test_moderations_response_model_echoes_alias(client: TestClient) -> None:
     _create_user(client)
 
@@ -543,3 +567,30 @@ async def test_moderations_response_model_echoes_alias(client: TestClient) -> No
     assert resp.status_code == 200
     # The caller sees the alias they sent, not the underlying model name.
     assert resp.json()["model"] == "myopusmodel"
+
+
+def test_embeddings_error_detail_names_the_alias_not_its_target(client: TestClient) -> None:
+    """A provider's refusal is passed through, but not the target it names."""
+    _create_user(client)
+    request = httpx.Request("POST", "https://box.ts.net/v1/embeddings")
+    upstream = openai.NotFoundError(
+        "Error code: 404 - The model `qwen3` does not exist or you do not have access to it.",
+        response=httpx.Response(404, request=request),
+        body={"message": "The model `qwen3` does not exist or you do not have access to it."},
+    )
+
+    with patch(
+        "gateway.api.routes.embeddings.aembedding",
+        new_callable=AsyncMock,
+        side_effect=convert_exception(upstream, "openai"),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "housemodel", "input": "hello", "user": "test-user"},
+            headers=HEADERS,
+        )
+    assert resp.status_code == 404
+    detail = resp.json()["detail"]
+    assert "qwen3" not in detail
+    assert "home_lab" not in detail
+    assert "`housemodel` does not exist" in detail

@@ -11,7 +11,7 @@ from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import WEB_SEARCH_PROVIDERS
+from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS
 from gateway.core.unit_of_work import UnitOfWork, session_for
 from gateway.models.tools import OrgWebSearchKey, WorkspaceWebSearchKeyOverride
 from gateway.repositories.base_repository import BaseRepository

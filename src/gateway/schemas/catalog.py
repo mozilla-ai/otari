@@ -27,8 +27,9 @@ class CatalogModelSummary(BaseModel):
     selector: str | None = Field(
         default=None,
         description=(
-            "The id as a selector: send it as `model` and the model's cheapest offering the caller can reach "
-            "answers, the vendor's own provider first where it serves the model. "
+            "The id as a selector: send it as `model` and the best offering the caller can reach answers. "
+            "Priced offerings come first, and among them the organization's own key, then the vendor's own "
+            "provider, then the cheapest. "
             "Null until the gateway has indexed the catalog."
         ),
     )

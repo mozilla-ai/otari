@@ -14,7 +14,7 @@ administration is the overlay's to contribute.
 
 These rates sit *above* ``/api/v1/pricing``, which stays the deployment price list.
 A model with no override here prices exactly as it did before, and the resolution
-order (override, deployment row, genai-prices dataset) is
+order (override, deployment row, models.dev catalog) is
 `services.pricing_service.find_model_pricing`.
 """
 
@@ -24,11 +24,13 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, RequestSessionModelProviderPortDep, get_config, get_db, verify_master_key
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.models.money import as_float
 from gateway.models.pricing import OrganizationModelPricing
 
@@ -79,16 +81,17 @@ _EFFECTIVE_TO_DESCRIPTION = (
 class OrganizationModelPricingRates(BaseModel):
     """The rates and period shared by the create and update bodies."""
 
-    input_price_per_million: float = Field(ge=0, description="Price per 1M input tokens")
-    output_price_per_million: float = Field(ge=0, description="Price per 1M output tokens")
+    input_price_per_million: float = Field(
+        ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
+    )
+    output_price_per_million: float = Field(
+        ge=0, description="Price per 1M output tokens; unused by a rate in requests or images"
+    )
     cache_read_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cached-input tokens"
     )
     cache_write_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cache-write (creation) tokens"
-    )
-    cache_write_1h_price_per_million: float | None = Field(
-        default=None, ge=0, description="Price per 1M Anthropic 1-hour cache-write tokens"
     )
     pricing_tiers: list[PricingTier] | None = Field(
         default=None,
@@ -98,7 +101,11 @@ class OrganizationModelPricingRates(BaseModel):
     effective_to: datetime | None = Field(default=None, description=_EFFECTIVE_TO_DESCRIPTION)
     unit: Literal["tokens", "requests", "images"] = Field(
         default="tokens",
-        description="What the rates are per: tokens for a model, requests or images for a non-token endpoint.",
+        description=(
+            "What the rates are per: tokens for a model, requests or images for a non-token endpoint, "
+            "each priced per million. "
+            "A completion model priced per requests is charged one request per successful call."
+        ),
     )
 
     @model_validator(mode="after")
@@ -165,7 +172,6 @@ class OrganizationModelPricingPublic(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
-    cache_write_1h_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str
     effective_from: datetime
@@ -186,7 +192,6 @@ class OrganizationModelPricingPublic(BaseModel):
             output_price_per_million=float(override.output_price_per_million),
             cache_read_price_per_million=as_float(override.cache_read_price_per_million),
             cache_write_price_per_million=as_float(override.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(override.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
             unit=override.unit or "tokens",
             effective_from=override.effective_from,
@@ -212,7 +217,7 @@ class OrganizationModelPricingsPublic(BaseModel):
 def get_organization_pricing_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> OrganizationPricingService:
     """Build the pricing service on the request's session, provider map, and hosted-credential port."""
     return OrganizationPricingService(db, config, model_provider=model_provider)
@@ -233,7 +238,6 @@ def _to_input(body: OrganizationModelPricingRates) -> PricingOverrideInput:
         output_price_per_million=body.output_price_per_million,
         cache_read_price_per_million=body.cache_read_price_per_million,
         cache_write_price_per_million=body.cache_write_price_per_million,
-        cache_write_1h_price_per_million=body.cache_write_1h_price_per_million,
         pricing_tiers=[tier.model_dump(exclude_none=True) for tier in body.pricing_tiers or []],
         effective_from=body.effective_from or datetime.now(tz=UTC),
         effective_to=body.effective_to,
@@ -241,7 +245,7 @@ def _to_input(body: OrganizationModelPricingRates) -> PricingOverrideInput:
     )
 
 
-async def _commit(db: AsyncSession) -> None:
+async def _commit(db: AsyncSession, operation: str) -> None:
     """Commit the request's work, mapping a database failure to a status.
 
     The services flush rather than commit (the house contract), so the route owns
@@ -265,12 +269,9 @@ async def _commit(db: AsyncSession) -> None:
                 "Re-read the overrides and try again."
             ),
         ) from None
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error(operation, exc) from None
 
 
 @router.get("")
@@ -308,7 +309,14 @@ async def list_organization_pricing(
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_403_FORBIDDEN: {"description": "The deployment holds the credential that serves the model."},
+        status.HTTP_409_CONFLICT: {"description": "The period overlaps one already stored for the model."},
+    },
+)
 async def create_organization_pricing(
     body: OrganizationModelPricingCreate,
     identity: CurrentIdentity,
@@ -338,11 +346,18 @@ async def create_organization_pricing(
     model_key = normalize_pricing_key(config, body.model_key)
     override = await service.create_for_caller(identity, model_key, _to_input(body))
     response = OrganizationModelPricingPublic.from_model(override)
-    await _commit(db)
+    await _commit(db, "create organization pricing")
     return response
 
 
-@router.put("/{pricing_id}")
+@router.put(
+    "/{pricing_id}",
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "The deployment serves the model, or the deployment operator set the rate."
+        }
+    },
+)
 async def replace_organization_pricing(
     pricing_id: uuid.UUID,
     body: OrganizationModelPricingUpdate,
@@ -358,21 +373,30 @@ async def replace_organization_pricing(
 
     Refused with a 403 on the same deployment-supplied-model rule the create path
     carries, so a row stored before that rule existed cannot be edited into a rate
-    nobody could create today.
+    nobody could create today, and with a 403 for a rate the deployment operator
+    set, which only the operator may change.
     """
     override = await service.replace_for_caller(identity, pricing_id, _to_input(body))
     response = OrganizationModelPricingPublic.from_model(override)
-    await _commit(db)
+    await _commit(db, "replace organization pricing")
     return response
 
 
-@router.delete("/{pricing_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{pricing_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_403_FORBIDDEN: {"description": "The deployment operator set the rate."}},
+)
 async def delete_organization_pricing(
     pricing_id: uuid.UUID,
     identity: CurrentIdentity,
     service: ServiceDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Remove an override, returning the model to the deployment price list."""
+    """Remove an override, returning the model to the deployment price list.
+
+    Refused with a 403 for a rate the deployment operator set, which only the
+    operator may remove.
+    """
     await service.delete_for_caller(identity, pricing_id)
-    await _commit(db)
+    await _commit(db, "delete organization pricing")

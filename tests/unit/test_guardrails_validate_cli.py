@@ -134,6 +134,43 @@ def test_warnings_alone_exit_zero_and_strict_makes_them_non_zero(repo: Path) -> 
     assert _invoke("--strict").exit_code == 1
 
 
+def test_a_warning_is_printed_with_its_code(repo: Path) -> None:
+    """The code is what a gate names to accept the warning, so the reader must see it."""
+    _write(repo, _FOOTGUNS)
+    result = _invoke()
+    assert "warning[glob-misses-shallower-depth]: no-hand-edited-claude-md:" in result.output
+    assert "warning[shell-write-unseen]: no-hand-edited-claude-md:" in result.output
+
+
+def test_an_accepted_warning_is_printed_as_accepted_and_does_not_fail_strict(repo: Path) -> None:
+    """The issue's own case: a path gate that runs only before an edit tool, by design."""
+    _write(
+        repo,
+        _HEADER + "  - id: no-agent-edited-policy\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.edit_target]\n"
+        "    enforcement: required\n"
+        '    forbidden: [".otari/x.yml"]\n'
+        "    accept_warnings: [shell-write-unseen]\n",
+    )
+    result = _invoke("--strict")
+    assert result.exit_code == 0, result.output
+    assert "  accepted[shell-write-unseen]: no-agent-edited-policy: runs at" in result.output
+    assert "0 error(s), 0 warning(s), 1 accepted." in result.output
+
+
+def test_an_unaccepted_warning_beside_an_accepted_one_still_fails_strict(repo: Path) -> None:
+    _write(repo, _FOOTGUNS.replace("    message:", "    accept_warnings: [shell-write-unseen]\n    message:"))
+    result = _invoke("--strict")
+    assert result.exit_code == 1
+    assert "0 error(s), 1 warning(s), 1 accepted." in result.output
+
+
+def test_the_help_says_how_to_accept_a_warning() -> None:
+    result = CliRunner().invoke(hook_cli.guardrails, ["validate", "--help"])
+    assert "accept_warnings" in result.output
+
+
 def test_a_missing_verifier_script_is_an_error(repo: Path) -> None:
     _write(
         repo,
@@ -294,10 +331,10 @@ def _judge_gates(count: int) -> str:
 
 def test_the_dry_run_applies_the_same_judge_cap_the_hook_applies(repo: Path) -> None:
     """A preview promising six model calls where the hook makes five is wrong about its own point."""
-    _write(repo, _HEADER + _judge_gates(hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN + 1))
+    _write(repo, _HEADER + _judge_gates(hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES + 1))
     result = _invoke("--path", "README.md")
-    assert result.output.count("would run") == hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN
-    assert f"judge-{hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN} (judge, past the " in result.output
+    assert result.output.count("would run") == hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES
+    assert f"judge-{hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES} (judge, past the " in result.output
     assert "-gate cap for one Stop event)" in result.output
 
 
@@ -307,11 +344,21 @@ def test_the_dry_run_cap_counts_only_applicable_gates(repo: Path) -> None:
         "  - id: judge-scoped\n    type: judge\n    runs: [stop.session]\n"
         '    enforcement: advisory\n    when_changed: ["nothing/here/**"]\n    rubric: r\n    message: m\n'
     )
-    _write(repo, _HEADER + scoped_out + _judge_gates(hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN))
+    _write(repo, _HEADER + scoped_out + _judge_gates(hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES))
     result = _invoke("--path", "README.md")
     assert "skipped    judge-scoped (judge, when_changed does not match)" in result.output
-    assert result.output.count("would run") == hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN
+    assert result.output.count("would run") == hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES
     assert "past the" not in result.output
+
+
+def test_the_judge_cap_follows_max_judges(repo: Path) -> None:
+    """The preview and the cap warning assume the cap the hook is configured with, not the default."""
+    _write(repo, _HEADER + _judge_gates(8))
+    result = _invoke("--max-judges", "7", "--path", "README.md")
+    assert result.output.count("would run") == 7
+    assert "judge-7 (judge, past the 7-gate cap for one Stop event)" in result.output
+    assert "8 judge gates, over the 7 one Stop event evaluates" in result.output
+    assert "these are skipped: judge-7." in result.output
 
 
 def test_a_separator_in_a_require_phrase_is_reported_as_an_error(repo: Path) -> None:
@@ -526,6 +573,7 @@ def test_a_user_level_verifier_is_probed_under_home(repo: Path, isolated_home: P
     verifiers = isolated_home / ".otari/verifiers"
     verifiers.mkdir(parents=True)
     (verifiers / "check.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (verifiers / "check.sh").chmod(0o644)
     _write_into(
         isolated_home,
         ".otari/guardrails.yml",
@@ -542,6 +590,7 @@ def test_a_user_level_file_named_directly_is_checked_as_the_users(repo: Path, is
     verifiers = isolated_home / ".otari/verifiers"
     verifiers.mkdir(parents=True)
     (verifiers / "check.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (verifiers / "check.sh").chmod(0o644)
     personal = isolated_home / ".otari/guardrails.yml"
     _write_into(
         isolated_home,
@@ -553,6 +602,42 @@ def test_a_user_level_file_named_directly_is_checked_as_the_users(repo: Path, is
     assert result.exit_code == 1, result.output
     assert "user:g" in result.output
     assert "`chmod +x ~/.otari/verifiers/check.sh`" in result.output
+
+
+def _write_linked_user_gate(home: Path, dotfiles: Path, mode: int) -> Path:
+    """A user-level gate whose script links into `dotfiles`; returns the link's target."""
+    target = dotfiles / "check.sh"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(mode)
+    (home / ".otari/verifiers").mkdir(parents=True)
+    (home / ".otari/verifiers/check.sh").symlink_to(target)
+    _write_into(
+        home,
+        ".otari/guardrails.yml",
+        _HEADER + "  - id: g\n    type: verifier\n    runs: [stop.verifier]\n"
+        "    enforcement: required\n    verifier: .otari/verifiers/check.sh\n    message: m\n",
+    )
+    return target
+
+
+def test_a_user_level_verifier_linked_to_a_script_the_user_owns_is_clean(
+    repo: Path, isolated_home: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    _write_linked_user_gate(isolated_home, tmp_path_factory.mktemp("dotfiles"), 0o755)
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+
+
+def test_a_user_level_verifier_linked_to_a_script_others_can_write_is_reported(
+    repo: Path, isolated_home: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    target = _write_linked_user_gate(isolated_home, tmp_path_factory.mktemp("dotfiles"), 0o775)
+    result = _invoke()
+    assert result.exit_code == 1, result.output
+    assert (
+        f"verifier '.otari/verifiers/check.sh' resolves to {target}, which is writable by group or others,"
+        " so the hook refuses to run it." in result.output
+    )
 
 
 def test_a_draft_under_otari_home_that_the_hook_never_reads_is_checked_as_a_repo_file(
@@ -593,3 +678,10 @@ def test_repo_only_and_guardrail_file_cannot_be_combined(repo: Path) -> None:
     result = _invoke("--repo-only", "--guardrail-file", str(repo / hook_cli.GUARDRAIL_FILE))
     assert result.exit_code == 2
     assert "--repo-only and --guardrail-file cannot be combined" in result.output
+
+
+@pytest.mark.parametrize("value", ["0", str(hook_cli._HOOK_JUDGE_MAX_GATES_CEILING + 1), "many"])
+def test_a_judge_gate_cap_outside_its_range_is_a_usage_error(repo: Path, value: str) -> None:
+    result = _invoke("--max-judges", value)
+    assert result.exit_code == 2
+    assert "--max-judges" in result.output

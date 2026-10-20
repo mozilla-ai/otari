@@ -3,11 +3,13 @@
 Pure logic in ``gateway.services.tools``, the settings that feed it, and the
 workspace policy write schema. The request-path wiring (claiming the keyword,
 the policy pin, the header) is covered by
-``tests/integration/test_code_execution_executor.py``.
+``tests/integration/test_code_execution_executor.py``, and each candidate's attempt
+by ``tests/integration/test_code_execution_per_attempt.py``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -16,16 +18,19 @@ from pydantic import ValidationError
 
 from gateway.api.routes._normalize import provider_container_requested, sandbox_requested
 from gateway.core.config import GatewayConfig
-from gateway.models.tools import CodeExecutor
-from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    WorkspaceCodeExecutionPolicyUpdate,
-)
+from gateway.exceptions.tools_exceptions import CodeExecutionDeclarationError, CodeExecutionRefusedError
+from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_settings_service import get_field_options, validate_value
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
+    DeclaredCodeExecution,
     Dialect,
+    WorkspaceCodeExecutionPolicyUpdate,
     code_execution_declaration_forms,
+    decide_candidate_tools,
     decide_code_executor,
+    declare_code_execution,
     extract_code_execution_tool,
     first_provider_code_execution_tool,
     native_code_execution_dialect,
@@ -277,10 +282,15 @@ def test_declaration_forms_include_the_provider_keywords_unless_the_provider_own
 # --- staging attachments follows the executor ---------------------------------------------
 
 
+def _chain(provider: str | None, fallbacks: Sequence[str]) -> list[LLMProvider | None]:
+    return [LLMProvider(provider) if provider else None, *(LLMProvider(name) for name in fallbacks)]
+
+
 def _requested(
     tools: list[dict[str, Any]],
     *,
     provider: str | None,
+    fallbacks: Sequence[str] = (),
     dialect: Dialect = Dialect.MESSAGES,
     header: str | None = None,
     pin: CodeExecutor | None = None,
@@ -289,7 +299,7 @@ def _requested(
     return sandbox_requested(
         tools,
         config=GatewayConfig(sandbox_url="http://sandbox:8080", **config),
-        provider=LLMProvider(provider) if provider else None,
+        providers=_chain(provider, fallbacks),
         dialect=dialect,
         code_execution_header=header,
         workspace_executor=pin,
@@ -307,6 +317,13 @@ def test_a_natively_served_declaration_does_not_stage() -> None:
 def test_a_declaration_the_provider_cannot_run_stages() -> None:
     assert _requested([ANTHROPIC_DATED], provider="mistral") is True
     assert _requested([BARE], provider="anthropic") is True
+
+
+def test_a_fallback_that_cannot_run_the_declaration_stages() -> None:
+    # That fallback's attempt runs the code on the sandbox, whatever the head does.
+    assert _requested([ANTHROPIC_DATED], provider="anthropic", fallbacks=["vertexai"]) is True
+    assert _requested([ANTHROPIC_DATED], provider="anthropic", fallbacks=["anthropic"]) is False
+    assert _requested([ANTHROPIC_DATED], provider="anthropic", fallbacks=["vertexai"], header="provider") is False
 
 
 def test_the_deployment_default_decides_staging_too() -> None:
@@ -327,7 +344,7 @@ def test_no_sandbox_means_nothing_is_staged() -> None:
         sandbox_requested(
             [BARE],
             config=GatewayConfig(),
-            provider=LLMProvider("mistral"),
+            providers=[LLMProvider("mistral")],
             dialect=Dialect.MESSAGES,
             code_execution_header=None,
         )
@@ -339,6 +356,7 @@ def _provider_runs(
     tools: list[dict[str, Any]],
     *,
     provider: str | None,
+    fallbacks: Sequence[str] = (),
     header: str | None = None,
     pin: CodeExecutor | None = None,
     sandbox: bool = True,
@@ -347,7 +365,7 @@ def _provider_runs(
     return provider_container_requested(
         tools,
         config=GatewayConfig(sandbox_url="http://sandbox:8080" if sandbox else None, **config),
-        provider=LLMProvider(provider) if provider else None,
+        providers=_chain(provider, fallbacks),
         dialect=Dialect.MESSAGES,
         code_execution_header=header,
         workspace_executor=pin,
@@ -369,6 +387,17 @@ def test_a_declaration_the_provider_cannot_run_is_not_its_container() -> None:
     assert _provider_runs([], provider="anthropic") is False
 
 
+def test_any_candidate_that_runs_the_declaration_natively_uses_its_container() -> None:
+    # Each native candidate's attempt runs the code in its own container, whoever is first.
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", fallbacks=["vertexai"]) is True
+    assert _provider_runs([ANTHROPIC_DATED], provider="vertexai", fallbacks=["anthropic"]) is True
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", fallbacks=["anthropic"]) is True
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", fallbacks=["vertexai"], sandbox=False) is True
+    # An executor asked for decides every candidate as it decides the head.
+    assert _provider_runs([ANTHROPIC_DATED], provider="mistral", fallbacks=["anthropic"], header="provider") is False
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", fallbacks=["vertexai"], header="otari") is False
+
+
 def test_the_header_the_pin_and_the_default_can_each_bring_the_code_to_the_sandbox() -> None:
     assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", header="otari") is False
     assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", pin=CodeExecutor.OTARI) is False
@@ -377,3 +406,114 @@ def test_the_header_the_pin_and_the_default_can_each_bring_the_code_to_the_sandb
 
 def test_a_header_outside_the_vocabulary_decides_nothing() -> None:
     assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", header="somewhere-else") is False
+
+
+# --- admission, per candidate ------------------------------------------------------------------
+
+
+async def _declare(
+    tools: list[dict[str, Any]],
+    *,
+    policy: ResolvedCodeExecutionPolicy | None = None,
+    container_id: object = None,
+    sandbox: bool = True,
+    header: str | None = None,
+) -> DeclaredCodeExecution:
+    async def _policy() -> ResolvedCodeExecutionPolicy | None:
+        return policy
+
+    return await declare_code_execution(
+        tools,
+        container_id=container_id,
+        code_execution_header=header,
+        config=GatewayConfig(sandbox_url="http://sandbox:8080" if sandbox else None),
+        resolve_policy=_policy,
+        container_registry=None,
+    )
+
+
+def _claims(
+    declared: DeclaredCodeExecution, providers: Sequence[str | None], *, follow_head: bool = False
+) -> list[bool]:
+    declaration = declared.provider_declaration(follow_head=follow_head)
+    if declaration is None:
+        return [False for _ in providers]
+    decided = decide_candidate_tools([declaration], providers=providers, dialect=Dialect.MESSAGES)
+    return [CODE_EXECUTION_TOOL_NAME in candidate.claimed for candidate in decided]
+
+
+def _disabled() -> ResolvedCodeExecutionPolicy:
+    return ResolvedCodeExecutionPolicy(
+        enabled=False, default_purpose_hint=None, max_iterations=None, exec_timeout_s=None, image=None, tools=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_each_way_of_running_the_keyword_is_admitted_on_its_own() -> None:
+    tools = [dict(ANTHROPIC_DATED)]
+    declared = await _declare(tools)
+    assert _claims(declared, ["anthropic", "vertexai"]) == [False, True]
+
+    native = await declared.admit(claimed=False, beside_sandbox=True)
+    sandboxed = await declared.admit(claimed=True, beside_sandbox=True)
+
+    assert native.executor is CodeExecutor.PROVIDER
+    assert not native.use_sandbox
+    assert native.tools_after_sandbox == tools
+    assert sandboxed.use_sandbox
+    assert sandboxed.tools_after_sandbox is None
+    # The native attempt forwards the caller's own entry, so the sandbox's is a copy of it.
+    assert sandboxed.tool_entry == ANTHROPIC_DATED
+    assert sandboxed.tool_entry is not tools[0]
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_of_one_way_leaves_the_other_admitted() -> None:
+    declared = await _declare([ANTHROPIC_DATED], policy=_disabled())
+
+    native = await declared.admit(claimed=False, beside_sandbox=True)
+    assert native.executor is CodeExecutor.PROVIDER
+    with pytest.raises(CodeExecutionRefusedError):
+        await declared.admit(claimed=True, beside_sandbox=True)
+
+
+@pytest.mark.asyncio
+async def test_otaris_auto_container_is_left_out_beside_the_sandbox_and_refused_without_it() -> None:
+    declared = await _declare([ANTHROPIC_DATED], container_id="auto")
+
+    assert not (await declared.admit(claimed=False, beside_sandbox=True)).use_sandbox
+    with pytest.raises(CodeExecutionDeclarationError):
+        await declared.admit(claimed=False, beside_sandbox=False)
+
+
+@pytest.mark.asyncio
+async def test_following_the_head_or_beside_the_explicit_type_every_candidate_runs_alike() -> None:
+    hybrid = await _declare([ANTHROPIC_DATED])
+    assert _claims(hybrid, ["anthropic", "vertexai"], follow_head=True) == [False, False]
+    assert _claims(hybrid, ["vertexai", "anthropic"], follow_head=True) == [True, True]
+
+    explicit = await _declare([{"type": "otari_code_execution"}, ANTHROPIC_DATED])
+    assert _claims(explicit, ["anthropic", "vertexai"]) == [True, True]
+    assert _claims(explicit, ["anthropic", "vertexai"], follow_head=True) == [True, True]
+    assert (await explicit.admit(claimed=True, beside_sandbox=True)).use_sandbox
+
+
+@pytest.mark.asyncio
+async def test_candidates_that_agree_are_decided_alike() -> None:
+    declared = await _declare([ANTHROPIC_DATED])
+
+    assert _claims(declared, ["anthropic", "anthropic"]) == [False, False]
+    assert _claims(declared, ["vertexai", "bedrock"]) == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_without_a_sandbox_nothing_is_claimed_and_nothing_runs_here() -> None:
+    declared = await _declare([ANTHROPIC_DATED], sandbox=False)
+
+    assert _claims(declared, ["anthropic", "vertexai"]) == [False, False]
+    admitted = await declared.admit(claimed=False, beside_sandbox=False)
+    assert admitted.executor is None
+    assert not admitted.use_sandbox
+
+    with pytest.raises(CodeExecutionDeclarationError):
+        await _declare([ANTHROPIC_DATED], sandbox=False, header="otari")

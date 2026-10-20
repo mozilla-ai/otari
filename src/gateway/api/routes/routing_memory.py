@@ -49,8 +49,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.api.routes._helpers import resolve_managed_workspace_id
+from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
 from gateway.models.routing import RouterPreference, RoutingMemory
 from gateway.repositories.users_repository import get_active_user
@@ -409,9 +410,9 @@ async def rank_candidates(
     # every example in the batch would then fail its foreign key one at a time.
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+        raise database_error("commit the workspace before recording router examples", exc) from None
     normalized = _validated_scores(config, request.user_id, request.examples, workspace_id)
 
     recorded = 0
@@ -427,9 +428,10 @@ async def rank_candidates(
                 task_id=example.task_id,
                 label_source=example.label_source,
             )
+        # Not DATABASE_ERRORS: the embedding call can raise TimeoutError too, and
+        # that is the 502 below, not a database failure.
         except SQLAlchemyError as exc:
-            logger.warning("Router example write failed after %d example(s)", recorded)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+            raise database_error(f"record a router example after {recorded} example(s)", exc) from exc
         except Exception as exc:
             # Broad on purpose, and matching the read path: `knn.rank` catches bare
             # `Exception` around the same call because an embedding provider can fail
@@ -462,9 +464,9 @@ async def rank_candidates(
                 )
             )
             await db.commit()
-        except SQLAlchemyError:
+        except DATABASE_ERRORS as exc:
             await db.rollback()
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+            raise database_error(f"store a router preference after {recorded} example(s)", exc) from None
 
     # Warmth of every pool this batch wrote into: each named partition, plus the
     # default pool when any example carried no task label.

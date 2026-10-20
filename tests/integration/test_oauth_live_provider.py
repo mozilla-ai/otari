@@ -59,6 +59,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session, init_db
+from gateway.models.identity import EmailAssertion
 from gateway.services import oauth_service
 
 pytestmark = pytest.mark.skipif(
@@ -133,11 +134,9 @@ async def test_a_real_authorization_code_exchanges_for_an_identity(provider: str
         await db.commit()
 
     assert identity.provider == provider
+    assert identity.subject, "the provider returned no subject, so nothing here could sign in"
     assert identity.email, "the provider returned no address, so nothing here could sign in"
-    # Not merely truthy: this is the tri-state collapsed onto a bool, and an
-    # unasserted value has to arrive as False rather than as something a gate
-    # would read as verified.
-    assert identity.email_verified is True
+    assert identity.email_verified is EmailAssertion.VERIFIED
 
 
 @pytest.mark.parametrize("provider", ["google", "github"])

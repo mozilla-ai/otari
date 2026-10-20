@@ -67,6 +67,13 @@ services:
       # the provider's `providers:` entry.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # The same for search providers, read under `search_tools:` as
+      # `api_key: ${EXA_API_KEY}`.
+      - EXA_API_KEY=${EXA_API_KEY:-}
+      - MOJEEK_API_KEY=${MOJEEK_API_KEY:-}
+      # And for fetch providers, under `fetch_tools:` as
+      # `api_key: ${TABSTACK_API_KEY}`.
+      - TABSTACK_API_KEY=${TABSTACK_API_KEY:-}
       # Deployment-wide management credential; overrides `master_key` in
       # config.yml. Unset, Otari generates one on first boot and prints it once.
       - OTARI_MASTER_KEY=${OTARI_MASTER_KEY:-}

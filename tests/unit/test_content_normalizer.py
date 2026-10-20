@@ -16,7 +16,7 @@ from any_llm.types.completion import CompletionUsage
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
 from gateway.services import content_normalizer as cn
-from gateway.services.content_normalizer import name_container_copies, normalize_messages
+from gateway.services.content_normalizer import name_container_copies, normalize_messages, stage_container_blocks
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.files import FileScope, StagedFile
 from gateway.services.model_capabilities import Capabilities
@@ -438,6 +438,37 @@ async def test_container_upload_is_held_for_the_providers_container() -> None:
     assert [staged.file_id for staged in stats.container_inputs] == ["file-csv"]
     assert stats.files_extracted == 0
     assert files.reads == []
+
+
+@pytest.mark.asyncio
+async def test_container_upload_is_held_and_staged_when_candidates_split() -> None:
+    """Some attempts run the code in the provider's container and others on the sandbox."""
+    files = _files(_stored(), data=b"a,b\n1,2\n")
+    block = {"type": "container_upload", "file_id": "file-csv"}
+    msgs = [{"role": "user", "content": [{"type": "text", "text": "Plot this."}, block]}]
+
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_TEXT_ONLY,
+        fmt="anthropic",
+        files=files,
+        user_id="u",
+        sandbox_requested=True,
+        provider_container=True,
+    )
+
+    assert out[0]["content"][1] == block
+    assert [staged.file_id for staged in stats.container_inputs] == ["file-csv"]
+    assert [staged.file_id for staged in stats.sandbox_inputs] == ["file-csv"]
+    assert files.reads == []
+    # A sandbox attempt is told where its sandbox holds the file instead.
+    staged = stage_container_blocks(out, stats.sandbox_inputs)
+    assert staged[0]["content"] == [
+        {"type": "text", "text": "Plot this."},
+        {"type": "text", "text": "[File available in the code execution sandbox: data.csv]"},
+    ]
+    assert out[0]["content"][1] == block
 
 
 def test_container_copies_are_named_without_changing_the_request() -> None:

@@ -1,3 +1,6 @@
+import pytest
+
+from otari_agent.domain import evaluators
 from otari_agent.domain.evaluators import evaluate_command_if_changed, tokenize_commands
 from otari_agent.domain.types import CommandEvidence, CommandIfChangedGate, Outcome, PathEvidence
 
@@ -148,3 +151,19 @@ def test_shares_a_precomputed_segment_cache() -> None:
         segment_cache=cache,
     )
     assert result.outcome is Outcome.PASS
+
+
+def test_a_cached_command_with_no_segments_is_not_retokenized(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty segment list is a cache hit, not a miss to tokenize again for every gate."""
+    evidence = CommandEvidence(commands=("; ; ;", ""), scope="session")
+    cache = tokenize_commands(evidence.commands)
+    calls: list[str] = []
+    monkeypatch.setattr(evaluators, "_command_segments", calls.append)
+    result = evaluate_command_if_changed(
+        _gate(),
+        PathEvidence(paths=("docs/public/openapi.json",)),
+        evidence,
+        segment_cache=cache,
+    )
+    assert result.outcome is Outcome.FAIL
+    assert calls == []

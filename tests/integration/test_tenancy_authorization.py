@@ -17,6 +17,7 @@ from gateway.core.config import GatewayConfig
 from gateway.exceptions.organizations_exceptions import (
     InvitationAlreadyPendingError,
     MembershipUpdateError,
+    NoActiveOrganizationError,
     NotAuthorizedError,
     OrganizationNameRequiredError,
     OrganizationNotFoundError,
@@ -45,8 +46,9 @@ from gateway.repositories.tenancy import (
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
-from .tenancy_helpers import membership_writes
+from .tenancy_helpers import NO_MAIL_LIMIT, NO_TERMS, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -136,7 +138,7 @@ async def test_the_served_organization_follows_the_identity_not_its_memberships(
     await OrganizationMemberRepository(async_db).create_membership(
         organization_id=elsewhere.id, user_id=operator.id, role="member"
     )
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
 
     served = await service.get_active_organization_for_user(operator)
     assert served.slug == elsewhere.slug, "ownership elsewhere does not move the pointer"
@@ -161,7 +163,9 @@ async def test_a_plain_member_cannot_rename_the_organization(async_db: AsyncSess
     member = await _member(async_db, organization, role="member", full_name="Member")
 
     with pytest.raises(NotAuthorizedError):
-        await OrganizationService(async_db, membership_listener=None).update_active_organization_for_user(
+        await OrganizationService(
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ).update_active_organization_for_user(
             user=member,
             organization_name="Renamed",
         )
@@ -171,7 +175,7 @@ async def test_a_viewer_cannot_remove_members(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     viewer = await _member(async_db, organization, role="viewer", full_name="Viewer")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     owner_membership = await service.members.get_active_by_organization_and_user(organization.id, owner.id)
     assert owner_membership is not None
 
@@ -350,18 +354,46 @@ async def test_a_suspended_member_has_no_access_at_all(async_db: AsyncSession) -
     await members.update_membership(membership, {"status": "suspended"})
 
     with pytest.raises(NotAuthorizedError):
-        await OrganizationService(async_db, membership_listener=None).get_active_organization_for_user(member)
+        await OrganizationService(
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ).get_active_organization_for_user(member)
 
 
 async def test_membership_in_another_organization_grants_nothing(async_db: AsyncSession) -> None:
-    """An owner of one organization is a stranger to the next."""
+    """An owner of one organization is a stranger to the next.
+
+    A pointer at the other organization resolves to the caller's own, never to
+    the one it names.
+    """
     organization = await _organization(async_db, slug="acme")
     other_organization = await _organization(async_db, slug="globex")
     outsider = await _member(async_db, other_organization, role="owner", full_name="Outsider")
     await UserRepository(async_db).set_active_organization(outsider, organization.id)
 
+    resolved = await OrganizationService(
+        async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+    ).get_active_organization_for_user(outsider)
+
+    assert resolved.id == other_organization.id
+    # A read stages nothing: the pointer is repaired where a session is minted, not by every page.
+    assert outsider.active_organization_id == organization.id
+    assert not async_db.dirty
+
+
+async def test_an_identity_with_no_membership_anywhere_is_refused(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme")
+    other_organization = await _organization(async_db, slug="globex")
+    outsider = await _member(async_db, other_organization, role="member", full_name="Outsider")
+    members = OrganizationMemberRepository(async_db)
+    membership = await members.get_active_by_organization_and_user(other_organization.id, outsider.id)
+    assert membership is not None
+    await members.update_membership(membership, {"status": "suspended"})
+    await UserRepository(async_db).set_active_organization(outsider, organization.id)
+
     with pytest.raises(NotAuthorizedError):
-        await OrganizationService(async_db, membership_listener=None).get_active_organization_for_user(outsider)
+        await OrganizationService(
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ).get_active_organization_for_user(outsider)
 
 
 async def test_a_suspended_membership_falls_back_to_a_live_one(async_db: AsyncSession) -> None:
@@ -380,7 +412,9 @@ async def test_a_suspended_membership_falls_back_to_a_live_one(async_db: AsyncSe
     assert membership is not None
     await members.update_membership(membership, {"status": "suspended"})
 
-    context = await OrganizationService(async_db, membership_listener=None).get_active_membership_context_for_user(user)
+    context = await OrganizationService(
+        async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+    ).get_active_membership_context_for_user(user)
 
     assert context.organization.id == live.id
     assert user.active_organization_id == live.id
@@ -394,8 +428,10 @@ async def test_an_identity_with_no_live_membership_has_no_context(async_db: Asyn
     assert membership is not None
     await members.update_membership(membership, {"status": "suspended"})
 
-    with pytest.raises(OrganizationNotFoundError):
-        await OrganizationService(async_db, membership_listener=None).get_active_membership_context_for_user(user)
+    with pytest.raises(NoActiveOrganizationError):
+        await OrganizationService(
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ).get_active_membership_context_for_user(user)
 
 
 # =============================================================================
@@ -419,6 +455,7 @@ async def test_anyone_may_create_an_organization_and_owns_the_one_they_create(
     created = await service.create_organization_for_user(
         user=viewer,
         request=OrganizationCreateRequest(name="Theirs"),
+        config=GatewayConfig(),
     )
 
     memberships, count = await service.members.get_by_user_with_organizations(viewer.id, status="active")
@@ -441,7 +478,9 @@ async def test_switching_is_refused_for_an_organization_the_caller_only_created_
     user = await _member(async_db, organization, role="owner", full_name="Owner")
 
     with pytest.raises(OrganizationNotFoundError):
-        await OrganizationService(async_db, membership_listener=None).switch_active_organization_for_user(
+        await OrganizationService(
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ).switch_active_organization_for_user(
             user=user,
             organization_id=elsewhere.id,
         )
@@ -465,7 +504,9 @@ async def test_switching_is_refused_for_a_membership_that_is_not_active(
     )
 
     with pytest.raises(OrganizationNotFoundError):
-        await OrganizationService(async_db, membership_listener=None).switch_active_organization_for_user(
+        await OrganizationService(
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ).switch_active_organization_for_user(
             user=user,
             organization_id=elsewhere.id,
         )
@@ -485,7 +526,9 @@ async def test_switching_carries_the_caller_workspaces_of_the_organization_moved
     await _workspace(async_db, here, name="Mine here", owner=user)
     await _workspace(async_db, there, name="Mine there", owner=user)
 
-    context = await OrganizationService(async_db, membership_listener=None).switch_active_organization_for_user(
+    context = await OrganizationService(
+        async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+    ).switch_active_organization_for_user(
         user=user,
         organization_id=there.id,
     )
@@ -522,8 +565,10 @@ async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a
         user=admin,
         request=InviteOrganizationMemberRequest(email="invitee@example.com"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
-    await service.accept_invitation(invitation.accept_link.split("token=")[1])
+    assert invitation.accept_link is not None
+    await service.accept_invitation(invitation.accept_link.split("token=")[1], claims=NO_TERMS)
 
     memberships = await service.list_organization_memberships_for_user(user=invitee)
     assert memberships.count == 2
@@ -740,7 +785,7 @@ async def test_a_blank_organization_name_is_refused_rather_than_substituted(asyn
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     await async_db.commit()
 
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     with pytest.raises(OrganizationNameRequiredError):
         await service.update_active_organization_for_user(user=owner, organization_name="   ")
 
@@ -815,7 +860,9 @@ async def test_a_superuser_with_only_a_member_role_gets_the_members_workspace_sc
     scope = await resolve_visible_workspace_scope(
         async_db,
         user=operator,
-        organizations=OrganizationService(async_db, membership_listener=None),
+        organizations=OrganizationService(
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ),
     )
 
     assert not scope.sees_every_workspace
@@ -832,10 +879,13 @@ async def test_a_plain_member_cannot_invite(async_db: AsyncSession) -> None:
     member = await _member(async_db, organization, role="member", full_name="Member")
 
     with pytest.raises(NotAuthorizedError):
-        await OrganizationService(async_db, membership_listener=None).invite_active_organization_member_for_user(
+        await OrganizationService(
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ).invite_active_organization_member_for_user(
             user=member,
             request=InviteOrganizationMemberRequest(email="ada@example.com"),
             config=_TEST_CONFIG,
+            mail_limit=NO_MAIL_LIMIT,
         )
 
 
@@ -843,10 +893,13 @@ async def test_an_admin_can_invite(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
 
-    result = await OrganizationService(async_db, membership_listener=None).invite_active_organization_member_for_user(
+    result = await OrganizationService(
+        async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+    ).invite_active_organization_member_for_user(
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com", role="member"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
     assert result.status == "invited"
@@ -864,6 +917,7 @@ async def test_an_admin_cannot_invite_an_owner(async_db: AsyncSession) -> None:
             user=admin,
             request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
             config=_TEST_CONFIG,
+            mail_limit=NO_MAIL_LIMIT,
         )
 
 
@@ -871,11 +925,12 @@ async def test_a_viewer_cannot_revoke_an_invitation(async_db: AsyncSession) -> N
     organization = await _organization(async_db)
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
     viewer = await _member(async_db, organization, role="viewer", full_name="Viewer")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     invitation = await service.invite_active_organization_member_for_user(
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
     with pytest.raises(NotAuthorizedError):
@@ -890,11 +945,12 @@ async def test_an_admin_cannot_revoke_a_pending_owner_invitation(async_db: Async
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     invitation = await service.invite_active_organization_member_for_user(
         user=owner,
         request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
     with pytest.raises(MembershipUpdateError, match="owners"):
@@ -907,11 +963,12 @@ async def test_an_admin_cannot_revoke_a_pending_owner_invitation(async_db: Async
 async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     await service.invite_active_organization_member_for_user(
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com"),
         config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
     )
 
     with pytest.raises(InvitationAlreadyPendingError):
@@ -919,4 +976,5 @@ async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db:
             user=admin,
             request=InviteOrganizationMemberRequest(email="ada@example.com"),
             config=_TEST_CONFIG,
+            mail_limit=NO_MAIL_LIMIT,
         )

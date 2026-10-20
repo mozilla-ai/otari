@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langchain-otari"
+# Bumped by hand in a PR, then published by otari-integrations-release.yml (RELEASE.md).
+version = "0.1.0"
+description = "LangChain chat models served through an Otari gateway"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["langchain", "langgraph", "otari", "llm", "gateway", "agents"]
+dependencies = [
+    "langchain-openai>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mozilla-ai/otari/tree/main/integrations/langchain-otari"
+Documentation = "https://github.com/mozilla-ai/otari/blob/main/docs/use-with-langchain.md"
+Repository = "https://github.com/mozilla-ai/otari"
+Issues = "https://github.com/mozilla-ai/otari/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+langchain_otari = ["py.typed"]

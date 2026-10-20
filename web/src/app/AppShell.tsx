@@ -1,5 +1,5 @@
 import { Button, Disclosure, Popover } from "@heroui/react"
-import { Link, Outlet, useLocation } from "@tanstack/react-router"
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { clsx } from "clsx"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -13,6 +13,7 @@ import {
   FiSidebar,
   FiX,
 } from "react-icons/fi"
+import { AutoUpdate } from "@/app/AutoUpdate"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { AccountMenu } from "@/app/nav/AccountMenu"
 import { Breadcrumbs } from "@/app/nav/Breadcrumbs"
@@ -30,6 +31,7 @@ import {
   navItemForPath,
   navLabelForPath,
   ORG_NAV_SECTIONS,
+  pageLabelForPath,
   visibleNavSections,
 } from "@/app/nav/registry"
 import {
@@ -50,25 +52,22 @@ import { EntitlementResolver } from "@/app/overlayEntitlementResolver"
 import { PostSignInGate } from "@/app/overlayPostSignInGate"
 import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
-import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { Chip } from "@/design-system/indicators/Chip"
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
-const CHROME_TITLES: Record<string, string | undefined> = {
-  "/docs": "Documentation",
-  "/account": "Account",
-}
 
 // One width, not a range. The rail used to be draggable between 200 and 480px
 // and to remember where it was left; it is now the design's 264px, or 72px
@@ -499,7 +498,8 @@ function AppShellChrome() {
   const isVisible = useNavVisibility()
   const recordNavigation = useRecordNavigation()
   const { pathname } = useLocation()
-  useDocumentTitle(navLabelForPath(pathname) ?? CHROME_TITLES[pathname])
+  const navigate = useNavigate()
+  useDocumentTitle(pageLabelForPath(pathname))
   // A gated-off destination is still reachable by bookmark or shared URL, so the
   // shell answers those with a panel instead of a page whose every request the
   // server would refuse. An unregistered path (the guide, the 404 splat) has no
@@ -557,8 +557,11 @@ function AppShellChrome() {
   // budgets and settings are reachable only through this entry, the routes still
   // work by URL, and the server authorizes every request behind it regardless.
   // Hiding the way there because one query failed strands three destinations.
+  // A 404 is not a failure but the answer that there is no organization to
+  // manage.
   const managesOrganization =
-    canManage(organization.data) || organization.isError
+    canManage(organization.data) ||
+    (organization.isError && !isNoOrganizationError(organization.error))
 
   // Both rails remember where you were, so the controls that cross between them
   // return you rather than resetting you. Recorded here rather than on those
@@ -810,7 +813,7 @@ function AppShellChrome() {
           the actor a session belongs to, and this shell is what a session gets
           you; the pages in front of one have no actor to name. */}
       <TelemetryIdentity />
-      <UpdatePrompt />
+      <AutoUpdate />
       <ConnectionStatus />
       <PricingWarning />
       <UnpricedUsageWarning />
@@ -819,8 +822,8 @@ function AppShellChrome() {
           and the pricing alarm above it is a band in flow, so a
           viewport-relative offset would leave the drawer covering the header by
           however tall that band is, taking the only control that closes it with
-          it. The update prompt and the connection status are out of flow and
-          carry their own fill, so they do not enter into this. */}
+          it. The connection status is out of flow and carries its own fill, so
+          it does not enter into this. */}
       <div
         className="relative flex min-h-0 flex-1"
         // What the rail costs the content beside it, for a `position: fixed`
@@ -952,7 +955,10 @@ function AppShellChrome() {
                 )}
               </div>
             ) : (
-              <WorkspaceSwitcher isCollapsed={effectiveCollapsed} />
+              <WorkspaceSwitcher
+                isCollapsed={effectiveCollapsed}
+                onNavigate={closeMobileNav}
+              />
             )}
           </div>
           {/* No bottom padding: the account band closes the rail, so it sits on
@@ -1026,7 +1032,7 @@ function AppShellChrome() {
               })}
             </nav>
             {/* The account block, set off by a rule as in the navigation prototype:
-              the way onto the organization rail, the bundled guide, and the
+              the way onto the organization rail, the documentation, and the
               account control whose menu carries appearance and sign-out. */}
             {/* `-mx-3 px-3` so the rule runs the rail's full width and meets its
               right border, while the rows inside keep the rail's padding. A
@@ -1208,7 +1214,11 @@ function AppShellChrome() {
             // without adding the region itself to the natural tab order.
             tabIndex={-1}
             inert={backgroundInert}
-            className="flex-1 overflow-y-auto focus:outline-none"
+            // The page never scrolls sideways; content meant to (a wide table)
+            // carries its own scroller. This is the backstop, not the fix: the
+            // 390px e2e check measures overflow under it. Not `overflow-x-clip`,
+            // which computes to `hidden` beside `overflow-y: auto` anyway.
+            className="flex-1 overflow-x-hidden overflow-y-auto focus:outline-none"
           >
             <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
               {answerIsStillComing ? (
@@ -1221,7 +1231,9 @@ function AppShellChrome() {
                   // a registered path can be gated off, so the fallback is there
                   // for the type rather than for a case that happens.
                   title={`${navLabelForPath(pathname) ?? currentItem?.label ?? "That page"} is not available here`}
-                  description="This deployment does not serve that page. Pick a destination from the sidebar."
+                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Overview."
+                  actionLabel={pathname === "/" ? undefined : "Go to Overview"}
+                  onAction={() => void navigate({ to: "/" })}
                 />
               ) : (
                 <Outlet />

@@ -61,6 +61,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 # What the guide calls the key it mints, as the Keys page shows it. One name for
 # every deployment, so an operator who finds it there can tell where it came
@@ -145,6 +146,9 @@ def _integration_traffic(endpoint: Any, api_key_id: Any) -> ColumnElement[bool]:
     cannot carry the surface; the credential does, because the one the control
     plane forwards under is minted by this deployment for exactly this purpose and
     is marked as such.
+
+    ``UsageSignalPort`` reports the same test for each row it is told about
+    (``_integration_traffic`` in ``services/log_writer``), so change the two together.
     """
     return and_(
         endpoint != PLAYGROUND_USAGE_ENDPOINT,
@@ -224,7 +228,9 @@ class WorkspaceActivationService:
         self.db = db
         self.config = config
         self.key_format = key_format
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
 
     # ------------------------------------------------------------------
     # Reads

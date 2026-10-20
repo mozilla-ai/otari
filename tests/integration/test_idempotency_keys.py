@@ -34,9 +34,15 @@ from gateway.api.routes._idempotency import (
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
+    ATTEMPT_COUNT_HEADER,
     CONVERSATION_HEADER,
+    FALLBACK_HEADER,
+    MODEL_HEADER,
+    PROVIDER_HEADER,
     REQUEST_ID_HEADER,
+    RESPONSE_DURATION_HEADER,
     ROUTER_TASK_HEADER,
+    TAGS_HEADER,
     GatewayConfig,
 )
 from gateway.core.unit_of_work import UnitOfWork
@@ -46,8 +52,8 @@ from gateway.models.users import User
 from gateway.repositories.inference import InferenceRepositories
 from gateway.services.inference import (
     Claimed,
-    IdempotencyService,
     IdempotentRequest,
+    InferenceService,
     Replay,
     StillInFlight,
     keep_claim_alive,
@@ -138,6 +144,11 @@ def test_retry_replays_the_original_response_without_billing_again(
     assert second.json() == first.json()
     assert second.json()["usage"]["cost_usd"] == first.json()["usage"]["cost_usd"]
     assert second.headers[REQUEST_ID_HEADER] == first.headers[REQUEST_ID_HEADER]
+    for name in (PROVIDER_HEADER, MODEL_HEADER, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER):
+        assert second.headers[name] == first.headers[name]
+    # The original's duration would misdescribe a replay, which never reached a provider.
+    assert RESPONSE_DURATION_HEADER in first.headers
+    assert RESPONSE_DURATION_HEADER not in second.headers
     assert second.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
     assert IDEMPOTENT_REPLAYED_HEADER not in first.headers
     assert _usage_rows(db_session_factory) == 1
@@ -247,6 +258,25 @@ def test_reusing_a_key_with_different_routing_headers_is_refused(
 
     assert refused.status_code == 422, refused.text
     assert provider.await_count == 1
+
+
+def test_reusing_a_key_with_different_tags_headers_is_refused(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "reused-tags")
+
+    assert _post_chat(client, headers, provider).status_code == 200
+    refused = _post_chat(client, {**headers, TAGS_HEADER: "run=1"}, provider)
+    assert refused.status_code == 422, refused.text
+    replayed = _post_chat(client, headers, provider)
+    assert replayed.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
+
+    tagged = _keyed(master_key_header, "reused-tags-value")
+    assert _post_chat(client, {**tagged, TAGS_HEADER: "run=1"}, provider).status_code == 200
+    refused = _post_chat(client, {**tagged, TAGS_HEADER: "run=2"}, provider)
+    assert refused.status_code == 422, refused.text
+    assert provider.await_count == 2
 
 
 def test_reusing_a_key_with_another_value_of_a_repeated_header_is_refused(
@@ -560,7 +590,7 @@ async def test_the_sweep_deletes_only_expired_records(async_db: AsyncSession, te
     await async_db.commit()
 
     uow = UnitOfWork(async_db)
-    deleted = await IdempotencyService(uow, InferenceRepositories.on(uow), test_config).sweep()
+    deleted = await InferenceService(uow, InferenceRepositories.on(uow), test_config).sweep()
 
     assert deleted == 1
     remaining = (await async_db.execute(select(IdempotencyRecord.idempotency_key))).scalars().all()
@@ -583,8 +613,8 @@ async def test_a_retry_after_the_original_ends_gets_its_outcome(
             original_db.add(User(user_id=_USER))
             await original_db.commit()
             original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
-            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), test_config)
-            retry = IdempotencyService(retry_uow, InferenceRepositories.on(retry_uow), test_config)
+            original = InferenceService(original_uow, InferenceRepositories.on(original_uow), test_config)
+            retry = InferenceService(retry_uow, InferenceRepositories.on(retry_uow), test_config)
 
             claimed = await original.admit(request)
             assert isinstance(claimed, Claimed)
@@ -628,8 +658,8 @@ async def test_a_running_request_keeps_its_claim_past_the_lease(
 
     monkeypatch.setattr(lease_module, "create_unit_of_work", worker_unit_of_work)
 
-    def build(uow: UnitOfWork) -> IdempotencyService:
-        return IdempotencyService(uow, InferenceRepositories.on(uow), config)
+    def build(uow: UnitOfWork) -> InferenceService:
+        return InferenceService(uow, InferenceRepositories.on(uow), config)
 
     async def locked_until() -> datetime:
         async with sessions() as db:
@@ -677,8 +707,8 @@ async def test_a_running_claim_outlives_its_retention(
             original_db.add(User(user_id=_USER))
             await original_db.commit()
             original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
-            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), config)
-            retry = IdempotencyService(retry_uow, InferenceRepositories.on(retry_uow), config)
+            original = InferenceService(original_uow, InferenceRepositories.on(original_uow), config)
+            retry = InferenceService(retry_uow, InferenceRepositories.on(retry_uow), config)
 
             assert isinstance(await original.admit(request), Claimed)
             # Past the lease-or-retention expiry an in-progress claim is stamped with, but inside its lease.
@@ -706,8 +736,8 @@ async def test_a_gateway_whose_clock_runs_ahead_does_not_take_over_a_live_claim(
             original_db.add(User(user_id=_USER))
             await original_db.commit()
             original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
-            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), test_config)
-            retry = IdempotencyService(retry_uow, InferenceRepositories.on(retry_uow), test_config)
+            original = InferenceService(original_uow, InferenceRepositories.on(original_uow), test_config)
+            retry = InferenceService(retry_uow, InferenceRepositories.on(retry_uow), test_config)
             assert isinstance(await original.admit(request), Claimed)
 
             class _FastClock(datetime):
@@ -747,7 +777,7 @@ async def test_the_sweep_deletes_in_bounded_batches(async_db: AsyncSession, test
     keys = repositories.idempotency
 
     with patch.object(keys, "delete_expired", wraps=keys.delete_expired) as delete_expired:
-        deleted = await IdempotencyService(uow, repositories, test_config).sweep(batch_size=2)
+        deleted = await InferenceService(uow, repositories, test_config).sweep(batch_size=2)
 
     assert deleted == 5
     assert delete_expired.await_count == 3
@@ -796,7 +826,7 @@ async def test_one_sweep_drains_a_backlog_of_many_batches(async_db: AsyncSession
     await async_db.commit()
     uow = UnitOfWork(async_db)
 
-    deleted = await IdempotencyService(uow, InferenceRepositories.on(uow), test_config).sweep(batch_size=1)
+    deleted = await InferenceService(uow, InferenceRepositories.on(uow), test_config).sweep(batch_size=1)
 
     assert deleted == 25
 
@@ -817,9 +847,9 @@ async def test_a_retry_does_not_take_over_a_claim_that_changed_after_it_looked(
             original_db.add(User(user_id=_USER))
             await original_db.commit()
             original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
-            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), test_config)
+            original = InferenceService(original_uow, InferenceRepositories.on(original_uow), test_config)
             retry_repositories = InferenceRepositories.on(retry_uow)
-            retry = IdempotencyService(retry_uow, retry_repositories, test_config)
+            retry = InferenceService(retry_uow, retry_repositories, test_config)
             claimed = await original.admit(request)
             assert isinstance(claimed, Claimed)
             if original_then == "completes":

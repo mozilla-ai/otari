@@ -16,10 +16,25 @@ otari-ai's password-reset token can be replayed until it expires.
 import hashlib
 import secrets
 
+# Marks a password link an operator was handed to pass on, rather than one mailed to the address.
+# The hash covers the prefix, so it cannot be added to or removed from a mailed token.
+# ``.`` is outside the alphabet ``token_urlsafe`` draws from, so no mailed token carries it.
+_SHARED_TOKEN_PREFIX = "shared."
+
 
 def generate_token() -> str:
     """A fresh bearer token, handed to a caller once and never stored."""
     return secrets.token_urlsafe(32)
+
+
+def generate_shared_token() -> str:
+    """A fresh bearer token for a link that reaches its recipient through someone else, not their mailbox."""
+    return f"{_SHARED_TOKEN_PREFIX}{generate_token()}"
+
+
+def is_shared_token(token: str) -> bool:
+    """Whether ``token`` came from ``generate_shared_token``, so redeeming it proves nothing about the mailbox."""
+    return token.startswith(_SHARED_TOKEN_PREFIX)
 
 
 def hash_token(token: str) -> str:
@@ -44,4 +59,4 @@ def format_expiry(hours: int) -> str:
     return f"{days} day{'s' if days != 1 else ''}"
 
 
-__all__ = ["format_expiry", "generate_token", "hash_token"]
+__all__ = ["format_expiry", "generate_shared_token", "generate_token", "hash_token", "is_shared_token"]

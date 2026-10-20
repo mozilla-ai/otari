@@ -42,7 +42,7 @@ so the event can arrive before or after the image is pushed.
 For a local preview of what the next release notes will look like, run
 `make changelog` (set `GITHUB_TOKEN` to resolve PR and author links).
 
-Three workflows react to the published Release:
+Five workflows react to the published Release:
 
 - **`otari-docker.yml`** builds and pushes the multi-arch image to Docker Hub,
   tagged `{{version}}` (e.g. `0.4.0`), `{{major}}.{{minor}}` (e.g. `0.4`), and the
@@ -59,6 +59,23 @@ Three workflows react to the published Release:
   uploads the sdist, the pinned requirements and the formula to the Release,
   installs and `brew test`s the formula on a macOS runner, then commits it to
   the tap, so `brew install mozilla-ai/tap/otari` follows every release.
+- **`otari-release-labels.yml`** labels every PR merged since the previous
+  release with the release tag (for example `v0.4.0`), creating the label, so
+  each PR shows the release it shipped in. A final release counts from the
+  previous final release, so a PR that first shipped in a pre-release also gets
+  the final version's label. Dispatch it with a tag to label an earlier release.
+- **`otari-docs.yml`** builds the GitBook site from `docs/` at the release tag
+  (`scripts/prepare_gitbook_site.py`) and commits it to the `gitbook-docs`
+  branch, which GitBook syncs from. A pre-release does not publish. The site
+  shows the highest release version only, so a release with a lower version,
+  such as a patch to an older minor version, fails to publish. That failure is
+  expected and needs no action. Dispatch the workflow to publish the highest
+  version's docs again.
+  The site includes the OpenAPI spec at `api/openapi.json` and a generated
+  page per API tag. Those pages render from the spec registered in the
+  GitBook organization as `otari-openapi-spec`, by the URL
+  `https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json`,
+  so a renamed spec or a moved file breaks them.
 
 One step stays manual. The Railway template (`deploy/railway/`) is a
 platform object that no workflow writes. After a release that changes the
@@ -180,3 +197,33 @@ For the full model (the spec-version compatibility scheme, the two-merge
 lifecycle, and the per-SDK registries and secrets) see
 [`docs/sdk-compatibility.md`](docs/sdk-compatibility.md) and each SDK repo's
 `RELEASE.md`.
+
+## Integration package releases
+
+`pydantic-ai-otari` and `langchain-otari` live under `integrations/` and publish to
+PyPI on their own versions, independent of Otari's. To release one:
+
+1. Bump `version` in `integrations/<package>/pyproject.toml` in an ordinary PR,
+   with a conventional title (`feat(integrations): ...` or `fix(integrations): ...`),
+   and merge it.
+2. Run **Otari Integrations Release** (`otari-integrations-release.yml`) from the
+   Actions tab on `main`, choosing the package.
+3. Approve the deployment when the run waits on the package's environment.
+
+The workflow reads the version from the package's `pyproject.toml` on `main` and
+refuses one whose tag already exists. After the approval it builds and publishes
+the package, then tags the commit `<package>-vX.Y.Z`; a failed or rejected
+publish leaves no tag. It creates no GitHub Release, so Otari's own release stays
+the repository's latest, and the release-triggered workflows (Docker image, SDK
+regeneration) do not run. Otari's `vX.Y.Z` tags and these `<package>-vX.Y.Z` tags
+share the repository, so everything that reads Otari's version from Git matches
+`v[0-9]*` only: `cliff.toml`, `otari-release.yml`, and the `describe_command` of
+the workspace members' setuptools-scm.
+
+Publishing uses PyPI trusted publishing, so no token is stored. Each project on
+PyPI trusts owner `mozilla-ai`, repository `otari`, workflow
+`otari-integrations-release.yml` and an environment of its own,
+`pypi-<package>` (`pypi-pydantic-ai-otari`, `pypi-langchain-otari`). PyPI refuses
+two pending publishers with the same configuration, so a shared environment
+cannot be registered for both. Each environment on this repository requires a
+reviewer's approval and can be deployed only from `main`.

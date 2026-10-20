@@ -169,7 +169,7 @@ To do either by hand:
 
 ```bash
 uv lock --upgrade --dry-run                    # what would move, and to where
-uv lock --upgrade-package genai-prices         # refresh one package
+uv lock --upgrade-package httpx                # refresh one package
 uv lock --upgrade                              # refresh everything
 ```
 

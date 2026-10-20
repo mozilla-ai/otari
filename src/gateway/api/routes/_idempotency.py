@@ -21,14 +21,19 @@ from typing import Annotated, Any
 from fastapi import Depends, Header, Request, Response
 from fastapi.encoders import jsonable_encoder
 
-from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_work_if_needed
+from gateway.api.deps import build_inference_service, get_config, get_unit_of_work_if_needed
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.config import (
+    ATTEMPT_COUNT_HEADER,
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
+    FALLBACK_HEADER,
+    MODEL_HEADER,
+    PROVIDER_HEADER,
     REQUEST_ID_HEADER,
     ROUTER_HEADER,
     ROUTER_TASK_HEADER,
+    TAGS_HEADER,
     GatewayConfig,
 )
 from gateway.core.unit_of_work import UnitOfWork
@@ -36,13 +41,13 @@ from gateway.log_config import logger
 from gateway.services.inference import (
     Admission,
     Claimed,
-    IdempotencyService,
     IdempotentRequest,
+    InferenceService,
     InvalidKey,
     Replay,
     keep_claim_alive,
 )
-from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER
+from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_FETCH_HEADER, WEB_SEARCH_HEADER
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"
@@ -54,18 +59,27 @@ _REPLAYED_HEADERS = (
     "Otari-Container-Expires-At",
     GUARDRAILS_RESULT_HEADER,
     END_USER_BUDGET_HEADER,
+    PROVIDER_HEADER,
+    MODEL_HEADER,
+    ATTEMPT_COUNT_HEADER,
+    FALLBACK_HEADER,
 )
 # The request headers that change what a request does, so they count toward
 # whether a retry is the same request.
 _REQUEST_SHAPING_HEADERS = (
     CODE_EXECUTION_HEADER,
     WEB_SEARCH_HEADER,
+    WEB_FETCH_HEADER,
     ROUTER_HEADER,
     "anthropic-beta",
     ROUTER_TASK_HEADER,
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
 )
+# Shaping headers added after keys were first stored. Each counts only when
+# sent, so a retry without it still matches a claim fingerprinted before it
+# existed; it is named in its option so two of them cannot collide.
+_LATER_SHAPING_HEADERS = (TAGS_HEADER,)
 
 INVALID_IDEMPOTENCY_KEY_DETAIL = (
     f"{IDEMPOTENCY_KEY_HEADER} must be 1 to {IdempotentRequest.MAX_KEY_LENGTH} printable ASCII characters."
@@ -105,6 +119,15 @@ def _header_values(raw_request: Request, name: str) -> str | None:
     return ",".join(values) if values else None
 
 
+def _shaping_options(raw_request: Request) -> list[str | None]:
+    options = [_header_values(raw_request, name) for name in _REQUEST_SHAPING_HEADERS]
+    for name in _LATER_SHAPING_HEADERS:
+        value = _header_values(raw_request, name)
+        if value is not None:
+            options.append(f"{name}: {value}")
+    return options
+
+
 class IdempotencyGuard:
     """One request's hold on its ``Idempotency-Key``, released unless the request completes.
 
@@ -114,7 +137,7 @@ class IdempotencyGuard:
     def __init__(
         self,
         raw_request: Request,
-        service: IdempotencyService | None,
+        service: InferenceService | None,
         key: str | None,
         *,
         keep_alive: KeepAlive | None = None,
@@ -138,7 +161,7 @@ class IdempotencyGuard:
             self._key,
             endpoint=endpoint,
             body=await self._raw_request.body(),
-            options=[_header_values(self._raw_request, name) for name in _REQUEST_SHAPING_HEADERS],
+            options=_shaping_options(self._raw_request),
             user_id=user_id,
             api_key_id=api_key_id,
         )
@@ -219,15 +242,15 @@ async def get_idempotency_guard(
 ) -> AsyncIterator[IdempotencyGuard]:
     """Yield the request's guard, and release its claim if the request did not complete."""
     service = None
-    if uow is not None and idempotency_key is not None and IdempotencyService.is_enabled(config):
-        service = build_idempotency_service(uow, config)
+    if uow is not None and idempotency_key is not None and InferenceService.is_enabled(config):
+        service = build_inference_service(uow, config)
 
     async def keep_alive(request: IdempotentRequest, claimed: Claimed) -> None:
         await keep_claim_alive(
             request,
             claimed,
             config.idempotency_lease_sec,
-            lambda worker_uow: build_idempotency_service(worker_uow, config),
+            lambda worker_uow: build_inference_service(worker_uow, config),
         )
 
     guard = IdempotencyGuard(raw_request, service, idempotency_key, keep_alive=keep_alive)

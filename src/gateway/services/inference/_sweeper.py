@@ -7,10 +7,10 @@ from collections.abc import Callable
 
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
-from gateway.services.inference._idempotency import IdempotencyService
+from gateway.services.inference._idempotency import InferenceService
 
 
-async def run_idempotency_sweeper(interval: float, build_service: Callable[[UnitOfWork], IdempotencyService]) -> None:
+async def run_idempotency_sweeper(interval: float, build_service: Callable[[UnitOfWork], InferenceService]) -> None:
     """Delete expired idempotency records until shutdown, retrying failures on the next tick."""
     while True:
         await asyncio.sleep(interval)

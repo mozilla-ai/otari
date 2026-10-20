@@ -1,0 +1,451 @@
+"""The trace read API answers inside the caller's scope and nowhere else.
+
+The operator routes read every workspace of the operator's active organization,
+the rule ``/api/v1/keys`` follows. The organization routes follow the
+rule organization usage follows: an owner or admin reads every workspace in
+their active organization, a member the workspaces they belong to, and nobody
+reads another organization's traces, whose ids answer 404 like ones that do
+not exist.
+"""
+
+import time
+import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from typing import Any
+
+import pytest
+from fastapi import status
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from sqlmodel import col
+
+from gateway.core.config import API_ROOT
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.models.traces import Trace, TraceSpan
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+
+from .test_otlp import _agent_span, _exempt_key, _otlp_traces
+
+_T0 = datetime(2026, 10, 7, 12, tzinfo=UTC)
+
+
+def _identity(
+    session: Session,
+    *,
+    email: str,
+    organization_id: uuid.UUID,
+    role: str,
+    workspace_ids: tuple[uuid.UUID, ...] = (),
+    operator: bool = False,
+) -> str:
+    user = User(email=email, full_name="X", active_organization_id=organization_id, is_superuser=operator)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    session.add(OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active"))
+    for workspace_id in workspace_ids:
+        session.add(WorkspaceMember(workspace_id=workspace_id, user_id=user.id, role="member", status="active"))
+    token = f"otari-sess-{email}"
+    session.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=12),
+        )
+    )
+    session.commit()
+    return token
+
+
+def _trace(session: Session, workspace_id: uuid.UUID, trace_id: str, *, failed: bool = False) -> None:
+    session.add(
+        Trace(
+            workspace_id=workspace_id,
+            trace_id=trace_id,
+            session_source="harness",
+            harness="claude-code",
+            started_at=_T0,
+            last_activity_at=_T0 + timedelta(minutes=2),
+            step_count=2,
+            span_count=5,
+            error_count=1 if failed else 0,
+            failing_error_count=1 if failed else 0,
+            cost_snapshot=Decimal("0.02"),
+        )
+    )
+    session.flush()
+    steps = [("req-1", True, 0), ("req-2", False, 60)]
+    for span_id, opens, offset in steps:
+        start = _T0 + timedelta(seconds=offset)
+        session.add(
+            TraceSpan(
+                workspace_id=workspace_id,
+                trace_id=trace_id,
+                span_id=span_id,
+                kind="step",
+                origin="gateway",
+                name="/v1/chat/completions",
+                request_id=f"{trace_id}-{span_id}",
+                outcome="error" if failed and span_id == "req-2" else "ok",
+                opens_turn=opens,
+                start_time=start,
+                end_time=start + timedelta(seconds=10),
+            )
+        )
+        session.add(
+            TraceSpan(
+                workspace_id=workspace_id,
+                trace_id=trace_id,
+                span_id=f"llm-{span_id}",
+                parent_span_id=span_id,
+                kind="llm",
+                origin="gateway",
+                name="chat",
+                request_id=f"{trace_id}-{span_id}",
+                outcome="ok",
+                input_tokens=10,
+                output_tokens=2,
+                cost_snapshot=Decimal("0.01"),
+                start_time=start,
+                end_time=start + timedelta(seconds=9),
+            )
+        )
+    # A client tool answered by the second step: its start is left for the read to fill.
+    session.add(
+        TraceSpan(
+            workspace_id=workspace_id,
+            trace_id=trace_id,
+            span_id="call-toolu_1",
+            kind="tool",
+            origin="gateway",
+            name="execute_tool:Bash",
+            tool_name="Bash",
+            tool_type="client",
+            outcome="ok",
+            end_time=_T0 + timedelta(seconds=60),
+        )
+    )
+    session.commit()
+
+
+@pytest.fixture
+def world(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> dict[str, str]:
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    with db_session_factory() as session:
+        alpha, beta = Organization(name="Alpha", slug="alpha-t"), Organization(name="Beta", slug="beta-t")
+        session.add_all([alpha, beta])
+        session.commit()
+        one, two = Workspace(name="One", organization_id=alpha.id), Workspace(name="Two", organization_id=alpha.id)
+        theirs = Workspace(name="Theirs", organization_id=beta.id)
+        session.add_all([one, two, theirs])
+        session.commit()
+        _trace(session, one.id, "s-one")
+        _trace(session, two.id, "s-two", failed=True)
+        _trace(session, theirs.id, "s-theirs")
+        return {
+            "member": _identity(
+                session, email="m@a.test", organization_id=alpha.id, role="member", workspace_ids=(one.id,)
+            ),
+            "admin": _identity(session, email="a@a.test", organization_id=alpha.id, role="admin"),
+            "outsider": _identity(session, email="o@b.test", organization_id=beta.id, role="owner"),
+            "operator": _identity(session, email="op@a.test", organization_id=alpha.id, role="owner", operator=True),
+        }
+
+
+def _operator_get(client: TestClient, world: dict[str, str], path: str, params: dict[str, str] | None = None) -> Any:
+    client.cookies.set(SESSION_COOKIE_NAME, world["operator"])
+    try:
+        return client.get(f"{API_ROOT}{path}", params=params)
+    finally:
+        client.cookies.clear()
+
+
+def _listed(client: TestClient, cookie: str) -> list[str]:
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+    try:
+        response = client.get(f"{API_ROOT}/organizations/me/traces")
+    finally:
+        client.cookies.clear()
+    assert response.status_code == status.HTTP_200_OK, response.text
+    return sorted(item["trace_id"] for item in response.json()["items"])
+
+
+def test_a_member_reads_their_workspaces_and_an_admin_the_whole_organization(
+    client: TestClient, world: dict[str, str]
+) -> None:
+    assert _listed(client, world["member"]) == ["s-one"]
+    assert _listed(client, world["admin"]) == ["s-one", "s-two"]
+    assert _listed(client, world["outsider"]) == ["s-theirs"]
+
+
+def test_another_organizations_trace_is_not_found(client: TestClient, world: dict[str, str]) -> None:
+    client.cookies.set(SESSION_COOKIE_NAME, world["outsider"])
+    try:
+        response = client.get(f"{API_ROOT}/organizations/me/traces/s-one")
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_the_operator_reads_every_workspace_of_their_organization_and_the_detail_has_turns(
+    client: TestClient, world: dict[str, str]
+) -> None:
+    listed = _operator_get(client, world, "/traces").json()
+    assert sorted(item["trace_id"] for item in listed["items"]) == ["s-one", "s-two"]
+    assert _operator_get(client, world, "/traces/s-theirs").status_code == status.HTTP_404_NOT_FOUND
+
+    detail = _operator_get(client, world, "/traces/s-two").json()
+
+    [turn] = detail["turns"]
+    assert (turn["state"], turn["llm_calls"], turn["tool_calls"], turn["step_ids"]) == (
+        "failed",
+        2,
+        1,
+        ["req-1", "req-2"],
+    )
+    assert {span["name"] for span in detail["spans"] if span["kind"] == "step"} == {"/v1/chat/completions"}
+    tool = next(span for span in detail["spans"] if span["kind"] == "tool")
+    assert tool["approximate"] is True
+    assert tool["parent_span_id"] == "req-1"
+    assert tool["start_time"].startswith("2026-10-07T12:00:10")
+    assert {(span["otel_trace_id"], span["otel_span_id"]) for span in detail["spans"]} == {(None, None)}
+
+
+def test_a_request_opens_the_session_it_was_traced_into_inside_the_scope_only(
+    client: TestClient, world: dict[str, str]
+) -> None:
+    def status_and_trace(cookie: str, request_id: str) -> tuple[int, str | None]:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        try:
+            response = client.get(f"{API_ROOT}/organizations/me/traces/requests/{request_id}")
+        finally:
+            client.cookies.clear()
+        return response.status_code, response.json().get("trace_id")
+
+    assert status_and_trace(world["member"], "s-one-req-2") == (status.HTTP_200_OK, "s-one")
+    # Another workspace of the organization, another organization, and an id never traced read alike.
+    assert status_and_trace(world["member"], "s-two-req-1")[0] == status.HTTP_404_NOT_FOUND
+    assert status_and_trace(world["outsider"], "s-one-req-1")[0] == status.HTTP_404_NOT_FOUND
+    assert status_and_trace(world["admin"], "never-traced")[0] == status.HTTP_404_NOT_FOUND
+    assert status_and_trace(world["admin"], "s-two-req-1") == (status.HTTP_200_OK, "s-two")
+
+    found = _operator_get(client, world, "/traces/requests/s-two-req-2").json()
+    assert (found["trace_id"], found["error_count"]) == ("s-two", 1)
+    assert _operator_get(client, world, "/traces/requests/s-theirs-req-1").status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_the_series_counts_sessions_by_whether_they_failed(client: TestClient, world: dict[str, str]) -> None:
+    series = _operator_get(client, world, "/traces/series", {"bucket": "hour"}).json()
+
+    assert series["points"] == [{"bucket": "2026-10-07T12:00:00Z", "succeeded": 1, "failed": 1}]
+
+
+def test_a_search_ignores_the_spaces_around_it(client: TestClient, world: dict[str, str]) -> None:
+    listed = _operator_get(client, world, "/traces", {"q": "  ONE "}).json()
+
+    assert [item["trace_id"] for item in listed["items"]] == ["s-one"]
+
+
+def test_the_header_master_key_reads_the_default_organization(
+    client: TestClient, master_key_header: dict[str, str], world: dict[str, str]
+) -> None:
+    listed = client.get(f"{API_ROOT}/traces", headers=master_key_header).json()
+    assert listed["items"] == []
+
+
+def test_the_operator_routes_refuse_a_member(client: TestClient, world: dict[str, str]) -> None:
+    client.cookies.set(SESSION_COOKIE_NAME, world["admin"])
+    try:
+        response = client.get(f"{API_ROOT}/traces")
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_a_workspace_filter_narrows_the_scope_and_never_widens_it(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    with db_session_factory() as session:
+        ids = {workspace.name: str(workspace.id) for workspace in session.scalars(select(Workspace))}
+
+    def read(path: str, workspace: str, cookie: str | None = None) -> dict[str, Any]:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie or world["operator"])
+        try:
+            response = client.get(f"{API_ROOT}{path}", params={"workspace_id": ids[workspace]})
+        finally:
+            client.cookies.clear()
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return dict(response.json())
+
+    assert [item["trace_id"] for item in read("/traces", "Two")["items"]] == ["s-two"]
+    assert read("/traces/count", "Theirs")["count"] == 0
+    assert read("/traces/series", "Two")["points"] == [{"bucket": "2026-10-07T12:00:00Z", "succeeded": 0, "failed": 1}]
+
+    admin = "/organizations/me/traces"
+    assert [item["trace_id"] for item in read(admin, "Two", world["admin"])["items"]] == ["s-two"]
+    # A workspace outside the caller's scope yields nothing rather than another tenant's sessions.
+    assert read(admin, "Theirs", world["admin"])["items"] == []
+    assert read(f"{admin}/count", "Two", world["member"])["count"] == 0
+    assert read(f"{admin}/series", "Theirs", world["member"])["points"] == []
+
+
+@pytest.mark.parametrize(
+    ("sort", "descending"),
+    [
+        ("last_activity", ["s-short", "s-long", "s-costly"]),
+        ("latency", ["s-long", "s-costly", "s-short"]),
+        ("tokens", ["s-short", "s-costly", "s-long"]),
+        ("cost", ["s-costly", "s-short", "s-long"]),
+        ("errors", ["s-long", "s-short", "s-costly"]),
+    ],
+)
+def test_the_list_sorts_by_the_column_asked_for_across_pages(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    sort: str,
+    descending: list[str],
+) -> None:
+    with db_session_factory() as session:
+        workspace = session.scalars(select(Workspace).where(col(Workspace.name) == "One")).one()
+        for trace_id, started, last, tokens, cost, errors in (
+            ("s-short", 60, 61, (900, 100), "0.05", 1),
+            ("s-long", 0, 50, (10, 10), "0.01", 3),
+            ("s-costly", 10, 40, (300, 200), "0.90", 0),
+        ):
+            session.add(
+                Trace(
+                    workspace_id=workspace.id,
+                    trace_id=trace_id,
+                    session_source="client",
+                    started_at=_T0 + timedelta(days=1, minutes=started),
+                    last_activity_at=_T0 + timedelta(days=1, minutes=last),
+                    input_tokens=tokens[0],
+                    output_tokens=tokens[1],
+                    cost_snapshot=Decimal(cost),
+                    error_count=errors,
+                )
+            )
+        session.commit()
+        workspace_id = str(workspace.id)
+
+    def listed(order: str) -> list[str]:
+        # Two pages of two, so the order holds across an offset.
+        pages = [
+            _operator_get(
+                client,
+                world,
+                "/traces",
+                {"workspace_id": workspace_id, "sort": sort, "order": order, "limit": "2", "skip": str(skip)},
+            )
+            for skip in (0, 2)
+        ]
+        assert all(page.status_code == status.HTTP_200_OK for page in pages), pages[0].text
+        return [item["trace_id"] for page in pages for item in page.json()["items"] if item["trace_id"] != "s-one"]
+
+    assert listed("desc") == descending
+    assert listed("asc") == descending[::-1]
+
+
+@pytest.mark.parametrize("sort", ["latency", "tokens", "cost", "errors"])
+def test_sessions_that_tie_on_the_sort_page_once_each(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    sort: str,
+) -> None:
+    with db_session_factory() as session:
+        workspace = session.scalars(select(Workspace).where(col(Workspace.name) == "One")).one()
+        # Equal on every sort key, and two pairs equal on last activity too, so only the key breaks those ties.
+        for index in range(6):
+            session.add(
+                Trace(
+                    workspace_id=workspace.id,
+                    trace_id=f"s-tie-{index}",
+                    session_source="client",
+                    started_at=_T0,
+                    last_activity_at=_T0 + timedelta(minutes=2 + index // 2),
+                    input_tokens=5,
+                    output_tokens=5,
+                    cost_snapshot=Decimal("0.02"),
+                    error_count=0,
+                )
+            )
+        session.commit()
+        workspace_id = str(workspace.id)
+
+    for order in ("asc", "desc"):
+        seen = [
+            item["trace_id"]
+            for skip in range(7)
+            for item in _operator_get(
+                client,
+                world,
+                "/traces",
+                {"workspace_id": workspace_id, "sort": sort, "order": order, "limit": "1", "skip": str(skip)},
+            ).json()["items"]
+        ]
+        assert sorted(seen) == sorted([*(f"s-tie-{index}" for index in range(6)), "s-one"])
+
+
+def test_the_list_refuses_a_sort_it_does_not_offer(client: TestClient, world: dict[str, str]) -> None:
+    for params in ({"sort": "name"}, {"order": "up"}):
+        assert _operator_get(client, world, "/traces", params).status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+def test_the_detail_reads_the_workspace_it_names(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    with db_session_factory() as session:
+        ids = {workspace.name: str(workspace.id) for workspace in session.scalars(select(Workspace))}
+
+    def status_of(workspace: str) -> int:
+        return int(_operator_get(client, world, "/traces/s-two", {"workspace_id": ids[workspace]}).status_code)
+
+    assert status_of("Two") == status.HTTP_200_OK
+    assert status_of("One") == status.HTTP_404_NOT_FOUND
+
+
+def test_an_id_in_two_workspaces_read_without_naming_one_is_a_conflict(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    with db_session_factory() as session:
+        one = session.scalars(select(Workspace).where(col(Workspace.name) == "One")).one()
+        _trace(session, one.id, "s-two")
+        session.commit()
+
+    response = _operator_get(client, world, "/traces/s-two")
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+
+
+def test_a_span_received_over_otlp_reads_back_with_the_otel_ids_it_was_sent(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    span = _agent_span("5b8efff798038103d269b633813fc60c", "eee19b7ec3c1b174")
+    assert client.post("/otlp/v1/traces", json=_otlp_traces(span), headers=headers).status_code == status.HTTP_200_OK
+
+    deadline = time.monotonic() + 10
+    while not (items := client.get(f"{API_ROOT}/traces", headers=master_key_header).json()["items"]):
+        assert time.monotonic() < deadline, "the exported span was never written"
+        time.sleep(0.1)
+    [trace] = items
+    detail = client.get(f"{API_ROOT}/traces/{trace['trace_id']}", headers=master_key_header).json()
+
+    [read] = detail["spans"]
+    assert (read["otel_trace_id"], read["otel_span_id"]) == ("5b8efff798038103d269b633813fc60c", "eee19b7ec3c1b174")

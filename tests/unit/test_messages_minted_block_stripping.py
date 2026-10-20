@@ -3,7 +3,7 @@
 Continuing an Anthropic conversation means echoing the previous assistant turn
 back. Gateway-minted web-search and MCP activity blocks describe work Otari
 already consumed, so they must not reach the provider on the next request.
-Mirrors ``responses._strip_gateway_minted_items``.
+Mirrors ``inference.strip_gateway_minted_items``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,16 @@ from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes.messages import _strip_gateway_minted_blocks
 from gateway.core.config import GatewayConfig
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
-from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX
+from gateway.services.tools import (
+    SERVER_TOOL_USE_ID_PREFIX,
+    WEB_SEARCH_TOOL_NAME,
+    Dialect,
+    NativeCall,
+    WebSearchBackend,
+    WebToolCallCap,
+    native_rendering,
+    resolve_in_loop_search,
+)
 
 
 def test_strips_the_minted_pair_but_keeps_the_text() -> None:
@@ -127,6 +136,36 @@ def test_gate_is_off_when_opted_in_without_a_backend(monkeypatch: pytest.MonkeyP
     config = GatewayConfig(web_search_intercept=True)
     assert config.web_search_url is None
     assert _tool_ctx(config).intercepts_web_search is False
+
+
+def test_gate_is_on_when_opted_in_with_a_search_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployment whose only search is one instance can intercept to it."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    instance = {"exa": {"provider": "fake"}}
+    assert _tool_ctx(GatewayConfig(web_search_intercept=True, search_tools=instance)).intercepts_web_search is True
+    turned_off = GatewayConfig(web_search_intercept=True, search_tools=instance, web_search_default_tool="none")
+    assert _tool_ctx(turned_off).intercepts_web_search is False
+
+
+@pytest.mark.asyncio
+async def test_a_pair_minted_from_a_library_search_is_stripped() -> None:
+    """The search backend on any-search keeps the hits the Messages rendering mints its pair from, under its prefix."""
+    config = GatewayConfig(search_tools={"exa": {"provider": "fake"}}, web_search_extract=False)
+    search = resolve_in_loop_search(config, None)
+    assert search is not None
+    call = NativeCall(WEB_SEARCH_TOOL_NAME, "toolu_1", {"query": "python"})
+    async with WebSearchBackend(search, cap=WebToolCallCap(10), max_results=5) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, dict(call.arguments))
+        rendering = native_rendering(WEB_SEARCH_TOOL_NAME, Dialect.MESSAGES)
+        assert rendering is not None
+        pair = [block.model_dump(exclude_none=True) for block in rendering.ran(call, backend)]
+    messages: list[dict[str, Any]] = [
+        {"role": "assistant", "content": [*pair, {"type": "text", "text": "Python 3.14."}]},
+    ]
+
+    assert pair[0]["id"].startswith(SERVER_TOOL_USE_ID_PREFIX)
+    assert _strip_gateway_minted_blocks(messages)[0]["content"] == [{"type": "text", "text": "Python 3.14."}]
 
 
 # --- provenance: only our own blocks are stripped -----------------------------
@@ -447,7 +486,7 @@ def test_anthropics_own_code_execution_pair_survives() -> None:
 
 
 def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read() -> None:
-    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.inference import strip_gateway_minted_items
     from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX
 
     items: list[dict[str, Any]] = [
@@ -463,7 +502,7 @@ def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read()
         {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "It is 42."}]},
     ]
 
-    out = _strip_gateway_minted_items(items)
+    out = strip_gateway_minted_items(items)
 
     assert len(out) == 3
     folded = out[1]
@@ -475,7 +514,7 @@ def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read()
 
 
 def test_a_failed_gateway_interpreter_call_folds_its_status() -> None:
-    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.inference import strip_gateway_minted_items
     from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX
 
     item = {
@@ -484,20 +523,20 @@ def test_a_failed_gateway_interpreter_call_folds_its_status() -> None:
         "code": "1/0",
         "status": "failed",
     }
-    (folded,) = _strip_gateway_minted_items([item])
+    (folded,) = strip_gateway_minted_items([item])
     assert "status: failed" in folded["content"][0]["text"]
 
 
 def test_openais_own_interpreter_call_survives_untouched() -> None:
-    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.inference import strip_gateway_minted_items
 
     item = {"type": "code_interpreter_call", "id": "ci_123", "code": "x", "status": "completed"}
-    assert _strip_gateway_minted_items([item]) == [item]
+    assert strip_gateway_minted_items([item]) == [item]
 
 
 def test_a_gateway_search_is_dropped_and_a_providers_own_survives() -> None:
     """Only the item the gateway minted is its to take back; OpenAI's own search is echoed to OpenAI."""
-    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.inference import strip_gateway_minted_items
     from gateway.services.tools import WEB_SEARCH_CALL_ID_PREFIX
 
     providers: dict[str, Any] = {
@@ -514,4 +553,36 @@ def test_a_gateway_search_is_dropped_and_a_providers_own_survives() -> None:
     }
     message = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done"}]}
 
-    assert _strip_gateway_minted_items([providers, gateways, message]) == [providers, message]
+    assert strip_gateway_minted_items([providers, gateways, message]) == [providers, message]
+
+
+# --- web fetch ------------------------------------------------------------------
+
+
+def _fetch_pair(tool_use_id: str) -> list[dict[str, Any]]:
+    return [
+        {"type": "server_tool_use", "id": tool_use_id, "name": "web_fetch", "input": {"url": "https://a.test/"}},
+        {
+            "type": "web_fetch_tool_result",
+            "tool_use_id": tool_use_id,
+            "content": {
+                "type": "web_fetch_result",
+                "url": "https://a.test/",
+                "content": {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": "x"}},
+            },
+        },
+    ]
+
+
+def test_a_gateway_fetch_pair_is_dropped_rather_than_folded_into_text() -> None:
+    """Fetched page text is untrusted, so it never comes back as the assistant's own words."""
+    text = {"type": "text", "text": "the page says x"}
+    messages = [{"role": "assistant", "content": [*_fetch_pair(f"{SERVER_TOOL_USE_ID_PREFIX}f"), text]}]
+
+    assert _strip_gateway_minted_blocks(messages) == [{"role": "assistant", "content": [text]}]
+
+
+def test_anthropics_own_fetch_pair_survives() -> None:
+    messages = [{"role": "assistant", "content": _fetch_pair("srvtoolu_prov")}]
+
+    assert _strip_gateway_minted_blocks(messages) == messages

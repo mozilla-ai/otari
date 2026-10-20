@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 import yaml
 from any_llm import AnyLLM, LLMProvider
-from any_llm.exceptions import AnyLLMError
+from any_llm.exceptions import AnyLLMError, MissingApiKeyError
 
 from gateway.api.routes.pricing import _candidate_model_keys
 from gateway.core.config import (
@@ -20,16 +21,20 @@ from gateway.core.config import (
 )
 from gateway.log_config import logger as gateway_logger
 from gateway.services import provider_kwargs
+from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
-    _AMBIENT_CREDENTIAL_PROVIDERS,
     _KEYLESS_PLACEHOLDER_API_KEY,
+    AMBIENT_CREDENTIAL_PROVIDERS,
     get_provider_kwargs,
     keyless_placeholder_api_key,
+    missing_declared_credential,
     normalize_pricing_key,
     provider_key,
+    require_declared_credential,
     resolve_provider_selector,
     split_selector,
+    warn_about_ignored_provider_variables,
 )
 
 # ---------------------------------------------------------------------------
@@ -120,6 +125,25 @@ def test_validate_rejects_non_list_models() -> None:
         config.validate_provider_instances()
 
 
+@pytest.mark.parametrize(
+    ("providers", "match"),
+    [
+        ({"bedrock": {"client_args": {"config": {"read_timeot": 120}}}}, "not a valid botocore Config"),
+        ({"aws": {"provider_type": "bedrock", "client_args": {"config": 120}}}, "must be a mapping"),
+    ],
+)
+def test_validate_rejects_a_bedrock_config_botocore_cannot_build(providers: dict[str, Any], match: str) -> None:
+    """Every Bedrock client merges this config in, so a typo would fail each request instead."""
+    with pytest.raises(ValueError, match=match):
+        GatewayConfig(providers=providers).validate_provider_instances()
+
+
+def test_validate_accepts_a_bedrock_config_botocore_can_build() -> None:
+    GatewayConfig(
+        providers={"bedrock": {"client_args": {"config": {"read_timeout": 120}}}}
+    ).validate_provider_instances()  # no raise
+
+
 def test_validate_allows_instance_without_provider_type() -> None:
     # Backward compatible: keys that are real providers need no provider_type and
     # are not hard-validated here.
@@ -184,11 +208,11 @@ def test_bare_keyed_entry_warns(monkeypatch: pytest.MonkeyPatch, caplog: pytest.
     assert "OPENAI_API_KEY" in text
 
 
-def test_bare_keyed_entry_with_env_credential_warns_nothing(
+def test_bare_keyed_entry_with_env_credential_warns_nothing_at_load(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # any-llm falls back to the provider's own env var, so a bare entry backed by
-    # OPENAI_API_KEY is a working config, not a typo.
+    # Not a load-time warning: the startup prune reports the entry as ignored,
+    # with the api_key line to add (test_entry_naming_no_key_lacks_one_although_the_variable_is_set).
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     config = GatewayConfig(**yaml.safe_load("providers:\n  openai:\n"))
     assert _validate_capturing_warnings(config, caplog) == ""
@@ -242,8 +266,9 @@ def test_credential_env_names_none_for_unknown_provider() -> None:
 # gemini raises `MissingApiKeyError` when neither GEMINI_API_KEY nor
 # GOOGLE_API_KEY resolves; azure and azureopenai tolerate a missing key only for
 # an Entra ID deployment, which still needs an endpoint from config and so never
-# reaches the port with empty kwargs.
-_KEYED_DESPITE_OVERRIDING = frozenset({"gemini", "azure", "azureopenai"})
+# reaches the port with empty kwargs. typesafe tolerates one only off its hosted
+# API, and serves no chat or Messages request otari could route to it anyway.
+_KEYED_DESPITE_OVERRIDING = frozenset({"gemini", "azure", "azureopenai", "typesafe"})
 
 
 def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
@@ -277,17 +302,17 @@ def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
     # itself and need no hand-written entry, so they are expected here but not in
     # either set.
     declares_nothing = {name for name in overriding if provider_credential_env_names(name) == ()}
-    classified = KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS | _KEYED_DESPITE_OVERRIDING
+    classified = KEYLESS_SELF_HOSTED_PROVIDERS | AMBIENT_CREDENTIAL_PROVIDERS | _KEYED_DESPITE_OVERRIDING
 
     assert overriding - declares_nothing == classified, (
         "any-llm's uncredentialed-provider roster changed. Every provider overriding "
         "_verify_and_set_api_key must be classified in config.py "
-        "(KEYLESS_SELF_HOSTED_PROVIDERS), provider_kwargs.py (_AMBIENT_CREDENTIAL_PROVIDERS) or here "
+        "(KEYLESS_SELF_HOSTED_PROVIDERS), provider_kwargs.py (AMBIENT_CREDENTIAL_PROVIDERS) or here "
         "(_KEYED_DESPITE_OVERRIDING). Unclassified names are treated as keyed, which is "
         "the direction that hands a working request to a hosted fleet."
     )
     # And nothing in either set has quietly started demanding a key.
-    for name in KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS:
+    for name in KEYLESS_SELF_HOSTED_PROVIDERS | AMBIENT_CREDENTIAL_PROVIDERS:
         assert provider_credential_env_names(name), f"{name} no longer declares a credential variable"
         assert name in overriding, f"any-llm now unconditionally requires a credential for {name}"
 
@@ -418,7 +443,7 @@ def test_bedrock_uses_aws_region_when_default_region_is_unset(monkeypatch: pytes
 
     kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.BEDROCK)
 
-    assert kwargs["client_args"] == {"region_name": "us-east-1"}
+    assert _without_read_timeout(kwargs["client_args"]) == {"region_name": "us-east-1"}
 
 
 def test_bedrock_region_fallback_preserves_other_client_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -428,7 +453,7 @@ def test_bedrock_region_fallback_preserves_other_client_args(monkeypatch: pytest
 
     kwargs = get_provider_kwargs(config, LLMProvider.BEDROCK)
 
-    assert kwargs["client_args"] == {
+    assert _without_read_timeout(kwargs["client_args"]) == {
         "retries": {"max_attempts": 2},
         "region_name": "us-east-1",
     }
@@ -445,8 +470,27 @@ def test_bedrock_preserves_explicit_region_and_aws_default_region(monkeypatch: p
     default_config = GatewayConfig(providers={"bedrock": {"client_args": {"retries": {"max_attempts": 2}}}})
     default_kwargs = get_provider_kwargs(default_config, LLMProvider.BEDROCK)
 
-    assert explicit_kwargs["client_args"] == {"region_name": "ap-southeast-2"}
-    assert default_kwargs["client_args"] == {"retries": {"max_attempts": 2}}
+    assert _without_read_timeout(explicit_kwargs["client_args"]) == {"region_name": "ap-southeast-2"}
+    assert _without_read_timeout(default_kwargs["client_args"]) == {"retries": {"max_attempts": 2}}
+
+
+def _without_read_timeout(client_args: dict[str, Any]) -> dict[str, Any]:
+    """``client_args`` less the read-timeout ``config`` every Bedrock client gets."""
+    rest = dict(client_args)
+    assert rest.pop("config").read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+    return rest
+
+
+def test_bedrock_outlasts_botocores_default_read_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """botocore's 60s default fails a stream whose model goes quiet for a minute."""
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    config = GatewayConfig(providers={"bedrock": {"client_args": {"config": {"connect_timeout": 5}}}})
+
+    client_config = get_provider_kwargs(config, LLMProvider.BEDROCK)["client_args"]["config"]
+
+    assert client_config.read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+    assert client_config.connect_timeout == 5
+    assert config.providers["bedrock"]["client_args"]["config"] == {"connect_timeout": 5}
 
 
 def test_aws_region_fallback_is_limited_to_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -482,44 +526,38 @@ def test_explicit_key_is_not_overridden_by_placeholder(monkeypatch: pytest.Monke
 
 
 def test_no_placeholder_without_api_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A default hosted endpoint (no custom api_base) still relies on the provider's
-    # native env var; injecting a placeholder there would shadow it.
+    # A default hosted endpoint (no custom api_base) needs a real key, so a
+    # placeholder there would only be sent to the provider and rejected.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     config = GatewayConfig(providers={"openai": {}})
     kwargs = get_provider_kwargs(config, LLMProvider.OPENAI, instance="openai")
     assert "api_key" not in kwargs
 
 
-def test_env_var_fallback_preserved_over_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
-    # any-llm falls back to OPENAI_API_KEY before raising, so the placeholder must
-    # not shadow a key the operator supplied that way.
+def test_a_keyless_endpoint_never_takes_the_provider_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The entry names no key, so OPENAI_API_KEY must never be sent to its api_base.
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     config = GatewayConfig(providers={"home_lab": {"provider_type": "openai", "api_base": "http://x/v1"}})
     kwargs = get_provider_kwargs(config, LLMProvider.OPENAI, instance="home_lab")
-    assert "api_key" not in kwargs
+    assert kwargs["api_key"] == _KEYLESS_PLACEHOLDER_API_KEY
 
 
-def test_keyless_placeholder_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def test_organization_endpoint_never_takes_the_deployment_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An organization's keyless endpoint is not the deployment's declaration, so
+    # the deployment's own OPENAI_API_KEY must never be sent to it.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    monkeypatch.setattr(provider_kwargs, "cached_org_provider_kwargs", lambda _ws, _p: {"api_base": "http://x/v1"})
+    kwargs = get_provider_kwargs(GatewayConfig(providers={}), LLMProvider.OPENAI, workspace_id=uuid.uuid4())
+    assert kwargs["api_key"] == _KEYLESS_PLACEHOLDER_API_KEY
+
+
+def test_keyless_placeholder_helper() -> None:
     # Keyless custom endpoint: placeholder.
-    assert keyless_placeholder_api_key(LLMProvider.ANTHROPIC, "http://x/v1", None) == _KEYLESS_PLACEHOLDER_API_KEY
+    assert keyless_placeholder_api_key("http://x/v1", None) == _KEYLESS_PLACEHOLDER_API_KEY
     # No api_base (hosted default): no placeholder.
-    assert keyless_placeholder_api_key(LLMProvider.ANTHROPIC, None, None) is None
+    assert keyless_placeholder_api_key(None, None) is None
     # Key already present: no placeholder.
-    assert keyless_placeholder_api_key(LLMProvider.ANTHROPIC, "http://x/v1", "sk-real") is None
-
-
-def test_env_var_fallback_honors_compound_key_label(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Some providers expose ``ENV_API_KEY_NAME`` as a ``/``-joined list of
-    # alternatives rather than one variable (gemini: "GEMINI_API_KEY/GOOGLE_API_KEY").
-    # A key set under any alternative must still suppress the placeholder, or it
-    # would shadow the operator's real env-var credential.
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setenv("GOOGLE_API_KEY", "goog-from-env")
-    assert keyless_placeholder_api_key(LLMProvider.GEMINI, "http://x/v1", None) is None
-    # With neither alternative set, a keyless custom endpoint still gets the placeholder.
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    assert keyless_placeholder_api_key(LLMProvider.GEMINI, "http://x/v1", None) == _KEYLESS_PLACEHOLDER_API_KEY
+    assert keyless_placeholder_api_key("http://x/v1", "sk-real") is None
 
 
 # ---------------------------------------------------------------------------
@@ -610,17 +648,110 @@ def test_candidate_model_keys_accepts_string_provider_from_any_llm(monkeypatch: 
 
 
 # ---------------------------------------------------------------------------
-# Deprecated env-var fallback for an undeclared provider (#1626)
+# A provider nothing declares is not served on its own environment variable
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def undeclared_env_warnings(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> Iterator[pytest.LogCaptureFixture]:
-    """Capture gateway warnings with the once-per-provider memory cleared."""
-    monkeypatch.setattr(provider_kwargs, "_undeclared_env_warned", set())
+@pytest.mark.parametrize("mode", [None, "hybrid", "hosted"])
+def test_undeclared_provider_on_env_var_is_missing_a_credential(
+    mode: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+    config = GatewayConfig(mode=mode, providers={}) if mode else GatewayConfig(providers={})
+    kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+
+    missing = missing_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs)
+
+    assert missing is not None
+    assert missing.provider == "anthropic"
+    assert "${ANTHROPIC_API_KEY}" in missing.detail
+    assert "sk-ant-secret-value" not in missing.detail
+    with pytest.raises(MissingApiKeyError):
+        require_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param({"api_key": "sk-ant-test"}, id="interpolated-key"),
+        pytest.param({"provider_type": "anthropic", "api_base": "http://x/v1"}, id="keyless-endpoint"),
+    ],
+)
+def test_declared_provider_is_served(entry: dict[str, Any]) -> None:
+    config = GatewayConfig(providers={"anthropic": entry})
+    kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+
+    assert missing_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs) is None
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [pytest.param({}, id="bare-entry"), pytest.param({"client_args": {"timeout": 60}}, id="client-args-only")],
+)
+def test_declared_entry_naming_no_key_is_refused_although_its_variable_is_set(
+    entry: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    config = GatewayConfig(providers={"anthropic": entry})
+    kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+
+    missing = missing_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs)
+    assert missing is not None
+    assert "${ANTHROPIC_API_KEY}" in missing.detail
+
+
+def test_organization_key_serves_an_undeclared_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(provider_kwargs, "cached_org_provider_kwargs", lambda _ws, _p: {"api_key": "sk-org"})
+    config = GatewayConfig(providers={})
+    kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC, workspace_id=uuid.uuid4())
+
+    assert missing_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs) is None
+
+
+_NO_KEY_PROVIDERS = [
+    LLMProvider.OLLAMA,
+    LLMProvider.LLAMACPP,
+    LLMProvider.LMSTUDIO,
+    LLMProvider.VLLM,
+    LLMProvider.BEDROCK,
+    LLMProvider.SAGEMAKER,
+    LLMProvider.VERTEXAI,
+]
+
+
+@pytest.mark.parametrize("provider", _NO_KEY_PROVIDERS)
+def test_a_declared_keyless_or_ambient_provider_needs_no_key(provider: LLMProvider) -> None:
+    # Vertex AI needs a project to build its client, which is configuration, not a credential.
+    entry = {"project": "test-project"} if provider == LLMProvider.VERTEXAI else {}
+    config = GatewayConfig(providers={provider.value: entry})
+    kwargs = get_provider_kwargs(config, provider)
+
+    assert missing_declared_credential(config, provider.value, provider, kwargs) is None
+
+
+@pytest.mark.parametrize("provider", _NO_KEY_PROVIDERS)
+def test_an_undeclared_keyless_or_ambient_provider_is_refused(provider: LLMProvider) -> None:
+    # The local server and the cloud role are the deployment's own, so they serve
+    # only a provider the deployment declares.
+    config = GatewayConfig(providers={})
+    kwargs = get_provider_kwargs(config, provider)
+
+    assert missing_declared_credential(config, provider.value, provider, kwargs) is not None
+
+
+def test_an_organization_key_naming_no_credential_never_rides_the_deployments_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(provider_kwargs, "cached_org_provider_kwargs", lambda _ws, _p: {})
+    config = GatewayConfig(providers={})
+    kwargs = get_provider_kwargs(config, LLMProvider.BEDROCK, workspace_id=uuid.uuid4())
+
+    assert missing_declared_credential(config, "bedrock", LLMProvider.BEDROCK, kwargs) is not None
+
+
+@pytest.fixture
+def ignored_variable_warnings(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
     _capture_gateway_logs(caplog)
     try:
         yield caplog
@@ -628,63 +759,144 @@ def undeclared_env_warnings(
         gateway_logger.removeHandler(caplog.handler)
 
 
-def test_undeclared_provider_on_env_var_warns_once(
-    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+def test_startup_warns_about_a_variable_no_entry_declares(
+    monkeypatch: pytest.MonkeyPatch, ignored_variable_warnings: pytest.LogCaptureFixture
 ) -> None:
-    """The warning names the provider and its variable, never the value, and is not repeated per request."""
+    """Names the variable and the provider, never the value."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
-    config = GatewayConfig(providers={})
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret-value")
 
-    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
-    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+    # The value interpolation leaves behind, so this entry reads OPENAI_API_KEY.
+    warn_about_ignored_provider_variables(GatewayConfig(providers={"openai": {"api_key": "sk-openai-secret-value"}}))
 
-    records = [r for r in undeclared_env_warnings.records if "not declared under providers:" in r.getMessage()]
+    records = [r for r in ignored_variable_warnings.records if "Ignoring" in r.getMessage()]
     assert len(records) == 1
     message = records[0].getMessage()
-    assert "'anthropic'" in message and "ANTHROPIC_API_KEY" in message
-    assert "sk-ant-secret-value" not in message
+    assert "ANTHROPIC_API_KEY" in message and "anthropic" in message
+    assert "OPENAI_API_KEY" not in message
+    assert "secret-value" not in message
 
 
-def test_declared_provider_on_env_var_warns_nothing(
-    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+def test_startup_warns_nothing_when_every_variable_is_read(
+    monkeypatch: pytest.MonkeyPatch, ignored_variable_warnings: pytest.LogCaptureFixture
 ) -> None:
-    """A declared entry reading its key from the env var is the supported shape."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    config = GatewayConfig(providers={"anthropic": {"api_key": "sk-ant-test"}})
-
-    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
-
-    assert "not declared" not in undeclared_env_warnings.text
-
-
-def test_undeclared_provider_without_env_var_warns_nothing(
-    undeclared_env_warnings: pytest.LogCaptureFixture,
-) -> None:
-    """No env var means no fallback in use; the request fails on its own terms."""
-    get_provider_kwargs(GatewayConfig(providers={}), LLMProvider.ANTHROPIC)
-
-    assert "not declared" not in undeclared_env_warnings.text
-
-
-def test_organization_key_counts_as_declared(
-    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
-) -> None:
-    """An organization-scoped provider key is a declaration too, even with the env var also set."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    monkeypatch.setattr(provider_kwargs, "cached_org_provider_kwargs", lambda _ws, _p: {"api_key": "sk-org"})
-
-    get_provider_kwargs(GatewayConfig(providers={}), LLMProvider.ANTHROPIC, workspace_id=uuid.uuid4())
-
-    assert "not declared" not in undeclared_env_warnings.text
-
-
-@pytest.mark.parametrize("mode", ["hybrid", "hosted"])
-def test_undeclared_env_provider_warns_nothing_outside_standalone(
-    mode: str, monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
-) -> None:
-    """Hybrid resolves credentials from the platform and hosted serves no inference."""
+    for provider in LLMProvider:
+        monkeypatch.delenv(f"{provider.value.upper()}_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
-    get_provider_kwargs(GatewayConfig(mode=mode, providers={}), LLMProvider.ANTHROPIC)
+    # What ``api_key: ${ANTHROPIC_API_KEY}`` interpolates to.
+    warn_about_ignored_provider_variables(GatewayConfig(providers={"anthropic": {"api_key": "sk-ant-test"}}))
 
-    assert "not declared" not in undeclared_env_warnings.text
+    assert "Ignoring" not in ignored_variable_warnings.text
+
+
+def test_startup_warns_about_a_variable_a_bare_entry_does_not_read(
+    monkeypatch: pytest.MonkeyPatch, ignored_variable_warnings: pytest.LogCaptureFixture
+) -> None:
+    for provider in LLMProvider:
+        monkeypatch.delenv(f"{provider.value.upper()}_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    warn_about_ignored_provider_variables(GatewayConfig(providers={"anthropic": {}}))
+
+    assert "Ignoring ANTHROPIC_API_KEY" in ignored_variable_warnings.text
+
+
+# ---------------------------------------------------------------------------
+# A providers: entry that declares no credential is ignored, not shadowing
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def uncredentialed_warnings(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> Iterator[pytest.LogCaptureFixture]:
+    """Capture gateway warnings with the once-per-instance memory cleared and the SDK variables unset."""
+    monkeypatch.setattr(provider_kwargs, "_uncredentialed_warned", set())
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "COHERE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    _capture_gateway_logs(caplog)
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param({"api_key": ""}, id="empty-string"),
+        pytest.param({"api_key": None}, id="none"),
+        pytest.param({}, id="no-settings"),
+        pytest.param({"client_args": {"timeout": 60}}, id="transport-only"),
+        pytest.param({"provider_type": "openai", "models": ["gpt-4o"]}, id="meta-only"),
+        pytest.param({"api_key": "", "temperature": 0.7}, id="call-options-are-not-credentials"),
+        pytest.param({"api_key": "", "client_args": {"default_headers": {"X-Trace": "1"}}}, id="non-auth-headers"),
+    ],
+)
+def test_entry_without_a_credential_names_the_variables_it_lacks(
+    entry: dict[str, object], uncredentialed_warnings: pytest.LogCaptureFixture
+) -> None:
+    config = GatewayConfig(providers={"openai": entry})
+    assert provider_kwargs.uncredentialed_env_names(config, "openai", entry) == ("OPENAI_API_KEY",)
+
+
+def test_entry_naming_no_key_lacks_one_although_the_variable_is_set(
+    monkeypatch: pytest.MonkeyPatch, uncredentialed_warnings: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    config = GatewayConfig(providers={"openai": {}})
+    assert provider_kwargs.uncredentialed_env_names(config, "openai", {}) == ("OPENAI_API_KEY",)
+
+
+@pytest.mark.parametrize(
+    ("instance", "entry", "env"),
+    [
+        pytest.param("openai", {"api_key": "sk-config"}, {}, id="key-in-config"),
+        pytest.param(
+            "home_lab", {"provider_type": "openai", "api_base": "http://models.local/v1"}, {}, id="keyless-base"
+        ),
+        pytest.param("ollama", {}, {}, id="keyless-local-backend"),
+        pytest.param("bedrock", {}, {}, id="ambient-credential"),
+        pytest.param("vertexai", {}, {}, id="no-credential-variable"),
+        pytest.param("mystery", {"provider_type": "not-a-provider"}, {}, id="unknown-type"),
+        pytest.param(
+            "openai",
+            {"api_key": "", "client_args": {"default_headers": {"Authorization": "Bearer t"}}},
+            {},
+            id="auth-header-in-client-args",
+        ),
+        pytest.param("openai", {"azure_ad_token": "t"}, {}, id="other-credential-field"),
+    ],
+)
+def test_entry_that_can_be_called_is_not_uncredentialed(
+    instance: str,
+    entry: dict[str, object],
+    env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    uncredentialed_warnings: pytest.LogCaptureFixture,
+) -> None:
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    config = GatewayConfig.model_construct(providers={instance: entry})
+    assert provider_kwargs.uncredentialed_env_names(config, instance, entry) is None
+
+
+def test_prune_drops_the_hollow_entries_and_warns_once_per_instance(
+    uncredentialed_warnings: pytest.LogCaptureFixture,
+) -> None:
+    config = GatewayConfig(
+        providers={"openai": {"api_key": ""}, "anthropic": {"api_key": "sk-ant-config"}, "ollama": {}}
+    )
+
+    first = provider_kwargs.prune_uncredentialed_providers(config)
+    second = provider_kwargs.prune_uncredentialed_providers(config)
+
+    assert first == {"openai": ("OPENAI_API_KEY",)}
+    assert second == {}
+    assert set(config.providers) == {"anthropic", "ollama"}
+    records = [r for r in uncredentialed_warnings.records if "declares no credential" in r.getMessage()]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "providers.openai" in message and "OPENAI_API_KEY" in message
+    assert "sk-ant-config" not in message

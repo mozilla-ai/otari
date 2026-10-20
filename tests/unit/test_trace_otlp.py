@@ -1,0 +1,381 @@
+"""Spans an instrumented agent exports become trace documents, projected, never passed through."""
+
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValue
+
+from gateway.api.routes.otlp import _attributes
+from gateway.core.config import GatewayConfig
+from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
+from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
+from gateway.types.traces import TraceWrite, is_identifier
+
+_WORKSPACE = uuid.uuid4()
+_T0 = datetime(2026, 10, 7, 12, tzinfo=UTC)
+_NOW = _T0 + timedelta(hours=1)
+_RETENTION = timedelta(days=30)
+_INT32_MAX = 2_147_483_647
+
+
+def _span(
+    span_id: str,
+    *,
+    trace_id: str = "t" * 32,
+    parent: str | None = None,
+    name: str = "span",
+    failed: bool = False,
+    attrs: Any = None,
+    start: datetime | None = _T0,
+    end: datetime | None = _T0 + timedelta(seconds=2),
+) -> OtlpSpan:
+    return OtlpSpan(
+        trace_id=trace_id,
+        span_id=span_id,
+        parent_span_id=parent,
+        name=name,
+        start_time=start,
+        end_time=end,
+        failed=failed,
+        attributes=attrs or {},
+    )
+
+
+def _project(
+    *spans: OtlpSpan, user_id: str | None = "alice", api_key_id: str = "k", max_traces: int = 1_000
+) -> list[TraceWrite]:
+    return list(
+        project_otlp_spans(
+            list(spans),
+            workspace_id=_WORKSPACE,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            retention=_RETENTION,
+            now=_NOW,
+            max_traces=max_traces,
+        ).writes
+    )
+
+
+def test_an_agent_run_keeps_its_tree_and_each_span_its_kind() -> None:
+    [write] = _project(
+        _span("a1", name="invoke_agent qa", attrs={"gen_ai.operation.name": "invoke_agent"}),
+        _span(
+            "c1",
+            parent="a1",
+            attrs={"gen_ai.operation.name": "chat", "gen_ai.request.model": "gpt-5", "gen_ai.usage.input_tokens": 12},
+        ),
+        _span("x1", parent="a1", attrs={"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "searchDocs"}),
+    )
+
+    ids = {span.otel_span_id: span.span_id for span in write.spans}
+    kinds = {span.otel_span_id: (span.kind, span.parent_span_id) for span in write.spans}
+    assert kinds == {
+        "a1": ("agent", None),
+        "c1": ("llm", ids["a1"]),
+        "x1": ("tool", ids["a1"]),
+    }
+    assert all(span.span_id.startswith("otlp-") and is_identifier(span.span_id) for span in write.spans)
+    llm = next(span for span in write.spans if span.kind == "llm")
+    assert (llm.model, llm.input_tokens, llm.origin) == ("gpt-5", 12, "otlp")
+    assert write.session_source == "otlp"
+
+
+def test_spans_naming_one_conversation_share_a_trace_across_otel_traces() -> None:
+    writes = _project(
+        _span("a", trace_id="1" * 32, attrs={"gen_ai.conversation.id": "conv-7"}),
+        _span("b", trace_id="2" * 32, attrs={"gen_ai.conversation.id": "conv-7"}),
+        _span("c", trace_id="3" * 32),
+    )
+
+    assert sorted(len(write.spans) for write in writes) == [1, 2]
+
+
+def test_a_claude_sessions_threads_share_one_trace() -> None:
+    session = {"anthropic.session.id": "sesn_1"}
+    writes = _project(
+        _span("a", trace_id="1" * 32, attrs={**session, "gen_ai.conversation.id": "sthr_main"}),
+        _span("b", trace_id="2" * 32, attrs={**session, "gen_ai.conversation.id": "sthr_sub"}),
+    )
+
+    assert [len(write.spans) for write in writes] == [2]
+
+
+def test_text_in_a_span_name_or_attribute_never_reaches_the_document() -> None:
+    [write] = _project(
+        _span(
+            "a",
+            name="summarize: the merger memo",
+            failed=True,
+            attrs={
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": "read file",
+                "error.type": "file not found",
+            },
+        )
+    )
+
+    [span] = write.spans
+    assert (span.name, span.tool_name, span.outcome, span.error_class) == ("execute_tool", None, "error", "error")
+    assert "merger" not in repr(span)
+
+
+@pytest.mark.parametrize(
+    ("reasons", "stored"),
+    [(["stop"], "stop"), (("tool_calls",), "tool_calls"), (["stop", "length"], "stop,length"), ("stop", "stop")],
+)
+def test_finish_reasons_sent_as_an_array_are_kept(reasons: Any, stored: str) -> None:
+    [write] = _project(
+        _span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.response.finish_reasons": reasons}),
+    )
+
+    [span] = write.spans
+    assert span.attributes == {"gen_ai.response.finish_reasons": stored}
+
+
+@pytest.mark.parametrize(
+    "reasons",
+    [
+        ["stop", "the model ran out of room"],
+        ["stop", 1],
+        ["stop", None],
+        [],
+        ["x" * 100, "y" * 100],
+        {"first": "stop"},
+        ["stop,length"],
+        "stop,length",
+    ],
+)
+def test_finish_reasons_that_are_not_all_identifiers_are_dropped_and_the_span_kept(reasons: Any) -> None:
+    [write] = _project(
+        _span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.response.finish_reasons": reasons}),
+    )
+
+    [span] = write.spans
+    assert span.attributes == {}
+
+
+@pytest.mark.parametrize(("sent", "stored"), [(1024, 1024), ("1024", 1024), (10**12, _INT32_MAX)])
+def test_the_requested_max_tokens_is_kept(sent: Any, stored: int) -> None:
+    [write] = _project(_span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.request.max_tokens": sent}))
+
+    [span] = write.spans
+    assert span.attributes == {"gen_ai.request.max_tokens": stored}
+
+
+@pytest.mark.parametrize("sent", [-1, 1.5, True, "lots"])
+def test_a_max_tokens_that_is_not_a_count_is_dropped_and_the_span_kept(sent: Any) -> None:
+    [write] = _project(_span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.request.max_tokens": sent}))
+
+    [span] = write.spans
+    assert span.attributes == {}
+
+
+def test_an_array_attribute_is_read_only_where_a_trace_asks_for_it() -> None:
+    reasons = AnyValue(array_value=ArrayValue(values=[AnyValue(string_value="stop")]))
+    received = [KeyValue(key="gen_ai.response.finish_reasons", value=reasons)]
+
+    assert _attributes(received) == {"gen_ai.response.finish_reasons": None}
+    assert _attributes(received, arrays=True) == {"gen_ai.response.finish_reasons": ("stop",)}
+
+
+def test_a_span_with_no_ids_is_skipped() -> None:
+    assert _project(_span("", trace_id="")) == []
+
+
+def test_equal_span_ids_from_two_otel_traces_of_one_conversation_stay_apart() -> None:
+    conversation = {"gen_ai.conversation.id": "conv-7"}
+    [write] = _project(
+        _span("root", trace_id="1" * 32, attrs=conversation),
+        _span("leaf", trace_id="1" * 32, parent="root", attrs=conversation),
+        _span("root", trace_id="2" * 32, attrs=conversation),
+        _span("leaf", trace_id="2" * 32, parent="root", attrs=conversation),
+    )
+
+    assert len({span.span_id for span in write.spans}) == 4
+    by_id = {span.span_id: span for span in write.spans}
+    for span in write.spans:
+        if span.parent_span_id is not None:
+            assert by_id[span.parent_span_id].otel_trace_id == span.otel_trace_id
+
+
+def test_a_span_id_is_the_same_on_every_export() -> None:
+    [first] = _project(_span("a"))
+    [again] = _project(_span("a"))
+
+    assert first.spans[0].span_id == again.spans[0].span_id
+
+
+def test_keys_with_no_user_do_not_share_a_conversation() -> None:
+    conversation = {"gen_ai.conversation.id": "conv-7"}
+    [one] = _project(_span("a", attrs=conversation), user_id=None, api_key_id="k1")
+    [other] = _project(_span("a", attrs=conversation), user_id=None, api_key_id="k2")
+    [first_key] = _project(_span("a", attrs=conversation), user_id="alice", api_key_id="k1")
+    [second_key] = _project(_span("a", attrs=conversation), user_id="alice", api_key_id="k2")
+
+    assert one.trace_id != other.trace_id
+    assert first_key.trace_id == second_key.trace_id
+
+
+def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
+    def tokens(value: Any) -> int | None:
+        [write] = _project(_span("a", attrs={"gen_ai.usage.input_tokens": value}))
+        count: int | None = write.spans[0].input_tokens
+        return count
+
+    assert tokens("120") == 120
+    assert tokens("\u00b2") is None
+    assert tokens("9" * 5_000) is None
+    assert tokens(-5) is None
+    assert tokens("-5") is None
+    assert tokens(True) is None
+    assert tokens(2**62) == _INT32_MAX
+    assert tokens(str(2**40)) == _INT32_MAX
+
+
+@pytest.mark.parametrize(
+    ("provider", "input_tokens", "cache_read_key", "cache_write_key"),
+    [
+        pytest.param(
+            "anthropic",
+            48_210,
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            id="inside-as-the-conventions-count-them",
+        ),
+        pytest.param(
+            "openai",
+            48_210,
+            "gen_ai.usage.cached_tokens",
+            "gen_ai.usage.cache_write_tokens",
+            id="inside-under-older-names",
+        ),
+        pytest.param(
+            "anthropic",
+            300,
+            "gen_ai.usage.cache_read_tokens",
+            "gen_ai.usage.cache_write_tokens",
+            id="on-top-when-they-outnumber-it",
+        ),
+    ],
+)
+def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported_its_cache(
+    provider: str, input_tokens: int, cache_read_key: str, cache_write_key: str
+) -> None:
+    attrs = {
+        "gen_ai.provider.name": provider,
+        "gen_ai.usage.input_tokens": input_tokens,
+        cache_read_key: 41_900,
+        cache_write_key: 6_010,
+        "gen_ai.usage.reasoning.output_tokens": 12,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    [span] = write.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (48_210, 41_900, 6_010)
+    assert span.reasoning_tokens == 12
+
+
+def test_a_reported_zero_cache_count_is_kept_not_stored_as_unknown() -> None:
+    attrs = {
+        "gen_ai.usage.input_tokens": 100,
+        "gen_ai.usage.cache_read.input_tokens": 0,
+        "gen_ai.usage.cache_creation.input_tokens": 0,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    [span] = write.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (100, 0, 0)
+
+
+def test_a_span_that_reports_no_cache_count_leaves_it_unknown() -> None:
+    [write] = _project(_span("a", attrs={"gen_ai.usage.input_tokens": 100}))
+
+    [span] = write.spans
+    assert (span.cache_read_tokens, span.cache_write_tokens) == (None, None)
+
+
+def test_cached_tokens_never_lift_the_whole_prompt_past_what_the_store_holds() -> None:
+    attrs = {
+        "gen_ai.provider.name": "anthropic",
+        "gen_ai.usage.input_tokens": 10,
+        "gen_ai.usage.cache_read_tokens": _INT32_MAX,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    assert write.spans[0].input_tokens == _INT32_MAX
+
+
+def test_span_times_are_clamped_to_the_window_a_trace_can_live_in() -> None:
+    [write] = _project(
+        _span("old", start=datetime(1970, 1, 1, tzinfo=UTC), end=datetime(1970, 1, 1, 0, 1, tzinfo=UTC)),
+        _span("future", start=_NOW, end=datetime(2999, 1, 1, tzinfo=UTC)),
+        _span("backwards", start=_T0, end=_T0 - timedelta(hours=1)),
+    )
+
+    spans = {span.otel_span_id: span for span in write.spans}
+    assert spans["old"].start_time == spans["old"].end_time == _NOW - _RETENTION
+    assert spans["future"].end_time == _NOW + timedelta(minutes=5)
+    assert spans["future"].duration_ms == 5 * 60 * 1000
+    assert spans["backwards"].end_time == _T0
+    assert spans["backwards"].duration_ms == 0
+
+
+def test_a_duration_never_exceeds_what_the_store_holds() -> None:
+    [write] = project_otlp_spans(
+        [_span("a", start=_NOW - timedelta(days=365), end=_NOW)],
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=timedelta(days=3650),
+        now=_NOW,
+    ).writes
+
+    assert write.spans[0].duration_ms == _INT32_MAX
+
+
+def test_spans_past_the_sessions_an_export_may_write_are_dropped_and_counted() -> None:
+    projection = project_otlp_spans(
+        [_span("a", trace_id="1" * 32), _span("b", trace_id="2" * 32), _span("c", trace_id="3" * 32)],
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+        now=_NOW,
+        max_traces=2,
+    )
+
+    assert len(projection.writes) == 2
+    assert projection.dropped == 1
+
+
+class _ExplodingAttributes(dict[str, Any]):
+    def get(self, key: str, default: Any = None) -> Any:
+        raise RuntimeError("the merger memo")
+
+
+def test_a_span_that_cannot_be_projected_is_dropped_never_raised() -> None:
+    projection = project_otlp_spans(
+        [_span("good"), _span("bad", attrs=_ExplodingAttributes(x=1)), _span("nameless", name=None)],  # type: ignore[arg-type]
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+        now=_NOW,
+    )
+
+    [write] = projection.writes
+    assert [span.otel_span_id for span in write.spans] == ["good"]
+    assert projection.dropped == 2
+
+
+def test_one_export_can_never_fill_the_trace_queue() -> None:
+    """The writer's queue is shared by every request, so one export keeps only a share of it."""
+    assert MAX_SPANS_PER_EXPORT < GatewayConfig().trace_queue_max_spans
+
+
+def test_the_session_cap_binds_below_the_span_cap() -> None:
+    """A cap on sessions at or above the span cap could never take effect."""
+    assert MAX_TRACES_PER_EXPORT < MAX_SPANS_PER_EXPORT

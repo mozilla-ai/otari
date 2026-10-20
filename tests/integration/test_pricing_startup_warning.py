@@ -58,18 +58,20 @@ async def test_warning_when_default_pricing_disabled_and_no_rows(
 _SEARCH_WARNING_MARKER = "No flat per-request rate is configured for search tool(s)"
 
 
-def _search_config() -> GatewayConfig:
+def _search_config(*, require_pricing: bool) -> GatewayConfig:
     return GatewayConfig(
         master_key="k",
-        require_pricing=False,
+        require_pricing=require_pricing,
         search_tools={"exa-search": {"provider": "exa", "api_key": "k"}},
     )
 
 
-async def _warn_for_search_tools(db: AsyncSession, caplog: pytest.LogCaptureFixture) -> None:
+async def _warn_for_search_tools(
+    db: AsyncSession, caplog: pytest.LogCaptureFixture, *, require_pricing: bool = False
+) -> None:
     _capture_gateway_logs(caplog)
     try:
-        await warn_if_search_tools_lack_flat_pricing(_search_config(), db)
+        await warn_if_search_tools_lack_flat_pricing(_search_config(require_pricing=require_pricing), db)
     finally:
         gateway_logger.removeHandler(caplog.handler)
 
@@ -82,6 +84,18 @@ async def test_warning_for_a_search_tool_with_no_flat_rate(
     await _warn_for_search_tools(async_db, caplog)
     assert _SEARCH_WARNING_MARKER in caplog.text
     assert "exa:exa-search" in caplog.text
+    assert "Nothing is reserved" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_search_tool_warning_names_the_402_under_require_pricing(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With require_pricing on, an unpriced tool's searches are refused, not merely unreserved."""
+    await _warn_for_search_tools(async_db, caplog, require_pricing=True)
+    assert _SEARCH_WARNING_MARKER in caplog.text
+    assert "HTTP 402" in caplog.text
+    assert "Nothing is reserved" not in caplog.text
 
 
 @pytest.mark.asyncio

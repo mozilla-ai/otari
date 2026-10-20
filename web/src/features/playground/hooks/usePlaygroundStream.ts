@@ -140,7 +140,11 @@ export function usePlaygroundStream(params: {
           tools,
           signal: controller.signal,
           onDelta: (delta) => {
-            firstTokenAt ??= performance.now()
+            // A tool call is not a token: time to first token stays the time to
+            // the first of the answer's own text.
+            if (delta.content || delta.reasoning) {
+              firstTokenAt ??= performance.now()
+            }
             setPanel((prev) => ({
               ...prev,
               turns: appendStreamDelta(prev.turns, delta),

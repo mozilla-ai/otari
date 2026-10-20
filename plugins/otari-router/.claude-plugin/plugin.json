@@ -1,0 +1,29 @@
+{
+  "name": "otari-router",
+  "version": "0.1.0",
+  "description": "Asks an Otari gateway which model each Claude Code subagent should run on, and starts it there.",
+  "author": {
+    "name": "Mozilla AI",
+    "email": "hello@mozilla.ai",
+    "url": "https://github.com/mozilla-ai/"
+  },
+  "repository": "https://github.com/mozilla-ai/otari",
+  "homepage": "https://github.com/mozilla-ai/otari/blob/main/docs/use-with-claude-code.md",
+  "license": "Apache-2.0",
+  "keywords": ["otari", "model-routing", "cost", "subagents"],
+  "userConfig": {
+    "otari_url": {
+      "type": "string",
+      "title": "Otari URL",
+      "description": "Base URL of the gateway that recommends the model, such as https://otari.example.com. Plain http only for a gateway on this machine.",
+      "required": true
+    },
+    "otari_api_key": {
+      "type": "string",
+      "title": "Otari API key",
+      "description": "The key each recommendation is billed to.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

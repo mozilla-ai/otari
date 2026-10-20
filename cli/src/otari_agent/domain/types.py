@@ -8,7 +8,7 @@ either pulling in YAML parsing.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
 from typing import Literal, TypeVar, get_args
@@ -66,6 +66,10 @@ RunsAt = Literal[
 PathEvidenceSource = Literal["pre_tool_use.edit_target", "pre_tool_use.read_target", "stop.working_tree"]
 PATH_EVIDENCE_SOURCES: tuple[PathEvidenceSource, ...] = get_args(PathEvidenceSource)
 
+# The ``type`` of each gate dataclass below, spelled as a policy file spells it.
+GateType = Literal["command", "command_if_changed", "judge", "path", "verifier"]
+GATE_TYPES: tuple[GateType, ...] = get_args(GateType)
+
 # Gate results that mean "no objection". Every other outcome blocks a required
 # gate: unknown and error are deliberately on the blocking side, not the
 # passing one, so a check that could not run is never mistaken for one that
@@ -92,6 +96,29 @@ class Outcome(str, Enum):
         the gate's ``enforcement`` to decide whether to block.
         """
         return self.value not in _NON_BLOCKING
+
+
+class WarningCode(str, Enum):
+    """The stable name of one kind of `otari guardrails validate` warning.
+
+    A gate names the codes it accepts in its own ``accept_warnings``, for a warning that describes its intended design.
+    """
+
+    gate_types: frozenset[GateType]
+
+    def __new__(cls, value: str, *gate_types: GateType) -> WarningCode:
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.gate_types = frozenset(gate_types)
+        return member
+
+    BACKSLASH_IN_GLOB = "backslash-in-glob", "command_if_changed", "judge", "path", "verifier"
+    GLOB_MISSES_SHALLOWER_DEPTH = "glob-misses-shallower-depth", "command_if_changed", "judge", "path", "verifier"
+    JUDGE_GATE_CAP = "judge-gate-cap", "judge"
+    SHELL_READ_UNSEEN = "shell-read-unseen", "path"
+    SHELL_WRITE_UNSEEN = "shell-write-unseen", "path"
+    SINGLE_TOKEN_PHRASE = "single-token-phrase", "command"
+    VERIFIER_GATE_CAP = "verifier-gate-cap", "verifier"
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +175,7 @@ class PathGate:
     runs: tuple[RunsAt, ...]
     forbidden: tuple[str, ...]
     message: str = ""
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["path"] = "path"
 
     @property
@@ -185,6 +213,7 @@ class CommandGate:
     runs: tuple[RunsAt, ...]
     forbidden: tuple[str, ...]
     message: str = ""
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["command"] = "command"
 
     @property
@@ -219,6 +248,7 @@ class CommandIfChangedGate:
     when_changed: tuple[str, ...]
     require: tuple[str, ...]
     message: str = ""
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["command_if_changed"] = "command_if_changed"
 
     @property
@@ -290,6 +320,7 @@ class JudgeGate:
     when_changed: tuple[str, ...] = ()
     judge_cli: tuple[str, ...] | None = None
     priority: int = 0
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["judge"] = "judge"
 
     @property
@@ -350,6 +381,7 @@ class VerifierGate:
     message: str = ""
     when_changed: tuple[str, ...] = ()
     priority: int = 0
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["verifier"] = "verifier"
 
     @property
@@ -458,17 +490,20 @@ class CommandEvidence:
 
 @dataclass(frozen=True, slots=True)
 class JudgeVerdict:
-    """One judge gate's model-produced verdict, as the caller observed it.
+    """One judge gate's outcome, as the caller reported it.
 
     ``outcome`` is the caller's own report, not a value Otari computed:
     ``"error"`` means the caller's model call itself failed or returned
     something it could not parse as a verdict (no `claude` on PATH, a
     timeout, malformed JSON), distinct from ``"fail"``, which means the model
     call succeeded and judged the rubric unmet. Otari does not verify either.
+
+    ``"not_run"`` means the caller skipped the gate and made no model call.
+    ``reasoning`` says why.
     """
 
     gate_id: str
-    outcome: Literal["pass", "fail", "error"]
+    outcome: Literal["pass", "fail", "error", "not_run"]
     reasoning: str
 
 

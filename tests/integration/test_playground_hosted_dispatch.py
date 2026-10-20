@@ -13,6 +13,7 @@ credential this deployment stores rather than only verifies, so no key surface
 hands it back, rotates it, or lists it beside the keys somebody actually manages.
 """
 
+import json
 import uuid
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
@@ -37,6 +38,7 @@ from .conftest import build_test_client
 
 _DATA_PLANE = "https://gateway.example.test"
 _COMPLETIONS = f"{API_ROOT}/playground/chat/completions"
+_COMPLETION_REQUEST = {"model": "openai:gpt-4o", "messages": [{"role": "user", "content": "hi"}]}
 
 # Bound before any test patches the name, so the factory below builds a real
 # client rather than calling itself.
@@ -138,6 +140,7 @@ def _answer_from_the_data_plane(
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
         seen["authorization"] = request.headers.get("authorization")
+        seen["body"] = json.loads(request.content)
         return httpx.Response(
             status_code,
             stream=_Stream(payload),
@@ -150,13 +153,13 @@ def _answer_from_the_data_plane(
     monkeypatch.setattr(httpx, "AsyncClient", build)
 
 
-def _send(client: TestClient, token: str, workspace_id: uuid.UUID) -> httpx2.Response:
+def _send(client: TestClient, token: str, workspace_id: uuid.UUID, **body: object) -> httpx2.Response:
     client.cookies.set(SESSION_COOKIE_NAME, token)
     try:
         return client.post(
             _COMPLETIONS,
             params={"workspace_id": str(workspace_id)},
-            json={"model": "openai:gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+            json={**_COMPLETION_REQUEST, **body},
         )
     finally:
         client.cookies.clear()
@@ -216,6 +219,26 @@ def test_the_forwarded_key_stands_for_the_caller_and_their_workspace(
     # cannot do, so it is held the way provider credentials are.
     assert minted.internal_secret is not None
     assert seen["authorization"] == f"Bearer {decrypt_secret(minted.internal_secret)}"
+
+
+def test_a_body_user_is_not_forwarded(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The data plane derives the end-user identifier from the key's own user.
+
+    A ``user`` that reached it would win over that user, so a member could take
+    on the identifier an API key's end user is known by upstream.
+    """
+    _, workspace_id, token = caller
+    seen: dict[str, object] = {}
+    _answer_from_the_data_plane(monkeypatch, seen)
+
+    response = _send(hosted_client, token, workspace_id, user="shared-tag-alpha")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert seen["body"] == _COMPLETION_REQUEST
 
 
 def test_the_key_is_minted_once_and_reused(

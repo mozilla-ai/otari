@@ -1,14 +1,19 @@
 """Unit tests for the editable tool/guardrail settings service."""
 
+import logging
+from typing import Any
+
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.models.platform import RuntimeSetting
 from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.tool_settings_service import (
     _parse,
     _serialize,
     apply_override,
     effective_value,
+    load_overrides,
     validate_url,
     validate_value,
 )
@@ -48,7 +53,15 @@ def test_validate_value_url_field_structural() -> None:
 
 @pytest.mark.parametrize("blank", [None, "", "   "])
 def test_validate_value_blank_clears_any_field(blank: SettingValue) -> None:
-    for key in ("web_search_url", "web_search_engines", "web_search_max_results", "web_search_extract"):
+    for key in (
+        "web_search_url",
+        "web_search_engines",
+        "web_search_max_results",
+        "web_search_extract",
+        "web_search_default_tool",
+        "web_fetch_default_tool",
+        "web_search_max_calls",
+    ):
         assert validate_value(key, blank) is None
 
 
@@ -60,6 +73,22 @@ def test_validate_value_int_bounds_and_bool_rejection() -> None:
         validate_value("web_search_max_results", True)  # bool is not an int here
     with pytest.raises(ValueError):
         validate_value("web_search_max_results", "5")  # wrong type
+
+
+def test_validate_value_call_cap_has_a_lower_bound_of_one() -> None:
+    assert validate_value("web_search_max_calls", 1) == 1
+    with pytest.raises(ValueError):
+        validate_value("web_search_max_calls", 0)
+
+
+def test_validate_value_takes_any_default_name() -> None:
+    """Whether it names an instance is the route's check at write: this one also runs at startup."""
+    assert validate_value("web_search_default_tool", "not-yet-loaded") == "not-yet-loaded"
+    assert validate_value("web_fetch_default_tool", "builtin_fetch") == "builtin_fetch"
+    # Stored as every read takes it.
+    assert validate_value("web_search_default_tool", " exa ") == "exa"
+    with pytest.raises(ValueError):
+        validate_value("web_search_default_tool", 3)
 
 
 def test_validate_value_bool_field() -> None:
@@ -82,6 +111,9 @@ def test_validate_value_unknown_key() -> None:
         ("web_search_max_results", 7),
         ("web_search_extract", False),
         ("web_search_extract", True),
+        ("web_search_default_tool", "exa"),
+        ("web_fetch_default_tool", "builtin_fetch"),
+        ("web_search_max_calls", 12),
         ("sandbox_url", None),
     ],
 )
@@ -117,3 +149,36 @@ def test_apply_override_mutates_config() -> None:
     assert config.web_search_url == "http://new:8080"
     apply_override(config, "web_search_url", None)
     assert config.web_search_url is None
+
+
+class _StoredSettings:
+    """Stands in for a session holding these runtime_settings rows."""
+
+    def __init__(self, rows: list[RuntimeSetting]) -> None:
+        self._rows = rows
+
+    async def execute(self, _statement: object) -> "_StoredSettings":
+        return self
+
+    def scalars(self) -> "_StoredSettings":
+        return self
+
+    def all(self) -> list[RuntimeSetting]:
+        return self._rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report_invalid", [True, False])
+async def test_an_invalid_stored_setting_is_skipped_and_reported_only_when_asked(
+    report_invalid: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The periodic refresh asks not to, since startup has reported it already."""
+    caplog.set_level(logging.WARNING, logger="gateway")
+    rows = [
+        RuntimeSetting(key="web_search_max_calls", value="0"),
+        RuntimeSetting(key="web_search_max_results", value="3"),
+    ]
+    session: Any = _StoredSettings(rows)
+    assert await load_overrides(session, report_invalid=report_invalid) == {"web_search_max_results": 3}
+    reported = [record.getMessage() for record in caplog.records]
+    assert reported == (["Ignoring invalid stored tool setting web_search_max_calls"] if report_invalid else [])

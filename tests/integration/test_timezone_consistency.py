@@ -15,8 +15,9 @@ async def test_usage_log_timestamp_is_timezone_aware(async_db: AsyncSession) -> 
         def __init__(self) -> None:
             self.logs: list[UsageLog] = []
 
-        async def put(self, log: UsageLog) -> None:
+        async def put(self, log: UsageLog) -> bool:
             self.logs.append(log)
+            return True
 
         async def start(self) -> None:
             pass

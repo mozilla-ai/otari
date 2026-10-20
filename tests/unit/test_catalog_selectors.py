@@ -6,7 +6,7 @@ from collections.abc import Iterator
 import pytest
 
 from gateway.core.config import GatewayConfig
-from gateway.services import catalog_selectors as selectors
+from gateway.services import catalog as selectors
 from gateway.services.provider_kwargs import resolve_provider_selector
 
 _ROWS = [
@@ -93,6 +93,110 @@ def test_a_slug_whose_vendor_is_a_provider_prefers_that_provider() -> None:
     # The cheaper offering is Azure's; the slug still reaches OpenAI's, because
     # that is the vendor the caller named and OpenAI serves it.
     assert both.models["openai/gpt-4o"] == "openai-eu:gpt-4o"
+
+
+def test_a_catalog_id_orders_its_offerings_cheapest_first(index: selectors.SelectorIndex) -> None:
+    assert index.offerings["z-ai/glm-5.3"] == (
+        "nebius:zai-org/GLM-5.3",
+        "fireworks:accounts/fireworks/models/glm-5p3-fp8",
+        "fireworks:accounts/fireworks/models/glm-5p3",
+    )
+
+
+def test_a_catalog_id_orders_the_vendors_provider_first_then_unpriced_last_then_a_to_z() -> None:
+    rows = [
+        selectors.OfferingRow("together:gpt-4o", "together", "together", None),
+        selectors.OfferingRow("groq:gpt-4o", "groq", "groq", 2.5),
+        selectors.OfferingRow("azure:gpt-4o", "azure", "azure", 2.5),
+        selectors.OfferingRow("openai-eu:gpt-4o", "openai-eu", "openai", 3.0),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", tuple(row.selector for row in rows))
+    }
+
+    built = selectors.build_selector_index(rows, identities)
+
+    assert built.offerings["openai/gpt-4o"] == ("openai-eu:gpt-4o", "azure:gpt-4o", "groq:gpt-4o", "together:gpt-4o")
+    assert built.models["openai/gpt-4o"] == "openai-eu:gpt-4o"
+
+
+def test_a_priced_reseller_comes_before_the_vendors_unpriced_provider() -> None:
+    rows = [
+        selectors.OfferingRow("openai-eu:gpt-4o", "openai-eu", "openai", None),
+        selectors.OfferingRow("azure:gpt-4o", "azure", "azure", 2.5),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", tuple(row.selector for row in rows))
+    }
+
+    built = selectors.build_selector_index(rows, identities)
+
+    assert built.offerings["openai/gpt-4o"] == ("azure:gpt-4o", "openai-eu:gpt-4o")
+
+
+def test_offerings_answer_only_a_catalog_id(index: selectors.SelectorIndex) -> None:
+    assert selectors.resolve_catalog_offerings("Z-AI/GLM-5.3") == index.offerings["z-ai/glm-5.3"]
+    assert selectors.resolve_catalog_offerings("fireworks:z-ai/glm-5.3") == ()
+    assert selectors.resolve_catalog_offerings("nebius:zai-org/GLM-5.3") == ()
+    assert selectors.resolve_catalog_offerings("cerebras/gpt-oss-120b") == ()
+    assert selectors.resolve_catalog_offerings("nope") == ()
+
+
+@pytest.fixture
+def legacy_index() -> Iterator[selectors.SelectorIndex]:
+    """``openai/gpt-4o`` is the legacy spelling of ``openai:gpt-4o`` and the id of a model three providers serve."""
+    rows = [
+        selectors.OfferingRow("azure:gpt-4o", "azure", "azureopenai", 2.5),
+        selectors.OfferingRow("groq:gpt-4o", "groq", "groq", 2.0),
+        selectors.OfferingRow("openai:gpt-4o", "openai", "openai", None),
+        selectors.OfferingRow("openai:gpt-4o-mini", "openai", "openai", 0.1),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o", "groq:gpt-4o", "openai:gpt-4o")),
+        "openai/gpt-4o-mini": ("gpt-4o-mini", ("openai:gpt-4o-mini",)),
+    }
+    built = selectors.build_selector_index(rows, identities)
+    selectors.set_selector_index(built)
+    yield built
+    selectors.reset_selector_index()
+
+
+def test_a_legacy_spelling_of_a_catalog_id_lists_the_offering_it_names_first(
+    legacy_index: selectors.SelectorIndex,
+) -> None:
+    assert legacy_index.offerings["openai/gpt-4o"] == ("groq:gpt-4o", "azure:gpt-4o", "openai:gpt-4o")
+    assert selectors.resolve_catalog_offerings("openai/gpt-4o") == ("openai:gpt-4o", "groq:gpt-4o", "azure:gpt-4o")
+    # Alone, the spelling resolves to the offering it names.
+    assert selectors.resolve_catalog_selector("openai/gpt-4o") is None
+    assert selectors.resolve_catalog_offerings("openai/gpt-4o-mini") == ("openai:gpt-4o-mini",)
+
+
+def test_the_colon_spelling_of_an_offering_lists_no_other_offering(legacy_index: selectors.SelectorIndex) -> None:
+    assert selectors.resolve_catalog_offerings("openai:gpt-4o") == ()
+    assert selectors.resolve_catalog_offerings("azure:gpt-4o") == ()
+
+
+def test_a_legacy_spelling_of_an_organizations_own_offering_lists_it_first() -> None:
+    deployment = [selectors.OfferingRow("azure:gpt-4o", "azure", "azureopenai", 2.5)]
+    own = [selectors.OfferingRow("openai:gpt-4o", "openai", "openai", None)]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o", "openai:gpt-4o"))
+    }
+    view = selectors.build_organization_selectors(deployment, own, identities)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment, {"openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o",))}, organizations={_ORG_A: view}
+        )
+    )
+    try:
+        assert view.offerings["openai/gpt-4o"] == ("azure:gpt-4o", "openai:gpt-4o")
+        assert selectors.resolve_catalog_offerings("openai/gpt-4o", organization_id=_ORG_A) == (
+            "openai:gpt-4o",
+            "azure:gpt-4o",
+        )
+        assert selectors.resolve_catalog_offerings("openai/gpt-4o", organization_id=_ORG_B) == ("azure:gpt-4o",)
+    finally:
+        selectors.reset_selector_index()
 
 
 def test_a_vendor_is_matched_to_its_own_provider_by_the_identity_table() -> None:
@@ -192,6 +296,59 @@ def test_an_offering_on_one_organizations_key_resolves_for_nobody_else(
     assert selectors.model_selector_for_slug("deepseek/deepseek-v4.1-flash", organization_id=_ORG_B) is None
 
 
+def test_offerings_come_from_the_callers_organization_view(organization_index: selectors.SelectorIndex) -> None:
+    assert selectors.resolve_catalog_offerings("deepseek/deepseek-v4.1-flash", workspace_id=_WORKSPACE_A) == (
+        _BYO_DEEPSEEK,
+    )
+    assert selectors.resolve_catalog_offerings("deepseek/deepseek-v4.1-flash", workspace_id=_WORKSPACE_B) == ()
+    assert (
+        selectors.resolve_catalog_offerings("z-ai/glm-5.3", organization_id=_ORG_A)
+        == (organization_index.offerings["z-ai/glm-5.3"])
+    )
+
+
+def test_catalog_models_list_each_id_in_the_callers_view_with_its_order_and_name() -> None:
+    """Each catalog ID with its offerings in ``resolve_catalog_offerings``'s order, and its own name."""
+    own = [selectors.OfferingRow(_BYO_DEEPSEEK, "nebius", "nebius", 0.3)]
+    identities = {**_IDENTITIES, "deepseek/deepseek-v4.1-flash": ("deepseekv4.1flash", (_BYO_DEEPSEEK,))}
+    names = {"z-ai/glm-5.3": "GLM-5.3", "deepseek/deepseek-v4.1-flash": "DeepSeek V4.1 Flash"}
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            _ROWS,
+            _IDENTITIES,
+            organizations={_ORG_A: selectors.build_organization_selectors(_ROWS, own, identities, names)},
+            names=names,
+        )
+    )
+    try:
+        mine = {model.id: model for model in selectors.catalog_models(organization_id=_ORG_A)}
+        theirs = {model.id: model for model in selectors.catalog_models(organization_id=_ORG_B)}
+    finally:
+        selectors.reset_selector_index()
+
+    assert mine["deepseek/deepseek-v4.1-flash"].offerings == (_BYO_DEEPSEEK,)
+    assert mine["deepseek/deepseek-v4.1-flash"].name == "DeepSeek V4.1 Flash"
+    assert "deepseek/deepseek-v4.1-flash" not in theirs
+    assert theirs["z-ai/glm-5.3"].name == "GLM-5.3"
+    assert theirs["z-ai/glm-5.3"].offerings[0] == "nebius:zai-org/GLM-5.3"
+    # No name indexed: the catalog ID stands in for one.
+    assert theirs["openai/gpt-oss-120b"].name == "openai/gpt-oss-120b"
+
+
+def test_an_organizations_unpriced_key_follows_the_priced_offerings() -> None:
+    """An unpriced offering would settle at no cost, so a priced one answers first."""
+    own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", None)]
+    identities = {
+        **_IDENTITIES,
+        "z-ai/glm-5.3": ("glm-5.3", (*_IDENTITIES["z-ai/glm-5.3"][1], "together:zai-org/GLM-5.3")),
+    }
+
+    view = selectors.build_organization_selectors(_ROWS, own, identities)
+
+    assert view.models["z-ai/glm-5.3"] == "nebius:zai-org/GLM-5.3"
+    assert view.offerings["z-ai/glm-5.3"][-1] == "together:zai-org/GLM-5.3"
+
+
 def test_an_organizations_view_is_narrowed_to_what_its_offerings_touch() -> None:
     """A model the organization offers nothing of stays the deployment's to resolve."""
     own = [selectors.OfferingRow(_BYO_DEEPSEEK, "nebius", "nebius", 0.3)]
@@ -203,15 +360,20 @@ def test_an_organizations_view_is_narrowed_to_what_its_offerings_touch() -> None
     assert "cerebras:gpt-oss-120b" not in view.model_selectors
 
 
-def test_an_organizations_cheaper_offering_wins_its_own_catalog_id() -> None:
-    """The organization's rate decides the pick, so its own key answers where it is cheapest."""
-    own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", 0.2)]
+def test_an_organizations_own_key_leads_its_catalog_id_even_when_it_costs_more() -> None:
+    own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", 0.9)]
     identities = {
         **_IDENTITIES,
         "z-ai/glm-5.3": ("glm-5.3", (*_IDENTITIES["z-ai/glm-5.3"][1], "together:zai-org/GLM-5.3")),
     }
     view = selectors.build_organization_selectors(_ROWS, own, identities)
     assert view.models["z-ai/glm-5.3"] == "together:zai-org/GLM-5.3"
+    assert view.offerings["z-ai/glm-5.3"] == (
+        "together:zai-org/GLM-5.3",
+        "nebius:zai-org/GLM-5.3",
+        "fireworks:accounts/fireworks/models/glm-5p3-fp8",
+        "fireworks:accounts/fireworks/models/glm-5p3",
+    )
     assert view.pinned["together:z-ai/glm-5.3"] == "together:zai-org/GLM-5.3"
     # A pin on an instance the organization has no key for stays the deployment's to answer.
     assert "nebius:z-ai/glm-5.3" not in view.pinned
@@ -238,7 +400,6 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     with (
         patch.object(selector_index_service, "build_merged_catalog", new=AsyncMock(return_value=empty)) as build,
         patch.object(selector_index_service, "resolve_all_organizations_offered_keys", new=AsyncMock(return_value={})),
-        patch.object(selector_index_service, "load_models_dev_catalog", new=AsyncMock(return_value=None)),
     ):
         await selector_index_service.rebuild_selector_index(AsyncMock(), config, fetch=fetch)
 
@@ -248,3 +409,5 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     assert build.await_args.kwargs["include_offered"] is False
     # No port was handed in, so none is asked; the lifespan worker hands one in.
     assert build.await_args.kwargs["model_provider"] is None
+    # Indexed by real offering, so an aliased model keeps its selectors.
+    assert build.await_args.kwargs["withhold_alias_targets"] is False

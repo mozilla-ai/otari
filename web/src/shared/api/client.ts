@@ -7,17 +7,69 @@
 // storage: it lives in the sign-in form's state until the request goes out and
 // is gone on reload.
 
-import type { OAuthAuthorizeResponse, OAuthCallbackRequest } from "@/client"
+import type { QueryClient } from "@tanstack/react-query"
+import type {
+  OAuthAuthorizeResponse,
+  OAuthCallbackRequest,
+  OAuthSessionResponse,
+} from "@/client"
 import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 
 export class ApiError extends Error {
   status: number
+  /** The refusal's `Otari-Error-Code`, or `""` where it carries none. */
+  code: string
 
-  constructor(status: number, message: string) {
-    super(message)
+  constructor(
+    status: number,
+    message: string,
+    code = "",
+    options?: { cause?: unknown },
+  ) {
+    super(message, options)
     this.name = "ApiError"
     this.status = status
+    this.code = code
+  }
+}
+
+/**
+ * The dashboard's default retry policy for a failed query: twice, except for
+ * an auth failure, which will not fix itself. `app/provider.tsx` installs it,
+ * and a hook that refuses one more status composes with it rather than
+ * restating it.
+ */
+export function defaultQueryRetry(failureCount: number, error: unknown) {
+  if (
+    error instanceof ApiError &&
+    (error.status === 401 || error.status === 403)
+  ) {
+    return false
+  }
+  return failureCount < 2
+}
+
+/**
+ * The client's own retry policy, plus a 404: for a read whose 404 is an answer
+ * rather than a failure, so asking again only holds the page behind the
+ * backoff. Composed with the client's default rather than with
+ * `defaultQueryRetry` directly, so a client configured otherwise keeps its
+ * policy for every other status.
+ */
+export function retryUnlessNotFound(queryClient: QueryClient) {
+  const fallback = queryClient.getDefaultOptions().queries?.retry
+  return (failureCount: number, error: Error): boolean => {
+    if (error instanceof ApiError && error.status === 404) {
+      return false
+    }
+    if (typeof fallback === "function") {
+      return fallback(failureCount, error)
+    }
+    if (typeof fallback === "number") {
+      return failureCount < fallback
+    }
+    return fallback ?? defaultQueryRetry(failureCount, error)
   }
 }
 
@@ -63,19 +115,26 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 // the shape every refusal this gateway writes has and the shape an intermediary
 // answering for it does not. Callers that only need something to display take
 // `message`; the one caller that has to tell a gateway refusal from a proxy's
-// own status takes `detail`.
+// own status takes `detail`. `code` is the body's stable error code, or `""`.
 async function readRefusal(
   response: Response,
-): Promise<{ detail: string | null; message: string }> {
+): Promise<{ detail: string | null; message: string; code: string }> {
   let detail: string | null = null
   let message: string | null = null
+  let code = ""
   try {
-    const data = JSON.parse(await response.text()) as { detail?: unknown }
+    const data = JSON.parse(await response.text()) as {
+      detail?: unknown
+      code?: unknown
+    }
     if (typeof data.detail === "string") {
       detail = data.detail
       message = data.detail
     } else if (data.detail != null) {
       message = JSON.stringify(data.detail)
+    }
+    if (typeof data.code === "string") {
+      code = data.code
     }
   } catch {
     // Body was not JSON; fall through to the status text.
@@ -84,6 +143,7 @@ async function readRefusal(
     detail,
     message:
       message ?? (response.statusText || `Request failed (${response.status})`),
+    code,
   }
 }
 
@@ -258,23 +318,41 @@ export async function startOAuthSignIn(
 
 // Finish an OAuth sign-in: spend the authorization code for a session cookie.
 //
-// The code travels alone. The redirect URI is the gateway's own, derived from
-// its configured public base URL rather than sent from here, and the `state`
-// was already checked in this browser against the value it stored: posting it
-// would only let the gateway compare a value to itself.
+// No redirect URI: the gateway derives its own from its configured public base
+// URL. `terms_accepted` says whether the person accepted the published terms
+// before leaving, which a sign-in that creates their account needs; the gateway
+// ignores it otherwise. A refusal for want of them throws an `ApiError` whose
+// `code` is `terms_not_accepted`.
+//
+// `passwordRemoved` carries the gateway's `password_removed`: the first
+// provider sign-in on an address nobody had proven removes the password set on
+// it before then, and the person has to be told rather than find out at the
+// next password sign-in.
 export async function completeOAuthSignIn(
   provider: string,
   code: string,
   state: string,
-): Promise<SignInResult> {
-  const payload: OAuthCallbackRequest = { code, state }
+  termsAccepted: boolean,
+): Promise<SignInResult & { passwordRemoved: boolean }> {
+  const payload: OAuthCallbackRequest = {
+    code,
+    state,
+    terms_accepted: termsAccepted,
+  }
   const finished = await publicPost(
     `/auth/oauth/${encodeURIComponent(provider)}/callback`,
     payload,
   )
-  return finished.isOk
-    ? { isOk: true }
-    : { isOk: false, message: finished.message, status: finished.status }
+  if (!finished.isOk) {
+    return {
+      isOk: false,
+      message: finished.message,
+      status: finished.status,
+      passwordRemoved: false,
+    }
+  }
+  const session = finished.body as Partial<OAuthSessionResponse> | undefined
+  return { isOk: true, passwordRemoved: session?.password_removed === true }
 }
 
 // One unauthenticated GET, with the same error handling `publicPost` gives its
@@ -361,7 +439,8 @@ async function publicPost(
     }
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   return {
     isOk: true,
@@ -396,15 +475,13 @@ export async function deleteSession(): Promise<void> {
 const REQUEST_TIMEOUT_MS = 30_000
 const TIMEOUT_MESSAGE = `The gateway did not respond within ${REQUEST_TIMEOUT_MS / 1000}s.`
 
-// For the handful of calls whose work scales with the data rather than with one
-// upstream hop: the bulk usage delete and reprice, and the pricing-snapshot
-// refresh. `DELETE /v1/usage` with `by_filter` issues one unbounded DELETE and
-// the reprice loops over every matched row, so on a large imported-usage table
-// either can outrun the 30s bound above. Aborting them is worse than waiting: the
-// server transaction commits regardless of whether the browser is still
-// listening, so the operator would be told the delete failed when it succeeded,
-// and the obvious next move is to run it again. Still bounded, because a socket
-// held forever is what the deadline exists to prevent.
+// For the calls whose work scales with the data rather than with one upstream
+// hop, such as the pricing-snapshot refresh, which can outrun the 30s bound
+// above. Aborting one is worse than waiting: the server transaction commits
+// whether or not the browser is still listening, so the operator would be told
+// it failed when it succeeded, and the obvious next move is to run it again.
+// Still bounded, because a socket held forever is what the deadline exists to
+// prevent.
 export const LONG_REQUEST_TIMEOUT_MS = 5 * 60_000
 
 /** Signal for a request whose duration scales with the data, not with one hop. */
@@ -448,6 +525,10 @@ async function readJson<T>(
       throw new ApiError(
         response.status,
         `The gateway's reply was not JSON (HTTP ${response.status}). Something between this page and the gateway answered in its place, so whether the request was carried out is unknown.`,
+        "",
+        // The message deliberately leaves out what the intermediary returned;
+        // this keeps it for whoever is debugging.
+        { cause: error },
       )
     }
     throw error

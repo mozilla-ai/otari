@@ -38,11 +38,7 @@ from gateway.models.tenancy import (
     User,
 )
 from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
-from gateway.services.dashboard_session_service import (
-    SESSION_COOKIE_NAME,
-    create_dashboard_session,
-    hash_session_token,
-)
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
@@ -176,6 +172,66 @@ def test_the_list_shows_an_identity_whose_every_membership_is_suspended(
 
     stuck = _row(_list(client, master_key_header), stuck_id)
     assert [organization["status"] for organization in stuck["organizations"]] == ["suspended"]
+
+
+def test_search_narrows_the_page_and_the_count_by_name_or_email(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    organization_id = _default_organization_id(db_session_factory)
+    ada_id = _add_identity(
+        db_session_factory, organization_id=organization_id, full_name="Ada Lovelace", email="ada@example.com"
+    )
+    grace_id = _add_identity(
+        db_session_factory, organization_id=organization_id, full_name="Grace Hopper", email="grace@navy.example"
+    )
+
+    def search(term: str) -> dict[str, Any]:
+        response = client.get(f"{API_ROOT}/admin/users", headers=master_key_header, params={"search": term})
+        assert response.status_code == 200, response.text
+        body: dict[str, Any] = response.json()
+        return body
+
+    by_name = search("LOVELACE")
+    assert [row["id"] for row in by_name["data"]] == [str(ada_id)]
+    assert by_name["count"] == 1
+
+    by_email = search("navy")
+    assert [row["id"] for row in by_email["data"]] == [str(grace_id)]
+    assert by_email["count"] == 1
+
+    # A wildcard is matched literally rather than matching everyone.
+    assert search("%")["count"] == 0
+    # A blank term is no filter at all.
+    assert search("   ")["count"] == 3
+
+
+def test_the_list_pages_with_a_total_count(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    organization_id = _default_organization_id(db_session_factory)
+    for index in range(3):
+        _add_identity(
+            db_session_factory,
+            organization_id=organization_id,
+            full_name=f"Member {index}",
+            email=f"member{index}@example.com",
+        )
+
+    pages = [
+        client.get(f"{API_ROOT}/admin/users", headers=master_key_header, params={"skip": skip, "limit": 2}).json()
+        for skip in (0, 2)
+    ]
+
+    assert [page["count"] for page in pages] == [4, 4]
+    assert [len(page["data"]) for page in pages] == [2, 2]
+    ids = [row["id"] for page in pages for row in page["data"]]
+    assert len(set(ids)) == 4
 
 
 def test_a_session_stamps_the_identity_it_was_minted_for(
@@ -561,16 +617,3 @@ async def test_the_service_refuses_the_two_shapes_the_routes_also_refuse(
             user_id=uuid.uuid4(),
             request=DeploymentUserUpdateRequest(is_active=False),
         )
-
-
-@pytest.mark.asyncio
-async def test_a_session_records_the_sign_in_on_the_identity(async_db: AsyncSession) -> None:
-    """The stamp lives in `create_dashboard_session`, so every sign-in flow gets it."""
-    user, _ = await _identity(async_db, full_name="Ada Lovelace")
-    assert user.last_sign_in_at is None
-
-    await create_dashboard_session(async_db, 24, user_id=user.id)
-    await async_db.commit()
-    await async_db.refresh(user)
-
-    assert user.last_sign_in_at is not None

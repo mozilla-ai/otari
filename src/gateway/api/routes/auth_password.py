@@ -129,7 +129,9 @@ class SetPasswordRequest(BaseModel):
             "The address to sign in with. Required when the identity has none, which is the state "
             "first boot leaves the operator in, including when the master key is what authenticates "
             "the call. Resubmitting the address the identity already holds is accepted and ignored; "
-            "only a *different* address is refused, because changing one is not supported yet."
+            "only a *different* address is refused, because changing one is not supported yet. It is always the "
+            "caller's own address, the operator's when the master key authenticates the call, and never names "
+            "another account."
         ),
     )
 
@@ -166,6 +168,13 @@ async def set_dashboard_password(
     recovered; it does not excuse ``email``, because an identity with no address
     has nothing to sign in with whoever is asking. The operator setting a password
     for the first time retires master-key sign-in on this deployment.
+
+    With the master key the caller is the deployment's operator, so an ``email``
+    sent then is the operator's own sign-in address: on an unclaimed deployment it
+    claims the deployment with that address. This never sets another account's
+    password; an address another account holds is refused with 409. To help a
+    member who forgot their password, send them a link with
+    ``POST /api/v1/admin/users/{user_id}/password-link``.
 
     Every other session this identity holds ends, the caller's own excepted, so
     a cookie stolen before the change does not outlive it.

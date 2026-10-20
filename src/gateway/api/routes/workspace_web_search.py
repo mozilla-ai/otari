@@ -10,17 +10,13 @@ plus the caller's tenancy identity for the per-workspace role checks).
 """
 
 import uuid
-from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
-from gateway.core.config import GatewayConfig
+from gateway.api.deps import CurrentIdentity, WorkspaceWebSearchServiceDep, verify_master_key
 from gateway.services.tenancy.workspace_web_search_service import (
     WorkspaceWebSearchConfigPublic,
     WorkspaceWebSearchConfigUpdate,
-    WorkspaceWebSearchService,
 )
 
 # Auth is declared on the router, matching the sibling per-workspace routers:
@@ -31,26 +27,6 @@ router = APIRouter(
     tags=["workspace-web-search"],
     dependencies=[Depends(verify_master_key)],
 )
-
-
-def get_workspace_web_search_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> WorkspaceWebSearchService:
-    """Build the service on the request's session.
-
-    The backend-presence check is the same one ``prepare_gateway_tools`` makes
-    when it decides whether a request may declare ``otari_web_search``, so the
-    page and the request path agree about whether this deployment can search at
-    all.
-    """
-    return WorkspaceWebSearchService(
-        db,
-        web_search_configured=config.web_search_configured(),
-    )
-
-
-WorkspaceWebSearchServiceDep = Annotated[WorkspaceWebSearchService, Depends(get_workspace_web_search_service)]
 
 
 @router.get("")

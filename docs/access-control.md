@@ -15,6 +15,60 @@ credentials.
 Use the master key through `Authorization: Bearer <master-key>` or
 `Otari-Key: <master-key>`. Applications should use scoped API keys instead.
 
+An operator manages every account on the deployment from the dashboard's
+Accounts page (`/api/v1/admin/users`): deactivate or reactivate one, grant or
+remove operator access, and send a password link. The page lists accounts one
+page at a time and searches them by name or email (`search` on the route,
+matched case-insensitively). Deactivating an account ends
+its sessions and voids its pending verification and reset links, so
+reactivating it does not bring an old link back.
+
+A password link is how an operator helps somebody who cannot sign in, and the
+only way back for a forgotten password on a deployment that sends no mail.
+Where mail is configured, the link is emailed to the account's address, as
+"Forgot your password?" does. Otherwise, or when the send fails, the operator
+is given the link to pass on. It works once, expires after
+`password_reset_expiry_hours`, and replaces any earlier reset link. Because the
+mailbox never saw a link that was passed on, a password chosen through one
+records the address as vouched for rather than proven, the same as a password
+chosen through an [invitation](#invitations) link. A link is refused for a
+deactivated account, one with no address, one that has no password and signs in
+with a provider or a passkey (its owner adds a password from Account settings
+once signed in), and, where `open_signup` is disabled, an unverified address no
+organization still has as a member or invitee. Where `open_signup` is enabled
+such an address gets a link, and choosing a password through it gives the
+account an organization and workspace of its own, as [signup](#signup) does.
+
+`PUT /api/v1/auth/password` with the master key acts on the operator's own
+account, never another one: an address sent with it is the operator's sign-in
+address, and on an unclaimed deployment it claims the deployment. It refuses an
+address another account holds, and that refusal points to the password link.
+
+## Hosted providers
+
+A hosted provider is a provider key the deployment itself owns and pays for,
+with the roster of models it offers on that key and the rate it charges for
+each. Only a deployment operator manages them: the master key, the bootstrap
+operator's session, or the session of an account granted operator access. That
+covers every route under `/api/v1/hosted-providers`, reads included. Any other
+signed-in account, whatever its role in whichever organization, gets the same
+`404` that `/api/v1/admin` gives, and an API key gets `401`. Organization owners
+and admins manage their own organization's provider keys, never these.
+
+A hosted provider is the last rung of the credential ladder: a request is
+served on it only when no provider instance the deployment configures and no
+provider key of the caller's organization covers the model.
+
+Adding a provider offers every model its key lists. A model the deployment
+price list already prices is switched on at that rate. Otherwise, where
+`default_pricing` is on, the model is seeded with its models.dev rate and
+switched on; where it is off, or models.dev does not price the model, the model
+is offered switched off until the operator prices it. Refreshing a provider's
+models moves a seeded rate nobody has changed to the current default, and
+leaves a rate the operator set alone. The API never returns a hosted provider's
+key, only its last four characters, and it masks credentials in `client_args`
+and in the base URL.
+
 ## Organizations and workspaces
 
 An organization is the tenant boundary. It owns workspaces, members, provider
@@ -36,6 +90,16 @@ Organization and workspace memberships use four roles:
 The API key that authenticates a request determines its workspace. A caller
 cannot select another workspace with a header. Master-key inference uses the
 default workspace.
+
+An owner or admin can delete their active organization from Organization →
+General (`DELETE /api/v1/organizations/me`) while it has no usage: the gateway
+refuses an organization whose workspaces still hold usage, API keys, aliases or
+routing policies, so a deletion never takes spend history with it. The
+deployment's default organization and the only organization the caller belongs
+to cannot be deleted either. Its workspaces, memberships, pending invitations
+and organization-level settings go with it. Everyone whose active organization
+it was moves to the oldest other organization they belong to; someone who
+belongs to no other organization is left with none until they join one.
 
 ## Users and identities
 
@@ -60,22 +124,74 @@ may also define:
 - expiration and active status
 - allowed models
 - budget exemption
-- whether mismatched client `user` fields are accepted
+- a budget of its own: a spend ceiling on the key, which its owner's budget does
+  not replace (both apply)
+- whether mismatched client `user` fields are accepted (see
+  [Mismatched `user` fields](#mismatched-user-fields))
 - whether content-free agent telemetry is captured
 - whether it is a service key, which may name end users
 - application metadata
 
 The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
+A key can also be declared in config.yml with a secret you choose, in which
+case config.yml owns it and writes it back whenever its entry changes; see
+[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+Rotating a declared key through the API lasts until config.yml changes the
+key's entry or its secret, which restores the secret config.yml declares.
 
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
+
+A backend on Google Cloud, or behind another OpenID Connect issuer, can
+authenticate as a key with its platform identity token instead of the key's
+secret, once the operator trusts the issuer and gives the key a federation
+rule; see [Workload identity](workload-identity.md).
 
 `/api/v1/keys` manages every key in the caller's organization and requires the
 deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than
 accepting one, mints only into a workspace the caller may see, and never issues
 a budget-exempt key.
+
+### Mismatched `user` fields
+
+A request can name a user: `user` on Chat Completions, Responses and the
+pass-through routes, `metadata.user_id` on Messages. On an ordinary key that
+value may only be the key's own user; anything else is refused with `403`. A
+key's `reject_user_mismatch` changes that for the key alone:
+
+| Value | Dashboard choice | A request naming another user |
+| --- | --- | --- |
+| `null` (default) | Use the deployment setting | Follows the deployment-wide `reject_user_mismatch`, which rejects unless changed |
+| `true` | Always reject (403) | Rejected, even where the deployment accepts |
+| `false` | Always accept | Accepted, and billed to the key's user |
+
+Spend binds to the key's own user whichever value applies, so accepting a
+mismatch never lets a key charge someone else.
+
+Accept mismatches on a key whose client puts something other than an Otari
+user ID in that field. Claude Code sends a telemetry value there (see
+[Use with Claude Code](use-with-claude-code.md)). So does an application that
+sends every request on one key and passes its own end user's ID. That
+application has two choices:
+
+- Accept mismatches, and every request bills the key's user: one budget for
+  the whole application.
+- Make the key a [service key](#service-keys-and-end-users), and each ID
+  becomes an end user with spend and a budget of its own.
+
+Set the value in the dashboard's key form (under **Advanced** when creating a
+key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
+`/api/v1/keys` and `/api/v1/organizations/me/keys`, or on a key declared in
+config.yml. The deployment-wide default is a runtime setting, changed on the
+Settings page or with `PATCH /api/v1/settings`.
+
+The check is a standalone one. A hybrid gateway, such as otari.ai's, does not
+compare the field with the key's owner, so a key there needs no setting: the
+value only feeds the
+[end-user identifier](hybrid-mode-protocol.md#end-user-identifier) sent to the
+provider.
 
 ## Service keys and end users
 
@@ -117,8 +233,9 @@ Each distinct `user` value creates an end user, whether or not the request is
 then admitted, and nothing else caps how many a key can create. Set a rate
 limit on a deployment that issues service keys, and send a stable id per end
 user rather than a per-session or per-request value. An id is at most 256
-characters, and a new one may not contain `/` or be `.` or `..`, so that it
-can be named in the path of the end user routes below.
+characters and may otherwise be any string, `/` included, such as a base64 key
+id. The routes below name every end user with the `external_id` query
+parameter, which carries any id intact.
 
 ### Several budgets on one key
 
@@ -164,28 +281,108 @@ starts with a letter or digit.
 `POST /api/v1/budgets` still generates an id, and `GET /api/v1/budgets`
 reports how many users are on each budget in `user_count`.
 
+### Declaring a service key in config
+
+A service whose keys and budgets should not depend on a provisioning script can
+declare them in config.yml instead. The two requests above become:
+
+```yaml
+budgets:
+  end-user-budget-ai: {max_budget: 0.1, reset_alignment: calendar_day, rpm_limit: 40, tpm_limit: 2000}
+  end-user-budget-memories: {max_budget: 0.05, reset_alignment: calendar_day}
+  mlpa-global: {max_budget: 100, reset_alignment: calendar_day}
+
+api_keys:
+  mlpa:
+    secret: ${MLPA_SERVICE_KEY}
+    user_id: mlpa
+    is_service_key: true
+    end_user_budget_ids: [end-user-budget-ai, end-user-budget-memories]
+    end_user_budget_id: end-user-budget-ai
+    ceiling: mlpa-global
+```
+
+`ceiling` is the key's own ceiling, the scoped budget on the API key that pools
+every end user. The service reads the same `MLPA_SERVICE_KEY` and presents it as
+its API key, so nothing has to hand a freshly minted secret from one to the
+other, and a restart or a second replica does not change it. A start writes
+the declared settings back over changes made through the API only when the
+key's entry in config.yml changed; see
+[What config.yml owns](configuration.md#what-configyml-owns).
+
 ### Managing end users
 
-An end user is addressed by the key and the id the service named it by:
+A service manages its own end users with its service key, addressing each one
+by the id it names it by. It needs neither the master key nor its key's id:
 
 | Request | Does |
 |---|---|
-| `GET /api/v1/keys/{key_id}/end-users/{external_id}` | Reads the end user: its budget, counters and whether it is blocked |
-| `PUT /api/v1/keys/{key_id}/end-users/{external_id}` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
-| `PATCH /api/v1/keys/{key_id}/end-users/{external_id}` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+| `GET /api/v1/end-users` | Lists the end users, oldest first |
+| `GET /api/v1/end-users?external_id=...` | Reads the end user: its budget, counters and whether it is blocked, as a list of one, or none when no end user goes by the id |
+| `PUT /api/v1/end-users?external_id=...` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
+| `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+| `DELETE /api/v1/end-users?external_id=...` | Deletes the end user, answering `{"deleted": 1}`, or 404 |
+| `DELETE /api/v1/end-users?created_before=...` | Deletes up to `limit` (default 100, at most 1000) of the oldest end users created before that time, answering `{"deleted": n}`; repeat until `n` is 0 |
+| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
 
-A budget set this way must be on the key's list too. Moving an end user
-restarts its period on the new budget and applies that budget's per-minute
-limits, but keeps its spend, tokens and requests so far, as moving a user
-through `/api/v1/users` does: an end user that used up one budget can be over
-the next one's limits until that period resets. End users belong to the key's
-user, so every service key of one user reaches the same end users.
+```http
+PATCH /api/v1/end-users?external_id=fxa123:memories
+Authorization: Bearer <service key>
 
-To list end users, use `/api/v1/users`, where each one carries
-`parent_user_id` (the key's user) and `external_id`.
-`GET /api/v1/users?parent_user_id=...&external_id=...` filters on them, and
-`include_total=true` counts every match in the `Otari-Total-Count` header. The
-users API can also put an end user on any deployment budget, not only one on a
+{"budget_id": "end-user-budget-ai"}
+```
+
+The query parameter names any end user, so use it for an id that may contain
+`/`, and URL-encode the id as any query value is (`/` as `%2F`, `+` as `%2B`).
+The id can also go in the path, `/api/v1/end-users/{external_id}`, for `GET`,
+`PUT`, `PATCH` and `DELETE`, which answer as their query forms do (the `GET`
+with the end user itself, or 404, and the `DELETE` with 204, or 404). That form suits an id without `/`: a
+proxy can merge the `//` of an id like `ab//cd`, and an HTTP client collapses
+`.` and `..` segments, so in a path such an id can reach another end user. An
+id with a `.` or `..` segment is refused there with 400.
+
+These routes take only a service key: another API key is refused with 403,
+and the master key and a dashboard session do not authenticate them. A service
+key whose own user is blocked or deleted is refused with 403 as well, since its
+end users cannot spend either; the operator's `/api/v1/keys/{key_id}/end-users`
+routes still reach them.
+`GET /api/v1/end-users` takes `skip` and `limit` (up to 1000), narrows on
+`budget_id`, `blocked` and `external_id`, and with `include_total=true` counts
+every match in the `Otari-Total-Count` header. Its list and the counts on
+`/api/v1/end-user-budgets` leave out deleted end users, and the counts include
+blocked ones, which `blocked_end_user_count` also gives on its own.
+
+Deleting an end user erases its telemetry and agent traces, as deleting any
+user does, and stops it being listed or counted. Its row stays, with what it
+has spent and used: a request that names the same id again revives it with
+those counters, on the budget it was on, so deleting an end user cannot reset
+its budget. Its usage history stays too. A service whose end users are
+short-lived, such as one id per guest session, can delete the expired ones by
+age with `created_before` (`2026-10-10T00:00:00Z`), a page per call. When
+erasure fails the call answers 5xx and deletes nothing, so it can be repeated.
+
+A budget set this way must be on the key's list: any other is refused with 403
+and `end_user_budget_not_allowed`, so a key cannot put an end user on a budget
+it was not given. Moving an end user restarts its period on the new budget and
+applies that budget's per-minute limits, but keeps its spend, tokens and
+requests so far, as moving a user through `/api/v1/users` does: an end user
+that used up one budget can be over the next one's limits until that period
+resets.
+
+End users belong to the key's user, so every service key of one user reaches
+the same end users, and a key of another user reaches none of them: an id it
+does not own answers 404, as one that does not exist does. Give each service
+its own user to keep their end users apart.
+
+A deployment operator reaches any service key's end users through the same
+routes under the key, with the master key:
+`GET`, `PUT` and `PATCH /api/v1/keys/{key_id}/end-users?external_id=...`, with
+`GET` taking the list's other parameters too, and the path form
+`/api/v1/keys/{key_id}/end-users/{external_id}`. A budget set there must be on
+that key's list too. The users API lists end users across
+keys, where each one carries `parent_user_id` (the key's user) and
+`external_id`: `GET /api/v1/users?parent_user_id=...&external_id=...` filters on
+them, and it can put an end user on any deployment budget, not only one on a
 key's list.
 
 ### Where end users apply
@@ -207,6 +404,8 @@ Two budget forms exist:
 - A scoped budget limits an organization, workspace, membership, or API key and
   can optionally narrow the limit to one provider.
 
+A routing fallback to another provider must also pass that provider's budgets, as [Routing](routing.md#what-is-billed-and-what-the-caller-sees) describes.
+
 A budget caps up to three things over its period, each set independently and
 each unlimited when left unset: spend in USD (`max_budget`), total tokens
 (`token_limit`), and requests (`request_limit`). A request must have room on
@@ -215,6 +414,15 @@ dispatch and reconciled to the measured figures afterwards; only the unused part
 of an over-estimate is released, and what the request measurably used stays
 charged. A request counts as one request when it is admitted. A model priced at
 zero spends no dollars, and still spends tokens and one request.
+A request whose dollar hold is larger than what remains is refused even when
+nothing has been spent yet, and the refusal says so with both amounts:
+`User 'alice' has $0.0015 of budget remaining, less than this request's
+estimated cost of $0.01025`. On chat completions, messages and responses the
+estimate prices the request's output token limit (`max_tokens`, or
+`max_output_tokens` on responses; `budget_estimate_default_output_tokens` when it
+sets none), and where the model charges for output the refusal names that
+figure, so a lower limit may let the request fit. A
+budget already at its cap is refused as `has exceeded budget limit`.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests
@@ -241,11 +449,50 @@ carried. The same holds for the vision side-call a request makes to describe an
 attachment. Cap batch-heavy workloads in dollars rather than in tokens. See
 [Importing external usage](external-usage.md).
 
+### Reservations are taken up front
+
+The hold is the request's worst case, taken before dispatch: its prompt at
+roughly four characters per token, plus its whole output token limit. A request
+with `max_tokens: 8192` therefore holds the price of 8192 output tokens however
+few the model ends up writing, and a user close to the cap is refused once that
+hold no longer fits, even when the answer would have cost a fraction of it.
+The trade is deliberate: a request is admitted only when its estimated worst
+case fits, at the price of refusing some requests near the cap that would have
+fit. The prompt side is an estimate, and settlement records what the request
+actually cost, so a request can still settle a little past its hold (and its
+budget past the cap) when the prompt tokenizes heavier than the estimate
+assumes. A client that sends a realistic output limit, rather than the model's
+maximum, keeps more of its allowance usable near the cap.
+
+Holds are also what bound concurrent requests from one user or end user. Each
+admitted request keeps its hold until it settles, and a new request is admitted
+only while recorded spend, every hold still in flight and its own hold together
+fit under the cap, checked in one conditional update so two requests cannot both
+take the last of it. Ten parallel requests near the cap are therefore admitted
+only as far as their combined worst case fits, and the rest are refused. A hold a crashed request leaves behind is returned after
+`budget_reservation_ttl_sec` (15 minutes by default). Scoped ceilings hold the
+same way, so a key's ceiling bounds all of its end users' in-flight requests
+together.
+
+### Refusals and `Retry-After`
+
+A refusal is a 403 with `Otari-Error-Code: budget_exceeded`, and
+`Otari-Budget-Scope` names the budget that refused: `user`, or the ceiling's
+scope. When that budget resets, the refusal also carries `Retry-After`, the
+whole seconds (rounded up) until its current window ends: the next UTC
+midnight, ISO week or month for a calendar budget, and the end of the user's or
+ceiling's own period for a rolling one, which only the gateway knows. Where
+several budgets apply, it is the window of the one that refused. A budget with
+no period never resets and sends no `Retry-After`, and neither does a refusal of
+a hold larger than the whole cap, since a fresh window would refuse it too.
+
 ## Workspace-scoped spend
 
 Usage is attributed to the workspace bound to the authenticating API key.
 Organization and workspace usage views then apply the signed-in identity's
-membership. Deployment operators can read the deployment-wide usage API.
+membership. Deployment operators can read the operator usage API, which covers
+every workspace of the operator's active organization (the default organization
+for the master key).
 
 Routing fallback and built-in tools can create several internal attempts, but a
 successful request remains one caller-visible request. The activity log records
@@ -265,7 +512,8 @@ offers the master-key box beside the form while both credentials still work.
 
 Sessions are revocable and expire after `dashboard_session_ttl_hours`. Password
 changes, master-key rotation, sign-out, and identity deactivation revoke relevant
-sessions.
+sessions. A request whose session cookie no longer authenticates is refused
+with 401 "Your dashboard session has ended. Sign in again."
 
 A session authorizes the management API. It does not authorize
 `/api/v1/chat/completions` or any other data-plane path, which take an API key
@@ -298,6 +546,16 @@ so without this the ceremony fails in the browser and nothing is logged here
 Changing the relying-party ID makes existing passkeys unusable. The dashboard
 continues listing unusable credentials so the owner can remove them.
 
+To turn passkeys off for a deployment, set `passkeys_enabled` to `false`
+(`OTARI_PASSKEYS_ENABLED=false`). It defaults to `true`, so a self-hosted
+gateway is unchanged. With it off, none of the passkey routes are mounted (they
+answer 404, not 503), no `passkey` sign-in method is published, the dashboard
+hides its passkeys page, and the `webauthn_*` settings are not checked at
+startup, so values left over from before are inert. Setting it is the only way
+to switch passkeys off while keeping `public_base_url`, which OAuth redirects
+and mail links need. Passkeys already registered stay in the database, and work
+again if the setting is turned back on.
+
 ### OAuth sign-in (Google and GitHub)
 
 OAuth sign-in requires `public_base_url` and the provider's client ID and
@@ -311,29 +569,89 @@ The gateway answers that path itself and redirects the browser into the
 dashboard to finish. Where an edge serves the dashboard elsewhere, set
 `ui_base_url` too; see [Configuration](configuration.md#the-interface-address).
 
-OAuth signs in the account that holds the address the provider verified. If no account holds that address, the result depends on `open_signup`, as it does for [signup](#signup). When `open_signup` is disabled, the sign-in is refused. When it is enabled, Otari creates an account with its own organization and workspace, and sends no verification email, because the provider has already verified the address. A sign-in is always refused if the provider did not verify the address, or if the account for it is deactivated.
+Otari links each provider account to one Otari account by the provider's own ID for that person, not by the address. An Otari account holds at most one link for each provider, so it can link both a Google and a GitHub account. A sign-in through a link still works after the address changes at the provider. A second account at the same provider is refused, even with the same address. Otari has no way to remove a link yet, so a person whose provider account was replaced signs in with a password or a passkey instead.
 
-A provider sign-in on an address that is not yet verified marks it verified. It also removes any password and verification link set on that address before then: the provider confirms who owns the address, not who chose that password. The person can set a new password from their account page once signed in. A password on an address that was already verified is kept.
+The first sign-in with a provider account links it to the account that holds the address the provider verified. Otari links by address only for Google and GitHub, because no tenant can set what they say about an address. If no account holds that address, the result depends on `open_signup`, as it does for [signup](#signup). When `open_signup` is disabled, the sign-in is refused, and so is one on an account an owner or admin added or invited whose address nobody has verified yet, unless it is still an active member or has an invitation it can accept, the same rule [signup](#signup) follows. When it is enabled, Otari creates an account with its own organization and workspace, and sends no verification email, because the provider has already verified the address. The first sign-in is refused if the provider did not verify the address. Any sign-in is refused if the provider says the address is not verified, or if the account is deactivated. A provider that shares no address at all is refused with a message saying so. A provider that fails, cannot be reached, or refuses this deployment's client credentials while finishing the sign-in answers 502, so a provider outage or a misconfigured client is not counted as a client error; only a code the provider calls invalid, expired or spent answers 400.
+
+The first sign-in on an address that is not yet verified, or that an organization only vouched for (see [Invitations](#invitations)), marks it verified. It also removes everything set up on that address before then: its password, any verification or reset link, every session signed in with that password, and every passkey registered from one. On an unverified address it replaces the display name chosen at signup with the provider's, and renames the organization that signup created after it, unless someone else belongs to that organization. The provider confirms who owns the address, not who chose that password or that name. The callback's response says so (`password_removed`), and the dashboard tells the person before they go on, so the password does not just stop working. They can set a new password from their account page once signed in. A password on an address that was already verified is kept, with its sessions and passkeys. A later sign-in through the link does not change the account's password or verification, unless the address has since become only vouched for (an operator's [password link](#deployment-wide-account-administration) that was passed on rather than mailed does that): the sign-in then proves the address the same way, and removes the password, links, sessions and passkeys set up through the vouch.
+
+Where the deployment publishes terms (`terms_url`), a sign-in that creates an account, or that is the first way in to one an owner or admin added or invited, needs the person's acceptance of them, as the signup form and a first password from an invitation link do. The dashboard asks before it sends the person to the provider and returns the acceptance with the callback (`terms_accepted`). Without it the sign-in is refused with the code `terms_not_accepted`, and nothing it would have set up is kept: no account, organization, workspace, provider link or session. With it, the acceptance is recorded on the account. A sign-in to an account someone already claimed, or through a provider account already linked to one, does not ask, and an account that never accepted the terms is not asked to later.
+
+A sign-in that creates an account, or that is the first way in to one an owner or admin added, is reported as a signup to whatever growth integration the deployment runs, as the signup form, a first password set from an invitation link, and a first password set by reset are.
 
 ### Signup
 
-Signup sets a password for an address and sends a verification link. What an
-unknown address does depends on `open_signup`:
+Signup sets a password for an address and sends a verification link. The link
+verifies the address only together with that password: the verification page
+asks for it, and a wrong one is refused without spending the link, with a
+message saying the link still works. A link that is unknown, expired or spent
+gets a different message, which says nothing about the password. Wrong
+passwords are counted per client address, so a held link cannot be used to guess
+the password at speed; a right one is never held back. Anyone can
+sign up with an address they do not hold, and the link then reaches the
+address's real owner, whose click must not activate a password a stranger
+chose. Signing up again before verifying changes nothing, so the first password
+is the one the link takes. An owner who never signed up, or who forgot that
+password, uses "Forgot your password?" instead, which replaces it. The
+verification and reset pages check their link as they open, without spending
+it, and say at once when it has expired or was already used (or a newer link
+replaced it). Where the deployment publishes terms (`terms_url`),
+signup is refused unless they are accepted, with the form or with a provider (see
+[OAuth sign-in](#oauth-sign-in-google-and-github)). What an unknown address does depends
+on `open_signup`:
 
 - `false` (default): signup only completes an identity an owner or admin already
-  added or invited by address. An address nobody has added gets no account. This
-  is the posture a single-tenant deployment wants, since anyone who can reach the
-  dashboard can reach the form.
+  added or invited by address, and only while it is still wanted: an active
+  member, or an invitee whose invitation is still pending. An address nobody has
+  added gets no account, and neither does one whose invitation was revoked or
+  expired or whose membership was removed. This is the posture a single-tenant
+  deployment wants, since anyone who can reach the dashboard can reach the form.
+  The rule holds when a link is used as well as when it is mailed, so revoking
+  the invitation or removing the member also stops a verification link, a resent
+  one, and a reset link minted before then. For the same reason, creating an
+  organization requires an active membership in one already, so a member who was
+  removed cannot make themselves a tenant.
 - `true`: an unknown address is registered, with an organization and workspace of
-  its own. Use it where the deployment serves many tenants.
+  its own. So is an address an organization once added or invited but no longer
+  wants (its invitation was revoked, declined or expired, or the member was
+  removed) when it is claimed, that is, when its owner first proves it: by
+  signing up with the form (or verifying that signup), by a first sign-in with a
+  provider, or by choosing a password through "Forgot your password?" while the
+  address is unverified or only vouched for (see [Invitations](#invitations)).
+  It gets its own organization and workspace, and signs in to them. An address
+  is claimed once: someone who already proved their address and later declines
+  their last invitation or is removed keeps the account but has no
+  organization, and signs in to the empty state [Invitations](#invitations)
+  describes, where they can create one. An address with an invitation still
+  waiting is claimed as it is, and finds the invitation under Invitations. Use
+  it where the deployment serves many tenants.
 
 Signup never sets a password on an address that is already verified. That is the
 state a Google or GitHub sign-in leaves, and the person who signs in that way
-adds a password from Account settings while signed in.
+adds a password from Account settings while signed in. Such a signup mails the
+address a notice that it already has an account and how it signs in: with its
+password (and "Forgot your password?" if it is forgotten), or with its provider.
+
+"Forgot your password?" mails a link to set or reset the password of an
+address that has a password, and also of one an owner or admin added or invited
+that nobody has signed in to yet, so that person can choose a first password.
+Completing it verifies the address, since the link reached its mailbox, and where
+the address was unverified or only vouched for it also ends every session and
+removes every passkey set up before then. Where it was unverified, the display
+name chosen at signup is dropped too, and the organization that signup created is
+renamed after the address, unless someone else belongs to it. Where `open_signup`
+is disabled, every address that is not yet verified, with or without a password,
+follows the signup rule above: it gets a link, and the link completes, only while it is an active
+member or holds an invitation it can still accept, so a revoked invitee gets
+none. Where the deployment publishes terms and the account has accepted none,
+the reset page asks for them. An address that signs in only through a provider
+gets no link; it is mailed the same notice signup sends, saying which provider
+it signs in with and that a password can be added from Account settings.
 
 Either way the response says the same thing whether the address was unknown,
 already claimed, already verified, or genuinely just claimed, so its body
-discloses nothing about the address. Response *timing* still does, because the
+discloses nothing about the address. A notice goes only to the address's own
+mailbox, so it tells nobody else anything either. Response *timing* still does, because the
 eligible path sends mail before it answers; that is [otari#720](https://github.com/mozilla-ai/otari/issues/720)
 and it applies to both postures.
 
@@ -348,8 +666,38 @@ whatever edge controls the deployment has.
 ## Invitations
 
 An owner or admin can invite a person to an organization and selected workspaces.
-The dashboard always shows the accept link after an invite, so it can be shared
-by hand. If mail is configured, Otari also emails it.
+If mail is configured, Otari emails the accept link. When the email does not go
+out (no mail configured, the send failed, or a mail limit below was reached), the
+dashboard shows the link instead, so it can be shared by hand. A link that was
+emailed is never shown to the inviter, so only the invitee's mailbox holds it. The
+email names the inviter by their address as well as the name they chose, and an
+address the mail server would refuse, such as one ending in a dot, is refused
+when it is invited.
+
+Invitation email is limited, because it carries text an organization chose (its
+name, the inviter's name) from the deployment's own sender, and on a deployment
+where anyone can create an organization that would otherwise make it an open
+relay. In any 24 hours an organization sends at most
+`invitation_mail_limit_per_organization` invitation emails (250 by default), and
+an address receives at most `invitation_mail_limit_per_address` (5 by default)
+from every organization together, so revoking and inviting again cannot flood it.
+An invitation over a limit is still created, and its link is returned to share by
+hand, as when mail is off: the link costs the deployment nothing, and refusing
+would stop a legitimate admin partway through a bulk invite. The counts are kept
+in `rate_limit_store`, so with Redis they hold across replicas.
+
+A link that was lost can be reissued. Reissuing gives a pending or expired
+invitation a new link, emailed or returned as above, and the old link stops
+working. Inviting an address whose invitation is still pending is refused and says
+to reissue it instead. On Members, an invited row says when its invitation has
+expired, and offers Reissue and Revoke either way.
+
+The API can also add a member directly (`POST /api/v1/organizations/me/members`),
+active at once with no invitation to accept and no email. A new address added
+that way gets in by signing up, by "Forgot your password?" or through a provider,
+so on a deployment with no mail and no provider it waits for an operator's
+password link. Invite it instead, since the invitation link itself can set its
+first password.
 
 To invite several people at once, paste their addresses into the invite dialog,
 separated by commas or new lines (up to 100). Everyone gets the same role and
@@ -360,13 +708,64 @@ its email went out, or its accept link to share when it did not.
 Opening the link lets the invitee accept. If the invited address has never signed
 in, the accept page asks them to choose a first password, and once they accept
 they can sign in straight away. No verification email is needed, so this works on
-a deployment without mail. An address that can already sign in, by password or
+a deployment without mail. Where the deployment publishes terms, choosing that
+password requires accepting them, as signup does. Accepting without a password
+records no acceptance, so the provider sign-in that follows it asks for the terms. An address that can already sign in, by password or
 through a provider, just accepts; the link cannot set or replace a password on
-it.
+it. Neither can it for an address another organization has already added: the
+inviter holds the link too, so that person accepts without a password and then
+signs in through a provider or resets their password, either of which proves the
+address.
+
+An invitee does not need the link. Signing up with the invited address, or
+signing in with Google or GitHub, completes the account the invitation created,
+and every invitation still waiting on it is listed under Invitations in the
+dashboard, where it can be accepted or declined. Someone who is not yet a member
+of any organization is taken there straight after signing in.
+
+A password chosen through a link counts as verified so the person can sign in,
+but Otari records that an organization vouched for the address rather than that
+the person proved it. A vouched address does not trigger
+[email-domain auto-join](#email-domain-auto-join), and another organization
+cannot add or invite it, since the vouching organization's admins could have
+chosen its password. A later provider sign-in on it replaces the password with
+the provider, and resetting the password by email also proves the address;
+either lifts both restrictions.
+
+A link stops working as soon as its membership stops waiting on it: when the
+person is added directly, removed, or accepts or declines from their inbox, any
+invitation still pending for them is closed. Revoking an invitation suspends
+the membership only while it is still waiting; a person who became a member
+another way keeps their access. An expired link says it expired every time it is
+opened, and every refusal says to ask the inviter for a new link. An address
+whose account a deployment operator deactivated cannot be invited or added until
+it is reactivated, and an invitation already pending for it stops working until
+then too; neither refusal gives the reason, since the admin asking may be
+another tenant's. For the same reason, refusing an address another organization
+vouched for says what would lift the refusal and nothing about that
+organization. An organization name cannot carry line breaks or other control
+characters, since it is quoted in invitation emails.
+
+When a link may not set a password (the address belongs to someone another
+organization still has as a member or invitee), the accept page says so before
+the invitee accepts, and names the way in this deployment offers once they have:
+a provider sign-in where one is configured, or "Forgot your password?" where mail
+is, or else asking whoever administers the gateway. A password sent anyway is
+refused with the same advice. Memberships that were revoked, declined, expired or
+removed do not count.
+
+Signing in answers which organization the session acts in. If the person was
+removed from the one they last used, it is the oldest one they still belong to,
+and if they belong to none it is empty; the dashboard then shows their
+invitations, and offers to create an organization where `open_signup` is
+enabled. Being removed, declining or having an invitation revoked moves the
+person's active organization to the oldest one they still belong to. For
+someone who belongs to none, `GET /api/v1/organizations/me` answers 404 saying
+so, without naming an organization.
 
 Invitation tokens are bearer credentials. Whoever holds an unused link can join
-as the invited address, and choose its first password if it has never signed
-in, so send it only to that person.
+as the invited address, and choose its first password where the link allows one,
+so send it only to that person.
 Do not put tokens in logs or analytics. The browser validates and accepts them
 through the public invitation endpoints. A link works once, and expires after
 `invitation_expiry_hours`.
@@ -403,7 +802,8 @@ narrow:
 - Only `member` and `viewer` can be handed out. Proving control of a domain is
   not a decision about a person, so it never confers organization management.
 - An unverified address is skipped, so signing up on an address without reading
-  the mail is not enough.
+  the mail is not enough. So is one only vouched for through an invitation
+  link, since any organization can invite any address.
 - An existing membership is left alone. A suspended one is not revived by
   signing in, and an established role is not overwritten.
 - The person's active organization is never changed by joining.

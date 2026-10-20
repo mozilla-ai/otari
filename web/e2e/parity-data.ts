@@ -14,8 +14,7 @@ import { authHeaders, expectOk } from "./helpers"
 // Rows are imported through POST /v1/usage/external-events rather than by making
 // provider calls: the endpoint writes real usage_logs rows (priced through the
 // same pricing path) with no upstream to reach, which is what lets the suite run
-// with no network egress. Imported rows carry counts_toward_budget=false, which
-// is also what makes them eligible for Activity's bulk actions.
+// with no network egress. Imported rows carry counts_toward_budget=false.
 export const PARITY = {
   source: "parity-e2e",
   users: {
@@ -34,10 +33,22 @@ export const PARITY = {
     // Deliberately left without a pricing row: the negative case for the Priced
     // filter, and the row whose detail panel offers "Price this model".
     unpriced: { provider: "groq", model: "llama-parity-unpriced" },
-    // Owned by the bulk-delete test, which consumes it. Kept off the two models
-    // above so deleting it cannot make an earlier assertion unreproducible.
-    scratch: { provider: "groq", model: "scratch-parity-model" },
   },
+} as const
+
+// The agent session the Sessions spec opens: one agent run that called one
+// tool, exported over OTLP the way an instrumented agent sends it. No `chat`
+// span, so the export adds nothing to the usage log the other specs count.
+export const PARITY_SESSION = {
+  agent: "parity-agent",
+  tool: "parity_lookup",
+  conversation: "parity-conversation",
+  keyName: "parity-otlp",
+  // Fixed, so a re-run against a warm database re-sends the same spans rather
+  // than starting another trace.
+  traceId: "7061726974792d73657373696f6e2d31",
+  agentSpanId: "7061726974792d61",
+  toolSpanId: "7061726974792d74",
 } as const
 
 export const PRICED_MODEL_KEY = `${PARITY.models.priced.provider}:${PARITY.models.priced.model}`
@@ -49,7 +60,6 @@ export const COUNTS = {
   priced: 30,
   unpriced: 6,
   errors: 3,
-  scratch: 4,
 } as const
 
 // Every seeded row lands inside this many hours of now, so all of them fall in
@@ -123,18 +133,6 @@ function errorEvents(): SeedEvent[] {
   }))
 }
 
-function scratchEvents(): SeedEvent[] {
-  return Array.from({ length: COUNTS.scratch }, (_, i) => ({
-    source_event_id: `parity-scratch-${i}`,
-    timestamp: spread(COUNTS.scratch, i),
-    ...PARITY.models.scratch,
-    input_tokens: 100,
-    output_tokens: 20,
-    duration_ms: 200 + i,
-    user_id: PARITY.users.light,
-  }))
-}
-
 // Create the users the imported rows attribute to. Ingestion rejects usage for a
 // user that does not exist, and a re-run against a warm database must not fail on
 // its own leftovers, so an existing user is accepted.
@@ -187,12 +185,7 @@ export async function seedParityUsage(page: Page): Promise<void> {
   await ensureUsers(page)
   await ensurePricing(page)
 
-  const events = [
-    ...pricedEvents(),
-    ...unpricedEvents(),
-    ...errorEvents(),
-    ...scratchEvents(),
-  ]
+  const events = [...pricedEvents(), ...unpricedEvents(), ...errorEvents()]
   const seeded = await page.request.post(`${API_ROOT}/usage/external-events`, {
     headers: authHeaders,
     data: { source: PARITY.source, events },
@@ -216,4 +209,92 @@ export async function seedParityUsage(page: Page): Promise<void> {
     result.accepted + result.duplicate,
     "every seeded event has to be stored or already present",
   ).toBe(events.length)
+}
+
+function otlpAttribute(key: string, value: string) {
+  return { key, value: { stringValue: value } }
+}
+
+/**
+ * Seed the session the Sessions spec opens, and wait until the trace API reads
+ * it back: spans are recorded off the request path, so the export answering
+ * 200 does not yet mean the list will show them.
+ */
+export async function seedParitySession(page: Page): Promise<void> {
+  // OTLP refuses the master key: an export is attributed to its key's user.
+  const key = await page.request.post(`${API_ROOT}/keys`, {
+    headers: authHeaders,
+    data: {
+      key_name: PARITY_SESSION.keyName,
+      user_id: PARITY.users.light,
+      exclude_from_budget: true,
+    },
+  })
+  await expectOk(key, "create the OTLP export key")
+  const { key: secret } = (await key.json()) as { key: string }
+
+  const startNs = BigInt(Date.now() - 60_000) * 1_000_000n
+  const at = (offsetMs: number) =>
+    String(startNs + BigInt(offsetMs) * 1_000_000n)
+  const common = [
+    otlpAttribute("gen_ai.conversation.id", PARITY_SESSION.conversation),
+    otlpAttribute("otari.client_name", PARITY_SESSION.agent),
+  ]
+  const exported = await page.request.post("/otlp/v1/traces", {
+    headers: { "Otari-Key": `Bearer ${secret}` },
+    data: {
+      resourceSpans: [
+        {
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  traceId: PARITY_SESSION.traceId,
+                  spanId: PARITY_SESSION.agentSpanId,
+                  name: `invoke_agent ${PARITY_SESSION.agent}`,
+                  startTimeUnixNano: at(0),
+                  endTimeUnixNano: at(4_000),
+                  attributes: [
+                    ...common,
+                    otlpAttribute("gen_ai.operation.name", "invoke_agent"),
+                    otlpAttribute("gen_ai.agent.name", PARITY_SESSION.agent),
+                  ],
+                },
+                {
+                  traceId: PARITY_SESSION.traceId,
+                  spanId: PARITY_SESSION.toolSpanId,
+                  parentSpanId: PARITY_SESSION.agentSpanId,
+                  name: `execute_tool ${PARITY_SESSION.tool}`,
+                  startTimeUnixNano: at(1_000),
+                  endTimeUnixNano: at(3_000),
+                  attributes: [
+                    ...common,
+                    otlpAttribute("gen_ai.operation.name", "execute_tool"),
+                    otlpAttribute("gen_ai.tool.name", PARITY_SESSION.tool),
+                    otlpAttribute("gen_ai.tool.type", "function"),
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  })
+  await expectOk(exported, "export the parity session over OTLP")
+
+  await expect
+    .poll(
+      async () => {
+        const listed = await page.request.get(`${API_ROOT}/traces?limit=100`, {
+          headers: authHeaders,
+        })
+        const { items } = (await listed.json()) as {
+          items: { harness: string | null }[]
+        }
+        return items.some((item) => item.harness === PARITY_SESSION.agent)
+      },
+      { message: "the trace API lists the exported session" },
+    )
+    .toBe(true)
 }

@@ -61,8 +61,10 @@ async def _workspace(db: AsyncSession, organization: Organization, *, name: str,
     return workspace
 
 
-def _service(db: AsyncSession, *, web_search_configured: bool = True) -> WorkspaceWebSearchService:
-    return WorkspaceWebSearchService(db, web_search_configured=web_search_configured)
+def _service(
+    db: AsyncSession, *, web_search_configured: bool = True, default_enabled: bool = True
+) -> WorkspaceWebSearchService:
+    return WorkspaceWebSearchService(db, web_search_configured=web_search_configured, default_enabled=default_enabled)
 
 
 async def test_a_workspace_with_no_row_reads_as_unconfigured_and_narrows_nothing(
@@ -274,10 +276,11 @@ async def test_an_unknown_workspace_is_not_found(async_db: AsyncSession) -> None
         await _service(async_db).get_config(user=owner, workspace_id=uuid.uuid4())
 
 
-async def test_a_ceiling_above_what_the_backend_honors_is_refused(async_db: AsyncSession) -> None:
-    """A row may only narrow, so a value that could never take effect is refused at the write."""
+async def test_a_ceiling_is_a_whole_number_from_1_that_its_column_holds(async_db: AsyncSession) -> None:
+    """No ceiling of the gateway's own bounds it (decision 65); only the 32-bit column does."""
+    assert WorkspaceWebSearchConfigUpdate(enabled=True, max_results=10_000).max_results == 10_000
     with pytest.raises(ValueError):
-        WorkspaceWebSearchConfigUpdate(enabled=True, max_results=10_000)
+        WorkspaceWebSearchConfigUpdate(enabled=True, max_results=2**31)
     with pytest.raises(ValueError):
         WorkspaceWebSearchConfigUpdate(enabled=True, max_results=0)
 

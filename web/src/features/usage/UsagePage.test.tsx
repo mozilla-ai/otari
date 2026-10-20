@@ -121,7 +121,7 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
         requests: 9_200,
         is_other: false,
       },
-      // Gateway traffic carries no session label: a real group with a null key,
+      // Traffic that named no session: a real group with a null key,
       // not the synthesized fold.
       {
         key: null,
@@ -164,6 +164,7 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       },
     ],
     by_tool: [],
+    by_tag: [],
     errors_by_status_code: [],
     series: [
       seriesPoint({
@@ -691,8 +692,7 @@ describe("UsagePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Tokens" }))
 
-    // The four billed buckets are legended: the same encoding as the Activity
-    // page's per-row token bar.
+    // The four billed buckets are legended.
     expect(await screen.findByText("Fresh input")).toBeInTheDocument()
     expect(screen.getByText("Cache read")).toBeInTheDocument()
     expect(screen.getByText("Cache write")).toBeInTheDocument()

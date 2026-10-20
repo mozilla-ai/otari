@@ -175,7 +175,11 @@ def test_changing_an_address_that_already_exists_is_refused(tmp_path: Path) -> N
 
 
 def test_claiming_an_address_another_identity_holds_is_refused(tmp_path: Path) -> None:
-    """The column is unique and the address is what sign-in matches on."""
+    """The column is unique and the address is what sign-in matches on.
+
+    An operator who sends a member's address here is trying to help that member, so the refusal says this
+    sets the caller's own password and names the way that does help.
+    """
     with _client(tmp_path) as client:
         headers = {"Otari-Key": MASTER_KEY}
         added = client.post(f"{API_ROOT}/organizations/me/members", json={"email": EMAIL}, headers=headers)
@@ -188,6 +192,7 @@ def test_claiming_an_address_another_identity_holds_is_refused(tmp_path: Path) -
         )
 
         assert response.status_code == 409, response.text
+        assert "password link" in response.json()["detail"]
         assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
 
 

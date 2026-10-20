@@ -38,8 +38,7 @@ from fastapi.testclient import TestClient
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
-from gateway.services.tools import WEB_SEARCH_HEADER
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import WEB_FETCH_HEADER, WEB_FETCH_TOOL_NAME, WEB_SEARCH_HEADER, WEB_SEARCH_TOOL_NAME
 from gateway.types.normalization_target import NormalizationTarget
 
 from .conftest import MODEL_NAME
@@ -838,59 +837,6 @@ def test_code_execution_without_sandbox_env_returns_400_anthropic_body(
     _assert_anthropic_error(resp.json(), error_type="invalid_request_error", message_substr="OTARI_SANDBOX_URL")
 
 
-def test_code_execution_combined_with_mcp_servers_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    resp = client.post(
-        f"{API_ROOT}/messages",
-        json={
-            "model": "anthropic:claude-3-5-sonnet-20241022",
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 100,
-            "tools": [{"type": "otari_code_execution"}],
-            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    _assert_anthropic_error(
-        resp.json(),
-        error_type="invalid_request_error",
-        message_substr="otari_code_execution and mcp_servers cannot be combined",
-    )
-
-
-def test_web_search_combined_with_mcp_servers_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The use cap reads ownership off the pool, which only tells a gateway call from an
-    MCP server's own because the two never share a request.
-    """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
-    resp = client.post(
-        f"{API_ROOT}/messages",
-        json={
-            "model": "anthropic:claude-3-5-sonnet-20241022",
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 100,
-            "tools": [{"type": "otari_web_search", "max_uses": 1}],
-            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    _assert_anthropic_error(
-        resp.json(),
-        error_type="invalid_request_error",
-        message_substr="cannot be combined with otari_code_execution",
-    )
-
-
 def test_code_execution_combined_with_a_provider_native_tool_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -964,34 +910,6 @@ def test_code_execution_allows_an_unrelated_caller_function(
         )
 
     assert resp.status_code == 200, resp.text
-
-
-def test_web_search_combined_with_sandbox_returns_400(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
-    resp = client.post(
-        f"{API_ROOT}/messages",
-        json={
-            "model": "anthropic:claude-3-5-sonnet-20241022",
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 100,
-            "tools": [
-                {"type": "otari_code_execution"},
-                {"type": "otari_web_search"},
-            ],
-        },
-        headers=api_key_header,
-    )
-    assert resp.status_code == 400
-    _assert_anthropic_error(
-        resp.json(),
-        error_type="invalid_request_error",
-        message_substr="cannot be combined with otari_code_execution",
-    )
 
 
 # ---------- gateway-side runtime errors ----------
@@ -1215,6 +1133,7 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
                 file_workspace_id=None,
                 credential_workspace_id=None,
                 workspace_executor=None,
+                candidate_providers=(None,),
             )
         )
         raise HTTPException(status_code=418, detail="stop after admission inputs")
@@ -1779,10 +1698,10 @@ def test_intercept_routes_provider_keywords_to_the_gateway_backend(
     else:
         # The cap arrived by value, not just as "some budget": spending it exactly
         # ``max_uses`` times is what exhausts it.
-        assert not budget.exhausted()
+        assert not budget.exhausted(WEB_SEARCH_TOOL_NAME)
         for _ in range(cap):
-            budget.record("results")
-        assert budget.exhausted()
+            budget.record(WEB_SEARCH_TOOL_NAME, "results")
+        assert budget.exhausted(WEB_SEARCH_TOOL_NAME)
 
 
 def test_intercept_emits_native_blocks_only_for_a_native_declaration(
@@ -2103,3 +2022,141 @@ def test_intercept_retargets_a_forced_tool_choice(
 
     assert resp.status_code == 200, resp.text
     assert seen == [{"type": "tool", "name": "web_search"}]
+
+
+# ---------- web-fetch takeover (Otari-Web-Fetch) ----------
+
+_ANTHROPIC_MODEL = "anthropic:claude-3-5-sonnet-20241022"
+_FETCH_KEYWORD = {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 3}
+
+
+def _post_fetch_keyword(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    *,
+    model: str,
+    header: str | None,
+    loop_calls: list[dict[str, Any]],
+    forwarded: dict[str, Any],
+) -> Any:
+    """Post a native fetch declaration, recording whether it reached the gateway's loop or the provider."""
+
+    async def fake_loop(
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
+    ) -> MessageResponse:
+        loop_calls.append({"completion_kwargs": completion_kwargs, "native_tools": native_tools, "budget": use_budget})
+        return _text_response("via-gateway-fetch")
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        forwarded.update(kwargs)
+        return _text_response("via-provider-fetch")
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_builder_result = AsyncMock(
+        __aenter__=AsyncMock(return_value=fake_backend),
+        __aexit__=AsyncMock(return_value=None),
+    )
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch("gateway.api.routes.messages.amessages", new=fake_amessages),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+    ):
+        return client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "read https://example.com"}],
+                "max_tokens": 100,
+                "tools": [dict(_FETCH_KEYWORD)],
+            },
+            headers={**api_key_header, **({WEB_FETCH_HEADER: header} if header else {})},
+        )
+
+
+def test_auto_claims_a_fetch_keyword_a_non_anthropic_model_cannot_run(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """The fetch runs on the gateway, is answered in Anthropic's own blocks, and keeps its cap."""
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    loop_calls: list[dict[str, Any]] = []
+    forwarded: dict[str, Any] = {}
+
+    resp = _post_fetch_keyword(
+        client, api_key_header, model=MODEL_NAME, header="auto", loop_calls=loop_calls, forwarded=forwarded
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert not forwarded, "the keyword was forwarded to a provider with no fetch of its own"
+    [call] = loop_calls
+    assert call["native_tools"] == frozenset({WEB_FETCH_TOOL_NAME})
+    assert not any(
+        str(tool.get("type", "")).startswith("web_fetch_") for tool in call["completion_kwargs"].get("tools") or []
+    )
+    budget = call["budget"]
+    for _ in range(3):
+        assert not budget.exhausted(WEB_FETCH_TOOL_NAME)
+        budget.record(WEB_FETCH_TOOL_NAME, "page")
+    assert budget.exhausted(WEB_FETCH_TOOL_NAME)
+
+
+@pytest.mark.parametrize(
+    ("model", "header", "fetch_enabled", "claimed"),
+    [
+        (_ANTHROPIC_MODEL, "auto", True, False),
+        (_ANTHROPIC_MODEL, "otari", True, True),
+        (MODEL_NAME, "provider", True, False),
+        (MODEL_NAME, None, True, False),
+        (MODEL_NAME, "auto", False, False),
+    ],
+    ids=["auto-keeps-anthropic-native", "otari-claims-anthropic", "provider", "no-header", "fetch-disabled"],
+)
+def test_who_runs_a_fetch_keyword(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+    model: str,
+    header: str | None,
+    fetch_enabled: bool,
+    claimed: bool,
+) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", fetch_enabled)
+    loop_calls: list[dict[str, Any]] = []
+    forwarded: dict[str, Any] = {}
+
+    resp = _post_fetch_keyword(
+        client, api_key_header, model=model, header=header, loop_calls=loop_calls, forwarded=forwarded
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert bool(loop_calls) is claimed
+    if not claimed:
+        assert [tool["type"] for tool in forwarded.get("tools") or []] == ["web_fetch_20250910"]
+
+
+def test_an_unknown_web_fetch_header_value_is_rejected(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    resp = client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": "read"}],
+            "max_tokens": 100,
+            "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}],
+        },
+        headers={**api_key_header, WEB_FETCH_HEADER: "gateway"},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "Otari-Web-Fetch must be one of auto, otari, provider" in resp.text

@@ -76,8 +76,11 @@ from gateway.api.deps import (
     ApiKeyFormatPortDep,
     CurrentIdentity,
     FileServiceDep,
-    ModelProviderPortDep,
+    PlaygroundToolOfferDep,
+    RequestSessionBillingPortDep,
+    RequestSessionModelProviderPortDep,
     ToolPortsDep,
+    WorkspaceCodeExecutionPoliciesDep,
     get_config,
     get_db,
     get_log_writer,
@@ -199,9 +202,10 @@ async def playground_chat_completions(
     files: FileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
     tool_ports: ToolPortsDep,
     key_format: ApiKeyFormatPortDep,
+    billing: RequestSessionBillingPortDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> ChatCompletion | Response:
     """Run one chat completion for the signed-in caller.
@@ -253,6 +257,9 @@ async def playground_chat_completions(
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
+        # On this route's own ``get_db`` session, which ``BillingPortDep`` is not:
+        # a deployment-paid charge has to land in the commit that settles on ``db``.
+        billing=billing,
         session_principal=principal,
     )
 
@@ -279,12 +286,12 @@ async def _dispatch_to_data_plane(
     a forward and which key; this is the request-shaped part: resolve the key,
     release the session, and forward.
 
-    The body is re-sent as validated, with ``exclude_unset`` so a default the data
-    plane would have chosen is not overridden by one chosen here. A field
-    ``ChatCompletionRequest`` does not model is dropped, exactly as it is dropped
-    on the standalone path, which runs the same validated object through the same
-    pipeline. Forwarding the raw body instead would make this deployment accept
-    what a standalone one refuses, and the two must answer alike.
+    The body is re-sent as validated, with ``exclude_unset``
+    so a default the data plane would have chosen is not overridden by one chosen
+    here. A field ``ChatCompletionRequest`` does not model is dropped, exactly as
+    it is dropped on the standalone path, which runs the same validated object
+    through the same pipeline. Forwarding the raw body instead would make this
+    deployment accept what a standalone one refuses, and the two must answer alike.
 
     The answer is streamed back whatever its shape. A non-streaming completion is
     one chunk of JSON carrying the upstream's own content type, so the page reads
@@ -330,6 +337,8 @@ async def read_playground_tools(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    offer: PlaygroundToolOfferDep,
+    code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> PlaygroundToolsResponse:
     """The gateway-run tools the caller's workspace may attach to a message.
@@ -342,7 +351,13 @@ async def read_playground_tools(
     something the request path would refuse.
     """
     resolved = await playground_service.resolve_playground_workspace(db, identity=identity, workspace_id=workspace_id)
-    availability = await playground_service.resolve_tool_availability(db, config=config, workspace_id=resolved)
+    availability = await playground_service.resolve_tool_availability(
+        db,
+        config=config,
+        offer=offer,
+        code_execution_policies=code_execution_policies,
+        workspace_id=resolved,
+    )
     return PlaygroundToolsResponse(
         web_search=_tool_status(availability.web_search),
         code_execution=_tool_status(availability.code_execution),
@@ -364,9 +379,9 @@ async def read_playground_tools(
 # ==============================================================================
 
 
-async def _require_playground_files(config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
+async def _require_playground_files(offer: PlaygroundToolOfferDep) -> None:
     """Answer as the unmounted ``/files`` routes do wherever the composer offers no attachments."""
-    if not playground_service.file_availability(config).enabled:
+    if not offer.files().enabled:
         raise FilesDisabledError
 
 

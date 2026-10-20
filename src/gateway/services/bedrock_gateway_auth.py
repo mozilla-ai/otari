@@ -30,6 +30,7 @@ through this module at all (see ``default_attempt_kwargs``).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import boto3
@@ -43,6 +44,40 @@ from botocore.config import Config
 # ``boto3.client("bedrock-runtime", endpoint_url=api_base, **kwargs)`` with no
 # reference to ``api_key`` at all.
 _SECRET_ACCESS_KEY_KWARG = "aws_secret_access_key"
+
+# How long a Bedrock client waits for the next byte of a response. botocore's
+# default of 60s fails a stream whose model goes quiet for a minute, which a model
+# writing a long tool call does. Callers run their own inactivity deadlines, so this
+# one only has to outlast them. Matches the Anthropic SDK's default read timeout.
+BEDROCK_READ_TIMEOUT_SECONDS = 600
+
+
+def with_bedrock_read_timeout(client_args: Mapping[str, Any] | None) -> dict[str, Any]:
+    """``client_args`` whose Bedrock client waits :data:`BEDROCK_READ_TIMEOUT_SECONDS` for a response.
+
+    A ``config`` the operator supplied, as a botocore ``Config`` or as the mapping
+    a YAML file gives, is merged over the default, so a read timeout it sets wins.
+    A pre-built ``client`` is left as built. The mapping is copied, never mutated,
+    because it can be the one held by the deployment's config.
+
+    Raises:
+        ValueError: ``config`` is neither a ``Config`` nor a mapping.
+    """
+    args = dict(client_args or {})
+    if "client" in args:
+        return args
+    default = Config(read_timeout=BEDROCK_READ_TIMEOUT_SECONDS)
+    config = args.get("config")
+    if config is None:
+        args["config"] = default
+    elif isinstance(config, Config):
+        args["config"] = default.merge(config)
+    elif isinstance(config, Mapping):
+        args["config"] = default.merge(Config(**config))
+    else:
+        msg = f"Bedrock client_args.config must be a botocore Config or a mapping, not {type(config).__name__}."
+        raise ValueError(msg)
+    return args
 
 
 def _build_unsigned_bedrock_runtime_client(region_name: str, token: str) -> Any:
@@ -69,7 +104,7 @@ def _build_unsigned_bedrock_runtime_client(region_name: str, token: str) -> Any:
     client = boto3.client(
         "bedrock-runtime",
         region_name=region_name,
-        config=Config(signature_version=botocore.UNSIGNED),
+        config=Config(signature_version=botocore.UNSIGNED, read_timeout=BEDROCK_READ_TIMEOUT_SECONDS),
     )
 
     def _inject_bearer_token(request: Any, **kwargs: Any) -> None:  # noqa: ARG001
@@ -98,7 +133,7 @@ def build_bedrock_client_args(api_key: str, extra_params: dict[str, str]) -> dic
     already supports overriding its client with).
     """
     if extra_params.get("aws_access_key_id"):
-        return {**extra_params, _SECRET_ACCESS_KEY_KWARG: api_key}
+        return with_bedrock_read_timeout({**extra_params, _SECRET_ACCESS_KEY_KWARG: api_key})
 
     region_name = extra_params.get("region_name", "")
     return {

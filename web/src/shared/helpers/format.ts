@@ -56,6 +56,8 @@ export function formatUnitRate(value: number): string {
 // `undefined` rather than a placeholder when the row recorded none, so a table
 // cell can render the em dash that keeps it aligned and a stat card can drop
 // the figure instead.
+export function formatLatency(ms: number): string
+export function formatLatency(ms: number | null | undefined): string | undefined
 export function formatLatency(
   ms: number | null | undefined,
 ): string | undefined {
@@ -144,6 +146,21 @@ export function formatDateTime(iso: string | null | undefined): string {
   return date.toLocaleString()
 }
 
+// A date and a time to the minute, where the seconds are noise.
+export function formatDateTimeMinutes(iso: string | null | undefined): string {
+  if (!iso) {
+    return "—"
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return date.toLocaleString(undefined, {
+    dateStyle: "short",
+    timeStyle: "short",
+  })
+}
+
 // The heading a dated row sits under in a history list: "Today", "Yesterday",
 // or the date, with the year only when it is not the current one.
 //
@@ -209,6 +226,29 @@ export function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
   return String(value)
+}
+
+const tokensCompact = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumSignificantDigits: 3,
+})
+
+// Three significant figures for a count shortened to fit a narrow lane:
+// 1234567890 -> "1.23B", 98765432 -> "98.8M".
+export function formatTokensCompact(value: number): string {
+  return tokensCompact.format(value)
+}
+
+const usdCompactNotation = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumSignificantDigits: 3,
+})
+
+// Money shortened the same way: 12345678.9 -> "$12.3M", 100000 -> "$100K".
+export function formatUsdCompact(value: number): string {
+  return usdCompactNotation.format(value)
 }
 
 const scoreFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 })

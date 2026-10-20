@@ -3,7 +3,15 @@ import { render } from "@testing-library/react"
 import type { ReactElement } from "react"
 import { vi } from "vitest"
 
-import type { InFlightResponse, OrganizationMember, UsageEntry } from "@/client"
+import type {
+  DeploymentBootstrap,
+  InFlightResponse,
+  OrganizationMember,
+  ScopedBudget,
+  TraceDetail,
+  TraceSummary,
+  UsageEntry,
+} from "@/client"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -92,6 +100,13 @@ export function mockApi(
     workspace?: string
     deploymentOperator?: boolean
     members?: OrganizationMember[]
+    // The trace explorer's reads: one page of sessions, and the one that opens.
+    traces?: TraceSummary[]
+    traceDetail?: TraceDetail
+    // The session a request was traced into; without one, the lookup is a 404.
+    requestTrace?: TraceSummary
+    // The deployment's spend ceilings, which the session panel reads per key.
+    ceilings?: ScopedBudget[]
   } = {},
 ) {
   const rows = opts.rows ?? []
@@ -174,6 +189,27 @@ export function mockApi(
           series: [],
         })
       }
+      if (url.includes("/traces/count")) {
+        return jsonResponse({ count: (opts.traces ?? []).length })
+      }
+      if (url.includes("/traces/series")) {
+        return jsonResponse({ bucket: "hour", points: [] })
+      }
+      if (url.includes("/traces/requests/")) {
+        return opts.requestTrace
+          ? jsonResponse(opts.requestTrace)
+          : jsonResponse({ detail: "No trace holds the request" }, 404)
+      }
+      if (/\/traces\/[^?]+/.test(url)) {
+        return opts.traceDetail
+          ? jsonResponse(opts.traceDetail)
+          : new Response(JSON.stringify({ detail: "Trace not found" }), {
+              status: 404,
+            })
+      }
+      if (url.includes("/traces")) {
+        return jsonResponse({ items: opts.traces ?? [], has_more: false })
+      }
       if (url.includes("/usage")) {
         // Group lookups can return siblings absent from the page's own rows.
         const asked = new URL(url, "http://localhost").searchParams.getAll(
@@ -188,6 +224,18 @@ export function mockApi(
           )
         }
         return jsonResponse(rows)
+      }
+      if (url.includes(`${API_ROOT}/scoped-budgets`)) {
+        const query = new URL(url, "http://localhost").searchParams
+        return jsonResponse(
+          (opts.ceilings ?? []).filter(
+            (ceiling) =>
+              (!query.has("scope_type") ||
+                ceiling.scope_type === query.get("scope_type")) &&
+              (!query.has("scope_id") ||
+                ceiling.scope_id === query.get("scope_id")),
+          ),
+        )
       }
       if (url.includes(`${API_ROOT}/organizations/me/members`)) {
         const members = opts.members ?? []
@@ -227,12 +275,16 @@ export function mockApi(
   return { mock, calls }
 }
 
-export function renderPage(ui: ReactElement, route = "/activity") {
+export function renderPage(
+  ui: ReactElement,
+  route = "/activity",
+  deployment: Partial<DeploymentBootstrap> = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={bootstrap()}>
+    <DeploymentProvider value={bootstrap(deployment)}>
       <QueryClientProvider client={client}>
         <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
       </QueryClientProvider>

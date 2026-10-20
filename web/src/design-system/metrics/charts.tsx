@@ -44,12 +44,6 @@ export interface SeriesDef {
 // series values live under their `SeriesDef.key`.
 export type StackedPoint = { x: string } & Record<string, number | string>
 
-// One point in a single-series trend: an x-axis/tooltip label and its value.
-export interface ChartPoint {
-  label: string
-  value: number
-}
-
 // A series identity swatch. An SVG fill (which accepts var(--color-*) tokens)
 // rather than an inline background-color style, per the dashboard's no-inline-
 // styles convention.

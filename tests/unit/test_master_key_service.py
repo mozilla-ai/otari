@@ -24,7 +24,7 @@ from gateway.services.master_key_service import (
     hash_master_key,
     stage_generated_master_key_rotation,
 )
-from gateway.services.pricing_service import no_pricing_error_detail
+from gateway.services.pricing_service import configure_default_pricing, no_pricing_error_detail
 
 
 @pytest.fixture(autouse=True)
@@ -119,9 +119,9 @@ def test_generated_key_authenticates_management_api(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(master_key_service, "generate_master_key", lambda: fixed)
     config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'mk.db'}", require_pricing=False)
     with TestClient(create_app(config)) as client:
-        ok = client.get(f"{API_ROOT}/provider-credentials", headers={"Otari-Key": f"Bearer {fixed}"})
+        ok = client.get(f"{API_ROOT}/hosted-providers", headers={"Otari-Key": f"Bearer {fixed}"})
         assert ok.status_code == 200
-        bad = client.get(f"{API_ROOT}/provider-credentials", headers={"Otari-Key": "Bearer wrong"})
+        bad = client.get(f"{API_ROOT}/hosted-providers", headers={"Otari-Key": "Bearer wrong"})
         assert bad.status_code == 401
 
 
@@ -155,3 +155,15 @@ def test_402_message_states_cause_and_both_fixes() -> None:
     assert f"{API_ROOT}/pricing" in msg
     assert "default_pricing" in msg
     assert f"{API_ROOT}/settings" in msg
+
+
+def test_402_message_with_default_pricing_on_names_a_typo_and_not_the_fallback() -> None:
+    configure_default_pricing(True)
+    msg = no_pricing_error_detail("openai:gpt5-mini")
+    assert "openai:gpt5-mini" in msg
+    assert "Default pricing is on" in msg
+    assert "typo" in msg
+    assert f"GET {API_ROOT}/models" in msg
+    assert f"POST {API_ROOT}/pricing" in msg
+    assert f"{API_ROOT}/settings" not in msg
+    assert "enable the default-pricing fallback" not in msg

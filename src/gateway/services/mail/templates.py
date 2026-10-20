@@ -35,9 +35,19 @@ _PLACEHOLDER: Final = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
 
 # Substituted into the layout before the value pass, so a body template is the
 # only thing a message has to write. Not available to a caller as a value name:
-# BODY is consumed here, and SUBJECT is supplied from the rendered subject.
+# BODY is consumed here, and the rest are filled from render_email's arguments.
 _LAYOUT_SLOT: Final = "{{BODY}}"
-_RESERVED_VALUES: Final = frozenset({"BODY", "SUBJECT"})
+_RESERVED_VALUES: Final = frozenset({"BODY", "SUBJECT", "PREHEADER", "MARK", "FONT_FACES"})
+
+# Files the dashboard serves from ``web/public``, by their path under its root.
+# A test holds them to that directory, since a moved file would break every
+# message without failing anything.
+MARK_PATH: Final = "pwa/icon-192.png"
+FONT_FILES: Final = (
+    ("Mozilla Text", "fonts/MozillaText-Variable.woff2", "200 700"),
+    ("Mozilla Headline", "fonts/MozillaHeadline-Variable.woff2", "200 700"),
+    ("Fira Code", "fonts/FiraCode-VariableFont_wght.woff2", "300 700"),
+)
 
 
 class MailTemplateError(Exception):
@@ -81,14 +91,61 @@ def _fill(document: str, values: dict[str, str], *, template: str) -> str:
     return _PLACEHOLDER.sub(substitute, document)
 
 
-def render_email(template: str, *, subject: str, values: dict[str, str]) -> MailMessage:
+def _preheader(text: str) -> str:
+    """The line an inbox shows after the subject, hidden in the message itself.
+
+    Padded so a client does not fill the rest of the preview with the first
+    words of the card.
+    """
+    if not text:
+        return ""
+    padding = "&#847;&zwnj;&nbsp;" * 40
+    return (
+        '<div style="display:none; max-height:0; max-width:0; overflow:hidden; opacity:0; mso-hide:all;">'
+        f"{escape(text)}{padding}</div>"
+    )
+
+
+def _mark(asset_root: str | None) -> str:
+    if asset_root is None:
+        return ""
+    return (
+        f'<img src="{escape(asset_root)}/{MARK_PATH}" width="24" height="24" alt="" '
+        'style="display:inline-block; vertical-align:middle; border:0; outline:none; width:24px; height:24px;">'
+        "&nbsp;&nbsp;"
+    )
+
+
+def _font_faces(asset_root: str | None) -> str:
+    if asset_root is None:
+        return ""
+    return "".join(
+        f"@font-face {{ font-family:'{family}'; src:url('{escape(asset_root)}/{path}') format('woff2'); "
+        f"font-weight:{weights}; font-style:normal; }}"
+        for family, path, weights in FONT_FILES
+    )
+
+
+def render_email(
+    template: str,
+    *,
+    subject: str,
+    values: dict[str, str],
+    preheader: str = "",
+    asset_root: str | None = None,
+) -> MailMessage:
     """Render ``<template>.html`` and ``<template>.txt`` into one message.
 
     ``subject`` may carry placeholders too and is filled from the same values,
     unescaped (it is a header, not markup) and stripped of CR/LF, which is what
     keeps a free-text organization name in a subject line from being either a
     ``HeaderParseError`` at send time or, on a mail stack that tolerates it, a
-    header-injection vector.
+    header-injection vector. ``preheader`` is filled from the same values and HTML-escaped.
+
+    ``asset_root`` is where this deployment's dashboard serves its static
+    files (``Mailer.asset_root``). The header's mark and the brand fonts load
+    from it; without it the message goes out with neither rather than with a
+    broken link.
     """
     reserved = _RESERVED_VALUES & values.keys()
     if reserved:
@@ -104,6 +161,9 @@ def render_email(template: str, *, subject: str, values: dict[str, str]) -> Mail
     html_document = _load("_layout.html").replace(_LAYOUT_SLOT, _load(f"{template}.html").rstrip("\n"))
     html_values = {name: escape(value) for name, value in values.items()}
     html_values["SUBJECT"] = escape(rendered_subject)
+    html_values["PREHEADER"] = _preheader(_fill(preheader, values, template=f"{template} preheader"))
+    html_values["MARK"] = _mark(asset_root)
+    html_values["FONT_FACES"] = _font_faces(asset_root)
 
     text_document = _load("_layout.txt").replace(_LAYOUT_SLOT, _load(f"{template}.txt").rstrip("\n"))
     text_values = dict(values)

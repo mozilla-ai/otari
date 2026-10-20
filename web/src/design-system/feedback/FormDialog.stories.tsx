@@ -268,16 +268,6 @@ function ManyFields() {
 }
 
 /**
- * Below 640px every size is a full-screen sheet: the dialog fills the frame,
- * the inputs are 16px so iOS does not zoom, and the footer clears the home
- * indicator.
- *
- * `mobile2` is Storybook's own 414px preset, the nearest one to the 390px frame
- * this was drawn at. The width is what matters: the sheet is a media query on
- * the preview frame, so a wrapper `<div>` would not produce it. The dialog
- * portals to the frame's `<body>` and never sees a wrapper at all.
- */
-/**
  * The same sheet, landscape. `isRotated` puts the phone at 844x390, which is
  * wider than 640 and shorter than it: the sheet's geometry keys on either
  * dimension, so a viewport that cannot afford the 120px gap vertically gets the
@@ -302,6 +292,16 @@ export const PhoneSheetLandscape: Story = {
   ),
 }
 
+/**
+ * Below 640px every size is a full-screen sheet: the dialog fills the frame,
+ * the inputs are 16px so iOS does not zoom, and the footer clears the home
+ * indicator.
+ *
+ * `mobile2` is Storybook's own 414px preset, the nearest one to the 390px frame
+ * this was drawn at. The width is what matters: the sheet is a media query on
+ * the preview frame, so a wrapper `<div>` would not produce it. The dialog
+ * portals to the frame's `<body>` and never sees a wrapper at all.
+ */
 export const PhoneSheet: Story = {
   globals: { viewport: { value: "mobile2", isRotated: false } },
   // With a `footerStart` caption, which is the case that does not fit a row:
@@ -337,6 +337,24 @@ export const SubmitBlocked: Story = {
         errorMessage="Give the key a name."
         shouldReserveMessage
       />
+    </FormDialog>
+  ),
+}
+
+/**
+ * A result screen: the form is done and the one action is an acknowledgement.
+ * Escape and the close control still work, but a Cancel beside Done would
+ * cancel nothing, so the footer drops it.
+ */
+export const ResultWithoutCancel: Story = {
+  args: {
+    hideCancel: true,
+    title: "Invitation",
+    submitLabel: "Done",
+  },
+  render: (args) => (
+    <FormDialog {...args}>
+      <p className="text-sm">An email with an accept link was sent.</p>
     </FormDialog>
   ),
 }

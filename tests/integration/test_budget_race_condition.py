@@ -8,10 +8,10 @@ to binary floating point: the drift is far too small for ``approx`` to see.
 
 from decimal import Decimal
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import event
 
 from gateway.models.budgets import MAX_COUNT_LIMIT, Budget
 from gateway.models.pricing import ModelPricing
@@ -45,14 +45,21 @@ async def test_reserve_budget_reads_user_without_locking(
     async_db.add(user)
     await async_db.commit()
 
-    with patch(
-        "gateway.services.budgets._reservations.get_active_user",
-        wraps=get_active_user,
-    ) as mock_get_active_user:
+    statements: list[str] = []
+
+    def record(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        statements.append(statement)
+
+    sync_engine = async_db.bind.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", record)
+    try:
         handle = await reserve_budget(async_db, "race-user", 0.5, strategy="cas")
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", record)
 
     assert handle.reserved
-    assert mock_get_active_user.call_args.kwargs.get("for_update", False) is False
+    assert statements
+    assert not [statement for statement in statements if "FOR UPDATE" in statement.upper()]
 
 
 @pytest.mark.asyncio
@@ -183,7 +190,7 @@ async def test_increase_reservation_grows_hold_and_folds_handle(async_db: Any) -
     await async_db.commit()
 
     handle = await reserve_budget(async_db, "inc-user", 5.0)
-    await increase_reservation(async_db, handle, 7.0)
+    await increase_reservation(async_db, handle, estimate=12.0)
 
     # Delta folded into the handle so the single reconcile/refund covers it all.
     assert handle.estimate == Decimal("12.0")
@@ -213,9 +220,9 @@ async def test_increase_reservation_rejects_without_touching_original(async_db: 
     await async_db.commit()
 
     handle = await reserve_budget(async_db, "incr-user", 1.0)  # 8 + 1 <= 10, fits
-    # Topping up by 5 would need 8 + 1 + 5 = 14 > 10 → rejected.
+    # Growing to 6 would need 8 + 6 = 14 > 10 → rejected.
     with pytest.raises(HTTPException) as exc_info:
-        await increase_reservation(async_db, handle, 5.0)
+        await increase_reservation(async_db, handle, estimate=6.0)
     assert exc_info.value.status_code == 403
 
     # Only the original 1.0 hold remains; the delta was not applied. The caller
@@ -233,15 +240,15 @@ async def test_increase_reservation_rejects_without_touching_original(async_db: 
 
 
 @pytest.mark.asyncio
-async def test_increase_reservation_noop_for_nonpositive_delta(async_db: Any) -> None:
-    """A zero/negative delta leaves the reservation untouched."""
+async def test_increase_reservation_is_a_no_op_at_or_below_the_hold(async_db: Any) -> None:
+    """A size the reservation already holds leaves it untouched."""
     async_db.add(Budget(budget_id="incn-budget", max_budget=100.0))
     async_db.add(User(user_id="incn-user", spend=0.0, budget_id="incn-budget"))
     await async_db.commit()
 
     handle = await reserve_budget(async_db, "incn-user", 5.0)
-    await increase_reservation(async_db, handle, 0.0)
-    await increase_reservation(async_db, handle, -3.0)
+    await increase_reservation(async_db, handle, estimate=5.0)
+    await increase_reservation(async_db, handle, estimate=2.0)
 
     assert handle.estimate == Decimal("5.0")
     async_db.expire_all()
@@ -328,7 +335,7 @@ async def test_a_top_up_grows_the_token_hold_without_counting_a_second_request(a
     await async_db.commit()
 
     handle = await reserve_budget(async_db, "topped-up-user", 1.0, estimated_tokens=1_000)
-    await increase_reservation(async_db, handle, Decimal("0.5"), additional_tokens=500)
+    await increase_reservation(async_db, handle, estimate=Decimal("1.5"), tokens=1_500)
 
     user = await get_active_user(async_db, "topped-up-user")
     assert user is not None
@@ -402,7 +409,7 @@ async def test_a_token_only_top_up_is_held(async_db: Any) -> None:
     await async_db.commit()
 
     handle = await reserve_budget(async_db, "token-topup-user", 1.0, estimated_tokens=1_000)
-    await increase_reservation(async_db, handle, Decimal("0"), additional_tokens=500)
+    await increase_reservation(async_db, handle, estimate=Decimal("1.0"), tokens=1_500)
 
     user = await get_active_user(async_db, "token-topup-user")
     assert user is not None
@@ -438,6 +445,56 @@ async def test_a_free_model_refusal_names_the_axis_that_gated_it(async_db: Any) 
 
 
 @pytest.mark.asyncio
+async def test_a_hold_larger_than_the_headroom_names_both_amounts(async_db: Any) -> None:
+    """Nothing is spent, so "has exceeded budget limit" would be false: the hold is what does not fit."""
+    async_db.add(Budget(budget_id="too-large", max_budget=0.0015))
+    async_db.add(User(user_id="too-large-user", budget_id="too-large"))
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, "too-large-user", Decimal("0.0021"), reserved_output_tokens=2_000)
+
+    assert refusal.value.status_code == 403
+    assert refusal.value.detail == (
+        "User 'too-large-user' has $0.0015 of budget remaining, less than this request's estimated cost "
+        "of $0.0021. The estimate assumes 2000 output tokens; a lower output token limit on the request may let it fit"
+    )
+    assert refusal.value.headers is not None
+    assert refusal.value.headers["Otari-Budget-Scope"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_a_spent_budget_keeps_its_exceeded_wording(async_db: Any) -> None:
+    """The counterpart: spend at the cap is a budget genuinely exceeded, and reads as one."""
+    async_db.add(Budget(budget_id="spent", max_budget=0.0015))
+    async_db.add(User(user_id="spent-user", budget_id="spent", spend=Decimal("0.0015")))
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, "spent-user", Decimal("0.0021"), reserved_output_tokens=2_000)
+
+    assert refusal.value.detail == "User 'spent-user' has exceeded budget limit"
+
+
+@pytest.mark.asyncio
+async def test_a_top_up_that_does_not_fit_names_the_growth(async_db: Any) -> None:
+    """A top-up's amount is the growth, not the request's whole estimate, and the message says which."""
+    async_db.add(Budget(budget_id="topup-too-large", max_budget=1.0))
+    async_db.add(User(user_id="topup-too-large-user", budget_id="topup-too-large"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "topup-too-large-user", Decimal("0.6"))
+    with pytest.raises(HTTPException) as refusal:
+        await increase_reservation(async_db, handle, estimate=Decimal("1.1"))
+
+    assert refusal.value.detail == (
+        "User 'topup-too-large-user' has $0.40 of budget remaining, less than the $0.50 this request's "
+        "estimated cost grew by"
+    )
+    await refund_reservation(async_db, handle)
+
+
+@pytest.mark.asyncio
 async def test_a_token_top_up_is_clamped_before_any_hold_is_taken(async_db: Any) -> None:
     """The ceilings are held first, so a delta bounded after them is bounded too late.
 
@@ -450,9 +507,9 @@ async def test_a_token_top_up_is_clamped_before_any_hold_is_taken(async_db: Any)
     await async_db.commit()
 
     handle = await reserve_budget(async_db, "clamped-user", 1.0, estimated_tokens=10)
-    await increase_reservation(async_db, handle, Decimal("0"), additional_tokens=10**18)
+    await increase_reservation(async_db, handle, estimate=Decimal("1.0"), tokens=10**18)
 
     user = await get_active_user(async_db, "clamped-user")
     assert user is not None
-    assert handle.token_estimate == 10 + MAX_COUNT_LIMIT
-    assert user.reserved_tokens == 10 + MAX_COUNT_LIMIT
+    assert handle.token_estimate == MAX_COUNT_LIMIT
+    assert user.reserved_tokens == MAX_COUNT_LIMIT

@@ -13,7 +13,7 @@ Enforces:
 9. Registry: only the app wiring reads gateway/features.py, so a service or a
    route may not import it; and nothing under gateway/ imports
    importlib.metadata, importlib_metadata or pkg_resources, so nothing is
-   discovered.
+   discovered. The same ban holds under otari_agent/ and the two libraries.
 10. Top-level packages: src/ holds only the packages on an explicit list, so a
     feature cannot sit beside gateway/, outside every rule above.
 11. Service database access: nothing under services/ imports sqlalchemy or
@@ -46,14 +46,14 @@ Enforces:
     rule 10 keeps src/ to the gateway, and this one keeps the CLI out of it.
 19. Domain names: a package in services/ or repositories/, a module in
     schemas/ and a module in exceptions/ take their domain from their name, so
-    each name is a domain that docs/domains.md gives a section. An exceptions
+    each name is a domain that DOMAINS.md gives a section. An exceptions
     module is named <domain>_exceptions.py. The names that do not match yet are
     on a baseline, and the baseline only shrinks.
     A package on it holds only the modules the baseline lists, so new code goes in its domain's package.
 20. Repository imports: only a domain's own service package, its own
     repository package and the builders in gateway/api/deps.py import a
     domain's repository package, so a domain's queries stay behind its
-    service. A domain is one that docs/domains.md gives a section. Service code
+    service. A domain is one that DOMAINS.md gives a section. Service code
     outside every domain package is not checked, because its path does not
     say which domain owns it.
 21. Service package imports: code outside a domain's service package
@@ -69,6 +69,20 @@ Enforces:
     A model has none until a repository holds its queries.
     The other modules that use a model are named on its baseline, and the baseline only shrinks.
     A class in models/ is an ORM model when it passes table=True or assigns __tablename__ or __table__.
+24. Listener defaults: no parameter or class field typed as a listener has a default,
+    so a caller cannot skip a listener by leaving it out.
+    A listener type is one whose name contains Listener.
+    Containing it, rather than ending in it, also catches an alias such as WorkspaceListenerDep.
+    A name in a Callable's parameter list or in Annotated's metadata is not the parameter's type, so it is skipped.
+    A FastAPI dependency declares a listener as Annotated[Listener, Depends(...)], since a Depends(...) default counts.
+    A field kept out of the constructor, such as field(init=False), is not a parameter, so the rule skips it.
+    The parameters and fields that still have one are named on a baseline, and the baseline only shrinks.
+25. Libraries: nothing under any-search/ or any-fetch/, tests and scripts
+    included, imports the gateway, SQLAlchemy, SQLModel, FastAPI, uvicorn or
+    the other library, so each runs on its own with httpx and pydantic. A
+    library keeps its tests and scripts inside its directory rather than
+    under tests/ or src/, so each directory is a root of its own, mapped to
+    its rule. Entry-point discovery is banned there as under gateway/.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -92,6 +106,11 @@ TESTS_ROOT = REPO_ROOT / "tests"
 # The otari-agent workspace member (cli/pyproject.toml); its files are checked
 # relative to this root so the "otari_agent" rule key matches them.
 CLI_ROOT = REPO_ROOT / "cli" / "src"
+# The two library workspace members, each checked whole against the rule it maps to.
+LIBRARY_ROOTS: dict[str, Path] = {
+    "any_search": REPO_ROOT / "any-search",
+    "any_fetch": REPO_ROOT / "any-fetch",
+}
 
 
 # session_for hands out the Unit of Work's session, so the repositories package is
@@ -159,6 +178,19 @@ RULES: dict[str, LayerRule] = {
             "fastapi",
         ],
         "description": "Light CLI (otari-agent)",
+    },
+    # The web search and fetch libraries are built to run without otari: import
+    # one, give it a key, call it. Neither imports the other either, so each
+    # stays self-contained. These keys match through LIBRARY_ROOTS, not a path.
+    "any_search": {
+        "allowed": [],
+        "forbidden": ["gateway", "sqlalchemy", "sqlmodel", "fastapi", "uvicorn", "any_fetch"],
+        "description": "Library (any-search)",
+    },
+    "any_fetch": {
+        "allowed": [],
+        "forbidden": ["gateway", "sqlalchemy", "sqlmodel", "fastapi", "uvicorn", "any_search"],
+        "description": "Library (any-fetch)",
     },
     "gateway/services": {
         "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth", "gateway.ports"],
@@ -279,11 +311,12 @@ ADAPTER_IMPORT = "gateway.adapters"
 LIGHT_CLI_ATTACH_POINT = "otari_agent/cli.py"
 LIGHT_CLI_ATTACH_IMPORT = "gateway.cli"
 
-# Entry-point discovery is banned everywhere under gateway/ and otari_agent/,
-# with a message of its own because "OSS base" would not say why: the feature
-# registry in gateway/features.py is a literal tuple on purpose
-# (ARCHITECTURE.md), and these are the modules discovery is written with.
-DISCOVERY_SCOPE = ("gateway/", "otari_agent/")
+# Entry-point discovery is banned everywhere under gateway/, otari_agent/ and
+# the two libraries, with a message of its own because "OSS base" would not say
+# why: the feature registry in gateway/features.py is a literal tuple on purpose
+# (ARCHITECTURE.md), as is each library's provider table, and these are the
+# modules discovery is written with.
+DISCOVERY_SCOPE = ("gateway/", "otari_agent/", "any_search/", "any_fetch/")
 DISCOVERY_IMPORTS = ("importlib.metadata", "importlib_metadata", "pkg_resources")
 DISCOVERY_RULE = "OSS base (no entry-point discovery; the feature registry is a literal tuple)"
 
@@ -296,7 +329,14 @@ def _matches(module: str, prefix: str) -> bool:
 
 
 def _resolve_relative(node: ast.ImportFrom, file_path: Path, src_root: Path) -> str | None:
-    """Resolve a relative import to an absolute module path, or None if it escapes src_root."""
+    """Resolve a relative import to an absolute module path, or None if it escapes src_root.
+
+    A library's root is its directory (LIBRARY_ROOTS), so a relative import inside it resolves
+    with that directory's layout in front, ``src.any_search.x`` rather than ``any_search.x``. No
+    rule names a library's own modules, and a relative import cannot reach the modules the
+    libraries' rule forbids, so the check is unaffected; a rule that names them would have to
+    resolve against the package's own root instead.
+    """
     package_parts = file_path.parent.relative_to(src_root).parts
     drop = node.level - 1
     if drop >= len(package_parts):
@@ -318,14 +358,19 @@ def _imported_modules(node: ast.Import | ast.ImportFrom, file_path: Path, src_ro
     return [base] + [f"{base}.{alias.name}" for alias in node.names]
 
 
-def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
+def check_file(file_path: Path, src_root: Path, rule_key: str | None = None) -> list[tuple[int, str, str]]:
     """Check one Python file below src_root against the layer rules for its location.
+
+    A library's files pass the rule key their root maps to (LIBRARY_ROOTS), and
+    are checked as if their path below the root started with it.
 
     Returns:
         One (line number, module, message) tuple per offending import statement.
 
     """
     relative_path = file_path.relative_to(src_root).as_posix()
+    if rule_key is not None:
+        relative_path = f"{rule_key}/{relative_path}"
     # Restrictions accumulate: a file answers to its own layer's rules and to
     # every enclosing layer's, so declaration order cannot silently shadow
     # either a nested rule or a broader one. Most specific first, so a violation
@@ -402,7 +447,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
     "gateway/services/pricing_service.py",
-    "gateway/services/provider_store_service.py",
     "gateway/services/routing/knn.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/search_tool_store_service.py",
@@ -418,7 +462,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/tenancy/user_service.py",
     "gateway/services/tenancy/webauthn_service.py",
     "gateway/services/tenancy/workspace_activation_service.py",
-    "gateway/services/tenancy/workspace_code_execution_policy_service.py",
     "gateway/services/tenancy/workspace_mcp_server_service.py",
     "gateway/services/tenancy/workspace_service.py",
     "gateway/services/tenancy/workspace_web_search_service.py",
@@ -450,7 +493,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/health.py",
     "gateway/api/routes/hooks.py",
     "gateway/api/routes/images.py",
-    "gateway/api/routes/invitations.py",
     "gateway/api/routes/keys.py",
     "gateway/api/routes/maintenance_mode.py",
     "gateway/api/routes/mcp.py",
@@ -463,11 +505,9 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/organization_routing.py",
     "gateway/api/routes/organization_usage.py",
-    "gateway/api/routes/organizations.py",
     "gateway/api/routes/otlp.py",
     "gateway/api/routes/playground.py",
     "gateway/api/routes/pricing.py",
-    "gateway/api/routes/providers.py",
     "gateway/api/routes/rerank.py",
     "gateway/api/routes/responses.py",
     "gateway/api/routes/routing.py",
@@ -480,9 +520,7 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/usage.py",
     "gateway/api/routes/users.py",
     "gateway/api/routes/workspace_activation.py",
-    "gateway/api/routes/workspace_code_execution_policy.py",
     "gateway/api/routes/workspace_mcp_servers.py",
-    "gateway/api/routes/workspace_web_search.py",
     "gateway/api/routes/workspaces.py",
 )
 
@@ -573,7 +611,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/organization_keys.py",
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/pricing.py",
-    "gateway/api/routes/providers.py",
     "gateway/api/routes/routing.py",
     "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
@@ -605,7 +642,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/tenancy/user_service.py",
     "gateway/services/tenancy/webauthn_service.py",
     "gateway/services/tenancy/workspace_activation_service.py",
-    "gateway/services/tenancy/workspace_code_execution_policy_service.py",
     "gateway/services/tenancy/workspace_mcp_server_service.py",
     "gateway/services/tenancy/workspace_service.py",
     "gateway/services/tenancy/workspace_web_search_service.py",
@@ -726,10 +762,7 @@ MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_
 MODE_FUNCTION = "deployment_for"
 # The services that still read the deployment's mode.
 # An entry that stops reading it fails the check until it is removed, so the list only shrinks.
-SERVICE_MODE_READ_BASELINE = (
-    "gateway/services/playground_service.py",
-    "gateway/services/provider_kwargs.py",
-)
+SERVICE_MODE_READ_BASELINE: tuple[str, ...] = ()
 
 
 def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:
@@ -770,6 +803,157 @@ def check_service_mode_reads(src_root: Path) -> list[str]:
     violations.extend(
         f"{relative_path} is on the mode read baseline but reads no mode; remove it from the baseline"
         for relative_path in sorted(set(SERVICE_MODE_READ_BASELINE) - reading)
+    )
+    return violations
+
+
+LISTENER_TYPE_MARKER = "Listener"
+# A Literal holds values rather than types, and a ClassVar is not a constructor parameter.
+LISTENER_SKIPPED_SUBSCRIPTS = ("ClassVar", "Literal")
+# Only the first argument of Annotated is a type. The rest is metadata.
+LISTENER_METADATA_SUBSCRIPTS = ("Annotated",)
+# A Callable that returns a listener builds one, and a Callable that takes one only consumes it.
+LISTENER_CALLABLE_SUBSCRIPTS = ("Callable",)
+# These constructors match by name, because no module under gateway/ binds the names to anything else.
+DATACLASS_FIELD_CONSTRUCTOR = "field"
+PYDANTIC_FIELD_CONSTRUCTOR = "Field"
+PYDANTIC_PRIVATE_ATTRIBUTE_CONSTRUCTOR = "PrivateAttr"
+FIELD_DEFAULT_KEYWORDS = ("default", "default_factory")
+# The listener parameters and fields that still have a default, as (module, path, name).
+# The path is the dotted chain of enclosing class and function names, not Python's __qualname__.
+# An entry whose default is gone fails the check until it is removed, so the list only shrinks.
+LISTENER_DEFAULT_BASELINE: tuple[tuple[str, str, str], ...] = (
+    ("gateway/container.py", "build_container", "membership_listener"),
+)
+
+
+def _names_a_listener(annotation: ast.expr) -> bool:
+    """Return whether a type annotation names a listener type, including in a quoted forward reference."""
+    if isinstance(annotation, ast.Constant):
+        if not isinstance(annotation.value, str):
+            return False
+        try:
+            return _names_a_listener(ast.parse(annotation.value, mode="eval").body)
+        except (SyntaxError, ValueError):
+            return False
+    if isinstance(annotation, ast.Subscript):
+        subscript = _called_name(annotation.value)
+        if subscript in LISTENER_SKIPPED_SUBSCRIPTS:
+            return False
+        if subscript in LISTENER_METADATA_SUBSCRIPTS:
+            arguments = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
+            return bool(arguments) and _names_a_listener(arguments[0])
+        if subscript in LISTENER_CALLABLE_SUBSCRIPTS:
+            arguments = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
+            return bool(arguments) and _names_a_listener(arguments[-1])
+    name = _called_name(annotation)
+    if name is not None and LISTENER_TYPE_MARKER in name:
+        return True
+    # NOTE: An attribute chain names the type by its last name, so a type nested in a listener is not one.
+    if isinstance(annotation, ast.Attribute):
+        return False
+    return any(_names_a_listener(child) for child in ast.iter_child_nodes(annotation) if isinstance(child, ast.expr))
+
+
+def _defaulted_parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.arg]:
+    """Yield each parameter of a function that has a default."""
+    positional = [*function.args.posonlyargs, *function.args.args]
+    yield from positional[len(positional) - len(function.args.defaults) :]
+    yield from (
+        parameter
+        for parameter, default in zip(function.args.kwonlyargs, function.args.kw_defaults, strict=True)
+        if default is not None
+    )
+
+
+def _is_pydantic_missing(value: ast.expr, keyword: str) -> bool:
+    """Return whether a default argument to Pydantic's Field leaves the field required."""
+    # Pydantic marks a required field with a default of ..., and a default_factory of None means no factory.
+    missing = None if keyword == "default_factory" else Ellipsis
+    return isinstance(value, ast.Constant) and value.value is missing
+
+
+def _supplies_default(value: ast.expr) -> bool:
+    """Return whether a class field's value gives the constructor a default.
+
+    A call to a dataclass or Pydantic field constructor supplies one only through a default argument,
+    and never when the field is left out of the constructor.
+    An unpacked mapping counts as a default argument, because it may carry one.
+    """
+    if not isinstance(value, ast.Call):
+        return True
+    constructor = _called_name(value.func)
+    if constructor == PYDANTIC_PRIVATE_ATTRIBUTE_CONSTRUCTOR:
+        return False
+    if constructor == DATACLASS_FIELD_CONSTRUCTOR:
+        if any(
+            keyword.arg == "init" and isinstance(keyword.value, ast.Constant) and keyword.value.value is False
+            for keyword in value.keywords
+        ):
+            return False
+        return any(keyword.arg is None or keyword.arg in FIELD_DEFAULT_KEYWORDS for keyword in value.keywords)
+    if constructor == PYDANTIC_FIELD_CONSTRUCTOR:
+        if any(
+            keyword.arg is None
+            or (keyword.arg in FIELD_DEFAULT_KEYWORDS and not _is_pydantic_missing(keyword.value, keyword.arg))
+            for keyword in value.keywords
+        ):
+            return True
+        return bool(value.args) and not _is_pydantic_missing(value.args[0], "default")
+    return True
+
+
+def _listener_defaults(tree: ast.Module) -> list[tuple[int, str, str]]:
+    """Return the line, path and name of each listener parameter or class field with a default in a module.
+
+    A class field counts because a dataclass or a Pydantic model turns its default into a constructor default.
+    """
+    found: list[tuple[int, str, str]] = []
+
+    def visit(node: ast.AST, path: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                found.extend(
+                    (field.lineno, f"{path}{child.name}", field.target.id)
+                    for field in child.body
+                    if isinstance(field, ast.AnnAssign)
+                    and isinstance(field.target, ast.Name)
+                    and field.value is not None
+                    and _supplies_default(field.value)
+                    and _names_a_listener(field.annotation)
+                )
+                visit(child, f"{path}{child.name}.")
+            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                function = f"{path}{child.name}"
+                found.extend(
+                    (parameter.lineno, function, parameter.arg)
+                    for parameter in _defaulted_parameters(child)
+                    if parameter.annotation is not None and _names_a_listener(parameter.annotation)
+                )
+                visit(child, f"{function}.")
+            else:
+                visit(child, path)
+
+    visit(tree, "")
+    return sorted(found)
+
+
+def check_listener_defaults(src_root: Path) -> list[str]:
+    """Check that no listener off the baseline has a default, and that every baseline entry still has one."""
+    violations: list[str] = []
+    defaulted: set[tuple[str, str, str]] = set()
+    for relative_path, tree in _parsed_modules(src_root, "gateway"):
+        for line, path, name in _listener_defaults(tree):
+            defaulted.add((relative_path, path, name))
+            if (relative_path, path, name) not in LISTENER_DEFAULT_BASELINE:
+                violations.append(
+                    f"{relative_path}:{line} gives the listener {name} of {path} a default; "
+                    "a caller that leaves a listener out skips it with no error, so every caller passes one"
+                )
+    violations.extend(
+        f"{relative_path} is on the listener default baseline for {name} of {path}, "
+        "but no such listener has a default; remove it from the baseline"
+        for relative_path, path, name in sorted(set(LISTENER_DEFAULT_BASELINE) - defaulted)
     )
     return violations
 
@@ -824,7 +1008,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/batch_service.py",
     "gateway/services/bedrock_gateway_auth.py",
     "gateway/services/bootstrap_service.py",
-    "gateway/services/catalog_selectors.py",
     "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
@@ -857,7 +1040,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/provider_health_service.py",
     "gateway/services/provider_kwargs.py",
     "gateway/services/provider_metadata_service.py",
-    "gateway/services/provider_store_service.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/sandbox_backend.py",
     "gateway/services/search_backend.py",
@@ -912,7 +1094,7 @@ def check_flat_modules(src_root: Path) -> list[str]:
     return violations
 
 
-DOMAINS_DOC = "docs/domains.md"
+DOMAINS_DOC = "DOMAINS.md"
 DOMAINS_SECTION = "## The domains"
 DOMAIN_HEADING = re.compile(r"^### (.*)$", re.MULTILINE)
 DOMAIN_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
@@ -925,7 +1107,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
     "gateway/repositories/code_execution/": (
         "__init__.py",
         "sandbox_container_repository.py",
-        "workspace_code_execution_policy_repository.py",
     ),
     "gateway/repositories/tenancy/": (
         "__init__.py",
@@ -940,7 +1121,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
     ),
     "gateway/services/code_execution/": (
         "__init__.py",
-        "_workspace_defaults.py",
         "container_sweeper.py",
         "containers.py",
     ),
@@ -979,7 +1159,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "verification_email.py",
         "webauthn_service.py",
         "workspace_activation_service.py",
-        "workspace_code_execution_policy_service.py",
         "workspace_listener.py",
         "workspace_mcp_server_service.py",
         "workspace_service.py",
@@ -1249,6 +1428,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/workspace_scope.py",
         ),
     },
+    "gateway.models.api_keys.APIKeyFederationRule": {
+        "repository": "gateway/repositories/api_keys/federation_rule_repository.py",
+        "baseline": (),
+    },
     "gateway.models.budgets.Budget": {
         "repository": "gateway/repositories/budgets/budget_repository.py",
         "baseline": (
@@ -1260,16 +1443,15 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/repositories/tenancy/organization_member_repository.py",
             "gateway/services/budgets/_organization_surface.py",
             "gateway/services/budgets/_reservations.py",
-            "gateway/services/budgets/_scoped_enforcement.py",
         ),
     },
     "gateway.models.budgets.BudgetReservation": {
-        "repository": None,
-        "baseline": ("gateway/services/budgets/_ledger.py",),
+        "repository": "gateway/repositories/budgets/reservation_repository.py",
+        "baseline": (),
     },
     "gateway.models.budgets.BudgetReservationScope": {
-        "repository": None,
-        "baseline": ("gateway/services/budgets/_ledger.py",),
+        "repository": "gateway/repositories/budgets/reservation_repository.py",
+        "baseline": (),
     },
     "gateway.models.budgets.BudgetResetLog": {
         "repository": "gateway/repositories/budgets/budget_repository.py",
@@ -1287,7 +1469,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/budgets/_member_policies.py",
             "gateway/services/budgets/_organization_surface.py",
             "gateway/services/budgets/_retiming.py",
-            "gateway/services/budgets/_scoped_enforcement.py",
         ),
     },
     "gateway.models.budgets.WorkspaceBudgetDefault": {
@@ -1319,6 +1500,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.guardrails.OrganizationGuardrailWorkspace": {
         "repository": None,
         "baseline": ("gateway/services/tenancy/organization_guardrail_service.py",),
+    },
+    "gateway.models.identity.OAuthIdentityLink": {
+        "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
+        "baseline": (),
     },
     "gateway.models.inference.BatchRecord": {
         "repository": None,
@@ -1360,7 +1545,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": ("gateway/services/playground_service.py",),
     },
     "gateway.models.pricing.ModelPricing": {
-        "repository": None,
+        "repository": "gateway/repositories/pricing/model_pricing_repository.py",
         "baseline": (
             "gateway/api/routes/models.py",
             "gateway/api/routes/pricing.py",
@@ -1407,6 +1592,18 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tenancy/org_provider_key_repository.py",
         "baseline": ("gateway/services/tenancy/org_provider_key_service.py",),
     },
+    "gateway.models.providers.ConfiguredProviderImport": {
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.providers.HostedProvider": {
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.providers.HostedProviderModel": {
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.ModelAlias": {
         "repository": None,
         "baseline": (
@@ -1416,8 +1613,24 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         ),
     },
     "gateway.models.providers.ProviderCredential": {
-        "repository": None,
-        "baseline": ("gateway/services/provider_store_service.py",),
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckRecovery": {
+        "repository": "gateway/repositories/health_checks/health_check_recovery_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckResult": {
+        "repository": "gateway/repositories/health_checks/health_check_result_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckRun": {
+        "repository": "gateway/repositories/health_checks/health_check_run_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckSettings": {
+        "repository": "gateway/repositories/health_checks/health_check_settings_repository.py",
+        "baseline": (),
     },
     "gateway.models.providers.ProviderEndpoint": {
         "repository": "gateway/repositories/providers/provider_endpoint_repository.py",
@@ -1447,7 +1660,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         ),
     },
     "gateway.models.tenancy.DashboardSession": {
-        "repository": None,
+        "repository": "gateway/repositories/identity/dashboard_session_repository.py",
         "baseline": ("gateway/services/dashboard_session_service.py",),
     },
     "gateway.models.tenancy.Invitation": {
@@ -1497,7 +1710,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": ("gateway/services/tenancy/webauthn_service.py",),
     },
     "gateway.models.tenancy.WebAuthnCredential": {
-        "repository": None,
+        "repository": "gateway/repositories/identity/webauthn_credential_repository.py",
         "baseline": ("gateway/services/tenancy/webauthn_service.py",),
     },
     "gateway.models.tenancy.Workspace": {
@@ -1542,15 +1755,12 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.tools.SearchToolCredential": {
-        "repository": None,
+        "repository": "gateway/repositories/tools/search_tool_repository.py",
         "baseline": ("gateway/services/search_tool_store_service.py",),
     },
     "gateway.models.tools.WorkspaceCodeExecutionPolicy": {
-        "repository": "gateway/repositories/code_execution/workspace_code_execution_policy_repository.py",
-        "baseline": (
-            "gateway/services/playground_service.py",
-            "gateway/services/tenancy/workspace_code_execution_policy_service.py",
-        ),
+        "repository": "gateway/repositories/tools/workspace_code_execution_policy_repository.py",
+        "baseline": (),
     },
     "gateway.models.tools.WorkspaceMcpServer": {
         "repository": None,
@@ -1570,12 +1780,20 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tools/web_search_key_repository.py",
         "baseline": (),
     },
+    "gateway.models.traces.Trace": {
+        "repository": "gateway/repositories/traces/trace_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceSpan": {
+        "repository": "gateway/repositories/traces/span_repository.py",
+        "baseline": (),
+    },
     "gateway.models.usage.AgentTelemetry": {
         "repository": None,
         "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),
     },
     "gateway.models.usage.UsageLog": {
-        "repository": None,
+        "repository": "gateway/repositories/usage_and_telemetry/usage_log_repository.py",
         "baseline": (
             "gateway/api/routes/_passthrough.py",
             "gateway/api/routes/_pipeline.py",
@@ -1899,10 +2117,10 @@ def check_model_access(src_root: Path) -> list[str]:
 
 
 def main() -> int:
-    """Run the architecture checks over the gateway package, the light CLI and the OSS test suite."""
+    """Run the architecture checks over the gateway package, the light CLI, the libraries and the OSS test suite."""
     # All must exist: silently skipping one would let its rules (including
     # the OSS/enterprise boundary) stop enforcing while the check stays green.
-    for required_root in (GATEWAY_ROOT, TESTS_ROOT, CLI_ROOT):
+    for required_root in (GATEWAY_ROOT, TESTS_ROOT, CLI_ROOT, *LIBRARY_ROOTS.values()):
         if not required_root.is_dir():
             print(f"❌ Expected directory not found at {required_root}")
             return 1
@@ -1920,6 +2138,14 @@ def main() -> int:
         import_violations.extend(
             (py_file, lineno, module, message) for lineno, module, message in check_file(py_file, CLI_ROOT)
         )
+    for rule_key, library_root in LIBRARY_ROOTS.items():
+        for py_file in sorted(library_root.rglob("*.py")):
+            if "__pycache__" in py_file.parts:
+                continue
+            import_violations.extend(
+                (py_file, lineno, module, message)
+                for lineno, module, message in check_file(py_file, library_root, rule_key)
+            )
     # tests/ sits beside src/, not under it, so its relative paths (and the
     # "tests" rule key above) are rooted at the repo root instead.
     for py_file in sorted(TESTS_ROOT.rglob("*.py")):
@@ -1936,6 +2162,7 @@ def main() -> int:
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
     mode_read_violations = check_service_mode_reads(SRC_ROOT)
+    listener_default_violations = check_listener_defaults(SRC_ROOT)
     # NOTE: A page with no domains fails here, so a rule that reads them cannot pass by checking nothing.
     domains, domains_page_violations = read_domains_page(REPO_ROOT / DOMAINS_DOC)
     domain_name_violations = domains_page_violations + (check_domain_names(SRC_ROOT, domains) if domains else [])
@@ -1986,6 +2213,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal mode read violations: {len(mode_read_violations)}")
 
+    if listener_default_violations:
+        print("\n❌ Listener default violations:\n")
+        for violation in listener_default_violations:
+            print(f"  {violation}")
+        print(f"\nTotal listener default violations: {len(listener_default_violations)}")
+
     if flat_module_violations:
         print("\n❌ Flat module violations:\n")
         for violation in flat_module_violations:
@@ -2024,6 +2257,7 @@ def main() -> int:
         or transaction_violations
         or unit_of_work_violations
         or mode_read_violations
+        or listener_default_violations
         or flat_module_violations
         or domain_name_violations
         or repository_import_violations

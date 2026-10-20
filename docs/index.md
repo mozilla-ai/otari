@@ -33,10 +33,13 @@ Running and managing a gateway.
 - [Configuration](configuration.md): configuration sources, precedence, and common settings.
 - [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
+- [Workload identity](workload-identity.md): a backend on Google Cloud authenticates with its platform identity token instead of a key's secret.
 - [Models](models.md): selectors, providers, discovery, aliases, and capabilities.
 - [Provider endpoints](provider-endpoints.md): model servers a workspace or a user brings, reached by name and kept out of budgets.
 - [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
+- [Health checks](health-checks.md): a scheduled check of every model the deployment serves, and email when one stops answering.
 - [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
+- [Gemini provider guide](providers/gemini.md): configure Gemini and route your first request through Otari.
 
 ### For integrators
 
@@ -56,7 +59,9 @@ Calling the gateway from your own code.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
 - [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API, or import its usage without routing.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
+- [Use with Pydantic AI](use-with-pydantic-ai.md), [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md): point an agent framework's model at Otari, with tools, structured output and streaming.
 - [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
+- [Agent traces](traces.md): see each agent session as turns, LLM calls and tool calls, with their timing and cost.
 - [Importing external usage](external-usage.md): bring subscription-backed usage (Claude Code, Codex, any OTLP app) into your analytics.
 - [SDK compatibility](sdk-compatibility.md): how the language SDKs are released and which SDK version works with which Otari version.
 
@@ -68,4 +73,5 @@ Calling the gateway from your own code.
 ### For contributors
 
 - [Architecture](../ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
-- [Backend domains](domains.md): what each backend domain owns, and the layer shape each domain moves toward.
+- [Backend domains](../DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
+- [Load test](../loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.

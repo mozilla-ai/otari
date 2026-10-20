@@ -234,6 +234,31 @@ def filter_spec(spec: dict[str, Any], tags: frozenset[str]) -> dict[str, Any]:
     return filtered
 
 
+def _flatten_content_part_unions(schemas: dict[str, Any]) -> None:
+    """Send multi-part message content through as plain objects.
+
+    A message's ``content`` array nests a union of part types (text, image,
+    audio, file) inside the union of ``content`` shapes. The generated Python
+    models build the nested wrapper without choosing a member, so every part
+    serializes as ``null`` and an ``input_audio`` or image part never reaches
+    the gateway. Pointing the array items at the shared free-form object
+    keeps the parts as the caller wrote them. The gateway validates them.
+    """
+    free_form = {"$ref": f"#/components/schemas/{_FREE_FORM_OBJECT}"}
+    flattened = False
+    for name, body in schemas.items():
+        if not name.startswith("MSG_"):
+            continue
+        content = body.get("properties", {}).get("content")
+        for member in content.get("anyOf", []) if isinstance(content, dict) else []:
+            items = member.get("items") if isinstance(member, dict) else None
+            if member.get("type") == "array" and isinstance(items, dict) and "anyOf" in items:
+                member["items"] = free_form
+                flattened = True
+    if flattened:
+        schemas[_FREE_FORM_OBJECT] = {"type": "object", "additionalProperties": True}
+
+
 def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     """Type the inference surface so the FULL client generates typed methods.
 
@@ -288,6 +313,7 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "MSG",
     )
     schemas["ChatMessageInput"] = msgs.get("items", {})
+    _flatten_content_part_unions(schemas)
 
     # otari-owned inference endpoints the gateway leaves ``response_model=None``.
     # Their real response shapes live in any-llm (which the gateway depends on);

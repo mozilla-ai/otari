@@ -30,21 +30,28 @@ The code and the state share one redirect URL that the access log and browser
 history both record; the cookie is the half of the flow that neither does. See
 ``gateway.services.oauth_service``.
 
-**What this route decides, and what it does not.** It proves the person holds
-the provider account. ``IdentityProviderPort`` decides which account that person
-signs in as here, so an overlay can change that policy without editing this file.
+**What this route decides, and what it does not.** It proves the person holds the provider account.
+``IdentityService`` decides which account that person signs in as here, through ``IdentityProviderPort``,
+so an overlay can change that policy without editing this file.
 """
 
 import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import IdentityProviderPortDep, get_config, get_db, record_auth_failure
+from gateway.api.deps import (
+    GrowthSignalPortDep,
+    IdentityServiceDep,
+    get_config,
+    get_db,
+    record_auth_failure,
+)
+from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
 # The same refusal the password and passkey sign-ins carry, imported rather than
@@ -52,12 +59,17 @@ from gateway.api.routes._public_auth import throttle_public_auth
 # wording it differently would tell a person the doors closed for three reasons.
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
 from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
-from gateway.exceptions.identity_exceptions import OAuthNotConfiguredError
+from gateway.exceptions.identity_exceptions import (
+    OAuthIdentityLinkConflictError,
+    OAuthNotConfiguredError,
+    OAuthProviderUnavailableError,
+    TermsNotAcceptedError,
+)
 from gateway.log_config import logger
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
-    create_dashboard_session,
     request_is_https,
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
@@ -71,7 +83,7 @@ from gateway.services.oauth_service import (
     provider_label,
     require_configured,
 )
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
+from gateway.services.tenancy import report_new_account
 
 router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
 
@@ -148,6 +160,14 @@ class OAuthCallbackRequest(BaseModel):
         max_length=_MAX_SUBMITTED_STATE,
         description="The 'state' from the provider's redirect, as issued by /authorize.",
     )
+    terms_accepted: bool = Field(
+        default=False,
+        description=(
+            "Whether the person accepted this deployment's terms before going to the provider. Required where the "
+            "bootstrap reports a terms_url and the sign-in creates the account, or is the first way in to one "
+            "nobody has claimed yet; ignored otherwise."
+        ),
+    )
 
 
 class OAuthSessionResponse(BaseModel):
@@ -159,8 +179,19 @@ class OAuthSessionResponse(BaseModel):
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
     user_id: uuid.UUID = Field(description="The identity this session speaks for.")
-    active_organization_id: uuid.UUID = Field(
-        description="The organization that identity is acting in, which scopes every tenancy surface."
+    active_organization_id: uuid.UUID | None = Field(
+        description=(
+            "The organization that identity is acting in, which scopes every tenancy surface. "
+            "Null when it is an active member of none, as an invitee who has not accepted yet is not."
+        )
+    )
+    password_removed: bool = Field(
+        default=False,
+        description=(
+            "Whether this sign-in removed a password the account held: the first provider sign-in on an "
+            "address nobody had proven removes the password set before then. The person can set a new one "
+            "from Account settings."
+        ),
     )
 
 
@@ -221,13 +252,11 @@ async def authorize(
     try:
         url, state = await authorization_url(config, provider, db=db, flow_secret=flow_secret)
         await db.commit()
-    except SQLAlchemyError:
+    # Not DATABASE_ERRORS: building the URL calls the OAuth client, which can
+    # raise TimeoutError for reasons that are not the database's.
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.warning("Failed to record a pending %s sign-in", provider, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error(f"record a pending {provider} sign-in", exc) from None
     apply_flow_cookie(response, flow_secret, secure=request_is_https(request))
     return AuthorizeResponse(authorization_url=url, state=state)
 
@@ -242,7 +271,9 @@ async def callback(
     body: OAuthCallbackRequest,
     request: Request,
     response: Response,
-    identity_provider: IdentityProviderPortDep,
+    identities: IdentityServiceDep,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     flow_cookie: FlowCookie = None,
@@ -267,6 +298,12 @@ async def callback(
     account. Refused before the exchange, so a frozen deployment makes no
     outbound call, spends nobody's authorization code, and counts no auth
     failure: nobody failed to authenticate, the gateway declined to try.
+
+    A sign-in that created the account, or is the first way in to one, is
+    reported to ``GrowthSignalPort`` as a signup once it has committed. Where
+    the deployment publishes terms, that sign-in is refused with
+    ``terms_not_accepted`` unless the body carries ``terms_accepted``, and
+    nothing it would have created is kept.
     """
     throttle_public_auth(request)
     if await is_maintenance_mode(db):
@@ -278,47 +315,29 @@ async def callback(
         external = await exchange_code(
             config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
         )
-        identity = await identity_provider.resolve(
-            provider=external.provider,
-            email=external.email,
-            full_name=external.full_name,
-            email_verified=external.email_verified,
-        )
+        signed_in = await identities.sign_in_with_oauth(external, terms_accepted=body.terms_accepted)
+    except (OAuthIdentityLinkConflictError, TermsNotAcceptedError):
+        # A concurrent sign-in finished first, or the terms are still to accept, so nobody failed to authenticate.
+        raise
+    except OAuthProviderUnavailableError as exc:
+        # Rendered here so the 502 keeps its message, which the tenancy handler would blank.
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
     except TenancyError:
         record_auth_failure("invalid_oauth")
         raise
-
-    try:
-        # Staging the session row is inside this block, not just the commit:
-        # ``create_dashboard_session`` prunes expired rows with a DELETE before
-        # it stages anything, so it is a statement that can fail on its own. Left
-        # outside, that failure would skip the rollback and the log line below
-        # and surface as a bare 500 from the generic handler.
-        #
-        # One commit for the whole sign-in: the adapter's link and verification
-        # stamp are on this same session, so they land with the session row or
-        # with neither.
-        # Before the session row and inside the same transaction, so a new
-        # membership and the sign-in that earned it land together or not at all.
-        # Not guarded: the only expected failure is two concurrent sign-ins
-        # racing, which the service settles on its own, and a database that
-        # cannot stage this cannot stage the session row either.
-        await OrganizationDomainService(db).auto_join_for_user(identity)
-        token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        logger.warning("Failed to persist a dashboard session on a %s sign-in", provider, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+    except DATABASE_ERRORS as exc:
+        raise database_error(f"persist a {provider} sign-in", exc) from None
+    identity = signed_in.account
     logger.info("Signed in %s with %s", identity.id, provider_label(provider))
-    apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
+    await report_new_account(growth, identity, background_tasks=background_tasks, new_account=signed_in.new_account)
+    apply_session_cookie(
+        response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
+    )
     return OAuthSessionResponse(
-        expires_at=expires_at,
+        expires_at=signed_in.session_expires_at,
         user_id=identity.id,
-        active_organization_id=identity.active_organization_id,
+        active_organization_id=signed_in.active_organization_id,
+        password_removed=signed_in.password_removed,
     )
 
 

@@ -3,11 +3,9 @@
 Decided at otari-ai#1748: the platform's ``ProviderKey`` shape
 (organization scope, archival, one default per organization+provider,
 per-workspace pin/disable overrides, per-workspace model allow-lists) ports
-into otari as new, additive tables. ``provider_credentials`` and its
-config.yml-merge overlay (``services/provider_store_service.py``) are
-unchanged: they stay the mechanism for config.yml-defined and legacy
-deployment-global stored credentials, addressed by instance name exactly as
-before. These two mechanisms are disjoint by construction (see
+into otari as new, additive tables. ``config.providers`` stays the
+mechanism for config.yml-defined credentials, addressed by instance name
+exactly as before. These two mechanisms are disjoint by construction (see
 ``services/provider_kwargs.py``): an ``instance:model`` selector that matches
 an existing ``config.providers`` entry never consults these tables, and a
 bare ``provider:model`` selector never consults ``config.providers`` for a
@@ -60,7 +58,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text, true
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
 
@@ -81,7 +79,7 @@ from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin,
 # ==============================================================================
 
 
-class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """One organization-scoped, BYO provider credential."""
 
     __tablename__ = "org_provider_keys"
@@ -126,7 +124,7 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
 # ==============================================================================
 
 
-class WorkspaceProviderKeyOverride(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class WorkspaceProviderKeyOverride(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """A workspace's departure from its organization's default for one key."""
 
     __tablename__ = "workspace_provider_key_overrides"
@@ -160,7 +158,7 @@ class WorkspaceProviderKeyOverride(SQLModel, PrimaryKeyMixin, CreatedAtMixin, Up
 # ==============================================================================
 
 
-class WorkspaceProviderModelRestriction(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
+class WorkspaceProviderModelRestriction(PrimaryKeyMixin, CreatedAtMixin, table=True):
     """One allowed model for a workspace+key pair.
 
     No rows for a pair means every model is allowed; this is an allow-list,
@@ -196,7 +194,7 @@ class WorkspaceProviderModelRestriction(SQLModel, PrimaryKeyMixin, CreatedAtMixi
 # ==============================================================================
 
 
-class OrgProviderKeyModel(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class OrgProviderKeyModel(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """One model an organization offers on one of its provider keys.
 
     Membership and a serving switch, nothing more. The rate lives in

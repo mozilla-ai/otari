@@ -121,7 +121,7 @@ def test_build_picks_the_store_the_config_names() -> None:
 
 
 def test_container_resolves_one_store_for_the_whole_app() -> None:
-    container = build_container(config=GatewayConfig())
+    container = build_container(config=GatewayConfig(), workspace_listener=None)
 
     store = container.resolve(RateLimitStorePort, None)
 
@@ -131,7 +131,7 @@ def test_container_resolves_one_store_for_the_whole_app() -> None:
 
 def test_container_without_config_refuses_to_pick_a_store() -> None:
     with pytest.raises(ContainerError, match="RateLimitStorePort"):
-        build_container().resolve(RateLimitStorePort, None)
+        build_container(workspace_listener=None).resolve(RateLimitStorePort, None)
 
 
 def test_config_rejects_an_unknown_store() -> None:

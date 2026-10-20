@@ -7,12 +7,11 @@ import {
   login,
   openFilterPickers,
   pickOption,
-  table,
   tableRows,
 } from "./helpers"
 import { COUNTS, PARITY, UNPRICED_MODEL_KEY } from "./parity-data"
 
-// The bulk-action test destroys the rows it selects, so the flows run in order.
+// One worker against one gateway either way (see web/playwright.config.ts).
 test.describe.configure({ mode: "serial" })
 
 const rows = (page: Page) => tableRows(page, "Activity log")
@@ -26,16 +25,14 @@ const SCOPED = `/activity?source=${PARITY.source}`
 // Every fixture row, which is one page at the default size. Asserted with
 // `toHaveCount` rather than read with `count()`: the log is fetched after the
 // route resolves, so a bare read races the first paint and sees an empty table.
-const ALL = COUNTS.priced + COUNTS.unpriced + COUNTS.errors + COUNTS.scratch
+const ALL = COUNTS.priced + COUNTS.unpriced + COUNTS.errors
 
 // The detail panel is rendered as an extra row under the one that was clicked
 // (DataTable's renderDetail), so it is reached through the wrapper that row
 // injects rather than by role: it is a panel, not a landmark.
 const detailPanel = (page: Page) => page.locator(".otari-detail-reveal")
 
-// Open a row's inline detail. Clicking the row header (the Model cell) rather
-// than the row keeps the press off the selection checkbox, which would toggle
-// selection instead of firing the row action.
+// Open a row's inline detail by pressing its row header (the Model cell).
 async function openDetail(
   page: Page,
   row: ReturnType<typeof rows>,
@@ -94,9 +91,7 @@ test.describe("activity log", () => {
     }
 
     await gotoRoute(page, `${SCOPED}&priced=false`)
-    await expect(rows(page)).toHaveCount(
-      COUNTS.unpriced + COUNTS.errors + COUNTS.scratch,
-    )
+    await expect(rows(page)).toHaveCount(COUNTS.unpriced + COUNTS.errors)
     // The two halves have to reconcile: a row counted in neither (or in both)
     // would mean "priced" and cost IS NULL had drifted apart.
     for (const row of await rows(page).all()) {
@@ -216,12 +211,11 @@ test.describe("activity log", () => {
     await expect(detail.getByText("Cost", { exact: true })).toBeVisible()
     await expect(detail).not.toContainText("This request carries no cost.")
 
-    // The token column splits its total into the composition it was billed on,
-    // which is the whole reason the cell is a bar and not a number.
+    // Input counts the cache it was billed on and names that share in its title.
     await expect(
       rows(page)
         .first()
-        .getByRole("img", { name: /Token composition:.*Cache read/ }),
+        .getByTitle(/cache read/),
     ).toBeVisible()
 
     await detailPanel(page).getByRole("button", { name: "Close" }).click()
@@ -255,39 +249,5 @@ test.describe("activity log", () => {
     await expect(
       detail.getByRole("button", { name: "Price this model" }),
     ).toBeVisible()
-  })
-
-  test("bulk-selects imported rows and deletes them", async ({ page }) => {
-    await login(page)
-    // A dedicated model, so consuming these rows cannot make an earlier
-    // assertion unreproducible.
-    await gotoRoute(page, `${SCOPED}&model=${PARITY.models.scratch.model}`)
-    await expect(rows(page)).toHaveCount(COUNTS.scratch)
-
-    // Selection is offered because these are imported rows
-    // (counts_toward_budget=false); enforced gateway rows are disabled by design.
-    // `force` because the selection box is a styled span drawn over a visually
-    // hidden input, so the input is never the hit target for an ordinary click.
-    await table(page, "Activity log")
-      .getByRole("checkbox", { name: "Select all rows" })
-      .check({ force: true })
-    const bar = page.getByRole("toolbar", { name: "Bulk actions" })
-    await expect(bar).toContainText(`${COUNTS.scratch} selected`)
-
-    await bar.getByRole("button", { name: "Delete" }).click()
-    const confirm = page.getByRole("alertdialog")
-    await expect(confirm).toContainText(
-      `Delete ${COUNTS.scratch} imported rows?`,
-    )
-    await confirm.getByRole("button", { name: "Delete" }).click()
-
-    // Asserted through the empty state rather than a row count of zero: an empty
-    // DataTable still renders one row, carrying the empty message.
-    await expect(table(page, "Activity log")).toContainText(
-      "No requests match these filters.",
-    )
-    await expect(table(page, "Activity log")).not.toContainText(
-      PARITY.models.scratch.model,
-    )
   })
 })

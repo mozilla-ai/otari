@@ -35,6 +35,8 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
     # platform's own provider account, so an error naming that account would
     # tell a workspace user whose credentials served them.
     re.compile(r"\b(?:org|proj|acct|account)[-_][A-Za-z0-9]{6,}", re.IGNORECASE),
+    # An AWS resource name (ARN) holds the operator's account ID and the names of its resources.
+    re.compile(r"\barn:aws[a-z-]*:[A-Za-z0-9:/_.+=@*-]+", re.IGNORECASE),
     # Any absolute URL. A self-hosted or proxied ``api_base`` is gateway
     # topology the caller has no business learning, and a credential is
     # sometimes embedded in one.
@@ -44,6 +46,9 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
     # Catch-all for key material with no recognizable prefix. Long unbroken
     # alphanumeric runs are tokens, not prose.
     re.compile(r"[A-Za-z0-9_-]{40,}"),
+    # NOTE: This masks any whole 12-digit number, dashed or not, because a bare AWS account ID has no other marker.
+    # It runs after the key shapes, so a key that holds 12 digits is masked whole first.
+    re.compile(r"(?<![\d.])\d{4}-?\d{4}-?\d{4}(?!\.?\d)"),
 )
 
 # Upstream APIs sometimes reflect the request that failed. Such an echo can
@@ -51,9 +56,12 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
 # which belongs in a client-facing error. Parameter paths such as
 # ``messages.0.content`` stay useful, while field/value pairs, including common
 # validation-error spellings, and JSON payloads are rejected as a whole and make
-# the caller-fault classifier use its fallback.
+# the caller-fault classifier use its fallback. The one exemption is the text
+# after "invalid request:", which is how Cohere phrases a rejection ("invalid
+# request: query must not be empty") rather than an echo; a payload opener after
+# it (a quote, brace or bracket) is still refused.
 _PAYLOAD_ECHO = re.compile(
-    r"(?:[\"']?(?:messages|input|prompt|tools?|tool_calls|response|request(?:_body)?|body|content|input_value)[\"']?\s*[:=]|\b(?:messages|input|tools?|tool_calls)(?:\.\d+|\[[^]]+\])+\.(?:content|input_value)\s*:\s*(?:(?:input_)?value\s*=|[\"'{[]))",
+    r"(?:[\"']?(?:messages|input|prompt|tools?|tool_calls|response|request_body|body|content|input_value)[\"']?\s*[:=]|(?<!invalid\s)[\"']?request[\"']?\s*[:=]|[\"']?request[\"']?\s*[:=]\s*[\"'{[]|\b(?:messages|input|tools?|tool_calls)(?:\.\d+|\[[^]]+\])+\.(?:content|input_value)\s*:\s*(?:(?:input_)?value\s*=|[\"'{[]))",
     re.IGNORECASE,
 )
 

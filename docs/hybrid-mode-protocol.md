@@ -17,6 +17,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 | `POST {base}/gateway/provider-keys/resolve` | Authorize a request and return one or more provider credentials to try |
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
 | `POST {base}/gateway/mcp-servers/resolve`   | Authorize MCP access and swap workspace-scoped MCP server ids for inline server configs |
+| `POST {base}/gateway/models/resolve`        | List the models the caller's key may use, for `GET /api/v1/models` |
 | `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's Web Access policy when a request uses `otari_web_search` or `otari_web_fetch` |
 | `POST {base}/gateway/code-execution/resolve` | Resolve the workspace's code-execution policy when a request declares `otari_code_execution` |
 
@@ -26,7 +27,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 
 Every endpoint requires `X-Gateway-Token: <gw_...>` in the request headers. This
 proves the caller is an Otari instance configured against this platform
-deployment. The three resolve endpoints additionally require `X-User-Token:
+deployment. The resolve endpoints additionally require `X-User-Token:
 <tk_...>`, which is the workspace API token forwarded opaquely from the end
 user's credential header (`Authorization: Bearer`, `Otari-Key`, or
 `x-api-key`). The usage endpoint sends only the gateway token.
@@ -52,6 +53,185 @@ on its search queries (`GET {base}/gateway/web-search/search`) so a
 platform-hosted search endpoint can authenticate the gateway. The token is sent
 only when that URL shares the platform origin (scheme/host/port, under the base
 path); it is never sent to a standalone or third-party search backend.
+
+## Grants
+
+> **Status.** Specified, not built. Otari sends and reads none of the fields in this section or in the two sections after it. Each capability adopts them when it ships, starting with files ([#1750](https://github.com/mozilla-ai/otari/issues/1750)). The rules behind them are in [ARCHITECTURE.md](../ARCHITECTURE.md#how-a-data-plane-reaches-what-it-does-not-own).
+
+The control plane never carries customer traffic. For each resource a request needs, it answers with one of three kinds of authority, and the data plane then goes to the resource directly.
+
+| Name | When | The answer carries |
+|---|---|---|
+| Workspace key | The workspace owns the credential | The credential, in the capability's own field |
+| Platform grant | The platform runs the resource, and the resource verifies a grant | A `grant` |
+| Platform key | The platform owns the credential, and the upstream cannot verify a grant | The credential, and only to a data plane the platform runs |
+
+The platform is whoever runs the control plane: otari.ai, or anyone who builds their own edition on Otari. The kind of authority depends on who runs the resource in that deployment, not on the capability. A resource that someone else runs, such as an operator's own sandbox backend or decision provider, never sees a grant and keeps its own API and credential. A data plane client therefore handles both: it sends a credential when it is given one, and it follows the obligations below when it is given a grant.
+
+### The grant object
+
+```json
+"grant": {
+  "url": "https://store.example/traces/ws_123/01JB...?X-Amz-Signature=...",
+  "method": "PUT",
+  "headers": { "Content-Type": "application/octet-stream", "Content-Length": "48213" },
+  "expires_at": "2026-10-08T14:03:00Z"
+}
+```
+
+A grant is a request recipe, and it is opaque to the data plane. The control plane chooses the encoding for each resource: an object store's own signed URL (S3, GCS, Azure Blob Storage and MinIO each have one), or a [front door token](#front-door-token) in `headers.Authorization`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `url` | string | Required. The URL of the one request, or the base URL of a series. |
+| `method` | string | Present: the grant permits exactly one request, with this method, to `url`. Absent: `url` is a base URL, and the capability's own contract defines the operations under it. |
+| `headers` | object of strings | Required, and may be empty. Headers to send on every request the grant covers. |
+| `expires_at` | RFC 3339 timestamp | Required. The grant is void after this instant. |
+
+The one-request form serves files and traces. The series form serves a sandbox session, with one grant per session that expires at the session deadline.
+
+A grant covers one resource, only the operations named for it, and a short deadline. No grant permits listing or enumeration, because a grant that can enumerate breaks tenant isolation.
+
+### Data plane obligations
+
+1. Treat the grant as opaque. Never parse its URL or its headers.
+2. Send every header given, and add no `Authorization` header of its own.
+3. Follow no redirect.
+4. Use HTTPS only. Loopback is allowed for local development.
+5. Do not use a grant after `expires_at`. Ask for a new one with the same idempotency key.
+6. On `401` or `403` from the resource, ask for a new grant once, then fail.
+7. Never log a grant, store one, or send one to a client. A log line may name the host only.
+
+### Front door token
+
+Where the resource is a front door, the grant's `Authorization` header carries a bearer token that the control plane signs and the front door verifies. The data plane never reads it.
+
+- Format: a JWT (RFC 7519) in the access token profile of RFC 9068, with header `typ: at+jwt`, `alg: Ed25519` and `kid`.
+- Algorithm: `Ed25519`, the fully specified identifier of RFC 9864. The polymorphic `EdDSA` identifier is deprecated by that RFC and is not accepted. The signature is pure Ed25519, not the pre-hashed Ed25519ph.
+- Signing key: the control plane holds it in a key management service and never exports it.
+
+| Claim | Value |
+|---|---|
+| `iss` | The control plane |
+| `aud` | Exactly one front door |
+| `sub` | The workspace ID. The front door derives tenancy from this claim only. |
+| `client_id` | The data plane the grant was issued to |
+| `iat`, `exp` | A one-request grant lives at most 5 minutes. A series grant lives until the session deadline, at most 1 hour. |
+| `jti` | Unique per grant |
+| `authorization_details` (RFC 9396) | The operations and the resource, for example `{"type": "code_execution", "actions": [...], "tools": [...], "limits": {...}}` |
+
+A front door must, following RFC 8725:
+
+1. Verify the signature against a key in the control plane's published key set.
+2. Accept exactly one algorithm, `Ed25519`, and reject `none`, `EdDSA` and every HMAC algorithm.
+3. Check `typ`, that `aud` names itself, and `exp`.
+4. Serve only an `authorization_details` type it implements.
+5. Refuse replay. A one-request grant is single use by `jti`. A series grant binds to the first session it creates and refuses a second.
+
+Keys and rotation:
+
+- The control plane publishes its public keys as a JWK set (RFC 7517) at `/.well-known/jwks.json` on its own origin.
+- A front door caches the set, refetches it on an unknown `kid` with a rate limit, and verifies offline, so the control plane is not on the request path.
+- To rotate, the control plane publishes the new key, waits one cache period, signs with the new key, and keeps the old key published until the last token it signed expires.
+- Removing a key from the set invalidates every token it signed.
+
+Each front door has its own `aud` and its own `authorization_details` type, and each type's fields are specified with its capability. The types defined so far are `code_execution`, for a sandbox session, and `model_recommendation`, for a model recommender the platform runs. A service the platform runs can verify the token itself, with no separate front door in front of it. A new front door adds a type and changes nothing else.
+
+### Why this shape
+
+- A request recipe keeps the data plane free of storage vendors. It sends what it was given, so a new store or a new front door needs no data plane change. A typed grant per store would couple every data plane to every store.
+- One token for everything, with a storage proxy that verifies it, was rejected. The proxy would be a new service on the request path that carries every byte.
+- A signed token that a front door verifies offline keeps the control plane off the request path, and a published key set lets the control plane rotate keys without a deploy anywhere else.
+
+## Try-Confirm/Cancel
+
+Where a capability leaves durable state, such as a stored file or a recorded trace, the exchange is Try-Confirm/Cancel (TCC), as [ARCHITECTURE.md](../ARCHITECTURE.md#durable-state-try-confirmcancel) describes. Each capability keeps its own endpoints (for files, prepare, finalize and abandon), and there is no generic TCC endpoint. The rules below apply to every one of them.
+
+### Idempotency
+
+Every Try and every Confirm carries an `Idempotency-Key` header, as draft-ietf-httpapi-idempotency-key-header defines it. A repeat with the same key returns the first answer. A repeated Try whose grant has expired returns the same `id` with a fresh grant.
+
+| Status | Meaning |
+|---|---|
+| `400` | The request has no `Idempotency-Key` |
+| `409` | The first request with this key is still in flight |
+| `422` | The key was used before with a different body |
+
+### Try
+
+The data plane asks for the operation. The control plane checks policy and quota, allocates the identifier, records the intent in a state that is not yet usable, and answers:
+
+| Field | Meaning |
+|---|---|
+| `id` | The identifier of the record the operation will produce |
+| `expires_at` | The deadline. A Try that is not confirmed by then is canceled. |
+| `grant` | Present where the operation needs one. See [Grants](#grants). |
+| `data_key` | Present where the content is encrypted. See [Content encryption](#content-encryption). |
+
+Where the data plane has a list, such as the files attached to one completion or the agent sessions in one trace flush, the Try takes `items: [...]` and answers with one entry per item, in the same order. Each agent session is its own item, because each session has its own data key.
+
+The control plane derives tenancy from its own records of the request, never from a workspace ID the data plane sends.
+
+### Confirm
+
+The data plane reports the outcome, for example size, SHA-256 and counts, as each capability defines them. The control plane makes the record usable. Confirm carries its own `Idempotency-Key`, so a retry cannot create a second record.
+
+### Cancel and sweep
+
+The data plane cancels explicitly when it knows the work failed. Cancel is idempotent. The control plane's sweep cancels every Try that is past its deadline and removes what it left behind, so a data plane that disappears leaves no usable record.
+
+### Retries
+
+- The data plane retries a Try, a Confirm or a Cancel with exponential backoff and jitter on a network failure, a `5xx` or a `429`.
+- A Confirm that runs in the background, such as a trace flush or a usage report, is parked after its last retry and replayed later with the same key. It is never dropped ([#1729](https://github.com/mozilla-ai/otari/issues/1729)).
+- A Confirm that a caller waits on, such as a file upload, is not parked. The caller's request fails, and the sweep removes the Try.
+
+### Inference
+
+Resolve and the [usage report](#usage-report) are the Try and the Confirm of inference. Today the Try holds nothing: resolve claims no budget, and the usage report settles with overdraft allowed. A control plane that holds budget at resolve makes the usage report the Confirm, keyed by the attempt ID, and cancels with its sweep an attempt that never reports. The wire does not change.
+
+## Content encryption
+
+Captured content, such as prompts, tool inputs and outputs, and file bytes, is encrypted by default before it leaves the data plane. The control plane holds the keys and never sees the plaintext on the write path.
+
+### The data key
+
+A Try for a write, and the answer to a data plane read, carry a data key beside the grant:
+
+```json
+"data_key": {
+  "key_id": "dek_01J...",
+  "key": "<base64, 32 bytes>",
+  "encryption_context": {
+    "organization_id": "org_...",
+    "workspace_id": "ws_...",
+    "context_type": "trace_session",
+    "context_id": "..."
+  }
+}
+```
+
+The data plane encrypts with `key` and puts `encryption_context` into the message unchanged, with the object's `id` added as `object_id`. It treats the data key as it treats a grant: in memory only, never logged, never stored and never sent to a client. Holding the key gives the data plane no access it did not have, because it already handled the plaintext.
+
+### Content format
+
+Content is written in the AWS Encryption SDK message format, version 2, with the algorithm suite `AES_256_GCM_HKDF_SHA512_COMMIT_KEY` (key commitment, no signature), framed, using a raw AES keyring that holds the data key. The SDK's format specification is public and has implementations in several languages, and a raw keyring needs no AWS account.
+
+- Framed, so a large file streams in bounded memory.
+- Key-committing, so one ciphertext cannot decrypt to two plaintexts under two keys.
+- The message's encryption context binds the organization, the workspace, the context and the object, so a ciphertext cannot be moved into another record.
+
+Tink's streaming AEAD was rejected because it has no key commitment and makes a raw key awkward to import. A format of Otari's own was rejected because a published one exists.
+
+### Control plane obligations
+
+- One data key per context. The context types are `trace_session`, one key per agent session, and `file`, one key per file.
+- Each data key is wrapped under a key-encryption key held in a key management service that never exports it. Only the control plane stores the wrapped key, with the owner's user ID beside it.
+- Each wrap is bound to the context `{organization_id, workspace_id, context_type, context_id}`, so every unwrap is attributable to a tenant and a context. The context holds immutable facts only, because an unwrap needs an exact match.
+- The store's own server-side encryption stays on as a second layer.
+- A person reads content through the control plane only, after an access check. The control plane writes an audit record before it decrypts, and without the record there is no read. The data plane decrypts only to serve a request.
+- The owner, the user whose request produced the content, may read it. An organization admin may read it only where an organization setting allows it, and the owner can see each such read. The platform operator may read it only through a separate break-glass role, which is time-boxed, audited, and the only principal besides the control plane that may unwrap.
+- Deletion is crypto-shredding. Deleting a wrapped key makes its content unreadable, including old object versions and backups. When content is deleted, for retention, erasure on request, or a legal hold, is not decided yet.
 
 ## Resolve
 
@@ -171,10 +351,9 @@ platform bug and surfaced as `502 Bad Gateway`.
 `user_id` (optional) identifies the platform identity that owns the
 `X-User-Token` presented for this call, i.e. the token's creator. It is a
 stable, opaque string; Otari does not assume any particular format and never
-tries to parse it. Absent on older peers, which is exactly as valid as a peer
-omitting any other unrecognized field: nothing that reads this field may
-require it. When present, it is Otari's only way to key its own per-caller
+tries to parse it. When present, it is Otari's only way to key its own per-caller
 gateway-side state (aliases, routing memory, files, batches) in hybrid mode.
+See [End-user identifier](#end-user-identifier) for the one case that requires it.
 
 `workspace_id` and `organization_id` (both optional) identify the tenant that
 owns this resolution: the workspace the presented `X-User-Token` belongs to,
@@ -183,8 +362,25 @@ parses. They are the only tenant Otari sees, because `X-Gateway-Token`
 authenticates the calling gateway and carries no tenant of its own, so nothing
 downstream can recover them after the fact. Both are optional in the same
 fail-open sense as `user_id`: a peer that omits them costs whatever record
-needed a tenant, never the request. Otari records them and does not route on
-them, so neither value can reach a provider call.
+needed a tenant, never the request, except as the next section describes.
+Otari records them and does not route on them. Neither value reaches a provider
+call as itself; `workspace_id` and `user_id` reach one only inside a digest.
+
+#### End-user identifier
+
+While `provider_user_identifier_enabled` is on (the default), Otari sends each
+provider call an opaque identifier of the end user behind it, so a provider
+that enforces its usage policy per end user blocks that user and not the whole
+upstream account. The identifier is a digest of `workspace_id` and the
+caller's own user tag (`user` on chat and Responses, `metadata.user_id` on
+Messages), or of `workspace_id` and `user_id` when the caller sent no tag.
+
+So while the setting is on, a peer MUST send `workspace_id`, and MUST send
+`user_id` for a caller that sends no tag. Otari answers a resolve response
+without them with `502 Bad Gateway` and calls no provider, because a request
+it cannot identify is exactly the one that would put the whole account at
+risk. The single-attempt shape below carries neither field, so a peer still
+sending it needs the setting off.
 
 ### Response: single-attempt shape
 
@@ -219,6 +415,12 @@ its own tenant.
 | Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
 A `421 Misdirected Request` only ever refers to `X-User-Token`: the user token belongs to another regional deployment, and the `detail` names the host that serves it. Otari forwards both the status and the detail unchanged so the end user can send the request there. A gateway token from the wrong region is not a `421`: that is the operator's configuration, which the end user cannot act on, so the platform answers it the way it answers any other bad gateway token. The region a token carries is a routing hint only: the platform still hashes the whole token and looks it up, and a token with a bad checksum, an unknown region, or the wrong kind for its header gets a `401` with no lookup (otari-ai#1665). The Web Access resolve below shares this ladder and forwards a `421` the same way. The MCP endpoints publish their own error contract and do not forward the detail: a `421` there becomes `misdirected_request` with the fixed safe message and no host (see below).
+
+### Decision models
+
+> **Status.** Specified, not built. Decision calls (`POST /api/v1/decisions` and `POST /api/v1/routing/recommend`) are standalone-only today.
+
+A hybrid data plane will mount both routes. Resolve accepts a decision model in `model`, as it accepts a completion model, and answers with attempts for a decision provider. Each attempt carries either the provider's key or, for a decision provider the platform runs, a [grant](#grants) in the one-request form whose token has the `model_recommendation` type. The [usage report](#usage-report) bills a decision call as it bills a completion attempt. The prompt goes from the data plane to the decision provider directly, never through the control plane.
 
 ## MCP server resolution
 
@@ -313,6 +515,55 @@ or a stored server. Statuses remain meaningful: `401` becomes
 `misdirected_request` (without the host the platform's detail named), and `429`
 keeps its status and `Retry-After` as `rate_limit_exceeded`. Other platform resolution failures become
 `502 mcp_resolution_failed`. See [MCP](mcp.md#caller-orchestrated-mcp).
+
+## Model listing
+
+Called by `GET /api/v1/models` on a hybrid gateway, which holds no catalog of
+its own. The caller's key is forwarded as `X-User-Token`, like the other
+resolve endpoints.
+
+### Request
+
+```http
+POST /gateway/models/resolve
+X-Gateway-Token: gw_...
+X-User-Token: tk_...
+Content-Type: application/json
+
+{}
+```
+
+### Response
+
+```json
+{
+  "models": [
+    {
+      "id": "openai:gpt-4o",
+      "created": 1715367049,
+      "owned_by": "openai",
+      "context_window": 128000,
+      "max_output_tokens": 16384
+    }
+  ]
+}
+```
+
+The peer returns only the models the key may use, so it owns entitlement: a
+managed model is listed only for a key entitled to it, and the key's
+`allowed_models` narrows the list. Otari relays the list, sorted by `id`, and
+filters nothing itself. It reads `id` (required, the selector to send as
+`model`), `created` (integer, `0` when absent), `owned_by` (the provider
+prefix of `id` when absent), and the model's token limits, `context_window` and
+`max_output_tokens` (each a positive integer, `null` when absent or not one).
+Every answer must carry the `models` key; an empty list means the key may use
+none.
+
+### Failure
+
+Refusals follow the MCP server resolution table above, with the fallback detail
+`"Model listing failed"`. A missing or malformed `models` list, or an entry
+without a string `id`, is mapped to `502 Bad Gateway`.
 
 ## Web Access resolution
 
@@ -464,7 +715,7 @@ Otari sends the sandbox no caller credential, whatever that setting names. A
 control plane that serves the sandbox itself therefore cannot tell which
 workspace a call is for.
 
-[#1603](https://github.com/mozilla-ai/otari/issues/1603) decided how a data plane will reach the sandbox: with a scoped grant, presented to a front door in front of the backend. This endpoint will then also return the front door's address and a grant, as fields an older data plane ignores. [#1688](https://github.com/mozilla-ai/otari/issues/1688) holds the grant's design, and this section specifies the new fields when they ship.
+[#1603](https://github.com/mozilla-ai/otari/issues/1603) decided how a data plane will reach a sandbox the platform runs: with a [grant](#grants) in the series form, presented to a front door in front of the backend. This response will then also carry `grant`, an optional field an older data plane ignores. Its `url` is the front door's base URL, its token's `authorization_details` type is `code_execution`, and it expires at the sandbox session's deadline. A deployment whose sandbox someone else runs gets no `grant`, and Otari keeps using `OTARI_SANDBOX_URL`.
 
 ## Usage report
 
@@ -486,6 +737,8 @@ Content-Type: application/json
     "cache_read_tokens": 8,            // provider cache-read input tokens
     "cache_write_tokens": 0           // cache-write (creation) input tokens; Anthropic only
   },
+  "units": {"images": 2},              // optional on success; counts in a unit
+                                       // other than tokens. See Units below.
   "error_class": "http_401",           // optional on error; omitted when the
                                        // Otari can't classify the failure
                                        // (e.g. mid-stream errors). See below.
@@ -507,6 +760,41 @@ A successful attempt that completes without provider usage data still sends a
 final report, but omits `usage` so the platform can record it as unavailable
 rather than as an explicit zero-token result.
 
+#### Units
+
+The pass-through endpoints are billed in tokens, in counts, or both. A success
+report carries the counts in `units`, an object beside `usage`. Its keys are
+meters, `requests`, `search_units` and `images`, and its values are JSON integers
+from 0 to 1,000,000. A receiver ignores a key it does not know, as the extension
+policy says, and refuses a report whose known key carries anything else with a
+422.
+
+| Endpoint | `units` | `usage` |
+|---|---|---|
+| `POST /api/v1/embeddings` | absent | input tokens |
+| `POST /api/v1/rerank` | `search_units`: the units the provider billed, at least 1 | tokens where the provider reports them |
+| `POST /api/v1/images/generations` | `images`: the images returned | tokens where the provider reports them |
+| `POST /api/v1/audio/transcriptions` | `requests`: 1 | tokens where the provider reports token usage |
+| `POST /api/v1/audio/speech`, `POST /api/v1/moderations` | `requests`: 1 | absent |
+
+A receiver prices an attempt by its rate's unit, and the rate prices one thing:
+
+- A rate in `requests` bills the `requests` count, or else the `search_units`
+  count, at `input_price_per_million / 1,000,000` each. An attempt that reports
+  neither, such as a completion, is billed one request.
+- A rate in `images` bills the `images` count at `input_price_per_million /
+  1,000,000` each. With no `images` count it prices nothing.
+- A rate in `tokens` bills `usage` and never a count. With no tokens it prices
+  nothing.
+
+Counts are never summed across meters. An attempt the rate prices nothing for is
+recorded unpriced. The cost is rounded once, half-up, to the micro-dollar.
+
+`units` sits beside `usage`, not in it, so a report whose provider returned no
+token counts still omits `usage`, and a receiver that does not read `units`
+records it as unavailable. A gateway does not negotiate this: it relies on its
+control plane reading `units` before it serves these endpoints.
+
 | Platform response | Gateway behavior |
 |---|---|
 | Completed success with `usage_status: "reported"` and non-null `pricing.source` | Validate the correlation id and attach `cost_usd` plus `pricing_source`. |
@@ -514,12 +802,14 @@ rather than as an explicit zero-token result.
 | `202` or legacy `204` | Return the provider response without inline cost. |
 | Terminal 4xx, including `404` and `410` | Do not retry or attach inline cost. |
 | Invalid body, correlation mismatch, reporting failure, or expired inline budget | Preserve the provider response and omit inline cost. |
+| A negative `cost_usd`, or a `pricing.source` that is not 1 to 32 lowercase letters and underscores | Treated as an invalid body. |
 
 ### Inline response fields
 
 | API format | Non-streaming placement | Streaming placement |
 |---|---|---|
-| Chat Completions | `usage.cost_usd`, `usage.pricing_source` | Terminal usage chunk: `usage.cost_usd`, `usage.pricing_source` |
+| Chat Completions | `usage.cost_usd`, `usage.pricing_source` | Terminal usage chunk (a usage chunk with no choices, or one that carries `finish_reason`): `usage.cost_usd`, `usage.pricing_source` |
+| Embeddings, rerank | `usage.cost_usd`, `usage.pricing_source` | Not streamed |
 | Messages | `usage.cost_usd`, `usage.pricing_source` | `message_delta.usage.cost_usd`, `message_delta.usage.pricing_source` |
 | Responses | `usage.cost_usd`, `usage.pricing_source` | `response.completed.response.usage.cost_usd`, `response.completed.response.usage.pricing_source` |
 
@@ -610,6 +900,7 @@ waiting forever for usage reports that will never arrive.
 | `conn_err` | `httpx.NetworkError`, or the OpenAI/Anthropic SDKs' own `APIConnectionError` |
 | `http_<code>` | Provider returned an HTTP status code (e.g. `http_429`, `http_401`) |
 | `http_<code>_billing` | Provider returned a 400 or 422 whose message identifies account billing exhaustion (e.g. Anthropic's "credit balance is too low"), or any 402 Payment Required, including one whose SDK discarded the response message. Reported as `http_400_billing` etc., keeping an empty provider wallet separable from a malformed request. Like every provider error before lock-in, it advances to the next attempt. |
+| `empty_completion` | The provider answered a non-streamed chat completion with no choices. It advances to the next candidate. |
 | `unknown` | Any other exception class. It still advances to the next candidate. |
 
 Treat `error_class` as an open set of strings, not a closed enum: new tags are

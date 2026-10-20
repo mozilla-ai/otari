@@ -15,18 +15,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.tenancy.workspace_web_search_service import (
-    _MAX_RESULTS,
+    _MAX_STORED_RESULTS,
     InvalidStoredWebSearchDomainError,
+    WorkspaceWebSearchConfigUpdate,
     _normalize_domains,
     _stored_domains,
     read_web_search_policy,
 )
 from gateway.services.tools._web_access import narrow_web_search_tool_entry
-from gateway.services.tools._web_admission import _canonicalize_web_search_request_domains
+from gateway.services.tools._web_admission import _canonicalize_request_domains
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, canonicalize_domain_rule
 
 
@@ -111,7 +113,7 @@ def test_every_source_refuses_the_same_domain_list(value: list[Any]) -> None:
     with pytest.raises(ValueError):
         read_web_search_policy({"enabled": True, "allowed_domains": value})
     with pytest.raises(ValueError):
-        _canonicalize_web_search_request_domains({"allowed_domains": value})
+        _canonicalize_request_domains({"allowed_domains": value})
 
 
 def test_every_source_reads_the_same_domain_list() -> None:
@@ -122,7 +124,7 @@ def test_every_source_reads_the_same_domain_list() -> None:
     assert tuple(_normalize_domains(value) or ()) == expected
     assert _stored_domains(value) == expected
     assert read_web_search_policy({"enabled": True, "allowed_domains": value}).allowed_domains == expected
-    _canonicalize_web_search_request_domains(request_entry)
+    _canonicalize_request_domains(request_entry)
     assert tuple(request_entry["allowed_domains"]) == expected
     assert tuple(request_entry["blocked_domains"]) == expected
 
@@ -130,7 +132,7 @@ def test_every_source_reads_the_same_domain_list() -> None:
 def test_a_request_keeps_an_empty_domain_list_empty() -> None:
     request_entry: dict[str, Any] = {"allowed_domains": [], "blocked_domains": None}
 
-    _canonicalize_web_search_request_domains(request_entry)
+    _canonicalize_request_domains(request_entry)
 
     assert request_entry == {"allowed_domains": [], "blocked_domains": None}
 
@@ -387,7 +389,6 @@ def test_a_whitespace_only_hint_from_the_control_plane_reads_as_absent() -> None
         pytest.param({"enabled": True, "max_results": "5"}, id="max-results-string"),
         pytest.param({"enabled": True, "max_results": True}, id="max-results-bool"),
         pytest.param({"enabled": True, "max_results": 0}, id="max-results-zero"),
-        pytest.param({"enabled": True, "max_results": _MAX_RESULTS + 1}, id="max-results-over-ceiling"),
         pytest.param({"enabled": True, "purpose_hint": 5}, id="hint-not-string"),
         pytest.param({"enabled": True, "purpose_hint": "x" * 2049}, id="hint-too-long"),
         pytest.param({"enabled": True, "provider_options": []}, id="options-not-object"),
@@ -407,16 +408,28 @@ def test_a_malformed_control_plane_answer_fails_closed(answer: dict[str, Any]) -
         read_web_search_policy(answer)
 
 
+def test_a_control_plane_ceiling_above_20_is_read() -> None:
+    """The gateway sets no ceiling of its own (decision 65), so the control plane's is taken as it is."""
+    assert read_web_search_policy({"enabled": True, "max_results": 50}).max_results == 50
+
+
+def test_a_stored_ceiling_above_20_is_accepted_up_to_what_its_column_holds() -> None:
+    assert WorkspaceWebSearchConfigUpdate(enabled=True, max_results=50).max_results == 50
+    assert WorkspaceWebSearchConfigUpdate(enabled=True, max_results=_MAX_STORED_RESULTS).max_results is not None
+    with pytest.raises(ValidationError):
+        WorkspaceWebSearchConfigUpdate(enabled=True, max_results=_MAX_STORED_RESULTS + 1)
+
+
 @pytest.mark.parametrize(
     ("name", "server_value"),
-    [("MAX_RESULTS", _MAX_RESULTS), ("MAX_DOMAINS", MAX_WEB_SEARCH_DOMAINS)],
+    [("MAX_RESULTS", _MAX_STORED_RESULTS), ("MAX_DOMAINS", MAX_WEB_SEARCH_DOMAINS)],
 )
 def test_the_card_repeats_the_ceiling_the_server_enforces(name: str, server_value: int) -> None:
     """The card cannot import a Python constant, so it repeats both and this pins the pair.
 
-    Raising `web_search_backend.MAX_RESULTS_CAP` without the card following
-    leaves the form refusing a value the API would accept, with the failure
-    showing up nowhere.
+    Changing either bound on the server without the card following leaves the
+    form refusing a value the API would accept, or the other way round, with the
+    failure showing up nowhere.
     """
     assert _card_constant(name) == server_value, (
         f"{name} in {_CARD.name} is {_card_constant(name)} but the server enforces {server_value}, "

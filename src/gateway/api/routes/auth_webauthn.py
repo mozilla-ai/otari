@@ -33,10 +33,10 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, record_auth_failure
+from gateway.api.deps import CurrentIdentity, IdentityServiceDep, get_config, get_db, record_auth_failure
+from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
 # The refusal is the same refusal, so it is imported rather than restated: the
@@ -44,9 +44,9 @@ from gateway.api.routes._public_auth import throttle_public_auth
 # differently would tell a person the two doors closed for different reasons.
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import PasskeysNotConfiguredError
-from gateway.log_config import logger
 from gateway.models.tenancy import (
     MAX_WEBAUTHN_CREDENTIAL_NAME,
     WebAuthnCredentialPublic,
@@ -55,12 +55,10 @@ from gateway.models.tenancy import (
 )
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
-    create_dashboard_session,
     request_is_https,
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy import webauthn_service
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
 router = APIRouter(prefix="/auth/webauthn", tags=["auth"])
 
@@ -108,8 +106,11 @@ class PasskeySessionResponse(BaseModel):
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
     user_id: uuid.UUID = Field(description="The identity this session speaks for.")
-    active_organization_id: uuid.UUID = Field(
-        description="The organization that identity is acting in, which scopes every tenancy surface."
+    active_organization_id: uuid.UUID | None = Field(
+        description=(
+            "The organization that identity is acting in, which scopes every tenancy surface. "
+            "Null when it is an active member of none, as an invitee who has not accepted yet is not."
+        )
     )
 
 
@@ -144,13 +145,9 @@ async def _commit(db: AsyncSession, what: str) -> None:
     """
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        logger.warning("Failed to %s", what, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error(what, exc) from None
 
 
 @router.post("/register/options", response_model=CeremonyOptions, dependencies=[Depends(require_passkey_support)])
@@ -212,6 +209,7 @@ async def authenticate_passkey(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    identities: IdentityServiceDep,
 ) -> Any:
     """Verify an assertion and set the HttpOnly session cookie.
 
@@ -245,15 +243,17 @@ async def authenticate_passkey(
     except TenancyError:
         record_auth_failure("invalid_passkey")
         raise
-    # Same transaction as the session row; see the note in ``auth_session``.
-    await OrganizationDomainService(db).auto_join_for_user(identity)
-    token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
-    await _commit(db, "persist a dashboard session on a passkey sign-in")
-    apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
+    try:
+        signed_in = await identities.sign_in(identity)
+    except DATABASE_ERRORS as exc:
+        raise database_error("persist a dashboard session on a passkey sign-in", exc) from None
+    apply_session_cookie(
+        response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
+    )
     return PasskeySessionResponse(
-        expires_at=expires_at,
+        expires_at=signed_in.session_expires_at,
         user_id=identity.id,
-        active_organization_id=identity.active_organization_id,
+        active_organization_id=signed_in.active_organization_id,
     )
 
 

@@ -19,15 +19,17 @@ neither operation can desync a budget, matching the boundary the ingest path est
 """
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import ColumnElement, delete, select
+from sqlalchemy import ColumnElement, Select, delete, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.database import describe_database_error
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.log_config import logger
@@ -137,8 +139,15 @@ class UsageSetPriceResult(BaseModel):
     unchanged: int = 0
 
 
-def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]]:
-    """WHERE conditions for a selection, always scoped to imported rows.
+def usage_in(workspaces: Select[tuple[uuid.UUID]]) -> ColumnElement[bool]:
+    """Match the usage rows of these workspaces: the scope of the operator's usage reads."""
+    return UsageLog.workspace_id.in_(workspaces)
+
+
+def _selection_conditions(
+    selection: UsageSelection, *, workspace_ids: Collection[uuid.UUID] | Select[tuple[uuid.UUID]]
+) -> list[ColumnElement[bool]]:
+    """WHERE conditions for a selection, always scoped to imported rows in the caller's workspaces.
 
     Two fixed conditions pin the target set to imported usage regardless of the
     caller's input:
@@ -153,11 +162,14 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
       the spend ledger can never be affected even if the provenance guard ever slips.
 
     Together they mean even an ``ids`` list naming enforced or budget-exempt gateway
-    rows cannot reach them: they simply do not match.
+    rows cannot reach them: they simply do not match. ``workspace_ids`` confines the
+    set to the caller's organization the way ``GET /api/v1/usage/count`` is, so an
+    ``ids`` list naming another organization's rows does not match either.
     """
     conditions: list[ColumnElement[bool]] = [
         UsageLog.source != SERVED_HERE_SLUG,
         UsageLog.counts_toward_budget.is_(False),
+        UsageLog.workspace_id.in_(workspace_ids),
     ]
     if selection.ids:
         conditions.append(UsageLog.id.in_(selection.ids))
@@ -205,20 +217,22 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     return conditions
 
 
-async def delete_usage(db: AsyncSession, request: UsageDeleteRequest) -> UsageDeleteResult:
+async def delete_usage(
+    db: AsyncSession, request: UsageDeleteRequest, *, workspace_ids: Collection[uuid.UUID] | Select[tuple[uuid.UUID]]
+) -> UsageDeleteResult:
     """Delete the imported usage rows a selection matches.
 
     Only ``counts_toward_budget=False`` rows are ever removed, so the enforcement
     ledger is untouched. Nothing references ``usage_logs``, so a plain bulk delete
     leaves no orphans.
     """
-    conditions = _selection_conditions(request)
+    conditions = _selection_conditions(request, workspace_ids=workspace_ids)
     try:
         result = cast("CursorResult[Any]", await db.execute(delete(UsageLog).where(*conditions)))
         await db.commit()
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.exception("usage delete failed")
+        logger.error("usage delete failed: %s", describe_database_error(exc))
         raise
     deleted = result.rowcount or 0
     logger.info("usage delete: removed=%d by_filter=%s", deleted, request.by_filter)
@@ -267,7 +281,9 @@ def _row_usage(row: UsageLog) -> BillableUsage:
     )
 
 
-async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> UsageSetPriceResult:
+async def set_usage_price(
+    db: AsyncSession, request: UsageSetPriceRequest, *, workspace_ids: Collection[uuid.UUID] | Select[tuple[uuid.UUID]]
+) -> UsageSetPriceResult:
     """Recompute cost for matched imported rows from manual per-1M rates.
 
     Builds a transient ``ModelPricing`` from the supplied rates and reprices each
@@ -291,10 +307,9 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
         output_price_per_million=request.output_price_per_million,
         cache_read_price_per_million=request.cache_read_price_per_million,
         cache_write_price_per_million=request.cache_write_price_per_million,
-        cache_write_1h_price_per_million=None,
         pricing_tiers=[],
     )
-    conditions = _selection_conditions(request)
+    conditions = _selection_conditions(request, workspace_ids=workspace_ids)
     result = UsageSetPriceResult()
 
     try:
@@ -340,9 +355,9 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
             await db.flush()
             db.expunge_all()
         await db.commit()
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.exception("usage set-price failed")
+        logger.error("usage set-price failed: %s", describe_database_error(exc))
         raise
 
     logger.info(

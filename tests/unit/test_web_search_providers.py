@@ -151,24 +151,36 @@ async def test_tavily_missing_results_list_is_an_error_not_an_empty_search() -> 
 async def test_upstream_error_status_becomes_a_provider_error() -> None:
     client, _ = _client(httpx.Response(429, text="slow down"))
     async with client:
-        with pytest.raises(WebSearchProviderError, match="429"):
+        with pytest.raises(WebSearchProviderError, match="429") as raised:
             await provider_search(provider="tavily", api_key="tvly-x", query="q", client=client)
+    assert (raised.value.tag, raised.value.status) == ("http_error", 429)
 
 
 @pytest.mark.asyncio
 async def test_transport_failure_becomes_a_provider_error() -> None:
     client, _ = _client(httpx.ConnectError("no route"))
     async with client:
-        with pytest.raises(WebSearchProviderError, match="could not be reached"):
+        with pytest.raises(WebSearchProviderError, match="could not be reached") as raised:
             await provider_search(provider="brave", api_key="brv-x", query="q", client=client)
+    assert (raised.value.tag, raised.value.status) == ("network", None)
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_is_tagged_as_one() -> None:
+    client, _ = _client(httpx.ReadTimeout("slow"))
+    async with client:
+        with pytest.raises(WebSearchProviderError) as raised:
+            await provider_search(provider="tavily", api_key="tvly-x", query="q", client=client)
+    assert (raised.value.tag, raised.value.status) == ("timeout", None)
 
 
 @pytest.mark.asyncio
 async def test_non_json_body_becomes_a_provider_error() -> None:
     client, _ = _client(httpx.Response(200, text="<html>maintenance</html>"))
     async with client:
-        with pytest.raises(WebSearchProviderError, match="not JSON"):
+        with pytest.raises(WebSearchProviderError, match="not JSON") as raised:
             await provider_search(provider="tavily", api_key="tvly-x", query="q", client=client)
+    assert raised.value.tag == "invalid_response"
 
 
 @pytest.mark.asyncio

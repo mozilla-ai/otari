@@ -4,7 +4,6 @@
  */
 
 export type PublicAuthFieldsPage =
-  | "login"
   | "signup"
   | "recover-password"
   | "resend-verification"

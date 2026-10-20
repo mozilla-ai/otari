@@ -13,10 +13,11 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import WEB_SEARCH_PROVIDERS, GatewayConfig
+from gateway.core.config import GatewayConfig
+from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
 from gateway.log_config import logger
-from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool
+from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.services.control_plane import ResolveEndpoint, resolve
 from gateway.services.tenancy.workspace_web_search_service import (
@@ -37,14 +38,17 @@ _NO_NARROWING = ResolvedWebSearchConfig(
     provider_options=None,
     authorized_tools=None,
 )
+# The policy of a workspace that holds no row where this deployment makes web access opt-in.
+_NOT_TURNED_ON = replace(_NO_NARROWING, enabled=False)
 
 
 class LocalWebSearchPolicy(WebSearchPolicyPort):
     """The policy stored in this deployment's own database."""
 
-    def __init__(self, session: AsyncSession, *, search_keys: WorkspaceSearchKeys) -> None:
+    def __init__(self, session: AsyncSession, *, search_keys: WorkspaceSearchKeys, on_without_policy: bool) -> None:
         self._session = session
         self._search_keys = search_keys
+        self._on_without_policy = on_without_policy
 
     async def resolve(
         self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
@@ -56,6 +60,8 @@ class LocalWebSearchPolicy(WebSearchPolicyPort):
             policy = await resolve_workspace_web_search_config(self._session, scope.workspace_id)
         except InvalidStoredWebSearchDomainError:
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID) from None
+        if policy is None and not self._on_without_policy:
+            return _NOT_TURNED_ON
         if WebTool.SEARCH not in requested_tools:
             return policy
         credential = await self._search_keys.credential_for(scope.workspace_id)
@@ -107,7 +113,7 @@ def _credential(answer: dict[str, Any]) -> WebSearchCredential | None:
     if provider not in WEB_SEARCH_PROVIDERS:
         logger.warning("Ignoring a workspace web search key for a provider this gateway cannot call: %s", provider)
         return None
-    return WebSearchCredential(provider=provider, api_key=api_key)
+    return WebSearchCredential(provider=provider, source=WebToolCredentialSource.HYBRID, api_key=api_key)
 
 
 def _authorized_tools(answer: dict[str, Any]) -> frozenset[str]:

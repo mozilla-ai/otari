@@ -1,7 +1,7 @@
 import json
 from collections.abc import AsyncIterator, Callable, Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import httpx2
@@ -10,8 +10,10 @@ from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
     ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCall,
     Choice,
     CompletionUsage,
+    Function,
     PromptTokensDetails,
 )
 from fastapi.testclient import TestClient
@@ -19,8 +21,19 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from conftest import InstallControlPlane, TaskGroupMcpTransport
 from gateway.api.deps import reset_config
+from gateway.api.routes._platform import all_attempts_rejected_detail
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
+from gateway.core.error_codes import (
+    ALL_CANDIDATES_REJECTED,
+    ERROR_CODE_HEADER,
+    ERROR_PROVIDER_HEADER,
+    ERROR_RETRYABLE_HEADER,
+    ERROR_STATUS_HEADER,
+    ERROR_TAG_HEADER,
+    PROVIDER_CREDENTIAL_REJECTED,
+)
+from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 
 from .conftest import app_for
 
@@ -32,6 +45,8 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
         GatewayConfig(
             mode="hybrid",
             web_fetch_enabled=True,
+            # These resolve payloads name no tenant. The end-user identifier has its own tests.
+            provider_user_identifier_enabled=False,
             platform={"base_url": "http://platform.test/api/v1"},
         )
     )
@@ -296,7 +311,9 @@ def test_hybrid_mode_forwards_bedrock_classic_key_pair_via_client_args(
         assert kwargs["api_key"] == "secret-access-key"
         assert "region_name" not in kwargs
         assert "aws_access_key_id" not in kwargs
-        assert kwargs["client_args"] == {
+        client_args = dict(kwargs["client_args"])
+        assert client_args.pop("config").read_timeout == BEDROCK_READ_TIMEOUT_SECONDS
+        assert client_args == {
             "region_name": "us-east-1",
             "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
             "aws_secret_access_key": "secret-access-key",
@@ -557,6 +574,10 @@ def test_hybrid_mode_maps_provider_timeout(
 
     assert response.status_code == 504
     assert response.json() == {"detail": "LLM provider timeout"}
+    assert response.headers[ERROR_PROVIDER_HEADER] == "openai"
+    assert response.headers[ERROR_TAG_HEADER] == "timeout"
+    assert response.headers[ERROR_RETRYABLE_HEADER] == "true"
+    assert ERROR_STATUS_HEADER not in response.headers
 
 
 def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
@@ -761,6 +782,150 @@ def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
     assert error_reports[0]["error_class"] == "http_400_billing"
 
 
+def test_hybrid_mode_falls_through_on_an_empty_completion(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """A 200 with no choices is the first attempt's failure, reported as such, and the next attempt serves."""
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "empty-req-1",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "empty-att-blank",
+                            "position": 0,
+                            "provider": "gemini",
+                            "model": "gemini-2.5-flash",
+                            "api_key": "sk-blank",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "empty-att-good",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-good",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        choices: list[Choice] = []
+        if kwargs["api_key"] == "sk-good":
+            choices = [
+                Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hello"), finish_reason="stop")
+            ]
+        return ChatCompletion(
+            id="chatcmpl-empty",
+            object="chat.completion",
+            created=1700000000,
+            model=kwargs["model"],
+            choices=choices,
+            usage=CompletionUsage(prompt_tokens=5, completion_tokens=1, total_tokens=6),
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "anything", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["Otari-Attempt-ID"] == "empty-att-good"
+    error_reports = [r for r in usage_reports if r.get("status") == "error"]
+    assert len(error_reports) == 1
+    assert error_reports[0]["correlation_id"] == "empty-att-blank"
+    assert error_reports[0]["error_class"] == "empty_completion"
+
+
+def test_hybrid_mode_refuses_with_a_424_when_every_attempt_rejects_its_credential(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """Every attempt's provider refused the key the platform resolved, so no
+    retry can succeed: a 424 naming the code, not a retryable 502. Each attempt
+    is still reported to the platform with the provider's own status."""
+    import openai
+
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "revoked-req-1",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": f"revoked-att-{position}",
+                            "position": position,
+                            "provider": "openai",
+                            "model": model,
+                            "api_key": "sk-revoked",
+                            "api_base": None,
+                            "managed": False,
+                        }
+                        for position, model in enumerate(("gpt-4o-mini", "gpt-4o"))
+                    ],
+                },
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        raise openai.AuthenticationError(
+            "Error code: 401 - Incorrect API key provided: sk-revoked",
+            response=httpx.Response(401, request=request),
+            body=None,
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "anything", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 424, response.text
+    assert response.headers[ERROR_CODE_HEADER] == PROVIDER_CREDENTIAL_REJECTED
+    assert "sk-revoked" not in response.text
+
+    error_reports = [r for r in usage_reports if r.get("status") == "error"]
+    assert sorted(r["correlation_id"] for r in error_reports) == ["revoked-att-0", "revoked-att-1"]
+    assert {r["error_class"] for r in error_reports} == {"http_401"}
+
+
 def test_hybrid_mode_propagates_resolve_rate_limit_retry_after(
     platform_client: TestClient,
     control_plane_transport: InstallControlPlane,
@@ -920,7 +1085,7 @@ def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
 ) -> None:
     from collections.abc import AsyncIterator
 
-    from any_llm.types.completion import ChatCompletionChunk
+    from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
 
     attempt_id = "3f1b6a1e-0000-4000-8000-000000000005"
 
@@ -967,7 +1132,7 @@ def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
         async def stream() -> AsyncIterator[ChatCompletionChunk]:
             yield ChatCompletionChunk(
                 id="chunk-usage",
-                choices=[],
+                choices=[ChunkChoice(delta=ChoiceDelta(), index=0, finish_reason="stop")],
                 created=0,
                 model="gpt-4o-mini",
                 object="chat.completion.chunk",
@@ -1195,6 +1360,7 @@ def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
     assert response.status_code == 502
     assert response.json() == {"detail": "All upstream providers failed"}
     assert response.headers["Otari-Attempt-ID"] == "att-b"
+    assert response.headers["Otari-Request-ID"] == "stream-req-fail"
 
 
 def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
@@ -1513,6 +1679,46 @@ def _two_attempt_resolve_response(*, request_id: str) -> httpx.Response:
     )
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+def test_hybrid_mode_names_the_last_attempt_when_every_provider_fails(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+    stream: bool,
+) -> None:
+    """The plan's 502 stays generic, while its headers name the last attempt's own 5xx."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _two_attempt_resolve_response(request_id="0b7f3a52-2f0e-4c5d-9a51-0f4b5d6e7a81")
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        request = httpx.Request("POST", "http://upstream")
+        raise httpx.HTTPStatusError("503", request=request, response=httpx.Response(503, request=request))
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "anything", "messages": [{"role": "user", "content": "hi"}], "stream": stream},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "All upstream providers failed"}
+    assert response.headers[ERROR_PROVIDER_HEADER] == "openai"
+    assert response.headers[ERROR_STATUS_HEADER] == "503"
+    assert response.headers[ERROR_TAG_HEADER] == "http_error"
+    assert response.headers[ERROR_RETRYABLE_HEADER] == "true"
+
+
 def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -1690,17 +1896,18 @@ class _CappedSearchBackend:
         return "results"
 
 
-def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
+def test_hybrid_mode_a_reported_search_commits_the_streamed_attempt(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
-    """``max_uses`` bounds the request, not each attempt of it.
+    """A search reported in ``otari_tool_calls`` commits the attempt that ran it.
 
-    A tool-loop stream whose swallowed first round runs a search and whose second
-    round dies is still pre-first-chunk, so the plan falls over. Both runs are
-    billed (``ToolUsageTally`` accumulates across attempts), so a cap the next
-    attempt started over on would bill up to ``max_uses`` per candidate.
+    The first round's tool-call chunks are swallowed, but the search's started and
+    ended entries reach the client while that round runs, so a provider failure in
+    the second round ends the stream with an error event rather than falling over
+    to a model the client was never told about. Messages and Responses commit on
+    their first event the same way.
     """
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
     _CappedSearchBackend.calls = 0
@@ -1786,14 +1993,83 @@ def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
     )
 
     assert response.status_code == 200
-    # The fallover happened, and the served attempt found the cap already spent.
-    assert calls == [
-        "anthropic:claude-haiku-4-5",
-        "anthropic:claude-haiku-4-5",
-        "openai:gpt-4o-mini",
-        "openai:gpt-4o-mini",
-    ]
+    assert calls == ["anthropic:claude-haiku-4-5", "anthropic:claude-haiku-4-5"]
     assert _CappedSearchBackend.calls == 1
+    events = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+    payloads = [json.loads(event) for event in events if event != "[DONE]"]
+    entries = [entry for payload in payloads for entry in payload.get("otari_tool_calls", [])]
+    assert [entry["status"] for entry in entries] == ["in_progress", "completed"]
+    assert entries[0]["id"] == entries[1]["id"]
+    assert payloads[-1]["error"]["code"] == "provider_credential_rejected"
+
+
+def test_hybrid_mode_an_answer_reports_the_search_the_data_plane_ran(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """The tool loop runs on the data plane, so a hybrid answer carries ``otari_tool_calls`` like a standalone one."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="ws-report-req")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search"]})
+        return httpx.Response(204)
+
+    rounds = iter(
+        [
+            ChatCompletionMessage(
+                role="assistant",
+                content=None,
+                tool_calls=cast(
+                    Any,
+                    [
+                        ChatCompletionMessageFunctionToolCall(
+                            id="call_1",
+                            type="function",
+                            function=Function(name="web_search", arguments='{"query": "otari"}'),
+                        )
+                    ],
+                ),
+            ),
+            ChatCompletionMessage(role="assistant", content="answer"),
+        ]
+    )
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        message = next(rounds)
+        return ChatCompletion(
+            id="cmpl-ws-report",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[Choice(finish_reason="tool_calls" if message.tool_calls else "stop", index=0, message=message)],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _CappedSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_web_search"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    [entry] = response.json()["otari_tool_calls"]
+    assert entry["query"] == "otari"
+    assert entry["status"] == "completed"
+    assert entry["sources"] == [{"url": "https://a", "title": "A", "published_date": None}]
 
 
 def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
@@ -2732,8 +3008,8 @@ def test_hybrid_mode_streaming_falls_through_on_provider_400(
         headers={"Authorization": "Bearer user_test_token"},
     )
 
-    assert response.status_code == 502
-    assert response.json() == {"detail": "All upstream providers failed"}
+    assert response.status_code == 400
+    assert response.json() == {"detail": all_attempts_rejected_detail(2), "code": ALL_CANDIDATES_REJECTED}
     assert len(calls) == 2
     assert sorted((r["correlation_id"], r["is_final_attempt"], r.get("error_class")) for r in usage_reports) == [
         ("att-a", False, "http_400"),
@@ -2767,6 +3043,7 @@ class _FakeSandboxBackend:
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
         tally: Any = None,
+        trace: Any = None,
         files: Any = None,
         files_base_url: str | None = None,
         container: Any = None,

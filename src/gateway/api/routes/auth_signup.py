@@ -24,16 +24,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
-    MembershipListenerDep,
+    MembershipOrganizationServiceDep,
+    OrganizationServiceDep,
     UnitOfWorkDep,
-    WorkspaceListenerDep,
     get_config,
     get_db,
 )
-from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
+from gateway.api.routes._public_auth import (
+    count_failed_verification,
+    mail_unavailable,
+    refuse_exhausted_verification_attempts,
+    throttle_public_auth,
+)
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
+from gateway.services.tenancy import report_new_account
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import (
     create_user_for_signup,
@@ -71,7 +78,12 @@ class SignupRequest(BaseModel):
     full_name: str | None = Field(
         default=None, max_length=MAX_FULL_NAME_LENGTH, description="Filled in only if not already set."
     )
-    terms_accepted: bool = Field(default=False, description="Whether the caller accepted this deployment's terms.")
+    terms_accepted: bool = Field(
+        default=False,
+        description=(
+            "Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url."
+        ),
+    )
 
 
 class SignupResponse(BaseModel):
@@ -82,6 +94,13 @@ class SignupResponse(BaseModel):
 
 class VerifyEmailRequest(BaseModel):
     token: str = Field(max_length=_MAX_SUBMITTED_TOKEN, description="The token from the verification link.")
+    password: str = Field(
+        max_length=_MAX_SUBMITTED_PASSWORD,
+        description=(
+            "The password chosen at signup. The link verifies the address only together with it, "
+            "so a link that reaches someone who did not sign up verifies nothing."
+        ),
+    )
 
 
 class VerifyEmailResponse(BaseModel):
@@ -114,8 +133,7 @@ async def signup(
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
     uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
+    organizations: MembershipOrganizationServiceDep,
 ) -> SignupResponse:
     """Claim a roster identity, register a new one, or do nothing: the response never says which.
 
@@ -124,6 +142,9 @@ async def signup(
 
     No session is minted. A newly claimed or registered identity is hard-blocked
     from signing in until it verifies, so there is nothing yet to sign it into.
+
+    Refused with a 400 where the deployment publishes terms and ``terms_accepted``
+    is not set, whatever the address.
     """
     throttle_public_auth(request)
     try:
@@ -134,26 +155,13 @@ async def signup(
             email=body.email,
             password=body.password,
             uow=uow,
-            membership_listener=membership_listener,
-            workspace_listener=workspace_listener,
+            organizations=organizations,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
-    # Only a genuine claim notifies, which is what keeps the seam from undoing
-    # the enumeration-safety above: the response is identical either way, and a
-    # signal an operator's own vendor receives is not something the caller can
-    # observe. ``email`` is set on any claimed identity, which is looked up by
-    # address in the first place.
-    if claimed is not None and claimed.email is not None:
-        await growth.record_signup(
-            background_tasks=background_tasks,
-            user_id=claimed.id,
-            email=claimed.email,
-            full_name=claimed.full_name,
-            created_at=claimed.created_at,
-        )
+    await report_new_account(growth, claimed, background_tasks=background_tasks)
     return SignupResponse(message=_OPEN_SIGNUP_MESSAGE if config.open_signup else _SIGNUP_MESSAGE)
 
 
@@ -162,10 +170,24 @@ async def verify_email_route(
     body: VerifyEmailRequest,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: MembershipOrganizationServiceDep,
 ) -> VerifyEmailResponse:
-    """Confirm an address from its verification link, lifting the sign-in gate."""
-    throttle_public_auth(request)
-    identity = await verify_email(db, token=body.token)
+    """Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
+
+    One refusal for a link that is unknown, expired or spent and for a password
+    that does not match, and a refusal consumes nothing. Refusals are counted
+    per client IP and answer 429 once over the limit, so a held link cannot be
+    used to guess its password; a verification that succeeds is never counted.
+    """
+    refuse_exhausted_verification_attempts(request)
+    try:
+        identity = await verify_email(
+            db, organizations=organizations, token=body.token, password=body.password, open_signup=config.open_signup
+        )
+    except VerificationTokenInvalidError:
+        count_failed_verification(request)
+        raise
     assert identity.email is not None  # guaranteed: only a claimed identity has a verification token
     return VerifyEmailResponse(email=identity.email)
 
@@ -177,11 +199,14 @@ async def resend_verification(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
 ) -> ResendVerificationResponse:
     """Mail a fresh verification link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
-        await resend_verification_email(db, config, background_tasks=background_tasks, email=body.email)
+        await resend_verification_email(
+            db, config, organizations=organizations, background_tasks=background_tasks, email=body.email
+        )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     return ResendVerificationResponse(message=_RESEND_MESSAGE)

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
+import httpx
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi import status
@@ -47,8 +48,10 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, Us
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.file_extractors import ExtractionResult
+from gateway.services.inference import upstream_user_identifier
 
 from .conftest import MODEL_NAME, build_test_client
+from .test_web_fetch_instances import scripted_model, serve_fetch_on_tabstack
 
 _PREFIX = f"{API_ROOT}/playground"
 
@@ -711,6 +714,26 @@ def test_a_workspace_can_only_narrow_the_deployment_s_answer(
     }
 
 
+def test_a_workspace_with_no_row_is_off_where_the_deployment_makes_tools_opt_in(
+    client: TestClient,
+    world: _World,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The menu reads a missing row the way the request path does, so it offers nothing a request would be refused."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9998/search")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setattr(test_config, "web_search_workspace_default", False)
+    monkeypatch.setattr(test_config, "code_execution_workspace_default", False)
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    not_on = {"configured": True, "enabled": False, "reason": "Not turned on for this workspace."}
+    assert body["web_search"] == not_on
+    assert body["code_execution"] == not_on
+
+
 # =============================================================================
 # The completion: billed to the caller, in their workspace, with no key
 # =============================================================================
@@ -808,6 +831,33 @@ def test_a_completion_cannot_be_billed_to_a_workspace_that_is_not_the_caller_s(
     assert code == status.HTTP_404_NOT_FOUND
 
     assert db_session.query(UsageLog).count() == 0
+
+
+def test_a_body_user_cannot_choose_the_provider_end_user_identifier(client: TestClient, world: _World) -> None:
+    """The identifier is the caller's own, whatever ``user`` the body names.
+
+    An API key may name an end user, so a member who could do the same here
+    could take on the identifier a key's end user is known by upstream.
+    """
+    with patch("gateway.api.routes.chat.acompletion") as mock:
+        mock.side_effect = _mock_acompletion
+        code, _ = _request(
+            client,
+            world,
+            "member",
+            "POST",
+            f"{_PREFIX}/chat/completions",
+            json={
+                "model": "openai:gpt-4o-mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": "shared-tag-alpha",
+            },
+            params=_ws(world),
+        )
+
+    assert code == status.HTTP_200_OK
+    workspace = str(world.workspaces["alpha_one"])
+    assert mock.call_args.kwargs["user"] == upstream_user_identifier(workspace, str(world.users["member"]), None)
 
 
 def test_a_completion_streams_server_sent_events(
@@ -1124,3 +1174,33 @@ def test_files_switched_off_answer_404_and_report_why(
     assert code == status.HTTP_404_NOT_FOUND
     code, _ = _request(files_off_client, built, "member", "GET", f"{_PREFIX}/files", params=_ws(built))
     assert code == status.HTTP_404_NOT_FOUND
+
+
+def test_a_playground_message_fetches_through_the_instance_on_the_apps_client(
+    client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig
+) -> None:
+    """The Playground runs the same completion pipeline, so its tools get the app's web provider client too."""
+    requests: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"content": "The notes.", "url": "https://example.com/notes"})
+
+    serve_fetch_on_tabstack(client, monkeypatch, test_config, answer)
+    with scripted_model():
+        code, body = _request(
+            client,
+            world,
+            "member",
+            "POST",
+            f"{_PREFIX}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "read it"}],
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            params=_ws(world),
+        )
+
+    assert code == status.HTTP_200_OK, body
+    assert [str(request.url) for request in requests] == ["https://api.tabstack.ai/v1/extract/markdown"]

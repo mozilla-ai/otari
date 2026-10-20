@@ -11,12 +11,11 @@ export type Parse<T> = (raw: string) => { value: T; error: string }
  * One typed row of a workspace policy: it holds a draft and commits the whole
  * policy when the field is left.
  *
- * The web-search policy group is a stance select over a handful of these, and
- * the shapes it needs differ only in how the value is parsed; the lane is
- * `SettingRow`'s and every field fills it. `ToolSettingRows` is the other row
- * family and stays separate: those are keyed on a backend field descriptor and
- * carry a config key, a reachability note and a Test button, none of which a
- * policy row has.
+ * The web-search card's narrowing rows are these, and the shapes they need
+ * differ only in how the value is parsed; the lane is `SettingRow`'s and every
+ * field fills it. `ToolSettingRows` is the other row family and stays separate:
+ * those are keyed on a backend field descriptor and carry a config key, a
+ * reachability note and a Test button, none of which a policy row has.
  */
 export function PolicyRow<T>({
   label,
@@ -109,9 +108,3 @@ export function ceilingParser(max: number, unit: string): Parse<number | null> {
     return { value: parsed, error: "" }
   }
 }
-
-/** A phrase, or nothing. Blank clears the stored one. */
-export const parsePhrase: Parse<string | null> = (raw) => ({
-  value: raw.trim() === "" ? null : raw.trim(),
-  error: "",
-})

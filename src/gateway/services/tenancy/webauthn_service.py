@@ -124,8 +124,7 @@ def require_relying_party(config: GatewayConfig) -> RelyingParty:
 async def _issue_challenge(db: AsyncSession, challenge: bytes, *, ceremony: str, user_id: uuid.UUID | None) -> None:
     """Record a challenge so the matching verify call can spend it.
 
-    Expired rows are swept here rather than by a background task, exactly as
-    ``create_dashboard_session`` sweeps expired sessions: this table is written
+    Expired rows are swept here rather than by a background task: this table is written
     once per ceremony, so the sweep runs as often as it needs to and never on a
     read path. The caller owns the transaction and commits.
     """

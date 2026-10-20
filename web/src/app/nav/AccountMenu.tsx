@@ -14,23 +14,26 @@ import {
   FiMoon,
   FiSettings,
   FiShield,
+  FiSun,
 } from "react-icons/fi"
 
 import {
   AccountBadge,
   useAccountBadgeLabel,
 } from "@/app/nav/overlayAccountBadge"
+import { AccountMenuRows } from "@/app/nav/overlayAccountMenuRows"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
-import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
+import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
-import { useOrganizationContext } from "@/shared/api/organizations"
-import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useProfile } from "@/shared/api/auth"
 import {
-  THEME_PREFERENCES,
-  type ThemePreference,
-  useTheme,
-} from "@/shared/hooks/useTheme"
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
+import { documentationHref } from "@/shared/helpers/docs"
+import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useTheme } from "@/shared/hooks/useTheme"
 import {
   NAV_ICON_CLASS,
   NAV_TRANSITION,
@@ -54,12 +57,6 @@ import {
 // Data & Privacy stays a disabled row when unset rather than vanishing: the
 // settings surface it will become is coming, and a menu that silently lacks it
 // reads as a menu that never will.
-
-const THEME_LABELS: Record<ThemePreference, string> = {
-  system: "System",
-  light: "Light",
-  dark: "Dark",
-}
 
 // 36px rows at 13.5px, which is the menu's own scale: a step down from the
 // rail's 44px/14px, because a menu row is read once on the way to a decision
@@ -96,7 +93,8 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // address stands in and is a better answer than a role. An identity with
 // neither, and a context that has not landed or could not be read, get
 // "Signed in": naming nobody is the honest answer, and it is what the trigger
-// showed before the first paint anyway.
+// showed before the first paint anyway. A caller with no organization, whom
+// the context answers with a 404, is named from the profile read instead.
 function sessionIdentity(caller: OrganizationContext["caller"]): {
   name: string
   initials: string
@@ -155,6 +153,7 @@ function MenuItem({
   title,
   trailing,
   trailingIcon,
+  hasTrailingGutter = false,
   ariaLabel,
   className = "",
 }: {
@@ -167,6 +166,13 @@ function MenuItem({
   trailing?: string
   /** Fills the same lane as `trailing`, for a mark rather than a value. */
   trailingIcon?: ReactNode
+  /**
+   * Leaves an empty chevron-width slot after the value, so a value ends where
+   * the value of a row that does end in a chevron does. A row an edition adds
+   * to this menu (the data region) ends in one, and without the slot the
+   * appearance row's value would stop 26px to the right of it.
+   */
+  hasTrailingGutter?: boolean
   ariaLabel?: string
   className?: string
 }) {
@@ -198,6 +204,11 @@ function MenuItem({
       ) : (
         <span aria-hidden="true" className="h-0 w-11 shrink-0" />
       )}
+      {hasTrailingGutter ? (
+        // 8px from the value, not the row's 10: the chevron it stands in for sits
+        // 8px from its own row's value.
+        <span aria-hidden="true" className="-ml-0.5 size-4 shrink-0" />
+      ) : null}
     </button>
   )
 }
@@ -269,38 +280,30 @@ function MenuExternalLink({
 }
 
 /**
- * Appearance: one row that names the current preference and cycles through the
- * three, system → light → dark → system.
+ * Appearance: one row that names the current theme and flips to the other.
  *
- * The design draws only the closed state, a row with "System" on the right,
- * which is what a menu wants: the setting is one line, not three. It was
- * previously a radio group, which spent three rows of the menu on a setting
- * nobody opened the menu for, and then a segmented control, which spent one row
- * on three targets 40px wide. A cycling row is the same one line the design
- * draws and needs no second surface to open into.
- *
- * `System` stays in the cycle rather than being the off state of a light/dark
- * pair: it is a preference in its own right, and the only value that keeps
- * following the OS after the fact.
+ * The design draws only the closed state, a row with the theme on the right,
+ * which is what a menu wants: the setting is one line, not two. Light and dark
+ * are the whole choice. Until one is chosen the dashboard follows the operating
+ * system, and the row names what that resolved to.
  *
  * The trailing value is the visible state, and `aria-label` is the same fact
  * for a screen reader plus what activating will do, because a button whose
  * meaning changes on every press cannot say it in a static name.
  */
 function AppearanceControl() {
-  const { preference, setPreference } = useTheme()
-  const next =
-    THEME_PREFERENCES[
-      (THEME_PREFERENCES.indexOf(preference) + 1) % THEME_PREFERENCES.length
-    ]
+  const { resolved, toggle } = useTheme()
+  const current = resolved === "dark" ? "Dark" : "Light"
+  const next = resolved === "dark" ? "Light" : "Dark"
 
   return (
     <MenuItem
       label="Appearance"
-      icon={FiMoon}
-      trailing={THEME_LABELS[preference]}
-      ariaLabel={`Appearance: ${THEME_LABELS[preference]}. Switch to ${THEME_LABELS[next]}.`}
-      onPress={() => setPreference(next)}
+      icon={resolved === "dark" ? FiMoon : FiSun}
+      trailing={current}
+      hasTrailingGutter
+      ariaLabel={`Appearance: ${current}. Switch to ${next}.`}
+      onPress={toggle}
     />
   )
 }
@@ -334,10 +337,13 @@ export function AccountMenu({
 }) {
   const { logout } = useAuth()
   const { docs_url, terms_url, privacy_url, feedback_enabled } = useDeployment()
-  const hostsSurface = useSurfaceVisibility()
+  const isNavVisible = useNavVisibility()
   const organization = useOrganizationContext()
+  // A caller with no organization has no context to read a name from, so the
+  // profile names them instead; everyone else needs no second request.
+  const profile = useProfile(isNoOrganizationError(organization.error))
   const [open, setOpen] = useState(false)
-  const identity = sessionIdentity(organization.data?.caller)
+  const identity = sessionIdentity(organization.data?.caller ?? profile.data)
   const badgeLabel = useAccountBadgeLabel()
   const triggerLabel = badgeLabel
     ? `Account: ${identity.name}, ${badgeLabel}`
@@ -397,6 +403,10 @@ export function AccountMenu({
             to="/account"
             onNavigate={() => setOpen(false)}
           />
+          {/* Whatever an edition adds under the account itself, before the
+              appearance row: it belongs with who is signed in, not with how
+              the page looks. */}
+          <AccountMenuRows closeMenu={() => setOpen(false)} />
           <AppearanceControl />
           {/* The deployment's own pages, which used to sit in the organization
               rail's General section. They are the deployment talking about
@@ -468,7 +478,7 @@ export function AccountMenu({
           ) : null}
           <div className={MENU_DIVIDER} />
           {/* The top bar's destinations remain reachable in the mobile drawer. */}
-          {hostsSurface(PLAYGROUND_NAV_ITEM) && (
+          {isNavVisible(PLAYGROUND_NAV_ITEM) && (
             <MenuLink
               label={PLAYGROUND_NAV_ITEM.label}
               icon={PLAYGROUND_NAV_ITEM.icon}
@@ -477,22 +487,12 @@ export function AccountMenu({
               className="md:hidden"
             />
           )}
-          {docs_url ? (
-            <MenuExternalLink
-              label="Documentation"
-              icon={FiBookOpen}
-              href={docs_url}
-              className="md:hidden"
-            />
-          ) : (
-            <MenuLink
-              label="Documentation"
-              icon={FiBookOpen}
-              to="/docs"
-              onNavigate={() => setOpen(false)}
-              className="md:hidden"
-            />
-          )}
+          <MenuExternalLink
+            label="Documentation"
+            icon={FiBookOpen}
+            href={documentationHref({ docs_url })}
+            className="md:hidden"
+          />
           {feedback_enabled && onOpenFeedback ? (
             <MenuItem
               label="Feedback"
@@ -529,7 +529,11 @@ export function AccountMenu({
           {/* Neutral, not danger-colored. Ending a session is reversible by
               signing in again, so red here spends the color that marks the
               deletes on the pages behind this menu. */}
-          <MenuItem label="Log out" icon={FiLogOut} onPress={logout} />
+          <MenuItem
+            label="Log out"
+            icon={FiLogOut}
+            onPress={() => void logout()}
+          />
         </Popover.Dialog>
       </Popover.Content>
     </Popover>

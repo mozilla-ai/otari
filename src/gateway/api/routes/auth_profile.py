@@ -1,8 +1,13 @@
-"""The name a signed-in identity goes by, which is the one thing about itself it can change.
+"""Who the signed-in identity is, and the name it goes by, which is the one thing about itself it can change.
 
-``PATCH /api/v1/auth/profile`` always acts on the caller's own identity: it takes
-no id, and an operator changing somebody else's name belongs to the deployment
-administration surface rather than here.
+``GET`` and ``PATCH /api/v1/auth/profile`` always act on the caller's own
+identity: they take no id, and an operator reading or changing somebody else's
+name belongs to the deployment administration surface rather than here.
+
+``GET`` answers whether or not the caller belongs to an organization, which
+``GET /api/v1/organizations/me`` cannot: it 404s for an identity with no active
+membership, and the dashboard still has to know whose session it holds to name
+the account and to tell an invitation for another address apart.
 
 It sits beside the password and passkey routes because it answers the same
 question they do, "what may the signed-in identity change about itself", and it
@@ -26,8 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH, CallerIdentityPublic
-from gateway.services.tenancy.provisioning_service import password_claims_deployment
-from gateway.services.tenancy.user_service import update_full_name
+from gateway.services.tenancy import describe_caller, update_full_name
 
 # Declared on the router rather than left to arrive through ``CurrentIdentity``,
 # matching `auth_password.py`: the credential check is then a property of the
@@ -63,6 +67,20 @@ class UpdateProfileRequest(BaseModel):
     )
 
 
+@router.get("")
+async def get_own_profile(
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CallerIdentityPublic:
+    """Report who the caller is, whether or not they belong to an organization.
+
+    The same shape ``GET /api/v1/organizations/me`` carries as ``caller``, for
+    an identity that context cannot describe because it has no active
+    membership.
+    """
+    return await describe_caller(db, identity)
+
+
 @router.patch("")
 async def update_own_profile(
     body: UpdateProfileRequest,
@@ -77,13 +95,7 @@ async def update_own_profile(
     the whole membership context.
     """
     updated = await update_full_name(db, identity, full_name=body.full_name)
-    return CallerIdentityPublic(
-        user_id=updated.id,
-        email=updated.email,
-        full_name=updated.full_name,
-        has_password=updated.hashed_password is not None,
-        claims_deployment=await password_claims_deployment(db, updated),
-    )
+    return await describe_caller(db, updated)
 
 
 __all__ = ["router"]

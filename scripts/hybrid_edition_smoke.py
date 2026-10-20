@@ -54,6 +54,11 @@ It walks:
    frames reach the caller as ``text/event-stream``, and the usage report carries
    the ``ttft_ms`` that only a streamed attempt produces.
 
+11. ``GET /api/v1/models`` relays the control plane's model list for the
+   caller's token, and an unknown token is refused with the platform's 401.
+12. An embedding, the pass-through path: resolved and dispatched like a
+   completion, and reported with the provider's tokens.
+
 Standard library only, and no dev dependencies, for the same reason as
 ``oss_edition_smoke.py``: CI runs it against ``uv sync --frozen --no-dev``, so a
 dev-only import on a hybrid code path fails here.
@@ -122,6 +127,7 @@ OTARI_CREDENTIAL_HEADERS = ("otari-key", "x-gateway-token", "x-user-token")
 
 GATEWAY_TOKEN = f"gw_hybrid_smoke_{secrets.token_hex(8)}"
 # One user token per control-plane behavior the smoke needs.
+MODELS_LISTED = ("openai:smoke-model", "openai:smoke-model-2")
 USER_TOKEN_OK = f"tk_ok_{secrets.token_hex(8)}"
 USER_TOKEN_BROKE = f"tk_broke_{secrets.token_hex(8)}"
 USER_TOKEN_THROTTLED = f"tk_throttled_{secrets.token_hex(8)}"
@@ -132,6 +138,7 @@ USER_TOKEN_CODE_MALFORMED = f"tk_code_malformed_{secrets.token_hex(8)}"
 OPENAI_KEY = f"sk-hybrid-smoke-{secrets.token_hex(8)}"
 ANTHROPIC_KEY = f"sk-ant-hybrid-smoke-{secrets.token_hex(8)}"
 OPENAI_MODEL = "hybrid-smoke-model"
+EMBEDDING_MODEL = "hybrid-smoke-embedding"
 ANTHROPIC_MODEL = "claude-hybrid-smoke"
 
 REPLY = "hybrid-smoke-ok"
@@ -171,6 +178,7 @@ LIVE_TAVILY_KEY_ENV = "OTARI_SMOKE_TAVILY_API_KEY"
 LIVE_OPENAI_MODEL_ENV = "OTARI_SMOKE_OPENAI_MODEL"
 LIVE_ANTHROPIC_MODEL_ENV = "OTARI_SMOKE_ANTHROPIC_MODEL"
 DEFAULT_LIVE_OPENAI_MODEL = "gpt-4.1-mini"
+LIVE_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_LIVE_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 # Anthropic's code-execution server tool is behind this beta; the gateway forwards
 # the caller's anthropic-beta header, so the caller sends it as a real SDK would.
@@ -455,6 +463,16 @@ class _ControlPlaneHandler(_RecordingHandler):
             )
         elif route == "code-execution/resolve":
             self._respond(200, code_execution_policy)
+        elif route == "models/resolve":
+            self._respond(
+                200,
+                {
+                    "models": [
+                        {"id": MODELS_LISTED[1], "context_window": 262144, "max_output_tokens": 8192},
+                        {"id": MODELS_LISTED[0], "created": 1},
+                    ]
+                },
+            )
         else:
             self._respond(404, {"detail": f"fake control plane has no route {route}"})
 
@@ -534,6 +552,20 @@ class _ProviderHandler(_RecordingHandler):
                 self._respond(401, {"error": {"message": "wrong OpenAI key"}})
                 return
             self._respond(200, self._responses(body if isinstance(body, dict) else {}))
+        elif path == "/openai/v1/embeddings":
+            item = self._record("embeddings", body)
+            if item.headers.get("authorization") != f"Bearer {OPENAI_KEY}":
+                self._respond(401, {"error": {"message": "wrong OpenAI key"}})
+                return
+            self._respond(
+                200,
+                {
+                    "object": "list",
+                    "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2, 0.3]}],
+                    "model": EMBEDDING_MODEL,
+                    "usage": {"prompt_tokens": 5, "total_tokens": 5},
+                },
+            )
         elif path == "/anthropic/v1/messages":
             item = self._record("messages", body)
             if item.headers.get("x-api-key") != ANTHROPIC_KEY:
@@ -1370,6 +1402,25 @@ def check_platform_refusals(base_url: str, fakes: Fakes) -> None:
     log("Budget, rate-limit and authentication refusals are forwarded, and nothing is dispatched or reported")
 
 
+def run_models(base_url: str, fakes: Fakes) -> None:
+    """GET /models relays the control plane's list and limits for the caller's token, and refuses an unknown one."""
+    status, body, _ = _request("GET", f"{base_url}{API_ROOT}/models", headers={KEY_HEADER: USER_TOKEN_OK})
+    _expect(status, 200, "listing models", body)
+    listed = [m.get("id") for m in body.get("data", [])]
+    _check(listed == sorted(MODELS_LISTED), f"model list was {listed!r}")
+    limits = {m.get("id"): (m.get("context_window"), m.get("max_output_tokens")) for m in body.get("data", [])}
+    _check(
+        limits == {MODELS_LISTED[1]: (262144, 8192), MODELS_LISTED[0]: (None, None)},
+        f"model limits were {limits!r}",
+    )
+    resolves = fakes.control_plane.recorder.all("models/resolve")
+    _check(len(resolves) == 1 and resolves[0].body == {}, f"models resolve: {[r.body for r in resolves]!r}")
+
+    status, body, _ = _request("GET", f"{base_url}{API_ROOT}/models", headers={KEY_HEADER: USER_TOKEN_UNKNOWN})
+    _expect(status, 401, "listing models with an unknown token", body)
+    log("GET /models relayed the control plane's list and forwarded its refusal")
+
+
 def run_web_search(base_url: str, fakes: Fakes) -> None:
     """Managed web search: resolve body, credential-free search query, and the result reaching the model."""
     chats_before = len(fakes.provider.recorder.all("chat"))
@@ -1769,6 +1820,44 @@ def run_streaming_tool_loop(base_url: str, fakes: Fakes) -> None:
     log("A streamed tool loop ran the tool mid-stream and kept the gateway's own call off the wire")
 
 
+def run_embeddings(base_url: str, fakes: Fakes) -> None:
+    """One embedding: a pass-through route resolves, dispatches and reports as a completion does."""
+    model = LIVE_EMBEDDING_MODEL if fakes.live else EMBEDDING_MODEL
+    before = len(fakes.control_plane.recorder.all("usage"))
+    status, body, headers = _request(
+        "POST",
+        f"{base_url}{API_ROOT}/embeddings",
+        headers={KEY_HEADER: USER_TOKEN_OK},
+        payload={"model": f"openai:{model}", "input": "hybrid smoke"},
+    )
+    _expect(status, 200, f"POST {API_ROOT}/embeddings", body)
+    data = body.get("data") if isinstance(body, dict) else None
+    _check(
+        isinstance(data, list) and bool(data) and bool(data[0].get("embedding")),
+        f"the embedding came back empty: {body!r}",
+    )
+    resolve = fakes.control_plane.recorder.all("provider-keys/resolve")[-1]
+    _check(
+        resolve.body == {"model": model, "provider": "openai"},
+        f"embedding resolve body is not what the contract documents: {resolve.body!r}",
+    )
+    if not fakes.live:
+        embeddings = fakes.provider.recorder.all("embeddings")
+        _check(len(embeddings) == 1, f"expected one embedding call, got {len(embeddings)}")
+    fakes.note_dispatched(headers, "the embedding")
+
+    report = fakes.control_plane.recorder.wait_for("usage", before + 1)[-1].body
+    _check(isinstance(report, dict), f"usage report is not an object: {report!r}")
+    _check(report.get("correlation_id") == headers.get("otari-attempt-id"), f"wrong attempt reported: {report!r}")
+    _check(report.get("status") == "success", f"embedding usage report status: {report!r}")
+    usage = report.get("usage") or {}
+    if fakes.live:
+        _check(int(usage.get("prompt_tokens") or 0) > 0, f"embedding usage report carries no tokens: {report!r}")
+    else:
+        _check(usage.get("prompt_tokens") == 5, f"embedding usage report tokens: {report!r}")
+    log("An embedding resolved, dispatched with the attempt's credential, and was reported")
+
+
 def check_every_attempt_was_reported(fakes: Fakes) -> None:
     """Exactly one usage report per dispatched attempt, and none for anything else.
 
@@ -1807,6 +1896,7 @@ STEPS: tuple[Callable[[str, Fakes], None], ...] = (
     lambda base_url, fakes: check_health_and_edition(base_url),
     run_completion,
     check_platform_refusals,
+    run_models,
     run_web_search,
     check_web_fetch_is_off_by_default,
     run_mcp,
@@ -1815,6 +1905,7 @@ STEPS: tuple[Callable[[str, Fakes], None], ...] = (
     run_native_web_search,
     run_streaming_completion,
     run_streaming_tool_loop,
+    run_embeddings,
     lambda base_url, fakes: check_every_attempt_was_reported(fakes),
 )
 

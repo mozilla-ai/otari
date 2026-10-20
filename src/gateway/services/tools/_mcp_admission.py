@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import Counter
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from gateway.exceptions.tools_exceptions import McpServerConfigurationError, McpServerDeclarationError
 from gateway.log_config import logger
@@ -13,12 +15,19 @@ from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
+if TYPE_CHECKING:
+    from gateway.services._tool_loop import ToolBackend
+
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
 MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
 MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
     "A request-supplied MCP server name collides with one of this workspace's stored servers"
 )
 MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL = "Configured MCP servers do not have unique names"
+MCP_TOOL_SHADOWS_BUILTIN_DETAIL_TEMPLATE = (
+    "An MCP server exposes a tool named {name!r}, which this request also declares as a gateway tool. "
+    "Leave it out of the server's allowed_tools, or drop one of the two from the request."
+)
 
 
 def duplicate_mcp_server_name_detail(name: str) -> str:
@@ -127,3 +136,17 @@ async def admit_mcp_servers(
             raise McpServerDeclarationError(MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL)
         mcp_servers = (mcp_servers or []) + stored_servers
     return mcp_servers
+
+
+def refuse_shadowed_builtin_tools(pool: ToolBackend, builtin_names: Iterable[str]) -> None:
+    """Refuse a request whose connected MCP servers expose a tool named like a built-in tool it declared.
+
+    Runs once the servers are connected, since only then are their tool names known.
+    Neither tool is renamed: the model, the caps and the bill all know each one by its name.
+
+    Raises:
+        McpServerDeclarationError: a server exposes one of ``builtin_names``.
+    """
+    for name in sorted(builtin_names):
+        if pool.owns_tool(name):
+            raise McpServerDeclarationError(MCP_TOOL_SHADOWS_BUILTIN_DETAIL_TEMPLATE.format(name=name))

@@ -31,6 +31,7 @@ from gateway.schemas.tools import OrgWebSearchKeyCreateRequest, WorkspaceWebSear
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.tools import WebSearchKeyService
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
@@ -313,7 +314,7 @@ def test_an_archived_key_is_not_searched_with(
 
 
 def _service(db: AsyncSession) -> WebSearchKeyService:
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     uow = UnitOfWork(db)
     return WebSearchKeyService(
         uow,

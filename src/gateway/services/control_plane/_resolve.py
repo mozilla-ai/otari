@@ -65,6 +65,7 @@ class ResolveEndpoint(StrEnum):
 
     CODE_EXECUTION = ("/gateway/code-execution/resolve", "Code execution resolution failed")
     MCP_SERVERS = ("/gateway/mcp-servers/resolve", "MCP server resolution failed")
+    MODELS = ("/gateway/models/resolve", "Model listing failed")
     PROVIDER_KEYS = ("/gateway/provider-keys/resolve", "Authorization request rejected")
     WEB_SEARCH = ("/gateway/web-search/resolve", "Web search resolution failed")
 

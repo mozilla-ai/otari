@@ -23,9 +23,8 @@ on:
       # make, tenancy, auth, usage and the deployment bootstrap included.
       - 'src/gateway/**'
       - 'cli/**'
-      # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a
-      # change to it changes the built app.
-      - 'docs/dashboard.md'
+      - 'any-search/**'
+      - 'any-fetch/**'
       # The suite boots the gateway through `uv run otari serve`, so its
       # dependency resolution is part of what has to still work.
       - 'pyproject.toml'
@@ -37,7 +36,8 @@ on:
       - 'web/**'
       - 'src/gateway/**'
       - 'cli/**'
-      - 'docs/dashboard.md'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-dashboard-parity.yml'

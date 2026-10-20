@@ -15,6 +15,7 @@ platform-fallback streaming paths. These tests pin that contract:
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 import logging
@@ -63,7 +64,7 @@ from gateway.api.routes._pipeline import (
     stream_final_attempt_extra_seconds,
     stream_first_chunk_timeout_seconds,
 )
-from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
+from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (
@@ -81,7 +82,9 @@ from gateway.ports.code_execution_policy_port import CodeExecutionPolicyScope
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo
+from gateway.schemas.inference import SettledCost
 from gateway.services.budgets import ReservationHandle
+from gateway.services.inference import DeploymentCharge
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools._mcp_admission import (
@@ -90,6 +93,7 @@ from gateway.services.tools._mcp_admission import (
     duplicate_mcp_server_name_detail,
 )
 from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL
+from gateway.services.traces import SessionRef
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -496,8 +500,9 @@ async def test_streaming_fallback_forwards_started_at_to_build_streaming_respons
 class _Settlement:
     """Records which settlement primitives the callbacks invoked."""
 
-    def __init__(self, pricing_source: PriceSource | None = "deployment") -> None:
+    def __init__(self, pricing_source: PriceSource | None = "deployment", *, per_request: bool = False) -> None:
         self.pricing_source = pricing_source
+        self.per_request = per_request
         self.reconciled: list[float] = []
         self.settled_tokens: list[int] = []
         self.refunded = 0
@@ -509,6 +514,8 @@ class _Settlement:
             usage = kwargs.get("usage_override")
             if kwargs.get("cost_override") is not None:
                 return LoggedUsage(Decimal(kwargs["cost_override"]), None)
+            if self.per_request and kwargs.get("error") is None:
+                return LoggedUsage(Decimal("0.005"), self.pricing_source)
             return LoggedUsage(Decimal("0.25"), self.pricing_source) if usage else LoggedUsage(None, None)
 
         async def fake_log_usage(**kwargs: Any) -> Decimal | None:
@@ -521,6 +528,10 @@ class _Settlement:
         async def fake_refund(db: Any, handle: Any) -> None:
             self.refunded += 1
 
+        async def fake_bills_per_request(db: Any, **kwargs: Any) -> bool:
+            return self.per_request
+
+        monkeypatch.setattr(pipeline, "bills_per_request", fake_bills_per_request)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)
         monkeypatch.setattr(pipeline, "record_usage", fake_record_usage)
         monkeypatch.setattr(pipeline, "reconcile_reservation", fake_reconcile)
@@ -528,9 +539,10 @@ class _Settlement:
 
 
 def _chunk(usage: CompletionUsage | None = None) -> ChatCompletionChunk:
+    """A chunk that finishes its choice, so a stream of these is complete."""
     return ChatCompletionChunk(
         id="c1",
-        choices=[],
+        choices=[ChunkChoice(delta=ChoiceDelta(), finish_reason="stop", index=0)],
         created=0,
         model="m",
         object="chat.completion.chunk",
@@ -539,7 +551,9 @@ def _chunk(usage: CompletionUsage | None = None) -> ChatCompletionChunk:
 
 
 def _reservation(estimate: Decimal = Decimal("0.5")) -> ReservationHandle:
-    return ReservationHandle(user_id="user-1", estimate=estimate, reserved=True, strategy="for_update")
+    return ReservationHandle(
+        user_id="user-1", estimate=estimate, reserved=True, strategy="for_update", scope_ceilings=()
+    )
 
 
 def _build(
@@ -550,6 +564,9 @@ def _build(
     started_at: float | None = None,
     tool_tally: ToolUsageTally | None = None,
     request_id: str | None = None,
+    deployment_charge: DeploymentCharge | None = None,
+    db: Any = None,
+    source_label: str | None = None,
 ) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
@@ -557,7 +574,7 @@ def _build(
         provider=LLMProvider.OPENAI,
         model="gpt-4",
         config=config,
-        db=cast(Any, object()),
+        db=cast(Any, db if db is not None else object()),
         log_writer=cast(Any, object()),
         api_key_id="key-1",
         user_id="user-1",
@@ -567,6 +584,8 @@ def _build(
         started_at=started_at,
         tool_tally=tool_tally,
         request_id=request_id,
+        deployment_charge=deployment_charge,
+        source_label=source_label,
     )
 
 
@@ -659,6 +678,27 @@ async def test_stream_without_usage_estimate_policy_charges_estimate(monkeypatch
 
     assert settlement.reconciled == [0.5]
     assert settlement.refunded == 0
+
+
+@pytest.mark.parametrize("policy", ["allow_free", "estimate", "fail"])
+@pytest.mark.asyncio
+async def test_stream_without_usage_of_a_per_request_model_charges_its_price(
+    monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    """The missing-usage policy is for token pricing; a model priced per request owes its flat rate."""
+    settlement = _Settlement(per_request=True)
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+
+    await _drain(_build(stream(), GatewayConfig(stream_missing_usage_policy=cast(Any, policy))))
+
+    assert settlement.reconciled == [Decimal("0.005")]
+    assert settlement.refunded == 0
+    (logged,) = settlement.logged
+    assert logged.get("error") is None
+    assert logged.get("cost_override") is None
 
 
 @pytest.mark.asyncio
@@ -793,12 +833,40 @@ async def test_completed_stream_row_carries_the_request_id(monkeypatch: pytest.M
     assert logged["request_id"] == "req-1"
 
 
+@pytest.mark.asyncio
+async def test_completed_stream_row_carries_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+
+    await _drain(_build(stream(), GatewayConfig(), source_label="s-abc"))
+
+    (logged,) = settlement.logged
+    assert logged["source_label"] == "s-abc"
+
+
+def _no_pricing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful row resolves its model's rate even without usage, in case it is priced per request."""
+
+    async def organization_for_workspace_id(db: Any, workspace_id: uuid.UUID | None) -> None:
+        return None
+
+    async def resolve_model_pricing(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(pipeline, "organization_for_workspace_id", organization_for_workspace_id)
+    monkeypatch.setattr(pipeline, "resolve_model_pricing", resolve_model_pricing)
+
+
 class _FakeLogWriter:
     def __init__(self) -> None:
         self.put_rows: list[Any] = []
 
-    async def put(self, row: Any) -> None:
+    async def put(self, row: Any) -> bool:
         self.put_rows.append(row)
+        return True
 
 
 @pytest.mark.asyncio
@@ -816,6 +884,7 @@ async def test_log_usage_skips_the_workspace_lookup_when_given_one(monkeypatch: 
         return uuid.uuid4()
 
     monkeypatch.setattr(pipeline, "workspace_for_key_id", counting_workspace_for_key_id)
+    _no_pricing(monkeypatch)
     workspace_id = uuid.uuid4()
 
     await log_usage(
@@ -832,8 +901,11 @@ async def test_log_usage_skips_the_workspace_lookup_when_given_one(monkeypatch: 
 
 
 @pytest.mark.asyncio
-async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row() -> None:
+async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An unrouted row has no attribution, and is findable by ``Otari-Request-ID`` all the same."""
+    _no_pricing(monkeypatch)
     writer = _FakeLogWriter()
 
     await log_usage(
@@ -852,6 +924,60 @@ async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row()
     assert row.policy_name is None
 
 
+def test_a_usage_row_names_its_session_by_the_trace_id_it_is_traced_under() -> None:
+    session = SessionRef(source="client", key="chat-42")
+    workspace_id = uuid.uuid4()
+
+    assert pipeline._session_trace_id(session, workspace_id, "user-1", "key-1") == session.trace_id(
+        workspace_id, "user-1", "key-1"
+    )
+    assert pipeline._session_trace_id(None, workspace_id, "user-1", "key-1") is None
+    # A hybrid request has no local workspace, and so no trace to name.
+    assert pipeline._session_trace_id(session, None, "user-1", "key-1") is None
+
+
+@pytest.mark.asyncio
+async def test_log_usage_stores_the_session_as_the_source_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gateway row names its session, so usage groups by the sessions the Sessions page lists."""
+    _no_pricing(monkeypatch)
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        source_label="s-abc",
+    )
+
+    (row,) = writer.put_rows
+    assert row.source_label == "s-abc"
+
+
+@pytest.mark.parametrize("paid", [False, True])
+@pytest.mark.asyncio
+async def test_log_usage_stores_whether_the_deployment_paid(monkeypatch: pytest.MonkeyPatch, paid: bool) -> None:
+    _no_pricing(monkeypatch)
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        deployment_paid=paid,
+    )
+
+    (row,) = writer.put_rows
+    assert row.deployment_paid is paid
+
+
 @pytest.mark.asyncio
 async def test_log_usage_still_resolves_the_workspace_when_not_given_one(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fallback stays intact for the callers that have no context to draw
@@ -866,6 +992,7 @@ async def test_log_usage_still_resolves_the_workspace_when_not_given_one(monkeyp
         return resolved
 
     monkeypatch.setattr(pipeline, "workspace_for_key_id", counting_workspace_for_key_id)
+    _no_pricing(monkeypatch)
     log_writer = _FakeLogWriter()
 
     await log_usage(
@@ -1235,11 +1362,9 @@ def _build_platform(
     )
 
 
-@pytest.mark.parametrize("yields_chunk", [True, False], ids=["no-usage-chunk", "zero-chunk"])
 @pytest.mark.asyncio
 async def test_platform_stream_without_usage_reports_final_success(
     monkeypatch: pytest.MonkeyPatch,
-    yields_chunk: bool,
 ) -> None:
     reports: list[dict[str, Any]] = []
 
@@ -1258,8 +1383,7 @@ async def test_platform_stream_without_usage_reports_final_success(
     monkeypatch.setattr(pipeline, "_schedule_usage_report", fake_schedule)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        if yields_chunk:
-            yield _chunk()
+        yield _chunk()
 
     await _drain(_build_platform(stream()))
 
@@ -1578,11 +1702,15 @@ def _content_chunk(chunk_id: str, text: str) -> ChatCompletionChunk:
     )
 
 
-def _usage_chunk(chunk_id: str, prompt_tokens: int) -> ChatCompletionChunk:
-    """An OpenAI ``include_usage`` chunk: usage, no choices."""
+def _usage_chunk(chunk_id: str, prompt_tokens: int, *, finishes: bool = False) -> ChatCompletionChunk:
+    """An OpenAI ``include_usage`` chunk: usage, no choices.
+
+    ``finishes`` puts the finished choice on it as well, as Cohere and Gemini
+    report usage, so a stream ending on it is complete.
+    """
     return ChatCompletionChunk(
         id=chunk_id,
-        choices=[],
+        choices=[ChunkChoice(delta=ChoiceDelta(), finish_reason="stop", index=0)] if finishes else [],
         created=0,
         model="gpt-4",
         object="chat.completion.chunk",
@@ -1649,7 +1777,7 @@ async def test_intermediate_usage_chunk_does_not_hold_the_final_answer(
         yield _usage_chunk("u1", 10)  # iteration 1's usage chunk, not terminal
         yield _content_chunk("c1", "final")
         yield _content_chunk("c2", "answer")
-        yield _usage_chunk("u2", 20)  # the real terminal carrier
+        yield _usage_chunk("u2", 20, finishes=True)  # the real terminal carrier
 
     iterator = _build_platform_stream(stream())
 
@@ -1696,7 +1824,7 @@ async def test_carrier_overflow_resumes_streaming_and_settles_on_a_later_carrier
         yield _usage_chunk("u1", 10)
         for index in range(6):
             yield _content_chunk(f"c{index}", f"part-{index}")
-        yield _usage_chunk("u2", 20)
+        yield _usage_chunk("u2", 20, finishes=True)
 
     emitted = [part async for part in _build_platform_stream(stream())]
 
@@ -1732,7 +1860,7 @@ async def test_buffered_terminal_carrier_is_relabeled_to_the_display_model(
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
         yield _content_chunk("c0", "hi")
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
     emitted = [part async for part in _build_platform_stream(stream(), display_model="my-alias")]
 
@@ -1771,7 +1899,7 @@ async def test_keepalives_continue_while_terminal_settlement_is_pending(
     reporter.install(monkeypatch)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
     iterator = _build_platform_stream(
         stream(),
@@ -1800,9 +1928,10 @@ async def test_cancellation_while_settling_leaves_the_report_running(
     reporter.install(monkeypatch)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
-    iterator = _build_platform_stream(stream())
+    # The canceled stream lets its settlement wait out the inline budget before the cancellation surfaces.
+    iterator = _build_platform_stream(stream(), config=GatewayConfig(platform={"usage_inline_timeout_ms": 50}))
     pending = asyncio.ensure_future(iterator.__anext__())
     await asyncio.wait_for(reporter.started.wait(), timeout=1)
 
@@ -2692,6 +2821,7 @@ async def _run_standalone(
     db: Any = None,
     display_model: str | None = None,
     workspace_id: uuid.UUID | None = None,
+    deployment_charge: DeploymentCharge | None = None,
 ) -> tuple[Any, Response]:
     """Drive the standalone non-streaming path with a faked provider call."""
 
@@ -2710,6 +2840,7 @@ async def _run_standalone(
         rate_limit_info=rate_limit_info,
         workspace_id=workspace_id,
     )
+    ctx.deployment_charge = deployment_charge
     response = Response()
     returned = await run_standalone_non_stream(
         adapter=chat._ADAPTER,
@@ -2880,7 +3011,12 @@ async def test_standalone_non_stream_marks_budget_exempt_rows(monkeypatch: pytes
     settlement.install(monkeypatch)
 
     exempt = ReservationHandle(
-        user_id="user-1", estimate=Decimal(0), reserved=False, strategy="for_update", counts_toward_budget=False
+        user_id="user-1",
+        estimate=Decimal(0),
+        reserved=False,
+        strategy="for_update",
+        counts_toward_budget=False,
+        scope_ceilings=(),
     )
     await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=exempt)
 
@@ -2965,6 +3101,76 @@ async def test_standalone_stream_has_no_first_chunk_deadline(monkeypatch: pytest
     assert settlement.reconciled == [0.25]
 
 
+def test_the_first_chunk_hold_defaults_to_fifteen_seconds_and_rejects_a_negative() -> None:
+    assert GatewayConfig().streaming_first_chunk_hold_ms == 15000
+    assert GatewayConfig(streaming_first_chunk_hold_ms=0).streaming_first_chunk_hold_ms == 0
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        GatewayConfig(streaming_first_chunk_hold_ms=-1)
+
+
+def _failing_on_first_read(started: list[bool]) -> Callable[..., Awaitable[AsyncIterator[ChatCompletionChunk]]]:
+    async def _acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        async def gen() -> AsyncIterator[ChatCompletionChunk]:
+            started.append(True)
+            raise TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'")
+            yield  # unreachable; makes this a generator
+
+        return gen()
+
+    return _acompletion
+
+
+@pytest.mark.asyncio
+async def test_a_held_stream_that_fails_before_its_first_chunk_raises_the_unstreamed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    started: list[bool] = []
+    monkeypatch.setattr(chat, "acompletion", _failing_on_first_read(started))
+
+    config = GatewayConfig()
+    ctx = _ctx(config, db=object(), log_writer=object(), reservation=_reservation())
+    with pytest.raises(HTTPException) as raised:
+        await run_single_attempt_stream(
+            adapter=chat._ADAPTER,
+            ctx=ctx,
+            tool_ctx=_tool_ctx(config=config),
+            call_kwargs={"model": "cohere:command-r", "messages": [{"role": "user", "content": "hi"}], "n": 1},
+            provider=LLMProvider.COHERE,
+            model="command-r",
+        )
+
+    assert raised.value.status_code == 400
+    assert started == [True]
+
+
+@pytest.mark.asyncio
+async def test_with_the_hold_off_the_stream_is_not_read_before_the_response_is_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    started: list[bool] = []
+    monkeypatch.setattr(chat, "acompletion", _failing_on_first_read(started))
+
+    config = GatewayConfig(streaming_first_chunk_hold_ms=0)
+    ctx = _ctx(config, db=object(), log_writer=object(), reservation=_reservation())
+    response = await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(config=config),
+        call_kwargs={"model": "cohere:command-r", "messages": [{"role": "user", "content": "hi"}], "n": 1},
+        provider=LLMProvider.COHERE,
+        model="command-r",
+    )
+
+    assert response.status_code == 200
+    assert started == []
+    chunks = await _drain(response)
+    assert any('"code": "provider_error"' in chunk for chunk in chunks)
+
+
 @pytest.mark.parametrize(
     ("reason", "status_code"),
     [
@@ -2977,3 +3183,260 @@ def test_a_code_execution_policy_failure_renders_its_status(
     reason: CodeExecutionPolicyResolutionFailure, status_code: int
 ) -> None:
     assert pipeline._code_execution_policy_failure_status(reason) == status_code
+
+
+# ---------------------------------------------------------------------------
+# Deployment-paid requests are charged where their reservation settles
+# ---------------------------------------------------------------------------
+
+
+class _ChargeRecorder:
+    """A billing port that records each charge with how many reconciles preceded it."""
+
+    def __init__(self, settlement: _Settlement) -> None:
+        self.settlement = settlement
+        self.charges: list[tuple[Decimal, str | None, int]] = []
+
+    async def charge(
+        self, *, organization_id: uuid.UUID, amount: Decimal, description: str | None = None, **_: Any
+    ) -> None:
+        assert organization_id == _ORGANIZATION_ID
+        self.charges.append((amount, description, len(self.settlement.reconciled)))
+
+
+class _SavepointDb:
+    @contextlib.asynccontextmanager
+    async def begin_nested(self) -> AsyncIterator[None]:
+        yield
+
+
+def _deployment_charge(recorder: _ChargeRecorder) -> DeploymentCharge:
+    return DeploymentCharge(
+        billing=cast(Any, recorder),
+        organization_id=_ORGANIZATION_ID,
+        api_key_id="key-1",
+        actor_user_id=None,
+        request_id="req-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_stream_is_charged_once_before_it_settles(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+        yield _chunk(CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+
+    await _drain(_build(stream(), GatewayConfig(), deployment_charge=_deployment_charge(recorder), db=_SavepointDb()))
+
+    # Charged before the reconcile whose commit lands it.
+    assert recorder.charges == [(Decimal("0.25"), "openai:gpt-4", 0)]
+    assert settlement.reconciled == [Decimal("0.25")]
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_stream_abandoned_after_usage_is_charged_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+        yield _chunk()
+
+    response = _build(stream(), GatewayConfig(), deployment_charge=_deployment_charge(recorder), db=_SavepointDb())
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    await iterator.aclose()
+
+    assert recorder.charges == [(Decimal("0.25"), "openai:gpt-4", 0)]
+    assert settlement.reconciled == [Decimal("0.25")]
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_stream_abandoned_before_usage_is_not_charged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+        yield _chunk()
+
+    response = _build(stream(), GatewayConfig(), deployment_charge=_deployment_charge(recorder), db=_SavepointDb())
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    await iterator.aclose()
+
+    assert recorder.charges == []
+    assert settlement.refunded == 1
+
+
+@pytest.mark.parametrize(("reported", "charged"), [(None, []), (_PARTIAL_USAGE, [Decimal("0.25")])])
+@pytest.mark.asyncio
+async def test_a_failed_deployment_paid_stream_is_charged_what_it_reported(
+    monkeypatch: pytest.MonkeyPatch, reported: CompletionUsage | None, charged: list[Decimal]
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(reported)
+        raise RuntimeError("upstream broke")
+
+    await _drain(_build(stream(), GatewayConfig(), deployment_charge=_deployment_charge(recorder), db=_SavepointDb()))
+
+    assert [amount for amount, _, _ in recorder.charges] == charged
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_stream_without_usage_is_charged_its_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+
+    await _drain(
+        _build(
+            stream(),
+            GatewayConfig(stream_missing_usage_policy="estimate"),
+            deployment_charge=_deployment_charge(recorder),
+            db=_SavepointDb(),
+        )
+    )
+
+    assert [amount for amount, _, _ in recorder.charges] == [Decimal("0.5")]
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_paid_completion_is_charged_once_before_it_settles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    await _run_standalone(
+        monkeypatch,
+        result=_completion(usage=_usage()),
+        reservation=_reservation(),
+        db=_SavepointDb(),
+        deployment_charge=_deployment_charge(recorder),
+    )
+
+    assert recorder.charges == [(Decimal("0.25"), "openai:gpt-4", 0)]
+    assert settlement.reconciled == [Decimal("0.25")]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_deployment_paid_completion_is_not_charged(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    recorder = _ChargeRecorder(settlement)
+
+    with pytest.raises(HTTPException):
+        await _run_standalone(
+            monkeypatch,
+            error=RuntimeError("upstream broke"),
+            reservation=_reservation(),
+            db=_SavepointDb(),
+            deployment_charge=_deployment_charge(recorder),
+        )
+
+    assert recorder.charges == []
+    assert settlement.refunded == 1
+
+
+async def _abandon(response: Any) -> None:
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    await iterator.aclose()
+
+
+async def _completed_stream() -> AsyncIterator[ChatCompletionChunk]:
+    yield _chunk(CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+
+
+async def _failed_stream() -> AsyncIterator[ChatCompletionChunk]:
+    yield _chunk(_PARTIAL_USAGE)
+    raise RuntimeError("upstream broke")
+
+
+async def _abandoned_stream() -> AsyncIterator[ChatCompletionChunk]:
+    yield _chunk(_PARTIAL_USAGE)
+    yield _chunk()
+
+
+async def _stream_without_usage() -> AsyncIterator[ChatCompletionChunk]:
+    yield _chunk()
+
+
+@pytest.mark.parametrize(
+    ("stream", "config", "abandoned"),
+    [
+        (_completed_stream, GatewayConfig(), False),
+        (_failed_stream, GatewayConfig(), False),
+        (_abandoned_stream, GatewayConfig(), True),
+        (_stream_without_usage, GatewayConfig(stream_missing_usage_policy="estimate"), False),
+        (_stream_without_usage, GatewayConfig(stream_missing_usage_policy="allow_free"), False),
+    ],
+    ids=["completed", "failed", "abandoned", "estimate", "allow_free"],
+)
+@pytest.mark.parametrize("paid", [False, True], ids=["byo", "deployment_paid"])
+@pytest.mark.asyncio
+async def test_every_row_a_stream_writes_says_whether_the_deployment_paid(
+    monkeypatch: pytest.MonkeyPatch,
+    stream: Callable[[], AsyncIterator[ChatCompletionChunk]],
+    config: GatewayConfig,
+    abandoned: bool,
+    paid: bool,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    charge = _deployment_charge(_ChargeRecorder(settlement)) if paid else None
+
+    response = _build(stream(), config, deployment_charge=charge, db=_SavepointDb())
+    if abandoned:
+        await _abandon(response)
+    else:
+        await _drain(response)
+
+    assert settlement.logged
+    assert [row["deployment_paid"] for row in settlement.logged] == [paid] * len(settlement.logged)
+
+
+@pytest.mark.parametrize("paid", [False, True], ids=["byo", "deployment_paid"])
+@pytest.mark.parametrize("fails", [False, True], ids=["served", "failed"])
+@pytest.mark.asyncio
+async def test_a_completions_row_says_whether_the_deployment_paid(
+    monkeypatch: pytest.MonkeyPatch, paid: bool, fails: bool
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    charge = _deployment_charge(_ChargeRecorder(settlement)) if paid else None
+
+    with contextlib.suppress(HTTPException):
+        await _run_standalone(
+            monkeypatch,
+            result=_completion(usage=_usage()),
+            error=RuntimeError("upstream broke") if fails else None,
+            reservation=_reservation(),
+            db=_SavepointDb(),
+            deployment_charge=charge,
+        )
+
+    (row,) = settlement.logged
+    assert row["deployment_paid"] is paid
+    assert (row.get("error") is not None) is fails

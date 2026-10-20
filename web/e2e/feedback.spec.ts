@@ -4,15 +4,14 @@ import { login, MASTER_KEY } from "./helpers"
 const MESSAGE =
   "We use Otari to track research spending. Comparing groups would help."
 
-// Feedback is off by default, and the e2e gateway runs the default. Turning it
-// on in the bootstrap alone is enough, because the submission is intercepted
-// below and never reaches the gateway.
-async function enableFeedback(page: Page) {
+// The e2e gateway has feedback on, so the off case is stubbed in the bootstrap.
+// Every submission is intercepted and never reaches the receiver.
+async function disableFeedback(page: Page) {
   await page.route("**/api/v1/bootstrap", async (route) => {
     const response = await route.fetch()
     await route.fulfill({
       response,
-      json: { ...(await response.json()), feedback_enabled: true },
+      json: { ...(await response.json()), feedback_enabled: false },
     })
   })
 }
@@ -35,7 +34,6 @@ test("desktop: the top bar opens it beside Documentation, a failure keeps the dr
         : { status: 204 },
     )
   })
-  await enableFeedback(page)
   await login(page)
   // The account menu's row is the phone's entry, so on a desktop it is hidden.
   await page.getByRole("button", { name: /^Account:/ }).click()
@@ -86,7 +84,6 @@ test.describe("phone", () => {
       submissions++
       await route.fulfill({ status: 204 })
     })
-    await enableFeedback(page)
     await page.goto("/")
     await page.locator('input[type="password"]').fill(MASTER_KEY)
     await page.locator('input[type="password"]').press("Enter")
@@ -122,6 +119,7 @@ test.describe("phone", () => {
 })
 
 test("a gateway with feedback off never offers it", async ({ page }) => {
+  await disableFeedback(page)
   await login(page)
   await expect(
     page.getByRole("link", { name: "Documentation", exact: true }),

@@ -205,6 +205,15 @@ export const WithRowDetail: Story = {
   },
 }
 
+/**
+ * `mobileLayout="cards"` swaps the grid for one card per row on a phone-width
+ * viewport: the row-header column is the title, an `actions` column sits beside
+ * it, and the rest are label and value pairs. Narrow the canvas to see it.
+ */
+export const MobileCards: Story = {
+  args: { mobileLayout: "cards" },
+}
+
 /** Draggable column resize handles. */
 export const Resizable: Story = {
   args: { isResizable: true },

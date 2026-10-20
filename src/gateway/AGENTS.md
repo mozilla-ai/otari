@@ -10,7 +10,7 @@ artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 [The modular monolith](../../ARCHITECTURE.md#the-modular-monolith) names the
 target shape and its import rules,
 [Layering](../../.github/skills/backend-standards/SKILL.md#layering) gives the
-rules for each layer, and [docs/domains.md](../../docs/domains.md) says what each
+rules for each layer, and [DOMAINS.md](../../DOMAINS.md) says what each
 domain owns.
 
 ## Ports and composition
@@ -46,7 +46,9 @@ Completion requests follow this order:
 5. Apply organization, policy, and request guardrails.
 6. Resolve MCP and gateway-run tool policy.
 7. Dispatch through any-llm.
-8. Record usage and reconcile or refund reservations.
+8. Record usage and reconcile or refund reservations. Each usage row the
+   writer accepts is also reported to `UsageSignalPort` (`SignalingLogWriter` in
+   `services/log_writer.py`), a Null Object unless an overlay binds one.
 
 Chat, Messages, and Responses share the pipeline in
 `api/routes/_pipeline.py`; hybrid attempt reporting lives in `_platform.py`,
@@ -96,6 +98,9 @@ dashboard session. It does not prove that the session may act deployment-wide.
   (`types/session_principal.py`). Adding a second such route means doing all
   three, not reusing the type.
 - Non-billable catalog reads use `verify_catalog_reader`.
+- A service key manages its own end users (`routes/end_users.py`) through
+  `verify_service_key`, which takes neither the master key nor a cookie, and
+  the budgets service scopes every lookup to the key's user.
 
 Tenant lookups include the tenant predicate and return 404 for a foreign ID.
 Client filters may narrow the server-derived scope and never widen it. A tenant
@@ -110,9 +115,16 @@ organization fields cannot move billing or credential resolution.
 
 ## Pricing and money
 
-`core/metered_pricing.py` is the only cost calculation. Settlement, estimates,
-repricing, and imported usage all use it. Cache-token convention is explicit,
-and a settled total is rounded once, half-up, to the micro-dollar.
+`core/metered_pricing.py` holds the cost arithmetic: the token meters, the
+per-million reading and the rounding. Settlement, estimates, repricing, and
+imported usage all use it. Cache-token convention is explicit, and a settled
+total is rounded once, half-up, to the micro-dollar.
+
+Which meter a rate prices is the pricing domain's rule, `price_usage` in
+`services/pricing/`: the rate's `unit` chooses it. A pass-through endpoint
+reports what its result was billed on (`PassthroughBilling` in
+`services/inference/`) and never prices it itself, so standalone settlement and
+the control plane price one request the same way.
 
 Money columns use the decimal types in `models/money.py`. Widen incoming
 floats with `to_usd` at service boundaries; never cast a decimal to float
@@ -121,6 +133,14 @@ metrics.
 
 Price lookup order belongs to `services/pricing_service.py`. Do not duplicate
 it in a route or tool backend.
+
+A completion served on a `ModelProviderPort` credential is deployment-paid
+(`ResolvedProvider.deployment_paid`). The funding rule is the inference
+domain's (`services/inference/_deployment_funding.py`): `_pipeline.py` admits
+the request through it before dispatch, and charges its settled cost on
+`ctx.db` just before the reservation settles, so the charge lands in that commit.
+Every usage row such a request writes once admitted carries
+`deployment_paid=True` (from `ctx.deployment_charge`); every other row is false.
 
 ## Budget enforcement
 
@@ -159,28 +179,48 @@ settlement. Work that depends on the account a candidate's credential reaches
 runs in its `prepare_kwargs` step, once per candidate, and a candidate that step
 cannot serve is skipped without reordering the plan (`CandidateCannotServe`).
 
+The walker's `admit_attempt` step moves the reservation onto the budgets of each candidate's provider through `BudgetService.move_reservation`, and a budget on that provider alone with no room skips the candidate the same way.
+
 ## Tools, MCP, and guardrails
 
-An `otari_*` tool type always runs in the gateway. Who runs a provider-native
-web-search type is described in
-[web-search interception](../../docs/tools.md#web-search-interception) and
-decided by `claims_provider_web_search` in `services/tools/_web_declarations.py`.
-Each tool's admission step (web, code execution, MCP) lives in `services/tools/`, and
-`prepare_gateway_tools` only calls them and renders their refusals. A provider-native
-code-execution type is decided by the executor (`models/tools.py`,
-resolved in `services/tools/_code_execution_declarations.py`): a workspace pin wins over everything, the
-`Otari-Code-Execution` header wins over the deployment default, and `auto`
-claims a declaration only when the dispatched provider does not run it
-natively. The workspace policy is read once, in the request preamble, and
-reused at admission; the same decision says where a referenced upload goes,
-staged for the gateway's sandbox or copied, for each candidate as it is
-dispatched, into the provider account whose container will read it
-(`FileService.provider_file_ids`). The tool loop is in
-`services/mcp_loop.py`, sandbox and search backends under `services/`, and
-outbound URL checks in `services/url_safety.py`.
+An `otari_*` tool type always runs in the gateway. A built-in tool declared in
+a provider's own words (code execution, web search, Anthropic's web fetch) is
+decided per candidate by `decide_candidate_tools`
+(`services/tools/_candidate_tools.py`), from the preference the request
+resolves once and the tool's own `BuiltinTool.runs_natively` answer: `otari`
+runs it here on every candidate, `auto` only where the candidate's provider does
+not run it natively, and `provider` never. Code execution's preference is the workspace pin, then the
+`Otari-Code-Execution` header, then the deployment default
+(`services/tools/_code_execution_declarations.py`); search's is
+`web_search_intercept`, then `Otari-Web-Search`, and fetch's `Otari-Web-Fetch`
+(`services/tools/_web_declarations.py`), where no header forwards the keyword.
+Each tool's admission step (web, code execution, MCP) lives in `services/tools/`.
+`prepare_gateway_tools` calls them once for the candidates that share one
+answer (a `CandidateVariant`) and renders their refusals; a refusal skips only
+those candidates (`CandidateCannotServe`) and refuses the request only where
+none is left, and each walker dispatches a candidate with
+`ToolContext.for_candidate`. A request that also declares the explicit code
+type decides every candidate alike. A hybrid attempt is never skipped, so hybrid
+decides a request one of whose attempts would be refused as a whole (web tools by every attempt, code by
+the head); its walkers take each attempt's request
+fields and tools, and the web policy is read once per request
+(`_RequestWebPolicy`). The workspace's code execution policy is read
+once, in the request preamble, and reused at admission; the same decision says
+where a referenced upload goes, staged for the gateway's sandbox or copied, for
+each candidate as it is dispatched, into the provider account whose container
+will read it (`FileService.provider_file_ids`). The tool loop is in
+`services/mcp_loop.py`, the sandbox and the older search backend under `services/`,
+the web search and fetch backends on any-search and any-fetch under `services/tools/`,
+and outbound URL checks in `services/url_safety.py`. A request that declares several
+tools gets one loop over all of them: `_open_tool_backends` in `_pipeline.py`
+opens each declared backend into a `CombinedToolBackend` (`services/tools/_combined_backend.py`),
+web search and web fetch as two of them when a search instance serves the request.
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.
+A workspace with no row gets `code_execution_on_without_policy()` and
+`web_search_on_without_policy()` (`core/config.py`); the request path, the
+Playground menu and the policy endpoints' `default_enabled` all read them.
 An organization's own web search key changes which account a workspace's
 searches bill to, not whether search is available (`services/tools/_web_search_keys.py`).
 MCP servers are workspace resources rather than a refinement of a deployment
@@ -196,10 +236,13 @@ for example, enforces the workspace search disable switch.
 
 ## Provider and search credential stores
 
-`provider_store_service.py` and `search_tool_store_service.py` overlay
-encrypted stored rows on a preserved config baseline and refresh them across
-workers. Stored values win over config values of the same name; config entries
-remain read-only through the management API.
+`search_tool_store_service.py` overlays encrypted stored rows on a preserved
+config baseline and refreshes them across workers. Stored values win over config
+values of the same name; config entries remain read-only through the management
+API. A provider credential the deployment stores is a hosted provider (below);
+the `provider_credentials` rows the Deployment providers page used to store are
+moved onto hosted providers at startup (`_move_deployment_providers` in
+`main.py`), and nothing else reads them.
 
 `secret_box.py` owns encryption through `OTARI_SECRET_KEY`. Public responses
 return metadata such as `last4`, never plaintext credentials.
@@ -212,9 +255,22 @@ budgets and dials them only through the pinned, no-redirect client in
 `_owned_endpoint_network.py`. Their `api_base` is a tenant's, so it is held to
 public addresses whatever `provider_allow_private_hosts` says.
 
-Provider resolution asks `ModelProviderPort` for a deployment-owned managed
-credential only after local and tenant BYO sources fail. Managed credentials
-must never move ahead of BYO or leave their trusted gateway.
+Provider resolution asks `ModelProviderPort` for a deployment-owned credential
+only after local and tenant BYO sources fail. The core adapter answers from the
+deployment's hosted providers (`services/providers`, the `hosted_providers`
+tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
+hosted credential must never move ahead of BYO or leave its trusted gateway.
+
+A provider's own SDK variable (`OPENAI_API_KEY`) is never a credential: a key
+reaches a call only from the kwargs `get_provider_kwargs` builds (an entry's
+`api_key`, `${VAR}` included, a stored key, an organization key, or the keyless
+placeholder). Every provider needs a declaration, keyless local backends and
+ambient cloud credentials included; those two skip only the key. When a call
+has neither and the port serves nothing, every dispatch path refuses it before
+any-llm is called (`require_declared_credential`, raising any-llm's
+`MissingApiKeyError` for the path to map), because any-llm would otherwise read
+the variable, or reach the deployment's local server or cloud role, for every
+tenant.
 
 ## Mail
 
@@ -284,6 +340,12 @@ Validate a new security or routing setting at config load. Annotate every new
 field with its settings view (`core/settings_view.py`): shown in a group,
 omitted, or secret. The settings endpoint derives its view from that, and a
 field without one fails at import.
+
+The `budgets` and `api_keys` sections are not read on requests: each start
+writes them to the database (`apply_declared_access` in `main.py`, through
+`BudgetService.apply_declared_access`), and the rows are what enforcement reads.
+A declared key's secret is a `SecretStr`, so validation names the key and never
+the value.
 
 A domain's settings live in `core/settings/<domain>.py`. `GatewayConfig`
 inherits them rather than nesting them, because a nested model does not read

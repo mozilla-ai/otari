@@ -9,10 +9,9 @@ name: Otari Lock Refresh
 # every dependency here is floored rather than pinned, and `uv lock` preserves an
 # existing resolution unless something forces a change, so a floored package stays
 # at whatever version happened to be current the day it was first locked. That is
-# not hypothetical: genai-prices sat at 0.1.0 from the day it was added while six
-# releases shipped upstream, and because it carries a *dataset* (model prices),
-# the stale resolution silently mispriced requests rather than merely missing a
-# feature. CI and the Docker image both install with --frozen, so the lockfile is
+# not hypothetical: a floored package sat at its first-locked version while six
+# releases shipped upstream, and a stale resolution can quietly miss fixes
+# rather than fail. CI and the Docker image both install with --frozen, so the lockfile is
 # what ships.
 #
 # The refresh runs the resolution-sensitive checks itself before opening anything,
@@ -80,7 +79,7 @@ jobs:
           PACKAGE: ${{ github.event.inputs.package }}
         run: |
           # --dry-run first, purely for the summary: it names each package and
-          # both versions ("Update genai-prices v0.1.0 -> v0.1.6"), which a diff
+          # both versions ("Update httpx v0.28.0 -> v0.28.1"), which a diff
           # of uv.lock does not, because the name and the version sit on separate
           # lines of the entry.
           if [ -n "${PACKAGE}" ]; then

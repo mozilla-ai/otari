@@ -1,9 +1,9 @@
 import { screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap } from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
 
@@ -22,6 +22,10 @@ vi.mock("@/app/nav/overlayWalletSlot", () => ({
 }))
 
 describe("a build that replaces the wallet-slot module", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("renders its chip in the top bar", async () => {
     await renderWithRouter(
       <AppProviders>
@@ -35,6 +39,10 @@ describe("a build that replaces the wallet-slot module", () => {
   })
 
   it("puts it at the end of the cluster, after the base links", async () => {
+    // A member, so Playground's membership gate has an answer to settle on.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(organizationContext()),
+    )
     await renderWithRouter(
       <AppProviders>
         <DeploymentProvider value={bootstrap()}>
@@ -43,6 +51,7 @@ describe("a build that replaces the wallet-slot module", () => {
       </AppProviders>,
     )
 
+    await screen.findByRole("link", { name: "Playground" })
     const cluster = (await screen.findByRole("link", { name: "Documentation" }))
       .parentElement
 

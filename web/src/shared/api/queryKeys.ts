@@ -45,14 +45,19 @@ export const BUILTIN_GUARDRAIL_CATALOG = "builtin-guardrail-catalog"
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
 export const ROUTER_STATUS = "router-status"
+export const AUTOMATIC_FALLBACKS = "automatic-fallbacks"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
 // key would fire a live provider call on every save.
 export const DISCOVERABLE = "discoverable"
 export const PROVIDERS = "providers"
 export const PROVIDER_HEALTH = "provider-health"
-export const STORED_PROVIDERS = "stored-providers"
-export const METADATA = "model-metadata"
+// Not PROVIDER_HEALTH: that asks each provider to list its models, while this
+// is the stored result of a completion sent to every offering on a schedule.
+export const HEALTH_CHECKS = "health-checks"
+// A run is started by a worker that polls every 15 seconds, so the page polls
+// at the same pace while it is open.
+export const HEALTH_CHECKS_POLL_MS = 15_000
 export const BUILD = "build"
 export const HEALTH = "health"
 export const KEYS = "keys"
@@ -60,6 +65,7 @@ export const BUDGETS = "budgets"
 export const SCOPED_BUDGETS = "scoped-budgets"
 export const USERS = "users"
 export const USAGE = "usage"
+export const TRACES = "traces"
 export const ORGANIZATIONS = "organizations"
 // The caller's standing in the organization they are acting in. Composed here
 // rather than spelled at the hook, because two things outside that hook address
@@ -72,6 +78,22 @@ export const ORGANIZATION_CONTEXT = [ORGANIZATIONS, "context"] as const
 // and nesting would re-read the context (and every page gated on it) as well.
 export const ORGANIZATION_MEMBERS = "organization-members"
 export const DEPLOYMENT_ADMIN = "deployment-admin"
+// The providers the deployment serves on its own keys, and below it each one's
+// offered models: a catalog sweep touches every provider at once, so one
+// invalidation of the root covers the list and every open panel.
+export const HOSTED_PROVIDERS = "hosted-providers"
+// What a provider says it serves on the stored key, and what a sweep would
+// remove. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
+// save there would re-dial, and the preview would refetch while its confirm
+// dialog is still open, asking every provider a second time.
+export const HOSTED_PROVIDER_AVAILABLE_MODELS =
+  "hosted-provider-available-models"
+export const HOSTED_PROVIDERS_REFRESH_PREVIEW =
+  "hosted-providers-refresh-preview"
+// The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
+// the organization context cannot describe because it has no organization. Not
+// a child of ORGANIZATIONS: switching organization does not change who you are.
+export const PROFILE = "profile"
 // Its own key rather than a child of ORGANIZATIONS, for the reason the members
 // key is: the organization context is read on nearly every page, and a rate
 // edit should not make all of them refetch.
@@ -130,6 +152,11 @@ export const PLAYGROUND = "playground"
 // happen to be acting in, and switching organizations does not change the list.
 export const PASSKEYS = "passkeys"
 
+// Whether a mailed reset or verification link can still be used, read once on
+// arrival. Keyed by the link's kind and token, and never invalidated: using the
+// link moves the page to its success state rather than back to this check.
+export const MAILED_LINK_STATUS = "mailed-link-status"
+
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
@@ -151,3 +178,17 @@ export const HEALTH_POLL_MS = 15_000
 // operator just clicked. Failing once and showing the error is the honest
 // behavior, and it frees the socket.
 export const NO_RETRY = { retry: false } as const
+
+/**
+ * The workspace a query reads, declared on its `meta` for the one reader that
+ * has to find such queries: switching organization marks the ones keyed on a
+ * workspace of the organization just left as stale without refetching them
+ * (`useSwitchOrganization`). Declared rather than searched for in the key,
+ * because a key also holds ids that are not workspaces (a trace's own id), and
+ * a key's shape differs per domain. `""` is no workspace.
+ */
+export function workspaceMeta(workspaceId: string | null | undefined): {
+  workspaceId: string
+} {
+  return { workspaceId: workspaceId ?? "" }
+}

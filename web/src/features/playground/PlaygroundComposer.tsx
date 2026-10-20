@@ -71,9 +71,9 @@ export function PlaygroundComposer({
 }: ComposerProps) {
   // Narrow enough to fit beside the controls from `lg` up, and under the frame
   // below it, so the two nodes say the same thing at one width each.
-  const hint = missingModel
-    ? `Choose model ${missingModel} to send`
-    : "Enter to send · Shift + Enter for a new line"
+  const hint = missingModel ? `Choose model ${missingModel} to send` : null
+  // The send button takes the free space itself once no hint sits beside it.
+  const sendMargin = hint ? "lg:ml-0" : ""
 
   return (
     <form onSubmit={onSubmit} className="w-full">
@@ -145,16 +145,18 @@ export function PlaygroundComposer({
             isDisabled={isBusy}
           />
           <div className="min-w-0">{modelPicker}</div>
-          <span className="ml-auto hidden pr-2 text-caption lg:block">
-            {hint}
-          </span>
+          {hint ? (
+            <span className="ml-auto hidden pr-2 text-caption lg:block">
+              {hint}
+            </span>
+          ) : null}
           {isBusy ? (
             <IconButton
               label="Stop generating"
               variant="primary"
               size="sm"
               isIconOnly
-              className="ml-auto shrink-0 lg:ml-0 md:min-h-8 md:min-w-8"
+              className={`ml-auto shrink-0 ${sendMargin} md:min-h-8 md:min-w-8`}
               onPress={onStop}
             >
               <FiSquare aria-hidden className="size-4" />
@@ -166,7 +168,7 @@ export function PlaygroundComposer({
               type="submit"
               size="sm"
               isIconOnly
-              className="ml-auto shrink-0 lg:ml-0 md:min-h-8 md:min-w-8"
+              className={`ml-auto shrink-0 ${sendMargin} md:min-h-8 md:min-w-8`}
               isDisabled={
                 !draft.trim() || !canChat || !!missingModel || isUploading
               }
@@ -176,9 +178,7 @@ export function PlaygroundComposer({
           )}
         </div>
       </div>
-      {missingModel ? (
-        <p className="mt-2 text-caption lg:hidden">{hint}</p>
-      ) : null}
+      {hint ? <p className="mt-2 text-caption lg:hidden">{hint}</p> : null}
     </form>
   )
 }

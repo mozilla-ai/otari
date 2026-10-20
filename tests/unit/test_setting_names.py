@@ -3,6 +3,7 @@
 import json
 import os
 from collections.abc import Iterator
+from enum import Enum
 from pathlib import Path
 from unittest import mock
 
@@ -17,7 +18,10 @@ _SETTING_NAMES = frozenset(
     {
         "accept_incoming_trace_context",
         "activation_guide",
+        "agent_recommender_candidates",
+        "agent_recommender_model",
         "aliases",
+        "api_keys",
         "auto_migrate",
         "bootstrap",
         "bootstrap_api_key",
@@ -27,8 +31,10 @@ _SETTING_NAMES = frozenset(
         "budget_reservation_sweep_interval_sec",
         "budget_reservation_ttl_sec",
         "budget_strategy",
+        "budgets",
         "capture_agent_telemetry",
         "code_execution_executor",
+        "code_execution_workspace_default",
         "cors_allow_origins",
         "dashboard_login_rate_limit_per_minute",
         "dashboard_session_ttl_hours",
@@ -48,7 +54,11 @@ _SETTING_NAMES = frozenset(
         "email_verification_expiry_hours",
         "enable_docs",
         "enable_metrics",
+        "federation_access_token_ttl_sec",
+        "federation_allow_private_hosts",
+        "federation_issuers",
         "feedback_enabled",
+        "fetch_tools",
         "file_understanding_enabled",
         "files_backend",
         "files_enabled",
@@ -68,12 +78,17 @@ _SETTING_NAMES = frozenset(
         "files_url",
         "forwarded_allow_ips",
         "guardrail_thread_pool_size",
+        "health_checks_enabled",
         "guardrails_url",
         "host",
+        "hosted_providers",
         "idempotency_lease_sec",
         "idempotency_retention_sec",
         "idempotency_sweep_interval_sec",
+        "import_configured_providers",
         "invitation_expiry_hours",
+        "invitation_mail_limit_per_address",
+        "invitation_mail_limit_per_organization",
         "log_writer_strategy",
         "mail_from_email",
         "mail_from_name",
@@ -94,6 +109,7 @@ _SETTING_NAMES = frozenset(
         "oauth_google_client_id",
         "oauth_google_client_secret",
         "open_signup",
+        "passkeys_enabled",
         "password_reset_expiry_hours",
         "platform",
         "port",
@@ -104,6 +120,10 @@ _SETTING_NAMES = frozenset(
         "provider_account_pepper",
         "provider_allow_private_hosts",
         "provider_endpoints_enabled",
+        "provider_max_retries",
+        "provider_request_timeout_seconds",
+        "provider_user_identifier_enabled",
+        "provider_user_identifier_key",
         "providers",
         "public_base_url",
         "public_catalog",
@@ -137,25 +157,39 @@ _SETTING_NAMES = frozenset(
         "smtp_tls",
         "smtp_user",
         "stream_missing_usage_policy",
+        "streaming_first_chunk_hold_ms",
         "streaming_keepalive_interval_ms",
         "terms_url",
         "tools_header",
+        "trace_capture_enabled",
+        "trace_flush_interval_s",
+        "trace_flush_max_spans",
+        "trace_max_spans_per_request",
+        "trace_queue_max_spans",
+        "trace_retention_days",
+        "trace_session_max_age_days",
+        "trace_shutdown_flush_s",
+        "trace_write_timeout_s",
         "ui_base_url",
         "vision_describe_max_tokens",
         "vision_describe_model",
         "vision_strategy",
+        "web_fetch_default_tool",
         "web_fetch_enabled",
         "web_retrieval_trust_env_proxy",
         "web_search_allow_private_hosts",
         "web_search_backend_token",
+        "web_search_default_tool",
         "web_search_engines",
         "web_search_extract",
         "web_search_intercept",
+        "web_search_max_calls",
         "web_search_max_results",
         "web_search_provider",
         "web_search_provider_api_key",
         "web_search_purpose_hint",
         "web_search_url",
+        "web_search_workspace_default",
         "webauthn_allowed_origins",
         "webauthn_rp_id",
         "webauthn_rp_name",
@@ -175,7 +209,10 @@ def _isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> It
 
 def _default(name: str) -> object:
     value = GatewayConfig.model_fields[name].get_default(call_default_factory=True)
-    return value.model_dump(mode="json") if isinstance(value, BaseModel) else value
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    # As it is written in a config file, which holds the enum's value rather than the member.
+    return value.value if isinstance(value, Enum) else value
 
 
 def _environment_value(value: object) -> str:

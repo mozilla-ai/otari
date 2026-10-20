@@ -2,6 +2,7 @@
 
 from fastapi import status
 
+from gateway.core.error_codes import TERMS_NOT_ACCEPTED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -233,6 +234,18 @@ class OAuthExchangeError(TenancyValidationError):
         super().__init__(f"{provider} did not complete the sign-in. Try again.")
 
 
+class OAuthProviderUnavailableError(OAuthExchangeError):
+    """The provider failed or could not be reached while exchanging the code or reading the identity.
+
+    502 rather than its base's 400: the request was sound and the upstream failed, so a provider outage
+    shows as a server-side failure to whatever watches the status codes. The message stays the base's,
+    which is why the route renders this error itself instead of leaving it to the tenancy handler,
+    which replaces every 5xx message with a generic one.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+
 class OAuthStateError(TenancyValidationError):
     """The callback did not carry a ``state`` this deployment is still waiting on.
 
@@ -274,6 +287,22 @@ class OAuthEmailNotVerifiedError(TenancyError):
         )
 
 
+class OAuthEmailMissingError(TenancyError):
+    """The provider shared no email address, so nothing here can be matched to the person.
+
+    401 and named for the reason ``OAuthEmailNotVerifiedError`` gives. Separate from it because the advice
+    differs: there is no address to verify, so the person adds one at the provider.
+    """
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"{provider} did not share an email address, so it cannot sign you in here. "
+            f"Add a verified email address to your {provider} account and try again."
+        )
+
+
 class OAuthIdentityUnknownError(TenancyError):
     """No account on this deployment signs in as that external identity.
 
@@ -305,6 +334,29 @@ class OAuthIdentityUnknownError(TenancyError):
             f"That {provider} account is not registered on this gateway. "
             "Ask whoever administers it to add your email address, then sign in again."
         )
+
+
+class OAuthAccountLinkedElsewhereError(TenancyError):
+    """The account that holds the address is linked to another identity at the same provider.
+
+    401, and named, for the reason ``OAuthEmailNotVerifiedError`` gives: the provider has confirmed that the
+    person at the browser holds the address, so the reason tells them about their own account.
+    """
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"The account for that address signs in with a different {provider} account. "
+            f"Sign in with that {provider} account, or with your password or passkey."
+        )
+
+
+class OAuthIdentityLinkConflictError(TenancyConflictError):
+    """Another sign-in linked the provider identity, or the account at that provider, first."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Another sign-in with that {provider} account finished first. Sign in again.")
 
 
 class CurrentPasswordIncorrectError(TenancyValidationError):
@@ -372,10 +424,22 @@ class SignInAddressRequiredError(TenancyValidationError):
 
 
 class EmailAlreadyInUseError(TenancyConflictError):
-    """Another identity already holds the address being claimed."""
+    """Another identity already holds the address being claimed.
+
+    The claim sets the caller's own address and password, never another account's, so the message says so
+    and names the way an operator helps somebody else back in.
+    """
 
     def __init__(self, email: str) -> None:
-        super().__init__(f"'{email}' already belongs to another identity")
+        super().__init__(
+            f"'{email}' already belongs to another account. This sets the address and password of the account "
+            "making the request, not another one; to help that person sign in, send them a password link from "
+            "the Accounts page."
+        )
+
+
+class PasswordLinkUnavailableError(TenancyConflictError):
+    """An operator asked for a password link for an account that cannot use one."""
 
 
 class InvalidEmailError(TenancyValidationError):
@@ -393,14 +457,29 @@ class InvalidEmailError(TenancyValidationError):
 class VerificationTokenInvalidError(TenancyValidationError):
     """A verification token that is unknown, expired, or already consumed.
 
-    One message for all three, the same reasoning ``InvitationNotFoundError``
+    One message for all of them, the same reasoning ``InvitationNotFoundError``
     gives an unknown-or-foreign invitation: distinguishing "expired" from
     "already used" from "never existed" would let a caller narrow down which
     is true of a token they do not hold.
     """
 
+    def __init__(self, message: str = "This verification link is invalid, expired, or already used") -> None:
+        super().__init__(message)
+
+
+class VerificationPasswordIncorrectError(VerificationTokenInvalidError):
+    """A live verification token presented with a password other than the one chosen at signup.
+
+    Named apart from a dead link because the two need different actions: this link still works, so the person
+    tries the password again. Only a holder of the link learns that it is live. A subclass, so every refusal
+    still counts toward the per-client limit on verification attempts.
+    """
+
     def __init__(self) -> None:
-        super().__init__("This verification link is invalid, expired, or already used")
+        super().__init__(
+            "That is not the password chosen when signing up. This link still works, so try again, "
+            'or choose a new password with "Forgot your password?".'
+        )
 
 
 class ResetTokenInvalidError(TenancyValidationError):
@@ -411,6 +490,15 @@ class ResetTokenInvalidError(TenancyValidationError):
 
     def __init__(self) -> None:
         super().__init__("This password reset link is invalid, expired, or already used")
+
+
+class TermsNotAcceptedError(TenancyValidationError):
+    """An account was about to become usable without accepting the terms this deployment publishes."""
+
+    error_code = TERMS_NOT_ACCEPTED
+
+    def __init__(self) -> None:
+        super().__init__("Accept the terms of service to continue")
 
 
 class EmailNotVerifiedError(TenancyForbiddenError):
@@ -440,10 +528,14 @@ __all__ = [
     "EmptyDeploymentUserUpdateError",
     "InvalidCredentialsError",
     "InvalidEmailError",
+    "OAuthAccountLinkedElsewhereError",
+    "OAuthEmailMissingError",
     "OAuthEmailNotVerifiedError",
     "OAuthExchangeError",
+    "OAuthIdentityLinkConflictError",
     "OAuthIdentityUnknownError",
     "OAuthNotConfiguredError",
+    "OAuthProviderUnavailableError",
     "OAuthStateError",
     "PasskeyAlreadyRegisteredError",
     "PasskeyCeremonyError",
@@ -452,10 +544,13 @@ __all__ = [
     "PasskeyNotFoundError",
     "PasskeySignInFailedError",
     "PasskeysNotConfiguredError",
+    "PasswordLinkUnavailableError",
     "PasswordNotSetError",
     "PasswordPolicyError",
     "ResetTokenInvalidError",
     "SignInAddressRequiredError",
+    "TermsNotAcceptedError",
     "UnmodifiedPasswordError",
+    "VerificationPasswordIncorrectError",
     "VerificationTokenInvalidError",
 ]

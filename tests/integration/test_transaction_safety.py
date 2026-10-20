@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -133,6 +134,36 @@ async def test_cas_reset_user_budget_rollback_on_commit_failure(async_db: AsyncS
             await _cas_reset_user_budget(async_db, user, budget, now)
 
         mock_rollback.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_a_reset_another_request_won_leaves_the_session_readable(async_db: AsyncSession) -> None:
+    """Losing the reset race must not expire what the caller reads next.
+
+    A rollback expires every instance in the session, so the caller's next read of
+    the user or its budget would be sync IO on an async session (MissingGreenlet).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    budget = Budget(max_budget=100.0, budget_duration_sec=3600)
+    user = User(user_id="reset-race-user", spend=50.0, next_budget_reset_at=now - timedelta(seconds=1))
+    async_db.add_all([user, budget])
+    await async_db.commit()
+    # Another request rolls the window first, behind this one's back.
+    await async_db.execute(
+        update(User)
+        .where(User.user_id == "reset-race-user")
+        .values(spend=0, next_budget_reset_at=now + timedelta(hours=1))
+        .execution_options(synchronize_session=False)
+    )
+    await async_db.commit()
+
+    returned = await _cas_reset_user_budget(async_db, user, budget, now)
+
+    assert returned.spend == 0
+    assert returned.next_budget_reset_at is not None
+    assert budget.max_budget == 100
 
 
 @pytest.mark.asyncio

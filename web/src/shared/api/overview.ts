@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import type { OverviewSummary } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { OVERVIEW } from "@/shared/api/queryKeys"
+import { OVERVIEW, workspaceMeta } from "@/shared/api/queryKeys"
 
 /**
  * The overview's counts and budget strips, in one read.
@@ -17,6 +17,7 @@ import { OVERVIEW } from "@/shared/api/queryKeys"
 export function useOverviewSummary(workspaceId?: string, enabled = true) {
   return useQuery({
     queryKey: [OVERVIEW, workspaceId ?? null],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<OverviewSummary>(
         workspaceId

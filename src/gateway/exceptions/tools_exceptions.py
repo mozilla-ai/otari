@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from fastapi import status
 
+from gateway.core.error_codes import PRICING_REQUIRED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -53,6 +54,20 @@ class WorkspaceMcpServerLimitReachedError(TenancyValidationError):
 
     def __init__(self, workspace_id: object, limit: int):
         super().__init__(f"Workspace {workspace_id} already has the maximum of {limit} MCP servers")
+
+
+class WorkspaceMcpServerCheckBusyError(TenancyError):
+    """No connection check could start, because every check slot on this process was taken.
+
+    A 429 rather than a 503: it clears on its own within seconds, and a 5xx
+    renders as a generic internal error, hiding the one thing the caller needs
+    to know, which is to try again shortly.
+    """
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+    def __init__(self) -> None:
+        super().__init__("Too many MCP server checks are running on this gateway; try again shortly")
 
 
 class ContainerOnManagedCredentialError(TenancyValidationError):
@@ -340,18 +355,128 @@ class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
         super().__init__("A web search key cannot be both pinned and turned off for a workspace")
 
 
+class SearchToolRefusedError(TenancyValidationError):
+    """A search or fetch instance the instance rules refuse to write or test.
+
+    A 422, the status the same route's request validation answers with.
+    """
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+class SearchToolNotFoundError(TenancyNotFoundError):
+    """No configured or stored search or fetch instance has this name."""
+
+    def __init__(self, name: str):
+        super().__init__(f"No search or fetch instance '{name}'.")
+
+
+class SearchToolMisconfiguredError(TenancyValidationError):
+    """A search instance nothing can run as it stands, such as a ``searxng`` one with no address to search."""
+
+    def __init__(self, name: str, problem: str | None = None):
+        super().__init__(problem or f"Search tool '{name}' is not configured correctly.")
+
+
+class SearchToolSelectionError(TenancyValidationError):
+    """A direct search that names no search instance it can run on (contract C6).
+
+    No instance exists, a name matches none, or no name is given while several
+    exist and no default names one.
+    """
+
+
+class DirectSearchFieldRefusedError(TenancyValidationError):
+    """A direct search asking ``include_raw`` or ``provider_options`` of a call that does not run on any-search.
+
+    A ``searxng`` instance until its adapter, and a Tavily or Brave organization
+    key until theirs.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"include_raw and provider_options are not available yet for a {provider} search: leave them unset."
+        )
+
+
+class DirectSearchFailedError(TenancyError):
+    """The provider failed a direct search, or could not be reached.
+
+    ``message`` is the provider's own account, for the usage row and the log
+    only: an old client's can quote the upstream body. ``headers`` carry the
+    failure's safe fields for the caller (decision 67), and ``upstream_status``
+    is the provider's HTTP status when it gave one.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self, message: str, *, headers: dict[str, str], upstream_status: int | None) -> None:
+        super().__init__(message)
+        self.headers = headers
+        self.upstream_status = upstream_status
+
+
+class DirectSearchPricingRequiredError(TenancyError):
+    """A direct search refused because ``require_pricing`` is on and no pricing row prices it.
+
+    ``message`` names the row to add; the route returns it to the caller and
+    writes it on the usage row.
+    """
+
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+    error_code: str = PRICING_REQUIRED
+
+
+class WebSearchOptionRefusedError(TenancyValidationError):
+    """A request's ``provider_options`` key the provider serving it does not take from a request.
+
+    The provider's schema does not know the key or refuses its value, or marks
+    the key operator-only. A 400 on either door (design G).
+    """
+
+    def __init__(self, key: str, problem: str):
+        super().__init__(f"provider_options: {problem}.")
+        self.key = key
+
+
+class WebSearchCredentialRefusedError(TenancyError):
+    """A workspace's search or fetch credential its provider cannot be called with as it is.
+
+    One without a key or base URL its provider needs, which the library or the
+    old code would fill from the server's own settings, so the deployment's key
+    or endpoint would serve the tenant; or one naming a base URL the code that
+    serves its provider cannot use, which would send the tenant's key to the
+    provider's public endpoint instead. A 502, the status a malformed
+    credential from the control plane gets (design K).
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self, provider: str, problem: str) -> None:
+        super().__init__(f"The workspace's {provider} credential {problem}.")
+        self.provider = provider
+
+
 __all__ = [
     "CodeExecutionPolicyResolutionFailedError",
     "CodeExecutionPolicyResolutionFailure",
+    "DirectSearchFailedError",
+    "DirectSearchFieldRefusedError",
     "McpResolutionFailure",
     "McpServerResolutionFailedError",
     "McpSessionsInterruptedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
+    "SearchToolMisconfiguredError",
+    "SearchToolNotFoundError",
+    "SearchToolRefusedError",
+    "SearchToolSelectionError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",
+    "WebSearchCredentialRefusedError",
     "WebSearchNotEnabledError",
+    "WebSearchOptionRefusedError",
     "WebSearchPolicyResolutionFailedError",
     "WebSearchPolicyResolutionFailure",
     "WorkspaceMcpServerAlreadyExistsError",

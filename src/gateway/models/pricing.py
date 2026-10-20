@@ -16,21 +16,32 @@ from gateway.models.money import UsdRate
 # on these spellings, and the request schemas validate against them.
 PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 
-# The vocabulary of ``origin`` on the same two tables. ``seed`` belongs to
-# ``organization_model_pricing`` alone: it marks a rate the offered-models
-# surface copied from the community dataset on the organization's behalf, which
-# a later refresh may move, where every other origin is a rate somebody chose
-# and a refresh leaves alone.
-PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration", "seed")
+# The counts an attempt reports in a unit other than tokens, keyed by meter. They
+# are the keys of ``billing_meters`` on the row a count settles, and of ``units``
+# in a hybrid gateway's usage report.
+UNIT_METERS: tuple[str, ...] = ("requests", "search_units", "images")
 
-# The one origin a refresh may move. Named because three modules compare against
-# it and a bare "seed" in any of them reads as a different fact.
+# The largest count one attempt may report under any meter.
+MAX_REPORTED_UNITS = 1_000_000
+
+# ``origin`` on the same two tables is ``config``, ``api``, ``migration``,
+# ``seed`` or, on an override only, ``operator``. ``seed`` marks a rate an offered-models surface copied from the
+# community dataset, an organization's on its own keys or the deployment's on
+# its hosted providers: the one origin a later refresh may move. Named because
+# three modules compare against it and a bare "seed" in any of them reads as a
+# different fact.
 SEED_ORIGIN = "seed"
 
 # What a rate somebody set through the API carries, which is what stops a
 # refresh moving it. Named for the same reason: the two are written in different
 # modules from the one that reads them back.
 API_ORIGIN = "api"
+
+# What an organization override carries when the deployment operator set it,
+# rather than the organization's own owner or admin. Only such a rate prices a
+# request the deployment paid for: one the organization wrote itself would let a
+# tenant name the cost of the deployment's own upstream.
+OPERATOR_ORIGIN = "operator"
 
 # Which rung of the ladder answered for a rate a reader is shown, in the order
 # ``pricing_service.find_model_pricing`` walks. One vocabulary, because the
@@ -95,18 +106,19 @@ class ModelPricing(Base):
     # (see log_usage in _pipeline.py).
     cache_read_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     cache_write_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
-    cache_write_1h_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     # Ordered threshold rules. Each rule applies its supplied rates to the
     # entire request once ``total_input_tokens`` reaches ``min_input_tokens``.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # What ``input_price_per_million`` is a rate per: ``tokens`` for a model,
-    # ``requests`` for a gateway-run tool or a moderation call, ``images`` for
+    # ``requests`` for a gateway-run tool, a moderation call or a completion model
+    # billed per call, ``images`` for
     # image generation. The rate columns are shared by all three and a reader
     # cannot tell which from the number, so the row says (``PRICING_UNITS``).
     unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
     # Which path wrote the row: ``config`` (the file's ``pricing:`` block),
-    # ``api`` (``POST /v1/pricing``), or ``migration``. NULL on a row written
-    # before origins were recorded, which is a real answer and not a default.
+    # ``api`` (``POST /v1/pricing``), ``migration``, or ``seed`` (a community
+    # default stored on a hosted model's behalf). NULL on a row written before
+    # origins were recorded, which is a real answer and not a default.
     origin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
@@ -124,7 +136,6 @@ class ModelPricing(Base):
             "output_price_per_million": self.output_price_per_million,
             "cache_read_price_per_million": self.cache_read_price_per_million,
             "cache_write_price_per_million": self.cache_write_price_per_million,
-            "cache_write_1h_price_per_million": self.cache_write_1h_price_per_million,
             "pricing_tiers": self.pricing_tiers,
             "unit": self.unit,
             "origin": self.origin,
@@ -141,7 +152,7 @@ class OrganizationModelPricing(Base):
     price the models it uses at its own negotiated rates while every other
     organization, and every model it has not overridden, keeps resolving exactly
     as before. Resolution order is override, then deployment row, then the
-    genai-prices dataset (`services.pricing_service.find_model_pricing`).
+    models.dev catalog (`services.pricing_service.find_model_pricing`).
 
     **Keyed on ``model_key``, not a split provider and model.** The platform's
     equivalent table (`otari-ai` ``organization_model_pricing``) carries
@@ -223,10 +234,6 @@ class OrganizationModelPricing(Base):
             "cache_write_price_per_million IS NULL OR cache_write_price_per_million >= 0",
             name="ck_organization_model_pricing_cache_write_non_negative",
         ),
-        CheckConstraint(
-            "cache_write_1h_price_per_million IS NULL OR cache_write_1h_price_per_million >= 0",
-            name="ck_organization_model_pricing_cache_write_1h_non_negative",
-        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -246,7 +253,6 @@ class OrganizationModelPricing(Base):
     # and the cost calculation falls back the way it already does.
     cache_read_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     cache_write_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
-    cache_write_1h_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     # Same shape and same ``min_input_tokens`` key as ``ModelPricing``, so the
     # transient row an override resolves into needs no tier translation.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)

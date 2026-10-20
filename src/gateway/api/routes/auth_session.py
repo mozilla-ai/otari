@@ -49,6 +49,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    IdentityServiceDep,
     MembershipListenerDep,
     UnitOfWorkDep,
     WorkspaceListenerDep,
@@ -57,7 +58,9 @@ from gateway.api.deps import (
     is_valid_master_key,
     record_auth_failure,
 )
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import EmailNotVerifiedError, InvalidCredentialsError
 from gateway.log_config import logger
@@ -67,7 +70,6 @@ from gateway.services.dashboard_session_service import (
     SESSION_COOKIE_NAME,
     apply_session_cookie,
     clear_session_cookie,
-    create_dashboard_session,
     request_is_https,
     revoke_dashboard_session,
 )
@@ -75,7 +77,6 @@ from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.password_service import MAX_PASSWORD_BYTES
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.membership_listener import MembershipListener
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
@@ -170,8 +171,11 @@ class SessionResponse(BaseModel):
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
     user_id: uuid.UUID = Field(description="The identity this session speaks for.")
-    active_organization_id: uuid.UUID = Field(
-        description="The organization that identity is acting in, which scopes every tenancy surface."
+    active_organization_id: uuid.UUID | None = Field(
+        description=(
+            "The organization that identity is acting in, which scopes every tenancy surface. "
+            "Null when it is an active member of none, as an invitee who has not accepted yet is not."
+        )
     )
 
 
@@ -286,6 +290,7 @@ async def create_session(
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
     workspace_listener: WorkspaceListenerDep,
+    identities: IdentityServiceDep,
 ) -> SessionResponse:
     """Verify a sign-in credential and set the HttpOnly session cookie.
 
@@ -341,27 +346,16 @@ async def create_session(
         assert body.email is not None and body.password is not None  # guaranteed by the model validator
         identity = await _sign_in_with_password(body.email, body.password, request, db)
     try:
-        # Before the session row and inside the same transaction, so a new
-        # membership and the sign-in that earned it land together or not at all.
-        # Not guarded: the only expected failure is two concurrent sign-ins
-        # racing, which the service settles on its own, and a database that
-        # cannot stage this cannot stage the session row either.
-        await OrganizationDomainService(db).auto_join_for_user(identity)
-        token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        # Generic error to the client; the raw failure is only logged here.
-        logger.warning("Failed to persist a dashboard session on sign-in", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
-    apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
+        signed_in = await identities.sign_in(identity)
+    except DATABASE_ERRORS as exc:
+        raise database_error("persist a dashboard session on sign-in", exc) from None
+    apply_session_cookie(
+        response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
+    )
     return SessionResponse(
-        expires_at=expires_at,
+        expires_at=signed_in.session_expires_at,
         user_id=identity.id,
-        active_organization_id=identity.active_organization_id,
+        active_organization_id=signed_in.active_organization_id,
     )
 
 
@@ -392,4 +386,4 @@ async def delete_session(
             # a live cookie the operator believes is gone. Clear it and return
             # 204 anyway; the unrevoked row dies on its TTL.
             logger.warning("Failed to revoke the dashboard session on sign-out", exc_info=True)
-    clear_session_cookie(response)
+    clear_session_cookie(response, secure=request_is_https(request))

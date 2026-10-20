@@ -4,19 +4,26 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import arerank
-from any_llm.types.rerank import RerankResponse
+from any_llm.types.rerank import RerankResponse as ProviderRerankResponse
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._passthrough import BillingMeters, run_passthrough
+from gateway.api.deps import (
+    get_config,
+    get_db_if_needed,
+    get_log_writer,
+    verify_api_key_or_master_key_if_needed,
+)
+from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
-from gateway.services.budgets import estimate_cost
+from gateway.schemas.inference import RerankResponse
+from gateway.services.budgets import rerank_estimate
+from gateway.services.inference import RERANK_BILLING, InferenceService
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import input_token_cost
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["rerank"])
@@ -36,51 +43,39 @@ class RerankRequest(BaseModel):
     user: str | None = Field(default=None, description="User ID for usage attribution")
 
 
-@router.post("/rerank", response_model=None)
+@router.post("/rerank")
 async def create_rerank(
     raw_request: Request,
     response: Response,
     request: RerankRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-) -> Any:
+) -> RerankResponse:
     """Rerank documents by relevance to a query.
+
+    Billing: a model priced per request (``unit: requests``) is charged per
+    search unit the provider reports, or for one unit when it reports none. A
+    model priced per token is charged on the input tokens the provider reports.
+
+    ``usage`` carries what the gateway metered: the provider's tokens, the
+    search units billed when the model is priced per request, and, when the
+    request was priced, ``cost_usd`` and ``pricing_source`` as a completion's
+    usage does. ``meta`` is the provider's own billing report, unchanged.
 
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
     """
-    # Rerank bills on total tokens (input only). Estimate from query + documents.
-    prompt_chars = len(request.query) + sum(len(doc) for doc in request.documents)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
-        return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
+        return rerank_estimate(
+            pricing, query_chars=len(request.query), document_chars=[len(doc) for doc in request.documents]
+        )
 
-    def usage_tokens(result: RerankResponse) -> tuple[int | None, int | None, int | None]:
-        total_tokens = result.usage.total_tokens if result.usage else None
-        return (total_tokens, 0, total_tokens)
-
-    def compute_cost(result: RerankResponse, pricing: ModelPricing | None) -> Decimal | None:
-        total_tokens = result.usage.total_tokens if result.usage else None
-        if result.usage and pricing and total_tokens:
-            return input_token_cost(total_tokens, pricing)
-        return None
-
-    def compute_meters(result: RerankResponse, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
-        total_tokens = result.usage.total_tokens if result.usage else None
-        if not pricing or not total_tokens:
-            return None
-        rate = float(pricing.input_price_per_million)
-        breakdown = [{"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": float(cost)}]
-        # See embeddings: the canonical meter name is what the billed-token SQL and
-        # the dashboard read. Rerank logs the same count as its prompt tokens, so
-        # this reports the value the fallback already produced.
-        return {"total_input_tokens": total_tokens}, breakdown
-
-    async def call_provider(resolved: ResolvedProvider) -> RerankResponse:
+    async def call_provider(resolved: ResolvedProvider) -> ProviderRerankResponse:
         rerank_kwargs: dict[str, Any] = {
             "model": resolved.model,
             "query": request.query,
@@ -94,9 +89,8 @@ async def create_rerank(
             rerank_kwargs["max_tokens_per_doc"] = request.max_tokens_per_doc
         return await arerank(**rerank_kwargs)
 
-    # Rerank results are returned verbatim and some providers (Voyage, Jina)
-    # carry ``model``, which would echo the target an alias exists to hide. The
-    # relabeling is a no-op on results without the field.
+    # Rerank results are returned verbatim and carry ``model``, which would echo
+    # the target an alias exists to hide, so it is relabeled to the alias.
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
@@ -108,10 +102,14 @@ async def create_rerank(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        request_params=request.model_fields_set,
         estimate=estimate,
         enforce_require_pricing=True,
-        usage_tokens=usage_tokens,
-        compute_cost=compute_cost,
-        compute_meters=compute_meters,
+        billing=RERANK_BILLING,
+        inline_cost=True,
     )
-    return outcome.result
+    if outcome.inline_cost is not None:
+        record_inline_cost_settlement("attached")
+    return InferenceService.rerank_response(
+        outcome.result, pricing=outcome.pricing, cost=outcome.cost, inline_cost=outcome.inline_cost
+    )

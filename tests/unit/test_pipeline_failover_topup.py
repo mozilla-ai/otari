@@ -11,11 +11,12 @@ same reason: the admission gate prices only the head, so an unpriced model that
 would 402 when named directly would otherwise serve, and log ``cost=null``,
 purely by being reached as a fallback.
 
-These are pure unit tests. ``find_model_pricing`` and ``increase_reservation``
+These are pure unit tests. ``resolve_model_pricing`` and ``increase_reservation``
 are stubbed, so what is pinned is the decision logic: when the hold grows, by how
 much, when it does not, and which failure the caller sees.
 """
 
+import logging
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
@@ -23,12 +24,17 @@ from typing import Any, cast
 import pytest
 from any_llm import LLMProvider
 from fastapi import HTTPException
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
+from gateway.api.routes._attempts import CandidateCannotServe
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
-from gateway.services.budgets import ReservationHandle
+from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
+from gateway.log_config import logger as gateway_logger
+from gateway.services import pricing_service
+from gateway.services.budgets import EstimateInputs, ReservationHandle
 from gateway.types.attempt import Attempt
 
 # Cost the stubbed estimator returns per (instance, model), standing in for the
@@ -67,10 +73,14 @@ def _ctx(
     """
     return SimpleNamespace(
         db=cast(AsyncSession, db) if db is not None else None,
+        uow=object(),
+        rate_limit_grant=None,
         # Resolved once in the preamble on a real request. None is "this
         # organization has no rate override", so the top-up prices against the
         # deployment list, which is what ``_PRICES`` below stands in for.
         organization_id=None,
+        # No memo, as for a context the preamble priced nothing on: the top-up resolves its own.
+        prices=None,
         reservation=reservation
         or ReservationHandle(
             user_id="user-1",
@@ -78,11 +88,12 @@ def _ctx(
             reserved=True,
             strategy="for_update",
             counts_toward_budget=counts_toward_budget,
+            scope_ceilings=(),
         ),
         estimate_inputs=(
             estimate_inputs
             if estimate_inputs is not None
-            else pipeline.EstimateInputs(prompt_chars=400, max_output_tokens=100, default_output_tokens=100)
+            else EstimateInputs(prompt_chars=400, max_output_tokens=100, default_output_tokens=100)
         ),
         config=GatewayConfig(require_pricing=require_pricing),
     )
@@ -90,7 +101,7 @@ def _ctx(
 
 @pytest.fixture
 def increases(monkeypatch: pytest.MonkeyPatch) -> list[Decimal]:
-    """Record every top-up delta, with pricing stubbed from ``_PRICES``."""
+    """Record every size a top-up grows the reservation to, with pricing stubbed from ``_PRICES``."""
     recorded: list[Decimal] = []
 
     async def fake_find_pricing(_db: Any, instance: str, model: str, *, organization_id: Any, **_kwargs: Any) -> Any:
@@ -99,41 +110,29 @@ def increases(monkeypatch: pytest.MonkeyPatch) -> list[Decimal]:
         # default it would bind cleanly and the regression would pass silently,
         # which is the opposite of what naming it here is for.
         price = _PRICES.get((instance, model))
-        return None if price is None else SimpleNamespace(price=price)
+        if price is None:
+            return None
+        rate = SimpleNamespace(price=price, input_price_per_million=price, output_price_per_million=price)
+        return SimpleNamespace(pricing=rate)
 
     def fake_estimate_cost(pricing: Any, **_kwargs: Any) -> Decimal:
         return Decimal(0) if pricing is None else Decimal(str(pricing.price))
 
-    async def fake_increase(_db: Any, _handle: Any, delta: Decimal, **_kwargs: Any) -> None:
-        recorded.append(delta)
+    async def fake_increase(_db: Any, _handle: Any, *, estimate: Decimal, **_kwargs: Any) -> None:
+        recorded.append(estimate)
 
-    monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
+    # The top-up prices through the request's price memo, which resolves here.
+    monkeypatch.setattr(pricing_service, "resolve_model_pricing", fake_find_pricing)
     monkeypatch.setattr(pipeline, "estimate_cost", fake_estimate_cost)
     monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
     return recorded
 
 
 @pytest.mark.asyncio
-async def test_a_pricier_candidate_grows_the_hold_before_dispatch(increases: list[Decimal]) -> None:
-    """The delta, not the full price: the original hold already covers the head."""
+async def test_a_fallback_grows_the_hold_to_its_own_estimate(increases: list[Decimal]) -> None:
+    """The candidate's whole estimate, because each leg grows only by what it lacks of it."""
     await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "anthropic", "pricey"))
-    assert increases == [Decimal(4)]
-
-
-@pytest.mark.asyncio
-async def test_a_cheaper_candidate_is_a_no_op(increases: list[Decimal]) -> None:
-    """The hold only ever grows toward the candidate that serves. Shrinking it
-    would release budget another request could take, on a chain that has not
-    finished spending.
-    """
-    await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "openai", "cheap"))
-    assert increases == []
-
-
-@pytest.mark.asyncio
-async def test_an_equally_priced_candidate_is_a_no_op(increases: list[Decimal]) -> None:
-    await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "openai", "same"))
-    assert increases == []
+    assert increases == [Decimal(9)]
 
 
 @pytest.mark.asyncio
@@ -194,7 +193,7 @@ async def test_an_unpriced_fallback_is_refused_under_require_pricing(increases: 
 @pytest.mark.asyncio
 async def test_an_unpriced_fallback_is_allowed_when_require_pricing_is_off(increases: list[Decimal]) -> None:
     await pipeline.top_up_reservation_for_attempt(_ctx(require_pricing=False), _attempt(2, "openai", "no-such-model"))
-    assert increases == []
+    assert increases == [Decimal(0)]
 
 
 @pytest.mark.asyncio
@@ -205,7 +204,7 @@ async def test_a_budget_exempt_request_skips_the_pricing_gate(increases: list[De
     await pipeline.top_up_reservation_for_attempt(
         _ctx(require_pricing=True, counts_toward_budget=False), _attempt(2, "openai", "no-such-model")
     )
-    assert increases == []
+    assert increases == [Decimal(0)]
 
 
 @pytest.mark.asyncio
@@ -225,3 +224,102 @@ async def test_no_estimate_inputs_means_nothing_to_reprice(increases: list[Decim
     ctx.estimate_inputs = None
     await pipeline.top_up_reservation_for_attempt(ctx, _attempt(2, "anthropic", "pricey"))
     assert increases == []
+
+
+class _Budgets:
+    """Stands in for the budget service a move goes through, recording the provider of each move."""
+
+    def __init__(self) -> None:
+        self.moves: list[str] = []
+        self.error: BaseException | None = None
+
+    async def move_reservation(self, _handle: Any, attempt: Attempt, **_kwargs: Any) -> None:
+        self.moves.append(attempt.instance)
+        if self.error is not None:
+            raise self.error
+
+
+@pytest.fixture
+def budgets(monkeypatch: pytest.MonkeyPatch) -> _Budgets:
+    fake = _Budgets()
+    monkeypatch.setattr(pipeline, "get_budget_service", lambda _uow, _db: fake)
+    return fake
+
+
+def _refused_by(provider_key_id: str | None) -> SpendCeilingExceededError:
+    error = ProviderSpendCeilingExceededError if provider_key_id is not None else SpendCeilingExceededError
+    return error("Workspace has exceeded budget limit", scope_type="workspace")
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_is_moved_onto_its_providers_budgets(budgets: _Budgets) -> None:
+    await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+
+    assert budgets.moves == ["anthropic"]
+
+
+@pytest.mark.asyncio
+async def test_every_candidate_is_moved_when_the_walk_admits_it(budgets: _Budgets) -> None:
+    admit = pipeline._candidate_admission(_ctx())
+
+    await admit(_attempt(1, "openai", "cheap"))
+    await admit(_attempt(2, "anthropic", "pricey"))
+
+    assert budgets.moves == ["openai", "anthropic"]
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_whose_providers_budget_is_full_is_skipped(budgets: _Budgets) -> None:
+    """A full budget on the fallback's provider says nothing about the next candidate, so the walk moves on."""
+    budgets.error = _refused_by("anthropic")
+
+    with pytest.raises(CandidateCannotServe) as exc_info:
+        await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+
+    refusal = exc_info.value.refusal
+    assert (refusal.status_code, refusal.detail) == (403, "Workspace has exceeded budget limit")
+    assert refusal.headers == error_headers(BUDGET_EXCEEDED, budget_scope="workspace")
+
+
+@pytest.mark.asyncio
+async def test_a_full_budget_on_every_provider_stops_the_chain(budgets: _Budgets) -> None:
+    budgets.error = _refused_by(None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == pipeline.budget_exhausted_mid_failover_detail()
+    assert exc_info.value.headers == error_headers(BUDGET_EXCEEDED, budget_scope="workspace")
+
+
+@pytest.mark.asyncio
+async def test_a_database_failure_during_a_move_stops_the_chain(budgets: _Budgets) -> None:
+    """A database failure is not the provider's, so the walk must not try the next candidate as if it were."""
+    budgets.error = OperationalError("UPDATE scoped_budgets", {}, Exception("connection lost"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == pipeline.BUDGETS_UNAVAILABLE_DETAIL
+
+
+@pytest.mark.asyncio
+async def test_a_database_failure_during_a_move_is_logged_without_its_message(
+    budgets: _Budgets, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A database error's message can carry the row it touched, so it is described, not logged."""
+    budgets.error = OperationalError("UPDATE scoped_budgets", {}, Exception("DETAIL: Failing row contains (secret)"))
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.ERROR, logger="gateway")
+    try:
+        with pytest.raises(HTTPException):
+            await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [record] = [r for r in caplog.records if "Could not move the reservation" in r.getMessage()]
+    assert record.getMessage().endswith(": OperationalError Exception")
+    assert record.exc_info is None
+    assert "Failing row" not in caplog.text

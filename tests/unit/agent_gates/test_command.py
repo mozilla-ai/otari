@@ -2,6 +2,7 @@ import time
 
 import pytest
 
+from otari_agent.domain import evaluators
 from otari_agent.domain.evaluators import (
     _command_segments,
     _contains_subsequence,
@@ -527,11 +528,24 @@ def test_text_that_is_not_a_terminated_heredoc_body_is_still_checked(command: st
     assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
 
 
-def test_many_unterminated_heredocs_resolve_quickly() -> None:
-    command = "cat <<X\n" * 20_000
-    start = time.perf_counter()
-    _command_segments(command)
-    assert time.perf_counter() - start < 1.0
+def _best_seconds(command: str) -> float:
+    timings = []
+    for _ in range(3):
+        start = time.perf_counter()
+        _command_segments(command)
+        timings.append(time.perf_counter() - start)
+    return min(timings)
+
+
+def test_many_unterminated_heredocs_resolve_in_linear_time() -> None:
+    """Eight times the heredocs costs about eight times as long, not sixty-four.
+
+    A ratio rather than a wall-clock budget, so a slow or loaded runner
+    scales both sides alike. 24 sits between linear (8) and quadratic (64).
+    """
+    small = _best_seconds("cat <<X\n" * 2_000)
+    large = _best_seconds("cat <<X\n" * 16_000)
+    assert large / small < 24
 
 
 def test_the_malformed_command_fallback_does_not_see_a_heredoc_body() -> None:
@@ -550,7 +564,7 @@ def test_empty_segments_are_dropped_not_matched_or_iterated() -> None:
     assert _command_segments("npm install ; ; git status") == [["npm", "install"], ["git", "status"]]
 
 
-def test_many_separators_with_no_real_content_resolve_quickly() -> None:
+def test_many_separators_with_no_real_content_leave_nothing_to_iterate() -> None:
     """A command built from many separators and no real tokens (";" * n) used
 
     to keep an empty segment per separator gap, each compared against every
@@ -561,11 +575,9 @@ def test_many_separators_with_no_real_content_resolve_quickly() -> None:
     """
     gate = _gate(forbidden=tuple(f"p{i}" for i in range(500)))
     commands = tuple("; " * 500 + " " * i for i in range(100))
-    evidence = CommandEvidence(commands=commands)
-    start = time.perf_counter()
-    result = evaluate_command(gate, evidence, segment_cache=tokenize_commands(commands))
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+    cache = tokenize_commands(commands)
+    assert all(segments == [] for segments in cache.values())
+    result = evaluate_command(gate, CommandEvidence(commands=commands), segment_cache=cache)
     assert result.outcome is Outcome.PASS
 
 
@@ -622,7 +634,19 @@ def test_segment_cache_produces_the_same_result_as_computing_internally() -> Non
     assert without_cache == with_cache
 
 
-def test_shared_segment_cache_avoids_retokenizing_per_gate() -> None:
+def _count_tokenizations(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record each command the evaluators tokenize from here on, rather than read from a cache."""
+    calls: list[str] = []
+
+    def counting(command: str) -> list[list[str]]:
+        calls.append(command)
+        return _command_segments(command)
+
+    monkeypatch.setattr(evaluators, "_command_segments", counting)
+    return calls
+
+
+def test_shared_segment_cache_avoids_retokenizing_per_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     """Review's P1 repro: 100 command gates forbidding "npm" against
 
     250 distinct, mostly-whitespace ~4,000-character commands passed every
@@ -630,18 +654,32 @@ def test_shared_segment_cache_avoids_retokenizing_per_gate() -> None:
     because each of the 100 gates independently re-tokenized every command
     from scratch. Tokenizing once and sharing the result, as
     tests/integration/test_hooks_route.py's route-level counterpart
-    exercises through the real endpoint, collapses this to a fraction of a
-    second.
+    exercises through the real endpoint, leaves no gate a command to tokenize.
     """
     gates = [_gate(id=f"g{i}", forbidden=("npm",)) for i in range(100)]
     commands = tuple(" " * 4000 + str(i) for i in range(250))
     evidence = CommandEvidence(commands=commands)
     cache = tokenize_commands(commands)
-    start = time.perf_counter()
+    calls = _count_tokenizations(monkeypatch)
     for gate in gates:
         evaluate_command(gate, evidence, segment_cache=cache)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+    assert calls == []
+
+
+def test_a_cached_command_with_no_segments_is_not_retokenized(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty segment list is a cache hit, not a miss to tokenize again for every gate."""
+    commands = ("; ; ;", "")
+    cache = tokenize_commands(commands)
+    calls = _count_tokenizations(monkeypatch)
+    evaluate_command(_gate(), CommandEvidence(commands=commands), segment_cache=cache)
+    assert calls == []
+
+
+def test_a_command_missing_from_the_cache_is_still_tokenized(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _count_tokenizations(monkeypatch)
+    result = evaluate_command(_gate(), CommandEvidence(commands=("git push --force",)), segment_cache={})
+    assert result.outcome is Outcome.FAIL
+    assert calls == ["git push --force"]
 
 
 def test_session_scoped_evidence_is_not_this_gates_to_judge() -> None:

@@ -69,6 +69,10 @@ POST /api/v1/audio/speech
 POST /api/v1/audio/transcriptions
 
 [excluded]
+# The RFC 7523 token exchange the Anthropic SDKs and Claude Code already speak
+# when ANTHROPIC_BASE_URL points at Otari. A client that wants workload identity
+# uses that implementation; an Otari SDK wrapper would be a second one.
+POST /api/v1/oauth/token                            # protocol endpoint, spoken by the Anthropic SDKs
 GET /api/v1/models/{model_id}                       # redundant, list_models covers discovery
 # Caller-orchestrated MCP is public, but no SDK shell wraps it yet. Typed
 # mcp.list_tools and mcp.execute methods are the next step for the SDKs, and
@@ -124,13 +128,25 @@ POST /api/v1/provider-endpoints                     # not yet wrapped
 GET /api/v1/provider-endpoints/{endpoint_id}        # not yet wrapped
 PATCH /api/v1/provider-endpoints/{endpoint_id}      # not yet wrapped
 DELETE /api/v1/provider-endpoints/{endpoint_id}     # not yet wrapped
+# Hosted providers (the deployment's own upstream credentials, operator-only)
+GET /api/v1/hosted-providers                        # dashboard-only
+POST /api/v1/hosted-providers                       # dashboard-only
+GET /api/v1/hosted-providers/refresh/preview        # dashboard-only
+POST /api/v1/hosted-providers/refresh               # dashboard-only
+POST /api/v1/hosted-providers/test                  # dashboard-only
+POST /api/v1/hosted-providers/reencrypt             # dashboard-only
+GET /api/v1/hosted-providers/migration              # dashboard-only
+POST /api/v1/hosted-providers/migration             # dashboard-only
+DELETE /api/v1/hosted-providers/migration/{instance} # dashboard-only
+PATCH /api/v1/hosted-providers/{provider}           # dashboard-only
+DELETE /api/v1/hosted-providers/{provider}          # dashboard-only
+GET /api/v1/hosted-providers/{provider}/models      # dashboard-only
+POST /api/v1/hosted-providers/{provider}/models     # dashboard-only
+POST /api/v1/hosted-providers/{provider}/models/refresh                  # dashboard-only
+GET /api/v1/hosted-providers/{provider}/available-models                 # dashboard-only
+PATCH /api/v1/hosted-providers/{provider}/models/{model_id}              # dashboard-only
+DELETE /api/v1/hosted-providers/{provider}/models/{model_id}             # dashboard-only
 # Provider credentials (runtime provider management)
-GET /api/v1/provider-credentials                    # not yet wrapped
-POST /api/v1/provider-credentials                   # not yet wrapped
-POST /api/v1/provider-credentials/test              # not yet wrapped
-PATCH /api/v1/provider-credentials/{instance}       # not yet wrapped
-DELETE /api/v1/provider-credentials/{instance}      # not yet wrapped
-POST /api/v1/provider-credentials/{instance}/test   # not yet wrapped
 # Providers catalog
 GET /api/v1/providers                               # not yet wrapped
 GET /api/v1/providers/catalog                       # not yet wrapped
@@ -144,20 +160,52 @@ GET /api/v1/settings                                # not yet wrapped
 PATCH /api/v1/settings                              # not yet wrapped
 GET /api/v1/settings/mail                           # not yet wrapped
 POST /api/v1/settings/mail/test                     # not yet wrapped
+GET /api/v1/health-checks                           # operator dashboard only
+POST /api/v1/health-checks/disable-failing          # operator dashboard only
+POST /api/v1/health-checks/run                      # operator dashboard only
+GET /api/v1/health-checks/settings                  # operator dashboard only
+PATCH /api/v1/health-checks/settings                # operator dashboard only
 GET /api/v1/settings/maintenance-mode               # not yet wrapped
 PATCH /api/v1/settings/maintenance-mode             # not yet wrapped
 # Model discovery / metadata
 GET /api/v1/models/discoverable                     # not yet wrapped
 GET /api/v1/models/metadata                         # not yet wrapped
+# Agent traces (the dashboard's trace explorer reads these)
+GET /api/v1/traces                                  # not yet wrapped
+GET /api/v1/traces/count                            # not yet wrapped
+GET /api/v1/traces/series                           # not yet wrapped
+GET /api/v1/traces/requests/{request_id}            # not yet wrapped
+GET /api/v1/traces/{trace_id}                       # not yet wrapped
+GET /api/v1/organizations/me/traces                 # not yet wrapped
+GET /api/v1/organizations/me/traces/count           # not yet wrapped
+GET /api/v1/organizations/me/traces/series          # not yet wrapped
+GET /api/v1/organizations/me/traces/requests/{request_id}  # not yet wrapped
+GET /api/v1/organizations/me/traces/{trace_id}      # not yet wrapped
 # Other control-plane extensions of already-covered resources
 GET /api/v1/usage/count                             # not yet wrapped
 GET /api/v1/usage/requests/{request_id}            # not yet wrapped
 POST /api/v1/keys/{key_id}/rotate                   # not yet wrapped
 GET /api/v1/budgets/{budget_id}/reset-logs          # not yet wrapped
 PUT /api/v1/budgets/{budget_id}                     # not yet wrapped
+GET /api/v1/keys/{key_id}/end-users                 # not yet wrapped
+PUT /api/v1/keys/{key_id}/end-users                 # not yet wrapped
+PATCH /api/v1/keys/{key_id}/end-users               # not yet wrapped
 GET /api/v1/keys/{key_id}/end-users/{external_id}   # not yet wrapped
 PUT /api/v1/keys/{key_id}/end-users/{external_id}   # not yet wrapped
 PATCH /api/v1/keys/{key_id}/end-users/{external_id} # not yet wrapped
+POST /api/v1/keys/{key_id}/federation-rules         # not yet wrapped
+GET /api/v1/keys/{key_id}/federation-rules          # not yet wrapped
+DELETE /api/v1/keys/{key_id}/federation-rules/{rule_id}  # not yet wrapped
+# A service key managing its own end users, authenticated with that key
+GET /api/v1/end-users                               # not yet wrapped
+PUT /api/v1/end-users                               # not yet wrapped
+PATCH /api/v1/end-users                             # not yet wrapped
+DELETE /api/v1/end-users                            # not yet wrapped
+GET /api/v1/end-users/{external_id}                 # not yet wrapped
+PUT /api/v1/end-users/{external_id}                 # not yet wrapped
+PATCH /api/v1/end-users/{external_id}               # not yet wrapped
+DELETE /api/v1/end-users/{external_id}              # not yet wrapped
+GET /api/v1/end-user-budgets                        # not yet wrapped
 
 # --- Second wave of gateway endpoints (added after the initial manifest) ---
 # Dashboard session auth: browser cookie flow for the admin UI, not an SDK surface.
@@ -171,9 +219,10 @@ DELETE /api/v1/auth/session                         # dashboard-only
 # flow. An SDK authenticates with the master key or an API key and never holds
 # a password, so there is nothing here for one to wrap.
 PUT /api/v1/auth/password                           # dashboard-only
-# The name the signed-in identity goes by: the account page's own write, beside
+# Who the signed-in identity is, and the name it goes by: the account page's own read and write, beside
 # the credential ones. An SDK authenticates as a key rather than as a person and
 # has no account page to render, so there is nothing here for one to wrap.
+GET /api/v1/auth/profile                            # dashboard-only
 PATCH /api/v1/auth/profile                          # dashboard-only
 # A signed-in person's message to the Otari team, sent from the top bar (the
 # account menu on a phone).
@@ -187,6 +236,8 @@ POST /api/v1/auth/verify-email                      # dashboard-only
 POST /api/v1/auth/resend-verification               # dashboard-only
 POST /api/v1/auth/password/reset                    # dashboard-only
 POST /api/v1/auth/password/reset/confirm            # dashboard-only
+POST /api/v1/auth/password/reset/validate           # dashboard-only
+POST /api/v1/auth/verify-email/validate             # dashboard-only
 # Passkeys (otari#652): both ceremonies need a WebAuthn authenticator, which is
 # a browser API. An SDK cannot produce an attestation or an assertion, so there
 # is nothing here for one to wrap, including the credential list: it exists to
@@ -231,6 +282,7 @@ DELETE /api/v1/routing/policies/{name}              # not yet wrapped
 POST /api/v1/routing/policies/explain               # not yet wrapped
 POST /api/v1/routing/preferences/rank               # not yet wrapped
 GET /api/v1/routing/status                          # not yet wrapped
+POST /api/v1/routing/recommend                      # not yet wrapped
 # Pricing refresh workflow
 POST /api/v1/pricing/refresh                        # not yet wrapped
 POST /api/v1/pricing/refresh/confirm                # not yet wrapped
@@ -246,7 +298,6 @@ POST /api/v1/catalog/selectors/refresh              # not yet wrapped
 # Providers
 GET /api/v1/providers/catalog/{provider_id}         # not yet wrapped
 GET /api/v1/providers/health                        # not yet wrapped
-POST /api/v1/provider-credentials/reencrypt         # not yet wrapped
 # Built-in tool settings and search
 GET /api/v1/tools                                   # not yet wrapped
 GET /api/v1/tool-settings                           # not yet wrapped
@@ -263,6 +314,8 @@ POST /api/v1/search-tools                           # not yet wrapped
 PATCH /api/v1/search-tools/{name}                   # not yet wrapped
 DELETE /api/v1/search-tools/{name}                  # not yet wrapped
 POST /api/v1/search-tools/reencrypt                 # not yet wrapped
+POST /api/v1/search-tools/test                      # not yet wrapped
+POST /api/v1/search-tools/{name}/test               # not yet wrapped
 # Settings
 POST /api/v1/settings/master-key/rotate             # not yet wrapped
 # Tenancy-scoped budgets: an operator surface with no dashboard page yet either,
@@ -280,6 +333,7 @@ DELETE /api/v1/scoped-budgets/{budget_id}                       # not yet wrappe
 GET /api/v1/admin/access                                        # dashboard-only
 GET /api/v1/admin/users                                         # dashboard-only
 PATCH /api/v1/admin/users/{user_id}                             # dashboard-only
+POST /api/v1/admin/users/{user_id}/password-link                # dashboard-only
 # Tenancy: organizations, workspaces, and their memberships. The dashboard's
 # tenancy pages are the consumer; an SDK caller acts inside one workspace with a
 # key that already names it, so none of these is an SDK surface yet. Move to
@@ -287,6 +341,7 @@ PATCH /api/v1/admin/users/{user_id}                             # dashboard-only
 POST /api/v1/organizations                                      # dashboard-only
 GET /api/v1/organizations/me                                    # dashboard-only
 PATCH /api/v1/organizations/me                                  # dashboard-only
+DELETE /api/v1/organizations/me                                 # dashboard-only
 GET /api/v1/organizations/me/memberships                        # dashboard-only
 POST /api/v1/organizations/me/switch                            # dashboard-only
 GET /api/v1/organizations/me/members                            # dashboard-only
@@ -325,6 +380,7 @@ DELETE /api/v1/organizations/me/routing-policies/{name}         # dashboard-only
 GET /api/v1/organizations/me/aliases                            # dashboard-only
 POST /api/v1/organizations/me/aliases                           # dashboard-only
 DELETE /api/v1/organizations/me/aliases/{name}                  # dashboard-only
+GET /api/v1/organizations/me/automatic-fallbacks                # dashboard-only
 # The member's own keys (otari-ai#1941), excluded for the same reason as the
 # usage reads above: scoped by the caller's dashboard session, which an SDK
 # caller does not hold.
@@ -366,6 +422,7 @@ POST /api/v1/organizations/me/guardrail-definitions/{definition_id}/test  # dash
 POST /api/v1/organizations/me/member-invitations                # dashboard-only
 POST /api/v1/organizations/me/member-invitations/bulk           # dashboard-only
 DELETE /api/v1/organizations/me/member-invitations/{invitation_id} # dashboard-only
+POST /api/v1/organizations/me/member-invitations/{invitation_id}/reissue # dashboard-only
 # The invitee's side of the same flow, and dashboard-only for the same reason
 # the admin's side above is: it acts as a signed-in person deciding about their
 # own membership, not as a key-holder calling the gateway.
@@ -414,6 +471,7 @@ DELETE /api/v1/organizations/me/provider-keys/{key_id}                        # 
 POST /api/v1/organizations/me/provider-keys/{key_id}/archive                  # dashboard-only
 POST /api/v1/organizations/me/provider-keys/{key_id}/restore                  # dashboard-only
 POST /api/v1/organizations/me/provider-keys/{key_id}/default                  # dashboard-only
+DELETE /api/v1/organizations/me/provider-keys/{key_id}/default                # dashboard-only
 # The models offered on one of those keys, their rates and their serving
 # switches (otari#643 follow-up). Same surface, same reason: an SDK caller sends
 # a model and a key, and which of an organization's adopted models are served
@@ -449,8 +507,10 @@ DELETE /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}             # 
 # by id in `mcp_server_ids` on a completion request, which is already covered.
 GET /api/v1/workspaces/{workspace_id}/mcp-servers                             # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers                            # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/check                      # operator surface
 PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface
 # Web-search backend (otari#882): the SearXNG-shaped endpoint one gateway calls
 # on another, authenticated by a shared deployment token rather than an API key.
 # Its caller is a data-plane gateway, not an application, and no SDK holds that

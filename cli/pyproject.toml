@@ -1,6 +1,6 @@
 [build-system]
 # 77 is the first setuptools that accepts a PEP 639 SPDX string in `license`.
-requires = ["setuptools>=84.0.0", "setuptools-scm>=8"]
+requires = ["setuptools>=84.0.0", "setuptools-scm>=9"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -56,3 +56,9 @@ version_file = "src/otari_agent/_version.py"
 # without .git) gets the unstamped version rather than a hard failure; that
 # image names its own version in OTARI_VERSION, which `otari --version` prefers.
 fallback_version = "0.0.0"
+
+[tool.setuptools_scm.scm.git]
+# Otari's own `vX.Y.Z` tags only: the packages under integrations/ tag their
+# releases `<package>-vX.Y.Z` in this repository, and describing one of those
+# would version this distribution as that package.
+describe_command = "git describe --dirty --tags --long --match v[0-9]*"

@@ -19,8 +19,8 @@ from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import event, select
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.models.budgets import (
@@ -43,7 +43,7 @@ from gateway.services.budgets import (
 )
 
 from .conftest import _to_async_url
-from .test_scoped_budgets import Fixture, _build_tenancy, _counters, _scoped
+from .test_scoped_budgets import Fixture, _build_tenancy, _counters, _scoped, move
 
 
 @pytest_asyncio.fixture
@@ -125,7 +125,8 @@ async def test_a_hold_becomes_a_row_on_both_mechanisms(async_db: AsyncSession, t
 
     lines = await _lines(async_db, handle.reservation_id)
     assert [line.scoped_budget_id for line in lines] == [cap.id]
-    assert lines[0].amount == Decimal("2.000000")
+    assert (lines[0].amount, lines[0].request_amount) == (Decimal("2.000000"), 1)
+    assert rows[0].request_estimate == 1
 
 
 @pytest.mark.asyncio
@@ -309,7 +310,7 @@ async def test_a_top_up_grows_the_row_it_already_has(async_db: AsyncSession, ten
     await async_db.commit()
 
     handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
-    await increase_reservation(async_db, handle, 2.0)
+    await increase_reservation(async_db, handle, estimate=3.0)
 
     rows = await _rows(async_db, tenancy.user_id)
     assert len(rows) == 1
@@ -347,7 +348,7 @@ async def test_a_top_up_after_a_reclaim_returns_the_delta(async_db: AsyncSession
     await async_db.commit()
     assert await ledger.sweep_expired(async_db, batch_size=10) == 1
 
-    await increase_reservation(async_db, handle, 2.0)
+    await increase_reservation(async_db, handle, estimate=3.0)
 
     # The delta is back on both counters, and the row was not resurrected.
     assert (await _user(async_db, tenancy.user_id)).reserved == Decimal("0.000000")
@@ -508,3 +509,252 @@ async def test_an_orphan_scope_line_does_not_block_the_release(async_db: AsyncSe
 
     await refund_reservation(async_db, handle)
     assert (await _user(async_db, tenancy.user_id)).reserved == Decimal("0.000000")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_ledger_write_refuses_the_request_holding_nothing(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """The per-user hold commits with its row, so a failed write takes the hold with it.
+
+    The ceilings' holds were committed before it and are given back, so nothing is
+    left held that no row could ever reclaim.
+    """
+    await _with_budget(async_db, tenancy)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+    # The failure rolls the session back, which expires everything loaded in it.
+    cap_id, user_id, scope = cap.id, tenancy.user_id, tenancy.scope()
+
+    with (
+        patch.object(ledger, "record", side_effect=OperationalError("INSERT", None, Exception("gone"))),
+        pytest.raises(OperationalError),
+    ):
+        await reserve_budget(async_db, user_id, 2.0, scope=scope)
+
+    user = await _user(async_db, user_id)
+    assert (user.reserved, user.reserved_tokens, user.reserved_requests) == (Decimal(0), 0, 0)
+    _, reserved = await _counters(async_db, cap_id)
+    assert reserved == pytest.approx(0.0)
+    assert await _rows(async_db, user_id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_ledger_write_on_ceilings_alone_keeps_the_hold_unledgered(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """With no per-user budget the ceilings' holds are already committed, so the request keeps them."""
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+
+    with patch.object(ledger, "record", side_effect=OperationalError("INSERT", None, Exception("gone"))):
+        handle = await reserve_budget(async_db, tenancy.user_id, 2.0, scope=tenancy.scope())
+
+    assert handle.reservation_id is None
+    _, reserved = await _counters(async_db, cap.id)
+    assert reserved == pytest.approx(2.0)
+
+
+@pytest.mark.asyncio
+async def test_a_user_holding_nothing_is_not_swept_for_leaks(async_db: AsyncSession, tenancy: Fixture) -> None:
+    await _with_budget(async_db, tenancy)
+
+    with patch.object(ledger, "reclaim_expired_for_user", wraps=ledger.reclaim_expired_for_user) as reclaim:
+        await reserve_budget(async_db, tenancy.user_id, 1.0)
+
+    reclaim.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_leaked_hold_is_still_reclaimed_by_the_next_request(async_db: AsyncSession, tenancy: Fixture) -> None:
+    await _with_budget(async_db, tenancy)
+    leaked = await reserve_budget(async_db, tenancy.user_id, 3.0)
+    assert leaked.reservation_id is not None
+    row = await async_db.get_one(BudgetReservation, leaked.reservation_id)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+
+    await reserve_budget(async_db, tenancy.user_id, 1.0)
+
+    assert await _status(async_db, leaked.reservation_id) == RESERVATION_EXPIRED
+    user = await _user(async_db, tenancy.user_id)
+    assert user.reserved == Decimal("1.000000")
+
+
+@pytest.mark.asyncio
+async def test_a_hold_another_session_leaked_is_reclaimed_past_a_stale_identity_map(
+    async_db: AsyncSession, postgres_url: str, tenancy: Fixture
+) -> None:
+    """The sweep is skipped for a user row holding nothing, so that row must be read fresh.
+
+    This session loaded the user while it held nothing; the leaked hold was taken
+    through another one, as a concurrent request's would be. Read from the
+    identity map, the row still shows nothing held and the leak is never swept.
+    """
+    await _with_budget(async_db, tenancy)
+    # Held for the whole test: the identity map is weak, and an unreferenced user
+    # would be loaded afresh whether or not the read asks for it.
+    loaded = await async_db.get_one(User, tenancy.user_id)
+    assert loaded.reserved == Decimal(0)
+
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as other:
+            leaked = await reserve_budget(other, tenancy.user_id, 3.0)
+            assert leaked.reservation_id is not None
+            row = await other.get_one(BudgetReservation, leaked.reservation_id)
+            row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+            await other.commit()
+    finally:
+        await engine.dispose()
+
+    await reserve_budget(async_db, tenancy.user_id, 1.0)
+
+    assert await _status(async_db, leaked.reservation_id) == RESERVATION_EXPIRED
+    user = await _user(async_db, tenancy.user_id)
+    assert user.reserved == Decimal("1.000000")
+
+
+def _updated_tables(statements: list[str]) -> list[str]:
+    tables = []
+    for statement in statements:
+        words = statement.split()
+        if len(words) > 1 and words[0].upper() == "UPDATE" and words[1] in {"users", "scoped_budgets"}:
+            tables.append(words[1])
+    return tables
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["settle", "refund", "reclaim"])
+async def test_every_ending_writes_the_user_before_the_ceiling(
+    async_db: AsyncSession, tenancy: Fixture, ending: str
+) -> None:
+    """One lock order everywhere, so two endings can never deadlock on a user and a ceiling."""
+    await _with_budget(async_db, tenancy)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 2.0, scope=tenancy.scope())
+    if ending == "reclaim":
+        assert handle.reservation_id is not None
+        row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+        row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        await async_db.commit()
+
+    statements: list[str] = []
+
+    def record(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        statements.append(statement)
+
+    sync_engine = async_db.bind.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", record)
+    try:
+        if ending == "settle":
+            await reconcile_reservation(async_db, handle, 1.0)
+        elif ending == "refund":
+            await refund_reservation(async_db, handle)
+        else:
+            assert await ledger.reclaim_expired_for_user(async_db, tenancy.user_id) == 1
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", record)
+
+    assert _updated_tables(statements) == ["users", "scoped_budgets"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("landed", [False, True])
+async def test_a_commit_that_reports_failure_gives_the_ceilings_back_only_if_it_did_not_land(
+    async_db: AsyncSession, tenancy: Fixture, landed: bool
+) -> None:
+    """A commit can land and still report failure. Landed, the sweep returns the ceilings
+    through the ledger row, so they stay held; not landed, nothing ever would, so they
+    are given back here."""
+    await _with_budget(async_db, tenancy)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+    cap_id, user_id, scope = cap.id, tenancy.user_id, tenancy.scope()
+    real_commit = async_db.commit
+    commits = 0
+
+    async def commit_failing_the_hold() -> None:
+        nonlocal commits
+        commits += 1
+        # The first commit is the ceiling's own hold; the second is the user's hold with its row.
+        if commits == 2:
+            if landed:
+                await real_commit()
+            raise OperationalError("COMMIT", None, Exception("connection lost"))
+        await real_commit()
+
+    with (
+        patch.object(async_db, "commit", side_effect=commit_failing_the_hold),
+        pytest.raises(OperationalError),
+    ):
+        await reserve_budget(async_db, user_id, 2.0, scope=scope)
+
+    _, reserved = await _counters(async_db, cap_id)
+    rows = await _rows(async_db, user_id)
+    assert len(rows) == 1
+    if landed:
+        assert reserved == pytest.approx(2.0)
+        assert rows[0].status == RESERVATION_ACTIVE
+    else:
+        assert reserved == pytest.approx(0.0)
+        assert rows[0].status == RESERVATION_RELEASED
+        user = await _user(async_db, user_id)
+        assert (user.reserved, user.reserved_requests) == (Decimal(0), 0)
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_returns_what_a_move_took(async_db: AsyncSession, tenancy: Fixture) -> None:
+    openai_cap = await _scoped(
+        async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=5.0, provider_key_id="openai"
+    )
+    anthropic = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=5.0,
+        provider_key_id="anthropic",
+    )
+    async_db.add_all([openai_cap, anthropic])
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    await move(async_db, handle, "anthropic", cost=2.0)
+    assert handle.reservation_id is not None
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+
+    assert await ledger.sweep_expired(async_db, batch_size=10) == 1
+
+    assert await _counters(async_db, openai_cap.id) == (0.0, 0.0)
+    assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_top_up_that_first_holds_the_user_leg_marks_its_row(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A move writes the row of a request that held nothing, and the sweep must release what a top-up adds to it."""
+    await _with_budget(async_db, tenancy)
+    anthropic = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=5.0,
+        provider_key_id="anthropic",
+    )
+    async_db.add(anthropic)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 0.0, model_is_free=True, scope=tenancy.scope("openai"))
+    assert handle.reservation_id is None
+    await move(async_db, handle, "anthropic", cost=2.0)
+    assert handle.reservation_id is not None
+
+    await increase_reservation(async_db, handle, estimate=2.0, tokens=100)
+
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    await async_db.refresh(row)
+    assert (row.user_reserved, row.estimate, row.token_estimate) == (True, Decimal(2), 100)

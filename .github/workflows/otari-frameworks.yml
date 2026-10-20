@@ -1,0 +1,102 @@
+name: Otari Agent Frameworks
+
+# Tests the agent-framework integrations: pydantic-ai-otari and langchain-otari
+# (integrations/), and every Python block on the docs pages that use them,
+# run against a real Otari booted from this checkout in front of a scripted mock
+# provider. The pages are the test, so a page that drifts from what works, or a
+# gateway change that breaks a framework, fails here. See
+# integrations/e2e/README.md.
+#
+# The frameworks live in integrations/e2e's own lockfile, never in uv.lock: they
+# release weekly, and in the workspace lock every release would move the
+# gateway's resolution. Pull requests run that lock as committed, so a red run
+# points at the PR. The weekly run upgrades it first, so a framework release that
+# breaks against Otari shows up there, without failing an unrelated PR.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/gateway/**'
+      - 'cli/**'
+      - 'alembic/**'
+      - 'alembic.ini'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'docs/use-with-pydantic-ai.md'
+      - 'docs/use-with-langchain.md'
+      - 'docs/use-with-langgraph.md'
+      - 'integrations/**'
+      - '.github/workflows/otari-frameworks.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/gateway/**'
+      - 'cli/**'
+      - 'alembic/**'
+      - 'alembic.ini'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'docs/use-with-pydantic-ai.md'
+      - 'docs/use-with-langchain.md'
+      - 'docs/use-with-langgraph.md'
+      - 'integrations/**'
+      - '.github/workflows/otari-frameworks.yml'
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  frameworks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        python-version: "3.14"
+
+    - name: Install the gateway
+      run: uv sync --frozen --no-dev
+
+    - name: Upgrade the frameworks to their latest releases
+      if: github.event_name == 'schedule'
+      working-directory: integrations/e2e
+      run: uv lock --upgrade
+
+    - name: Run the packages' tests, and the docs pages against Otari
+      working-directory: integrations/e2e
+      run: uv run --locked pytest -v -c pyproject.toml --rootdir . . ../pydantic-ai-otari/tests ../langchain-otari/tests
+
+  # The packages promise the oldest Python and framework releases their
+  # pyproject.toml files declare, and a project pinned to an older framework is
+  # the common case. This installs exactly those floors (lowest-direct) and runs
+  # the packages' own tests on them.
+  floors:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        python-version: "3.10"
+
+    - name: Install the declared minimum versions
+      run: |
+        uv venv --python 3.10 "$RUNNER_TEMP/floors"
+        uv pip install --python "$RUNNER_TEMP/floors" --resolution lowest-direct \
+          -r integrations/pydantic-ai-otari/pyproject.toml -r integrations/langchain-otari/pyproject.toml "pytest>=8"
+        uv pip install --python "$RUNNER_TEMP/floors" --no-deps ./integrations/pydantic-ai-otari ./integrations/langchain-otari
+
+    - name: Run the packages' tests
+      run: >-
+        "$RUNNER_TEMP/floors/bin/python" -m pytest -v -c integrations/e2e/pyproject.toml --rootdir integrations
+        integrations/pydantic-ai-otari/tests integrations/langchain-otari/tests

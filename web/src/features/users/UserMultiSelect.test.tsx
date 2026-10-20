@@ -18,11 +18,13 @@ function user(user_id: string, alias: string | null = null): User {
 function member(
   attributionUserId: string,
   fullName: string,
+  email: string | null = null,
 ): OrganizationMember {
   return organizationMember({
     organization_member_id: attributionUserId,
     attribution_user_id: attributionUserId,
     full_name: fullName,
+    email,
   })
 }
 
@@ -79,7 +81,7 @@ describe("UserMultiSelect", () => {
   })
 
   it("names a member by the roster, with their owner id as the second line", async () => {
-    mockRoster([member(UUID, "Alice Example")])
+    mockRoster([member(UUID, "Alice Example", "alice@example.com")])
     renderPicker(
       <UserMultiSelect
         label="Applies to"
@@ -97,10 +99,11 @@ describe("UserMultiSelect", () => {
     // The same shape the owner picker uses, so a person reads the same way in
     // both: name first, billing id under it and in the row's name.
     const row = await screen.findByRole("option", {
-      name: `Alice Example (${UUID})`,
+      name: "Alice Example (alice@example.com)",
     })
     expect(within(row).getByText("Alice Example")).toBeInTheDocument()
-    expect(within(row).getByText(UUID)).toBeInTheDocument()
+    expect(within(row).getByText("alice@example.com")).toBeInTheDocument()
+    expect(within(row).queryByText(UUID)).toBeNull()
     // An id an operator chose is already its own name, so it carries no hint.
     expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
   })
@@ -119,7 +122,7 @@ describe("UserMultiSelect", () => {
     await userEvent.type(screen.getByLabelText("Applies to"), UUID)
 
     expect(
-      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
+      await screen.findByRole("option", { name: "Alice Example" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("option", { name: "ci-bot" })).toBeNull()
   })
@@ -130,7 +133,7 @@ describe("UserMultiSelect", () => {
 
     await userEvent.click(screen.getByLabelText("Applies to"))
     await userEvent.click(
-      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
+      await screen.findByRole("option", { name: "Alice Example" }),
     )
 
     // The id is what a budget assignment PATCHes; the chip is what the operator

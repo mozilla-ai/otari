@@ -49,7 +49,7 @@ from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRep
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import WorkspaceListener
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 
 
 class WorkspaceService:
@@ -61,14 +61,16 @@ class WorkspaceService:
         *,
         uow: UnitOfWork,
         membership_listener: MembershipListener,
-        workspace_listener: WorkspaceListener | None = None,
+        workspace_listener: WorkspaceListener,
     ):
         """Build the service on a session and a Unit of Work over it, which the listener writes through."""
         self.db = db
         self._uow = uow
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
         self._workspace_listener = workspace_listener
         self._membership_listener = membership_listener
 
@@ -184,8 +186,7 @@ class WorkspaceService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
-                if self._workspace_listener is not None:
-                    await self._workspace_listener.workspace_created(workspace.id)
+                await self._workspace_listener.workspace_created(workspace.id)
                 member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
                 # No-op today: a workspace this fresh has no defaults of its own yet.
                 # Called anyway so every WorkspaceMember-creating path materializes

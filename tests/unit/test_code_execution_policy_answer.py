@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy
-from gateway.services.tenancy.workspace_code_execution_policy_service import read_code_execution_policy
+from gateway.services.tools import read_code_execution_policy
 
 
 def test_a_full_answer_is_read_field_by_field() -> None:

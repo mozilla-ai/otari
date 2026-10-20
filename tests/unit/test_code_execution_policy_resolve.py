@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -180,24 +180,40 @@ async def test_resolve_misconfigured_platform_500() -> None:
 @pytest.mark.asyncio
 async def test_a_local_scope_without_a_workspace_is_a_resolution_failure() -> None:
     with pytest.raises(CodeExecutionPolicyResolutionFailedError) as ei:
-        await LocalCodeExecutionPolicy(MagicMock()).resolve(_token_scope())
+        await LocalCodeExecutionPolicy(MagicMock(), on_without_policy=True).resolve(_token_scope())
 
     assert ei.value.reason is CodeExecutionPolicyResolutionFailure.NO_WORKSPACE
 
 
 @pytest.mark.asyncio
 async def test_a_local_scope_reads_the_workspace_row() -> None:
-    session = MagicMock()
     workspace_id = uuid.uuid4()
     stored = ResolvedCodeExecutionPolicy(
         enabled=False, default_purpose_hint=None, max_iterations=None, exec_timeout_s=None, image=None, tools=None
     )
-    read = AsyncMock(return_value=stored)
+    policies = MagicMock()
+    policies.resolve = AsyncMock(return_value=stored)
 
-    with patch("gateway.adapters.code_execution_policy_adapter.resolve_workspace_code_execution_policy", read):
-        policy = await LocalCodeExecutionPolicy(session).resolve(
-            CodeExecutionPolicyScope(workspace_id=workspace_id, user_token="tk_ignored")
-        )
+    policy = await LocalCodeExecutionPolicy(policies, on_without_policy=True).resolve(
+        CodeExecutionPolicyScope(workspace_id=workspace_id, user_token="tk_ignored")
+    )
 
     assert policy is stored
-    read.assert_awaited_once_with(session, workspace_id)
+    policies.resolve.assert_awaited_once_with(workspace_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on_without_policy", [True, False])
+async def test_no_row_follows_the_deployments_default(on_without_policy: bool) -> None:
+    policies = MagicMock()
+    policies.resolve = AsyncMock(return_value=None)
+
+    policy = await LocalCodeExecutionPolicy(policies, on_without_policy=on_without_policy).resolve(
+        CodeExecutionPolicyScope(workspace_id=uuid.uuid4(), user_token=None)
+    )
+
+    if on_without_policy:
+        assert policy is None
+    else:
+        assert policy is not None
+        assert policy.enabled is False

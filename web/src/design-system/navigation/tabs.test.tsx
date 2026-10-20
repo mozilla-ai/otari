@@ -221,6 +221,32 @@ describe("Segmented", () => {
     return { onChange, view, user: userEvent.setup() }
   }
 
+  it("hugs its labels by default and fills its row on request", () => {
+    const { view } = setup()
+    const group = screen.getByRole("radiogroup", { name: "Bucket" })
+    expect(group).toHaveClass("inline-flex", "w-fit")
+    view.unmount()
+
+    render(
+      <Segmented
+        label="Bucket"
+        options={OPTIONS}
+        value="week"
+        onChange={() => {}}
+        isFullWidth
+      />,
+    )
+    const full = screen.getByRole("radiogroup", { name: "Bucket" })
+    expect(full).toHaveClass("flex", "w-full")
+    expect(full).not.toHaveClass("w-fit")
+    // Each segment takes an equal share and centers its label.
+    for (const radio of screen.getAllByRole("radio")) {
+      const segment = radio.closest("label")
+      expect(segment).toHaveClass("flex-1", "justify-center")
+      expect(segment).not.toHaveClass("shrink-0")
+    }
+  })
+
   it("is a named radio group of real radios", () => {
     // Native inputs and not `role="radio"` on buttons: the semantics here are
     // exactly a radio group's, so taking the real element brings the arrow-key

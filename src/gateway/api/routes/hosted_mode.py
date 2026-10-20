@@ -81,6 +81,11 @@ DATA_PLANE_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/rerank", "priced per request"),
     ("/decisions", "priced per token like a completion"),
     ("/systemone", "the TypeSafe SDK's path for /decisions"),
+    (
+        "/routing/recommend",
+        "one decision call, priced like /decisions. This sub-path only: the "
+        "policy table and router status beside it are management and stay mounted",
+    ),
     ("/moderations", "dispatches upstream even where the upstream charges nothing"),
     (
         "/search",

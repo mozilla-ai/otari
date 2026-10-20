@@ -1,17 +1,19 @@
 """Data access for the reconciled control plane's identities."""
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, nulls_last, select, update
+from sqlalchemy import CursorResult, func, nulls_last, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from gateway.core.sql import dialect_name
+from gateway.core.sql import LIKE_ESCAPE, contains_pattern, dialect_name
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User, UserBase, UserCreate
 from gateway.repositories.base_repository import BaseRepository
 
@@ -32,10 +34,19 @@ def user_alphabetical_order() -> ColumnElement[str]:
     return nulls_last(func.lower(func.coalesce(func.nullif(func.trim(col(User.full_name)), ""), col(User.email))))
 
 
+def user_matches_search(term: str) -> ColumnElement[bool]:
+    """Match an identity whose name or email contains ``term``, case-insensitively."""
+    pattern = contains_pattern(term)
+    return or_(
+        func.lower(col(User.full_name)).like(pattern, escape=LIKE_ESCAPE),
+        func.lower(col(User.email)).like(pattern, escape=LIKE_ESCAPE),
+    )
+
+
 class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     """Repository for identity rows."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession | UnitOfWork):
         super().__init__(db, User)
 
     async def get_by_email(self, email: str) -> User | None:
@@ -163,7 +174,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         )
         return result.scalar_one_or_none() is not None
 
-    async def list_all(self, *, skip: int = 0, limit: int = 100) -> tuple[list[User], int]:
+    async def list_all(self, *, skip: int = 0, limit: int = 100, search: str | None = None) -> tuple[list[User], int]:
         """Return a page of every identity on the deployment, plus the total.
 
         Deployment-wide and therefore unfiltered by organization: this is what
@@ -175,12 +186,15 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         the reason ``get_by_organization_with_users`` orders the roster that way:
         the sort key is not unique, and a page whose order is not total can
         return one row twice and another never.
+
+        ``search`` narrows on the name and the email, and the count narrows with it.
         """
-        count_result = await self.db.execute(select(func.count()).select_from(User))
+        filters = [user_matches_search(term)] if (term := (search or "").strip()) else []
+        count_result = await self.db.execute(select(func.count()).select_from(User).where(*filters))
         count = count_result.scalar_one()
 
         result = await self.db.execute(
-            select(User).order_by(user_alphabetical_order(), col(User.id)).offset(skip).limit(limit)
+            select(User).where(*filters).order_by(user_alphabetical_order(), col(User.id)).offset(skip).limit(limit)
         )
         return list(result.scalars().all()), count
 
@@ -215,6 +229,15 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         land. A deployment that needs this guarantee runs PostgreSQL.
         """
         await self.db.execute(select(col(User.id)).where(col(User.id) == user_id).with_for_update())
+
+    async def record_sign_in(self, user_id: uuid.UUID, *, at: datetime) -> None:
+        """Stage ``at`` as the identity's last sign-in, unless a later one is already recorded."""
+        await self.db.execute(
+            update(User)
+            .where(col(User.id) == user_id)
+            .where(or_(col(User.last_sign_in_at).is_(None), col(User.last_sign_in_at) < at))
+            .values(last_sign_in_at=at)
+        )
 
     async def get_locked(self, user_id: uuid.UUID) -> User | None:
         """Return the identity read fresh under a row lock, or None.
@@ -269,6 +292,16 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         )
         return bool(result.rowcount)
 
+    async def reload(self, identity: User) -> User:
+        """Read the identity's columns again, for a caller whose conditional write bypassed the session."""
+        await self.db.refresh(identity)
+        return identity
+
+    async def set_home_organization(self, user: User, organization_id: uuid.UUID) -> User:
+        """Stage an organization the identity now owns as both its default and its active one."""
+        user.default_organization_id = organization_id
+        return await self.set_active_organization(user, organization_id)
+
     async def set_active_organization(self, user: User, organization_id: uuid.UUID) -> User:
         """Stage a change of the identity's active organization."""
         user.active_organization_id = organization_id
@@ -276,6 +309,19 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         await self.db.flush()
         await self.db.refresh(user)
         return user
+
+    async def get_ids_by_active_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return the ID of every identity whose active organization is this one, member or not."""
+        result = await self.db.execute(select(col(User.id)).where(col(User.active_organization_id) == organization_id))
+        return list(result.scalars().all())
+
+    async def move_active_organization(self, user_ids: Collection[uuid.UUID], organization_id: uuid.UUID) -> None:
+        """Stage ``organization_id`` as the active organization of each of these identities."""
+        if not user_ids:
+            return
+        await self.db.execute(
+            update(User).where(col(User.id).in_(user_ids)).values(active_organization_id=organization_id)
+        )
 
 
 __all__ = ["UserRepository", "user_alphabetical_order"]

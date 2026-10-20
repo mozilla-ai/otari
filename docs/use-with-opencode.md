@@ -34,27 +34,24 @@ Export your key so opencode reads it from the environment instead of the config
 file, then run with a model:
 
 ```bash
-export OTARI_API_KEY=<your-token>          # standalone API key, or tk_ user token
+export OTARI_API_KEY=<your-otari-key>      # from otari.ai, or from your own gateway
 opencode --model otari/openai:gpt-4o
 ```
 
-The `apiKey` is sent as `Authorization: Bearer <token>`, which Otari
-accepts for both standalone API keys and connected user tokens.
+The `apiKey` is sent as `Authorization: Bearer <key>`, which Otari accepts for
+every key it issues.
 
 ## Choosing a model
 
 The provider id is `otari` (from your config) and the model selector is whatever
 your deployment expects:
 
-- **Standalone, any configured provider:** `provider:model`, e.g. `otari/openai:gpt-4o`,
-  `otari/anthropic:claude-sonnet-4-6`, `otari/mistral:mistral-large-latest`.
-- **Connected to otari.ai, managed models:** `otari/mzai:<catalog-id>`, for
-  example `otari/mzai:moonshotai/Kimi-K2.6`. These run only through otari.ai's
-  own gateway.
-- **Connected to otari.ai, your own provider keys:** `otari/openai:gpt-4o` or
-  `otari/openai/gpt-4o`, plus the equivalent Anthropic or Mistral forms. An
-  `mzai:` prefix selects the managed catalog, so adding it to a proprietary
-  model misroutes it.
+- **On otari.ai:** any model your organization's catalog lists, which
+  `GET /api/v1/models` returns for your key, for example `otari/openai:gpt-4o`,
+  `otari/anthropic:claude-sonnet-4-6` or `otari/mistral:mistral-large-latest`.
+  `provider/model` works as well as `provider:model`.
+- **On your own gateway:** `provider:model` for any provider it is configured
+  with, for example `otari/openai:gpt-4o`.
 
 Any model in the catalog works; Otari routes the request to the right
 provider and records usage and cost for it the same way as any other client.

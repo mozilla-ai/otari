@@ -3,12 +3,13 @@
 A provider-native code-execution keyword (``code_execution``,
 ``code_interpreter``, ``code_execution_<date>``) is decided by the request's
 **executor** instead (:class:`gateway.models.tools.CodeExecutor`): the
-provider, Otari's sandbox, or ``auto``, which picks the provider only when it
-runs that tool natively for the dispatched model. ``auto`` is the default, and
-it is what lets a request written against a frontier model's own sandbox keep
-working when the model is swapped for one that has none. The deployment sets
-the default, a workspace policy may pin a value, and :data:`CODE_EXECUTION_HEADER`
-chooses per request where the workspace has not.
+provider, Otari's sandbox, or ``auto``, which picks the provider for each
+attempt whose model runs that tool natively and the sandbox for the rest. ``auto``
+is the default, and it is what lets a request written against a frontier
+model's own sandbox keep working when the model is swapped, or falls back, to
+one that has none. The deployment sets the default, a workspace policy may pin
+a value, and :data:`CODE_EXECUTION_HEADER` chooses per request where the
+workspace has not.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from gateway.models.tools import CodeExecutor
-from gateway.services.tools._declarations import Tool, extract_first_matching_tool
+from gateway.services.tools._declarations import Tool, extract_first_matching_tool, first_matching_tool
 from gateway.services.tools._native import Dialect
 
 if TYPE_CHECKING:
@@ -88,10 +89,7 @@ def declares_code_execution(tools: list[dict[str, Any]] | None) -> bool:
 
 def first_provider_code_execution_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """The first provider-named code-execution entry in ``tools``, left in place."""
-    for entry in tools or []:
-        if isinstance(entry, dict) and _is_provider_code_execution_tool_type(entry.get("type")):
-            return entry
-    return None
+    return first_matching_tool(tools, _is_provider_code_execution_tool_type)
 
 
 def native_code_execution_dialect(tool_entry: Mapping[str, Any] | None) -> Dialect | None:
@@ -115,7 +113,9 @@ def native_code_execution_dialect(tool_entry: Mapping[str, Any] | None) -> Diale
     return None
 
 
-def provider_runs_code_natively(tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect) -> bool:
+def provider_runs_code_natively(
+    tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect, model: str | None = None
+) -> bool:
     """Whether the dispatched provider would run this declaration in its own sandbox.
 
     True only when the keyword is the provider's own vocabulary *and* the request

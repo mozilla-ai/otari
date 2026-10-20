@@ -1,3 +1,5 @@
+from dataclasses import fields
+
 import pytest
 import yaml
 
@@ -6,9 +8,11 @@ from otari_agent.domain.policy import MAX_GATE_ID_LENGTH, PolicyError, parse_pol
 from otari_agent.domain.types import (
     CommandGate,
     CommandIfChangedGate,
+    GateSpec,
     JudgeGate,
     PathGate,
     VerifierGate,
+    WarningCode,
 )
 
 _ONE_GATE = (
@@ -590,3 +594,54 @@ def test_a_yaml_error_keeps_the_offending_line_and_a_caret() -> None:
     message = str(excinfo.value)
     assert "bad: indent" in message
     assert "^" in message
+
+
+def _accepting(accept_warnings: str) -> str:
+    return (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: path\n    runs: [pre_tool_use.edit_target]\n"
+        '    enforcement: required\n    forbidden: ["x.txt"]\n'
+        f"    accept_warnings: {accept_warnings}\n"
+    )
+
+
+def test_a_gate_accepts_no_warning_by_default() -> None:
+    spec = parse_policy(VALID_POLICY, source="test.yml")
+    assert spec.gates[0].accept_warnings == ()
+
+
+def test_a_gate_names_the_warnings_it_accepts_deduplicated() -> None:
+    spec = parse_policy(_accepting("[shell-write-unseen, shell-write-unseen]"), source="test.yml")
+    assert spec.gates[0].accept_warnings == (WarningCode.SHELL_WRITE_UNSEEN,)
+
+
+@pytest.mark.parametrize("accept_warnings", ["[]", "shell-write-unseen", "[1]", "{a: b}"])
+def test_accept_warnings_must_be_a_non_empty_list_of_codes(accept_warnings: str) -> None:
+    with pytest.raises(PolicyError, match="'accept_warnings' must be a non-empty list"):
+        parse_policy(_accepting(accept_warnings), source="test.yml")
+
+
+def test_an_unknown_warning_code_is_refused_with_the_ones_this_gate_type_can_draw() -> None:
+    with pytest.raises(PolicyError, match="'shell-write' is not a warning code") as excinfo:
+        parse_policy(_accepting("[shell-write]"), source="test.yml")
+    assert "shell-write-unseen" in str(excinfo.value)
+    assert "judge-gate-cap" not in str(excinfo.value)
+
+
+def test_a_warning_this_gate_type_cannot_raise_is_refused() -> None:
+    """Accepting a warning the gate can never draw is a mistake, not a harmless no-op."""
+    with pytest.raises(PolicyError, match="type 'path'\\) cannot draw the warning 'judge-gate-cap'"):
+        parse_policy(_accepting("[judge-gate-cap]"), source="test.yml")
+
+
+@pytest.mark.parametrize("code", list(WarningCode))
+def test_every_warning_code_names_a_gate_type_that_can_accept_it(code: WarningCode) -> None:
+    """A code no gate type names could never be accepted at all."""
+    assert code.gate_types
+
+
+@pytest.mark.parametrize("gate_class", [CommandGate, CommandIfChangedGate, JudgeGate, PathGate, VerifierGate])
+def test_accept_warnings_is_keyword_only(gate_class: type[GateSpec]) -> None:
+    """A positional argument keeps binding to the field it bound to before this one existed."""
+    (accept_warnings,) = [field for field in fields(gate_class) if field.name == "accept_warnings"]
+    assert accept_warnings.kw_only

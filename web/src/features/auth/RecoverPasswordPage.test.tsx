@@ -3,6 +3,10 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RecoverPasswordPage } from "@/features/auth/RecoverPasswordPage"
+import {
+  readSignInAddress,
+  rememberSignInAddress,
+} from "@/features/auth/signInAddress"
 import { ApiError, apiFetch } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
@@ -32,6 +36,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  window.sessionStorage.clear()
   window.location.hash = ""
 })
 
@@ -61,12 +66,32 @@ describe("RecoverPasswordPage", () => {
     renderPage()
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
-    await user.click(screen.getByRole("button", { name: "Send reset link" }))
+    await user.click(screen.getByRole("button", { name: "Send link" }))
 
     expect(
-      await screen.findByText(/If that address has a password on this gateway/),
+      await screen.findByText(
+        /If that address has an account on this gateway, a link to set or reset its password/,
+      ),
     ).toBeInTheDocument()
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe("/auth/password/reset")
+  })
+
+  it("starts from the address the sign-in screen handed over, and hands it back", async () => {
+    rememberSignInAddress("ada@example.com")
+    vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com")
+    await user.click(screen.getByRole("button", { name: "Send link" }))
+
+    await screen.findByRole("heading", { name: "Check your email" })
+    expect(
+      JSON.parse(String(vi.mocked(apiFetch).mock.calls[0]?.[1]?.body)),
+    ).toEqual({
+      email: "ada@example.com",
+    })
+    expect(readSignInAddress()).toBe("ada@example.com")
   })
 
   it("clears a stale refusal as soon as the address is retyped", async () => {
@@ -77,7 +102,7 @@ describe("RecoverPasswordPage", () => {
     renderPage()
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
-    await user.click(screen.getByRole("button", { name: "Send reset link" }))
+    await user.click(screen.getByRole("button", { name: "Send link" }))
     expect(
       await screen.findByText("Too many attempts. Try again in a minute."),
     ).toBeInTheDocument()

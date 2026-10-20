@@ -1,13 +1,18 @@
-"""ORM table for API keys."""
+"""ORM tables for API keys and the federation rules that let a workload authenticate as one."""
 
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Uuid, false, text
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
+
+# How many budgets one key may list for its end users.
+MAX_END_USER_BUDGETS = 100
+# How many federation rules one key may hold.
+MAX_FEDERATION_RULES_PER_KEY = 20
 
 
 class APIKey(Base):
@@ -37,6 +42,10 @@ class APIKey(Base):
             postgresql_where=text("internal_secret IS NOT NULL"),
             sqlite_where=text("internal_secret IS NOT NULL"),
         ),
+        # One row per config.yml entry, which is what lets replicas starting at
+        # once insert it without a second copy: the loser's insert conflicts here.
+        # NULLs are distinct on both engines, so every other key is unconstrained.
+        Index("uq_api_keys_config_name", "config_name", unique=True),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True)
@@ -113,6 +122,13 @@ class APIKey(Base):
     # key listings filter on: a row with a value here is machinery rather than a
     # credential anybody manages, and no endpoint ever returns the value itself.
     internal_secret: Mapped[str | None] = mapped_column()
+    # The name config.yml declares this key under, set only while it does. Every
+    # start finds the key by it, and writes the declared settings and secret back
+    # when the entry's digest differs from ``declared_digest``.
+    config_name: Mapped[str | None] = mapped_column(default=None)
+    # A digest of the config.yml entry last written over this key, its secret's
+    # hash included, so changing the entry or the secret writes it back.
+    declared_digest: Mapped[str | None] = mapped_column(String(64), default=None)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
@@ -144,5 +160,36 @@ class APIKey(Base):
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
             "end_user_budget_ids": self.assignable_end_user_budgets(),
+            "config_name": self.config_name,
             "metadata": self.metadata_,
         }
+
+
+class APIKeyFederationRule(Base):
+    """An OpenID Connect identity that authenticates as an API key in place of its secret.
+
+    A verified token whose issuer and audience equal the rule's, and whose
+    subject and verified email equal each of the rule's that is set, is that key.
+    Issuer and audience alone are never enough, since anyone can mint a token
+    for any audience at a public issuer, so a rule names a subject or an email.
+    """
+
+    __tablename__ = "api_key_federation_rules"
+    __table_args__ = (
+        CheckConstraint("subject IS NOT NULL OR email IS NOT NULL", name="ck_api_key_federation_rules_principal"),
+        # Authentication reads the rules by the token's issuer and audiences.
+        Index("ix_api_key_federation_rules_issuer_audience", "issuer", "audience"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    api_key_id: Mapped[str] = mapped_column(
+        String, ForeignKey("api_keys.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    issuer: Mapped[str] = mapped_column(String, nullable=False)
+    audience: Mapped[str] = mapped_column(String, nullable=False)
+    subject: Mapped[str | None] = mapped_column(String, default=None)
+    # Stored lower case; compared with the token's email only when the token says it is verified.
+    email: Mapped[str | None] = mapped_column(String, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )

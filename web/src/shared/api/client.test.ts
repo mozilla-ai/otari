@@ -1,3 +1,4 @@
+import { QueryClient } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { API_ROOT, DASHBOARD_BUILD_PATH } from "@/shared/api/client"
 import type { RequestPolicy } from "@/shared/api/requestPolicy"
@@ -5,8 +6,11 @@ import {
   ApiError,
   apiFetch,
   createSession,
+  defaultQueryRetry,
   deleteSession,
+  retryUnlessNotFound,
   siteFetch,
+  startOAuthSignIn,
 } from "./client"
 
 // The seam this build answers "same origin" through, made mutable so the
@@ -168,6 +172,7 @@ describe("apiFetch", () => {
     await expect(failure).rejects.toMatchObject({
       status: 200,
       message: expect.stringContaining("not JSON"),
+      cause: expect.any(SyntaxError),
     })
     await expect(failure).rejects.not.toMatchObject({
       message: expect.stringContaining("DOCTYPE"),
@@ -188,9 +193,9 @@ describe("apiFetch", () => {
   })
 
   it("does not quote its own 30s deadline at a caller that set a longer one", async () => {
-    // The bulk usage delete and reprice run on longRequestSignal(); telling an
-    // operator who waited five minutes that nothing answered "within 30s" would
-    // point them at the wrong thing.
+    // A refresh on longRequestSignal() can run for minutes; telling an operator
+    // who waited five minutes that nothing answered "within 30s" would point
+    // them at the wrong thing.
     const controller = new AbortController()
     vi.spyOn(globalThis, "fetch").mockRejectedValue(
       new DOMException("timed out", "TimeoutError"),
@@ -268,12 +273,54 @@ describe("siteFetch", () => {
     )
   })
 
+  it("explains a reply that is not JSON rather than throwing a raw SyntaxError", async () => {
+    // The build poll runs against the gateway's own root, so an edge proxy's
+    // HTML page answering in its place reaches this read first (#993).
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>otari</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    )
+
+    const failure = siteFetch(DASHBOARD_BUILD_PATH)
+
+    await expect(failure).rejects.toBeInstanceOf(ApiError)
+    await expect(failure).rejects.toMatchObject({
+      status: 200,
+      message: expect.stringContaining("not JSON"),
+      cause: expect.any(SyntaxError),
+    })
+  })
+
   it("reports an unreachable gateway rather than throwing a raw fetch failure", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("nope"))
 
     await expect(siteFetch(DASHBOARD_BUILD_PATH)).rejects.toThrow(
       "Network error: could not reach the gateway.",
     )
+  })
+})
+
+describe("startOAuthSignIn", () => {
+  it("explains a reply that is not JSON rather than throwing a raw SyntaxError", async () => {
+    // Reached from the sign-in screen, before anything else has shown the
+    // gateway is the one answering (#993).
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>otari</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    )
+
+    const failure = startOAuthSignIn("github")
+
+    await expect(failure).rejects.toBeInstanceOf(ApiError)
+    await expect(failure).rejects.toMatchObject({
+      status: 200,
+      message: expect.stringContaining("not JSON"),
+      cause: expect.any(SyntaxError),
+    })
   })
 })
 
@@ -433,5 +480,43 @@ describe("deleteSession", () => {
     )
 
     await expect(deleteSession()).resolves.toBeUndefined()
+  })
+})
+
+describe("defaultQueryRetry", () => {
+  it("retries a failure twice and an auth failure never", () => {
+    const failure = new ApiError(500, "Internal server error")
+    expect(defaultQueryRetry(0, failure)).toBe(true)
+    expect(defaultQueryRetry(1, failure)).toBe(true)
+    expect(defaultQueryRetry(2, failure)).toBe(false)
+    expect(defaultQueryRetry(0, new ApiError(401, "Unauthorized"))).toBe(false)
+    expect(defaultQueryRetry(0, new ApiError(403, "Forbidden"))).toBe(false)
+    expect(defaultQueryRetry(0, new ApiError(404, "Not found"))).toBe(true)
+  })
+})
+
+describe("retryUnlessNotFound", () => {
+  it("keeps the dashboard's policy but never retries a 404", () => {
+    const retry = retryUnlessNotFound(
+      new QueryClient({
+        defaultOptions: { queries: { retry: defaultQueryRetry } },
+      }),
+    )
+    expect(retry(0, new ApiError(404, "Not found"))).toBe(false)
+    expect(retry(0, new ApiError(500, "Internal"))).toBe(true)
+    expect(retry(2, new ApiError(500, "Internal"))).toBe(false)
+    expect(retry(0, new ApiError(401, "Unauthorized"))).toBe(false)
+  })
+
+  it("keeps a client's own policy for every other status", () => {
+    const never = retryUnlessNotFound(
+      new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+    )
+    expect(never(0, new ApiError(500, "Internal"))).toBe(false)
+    const thrice = retryUnlessNotFound(
+      new QueryClient({ defaultOptions: { queries: { retry: 3 } } }),
+    )
+    expect(thrice(2, new ApiError(500, "Internal"))).toBe(true)
+    expect(thrice(2, new ApiError(404, "Not found"))).toBe(false)
   })
 })

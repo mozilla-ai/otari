@@ -9,12 +9,12 @@ model for best quality.
 
 from __future__ import annotations
 
-from any_llm import acompletion
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_kwargs import require_declared_credential, resolve_provider_selector
+from gateway.services.providers import acompletion
 
 _DESCRIBE_PROMPT = (
     "You are assisting a text-only language model that cannot see images. "
@@ -44,6 +44,7 @@ async def describe_image(config: GatewayConfig, image_data_url: str) -> tuple[st
     provider_kwargs = resolved.kwargs
 
     try:
+        require_declared_credential(config, resolved.instance, provider, provider_kwargs)
         completion = await acompletion(
             model=model_name,
             provider=provider,

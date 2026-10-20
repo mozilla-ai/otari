@@ -17,7 +17,11 @@ untyped dicts, several inference responses use `response_model=None`), so
 method that accepts typed messages and returns a typed `ChatCompletion`,
 typed `messages` / `rerank` / `embeddings` responses, typed batch lifecycle
 and result responses (including `ChatCompletion` results), and the fully typed
-control-plane endpoints (keys, users, budgets, pricing, usage).
+control-plane endpoints (keys, users, budgets, pricing, usage). The one
+exception is the parts of a multi-part message `content` array (text, image,
+audio, file): the generated Python wrapper for that nested union serializes
+every part as `null`, so `enrich_spec` types the parts as free-form objects and
+the gateway validates them.
 
 Each SDK then **hand-writes a thin shell** over this generated core for the
 things OpenAPI Generator cannot emit:

@@ -16,6 +16,7 @@ import anthropic
 import httpx
 from any_llm.types.messages import MessageStreamEvent
 from fastapi.testclient import TestClient
+from urllib3.exceptions import ReadTimeoutError
 
 from gateway.core.config import API_ROOT
 
@@ -69,3 +70,40 @@ def test_an_upstream_overload_mid_stream_reaches_the_client_as_overloaded(
     [error] = _error_events(body)
     assert error["error"]["type"] == "overloaded_error"
     assert "req_x" not in body
+
+
+async def _stream_then_stall(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+    async def _gen() -> AsyncIterator[MessageStreamEvent]:
+        yield _message_start()
+        yield _text_delta("hello")
+        raise ReadTimeoutError(None, None, "Read timed out.")  # type: ignore[arg-type]
+
+    return _gen()
+
+
+def test_an_upstream_read_timeout_mid_stream_reaches_the_client_as_a_timeout(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Bedrock's botocore gives up on a stream that sends nothing for its read timeout."""
+    _seed_budgeted_user(client, master_key_header, "stream-read-timeout")
+
+    with patch("gateway.api.routes.messages.amessages", new=_stream_then_stall):
+        response = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 64,
+                "stream": True,
+                "metadata": {"user_id": "stream-read-timeout"},
+            },
+            headers=master_key_header,
+        )
+        body = response.text
+
+    assert response.status_code == 200
+    assert "hello" in body
+    [error] = _error_events(body)
+    assert error["error"]["type"] == "timeout_error"
+    assert "Read timed out" not in body

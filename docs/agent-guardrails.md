@@ -64,6 +64,8 @@ Run `otari hook setup` from inside the repository being guarded. It requires a
 Git repository: it refuses outside one, and `git status` is where the `Stop`
 event's evidence comes from.
 
+The hook runs at most five judge gates per `Stop` event, highest `priority` first, and skips the rest. The CI judge job runs up to twenty (see [The CI jobs](#the-ci-jobs)). To run the same judge gates locally, set `OTARI_HOOK_MAX_JUDGES=20` in the environment the harness starts from, such as your shell profile. Each judge gate is one model call, so this raises the cost of a `Stop` event that many gates apply to.
+
 ### Claude Code
 
 ```bash
@@ -305,7 +307,7 @@ Some rules belong to a person, not to a repository: no `git reset --hard`, no re
 
 - The hook puts `user:` in front of every gate ID from `~/.otari/`, so `no-force-push` in your file is `user:no-force-push` in every message and in `otari guardrails validate`. A repository gate can therefore use the same ID as yours without a clash. A repository gate whose ID itself starts with `user:` can still clash, and the clash is an error that names both files.
 - A repository cannot turn off your gates. When the combined set cannot load, because of a clash, a broken file, or too many files, the hook enforces your gates alone and says that the repository's gates are off each time it reports anything. When your own files are the broken ones, it enforces the repository's gates alone. Only when neither side loads does it enforce no gate.
-- A `verifier` gate in a file under `~/.otari/` names its script relative to your home directory, for example `verifier: .otari/verifiers/lint-before-stop.sh`. The script must be inside `~/.otari/verifiers/`. It runs with the repository root as its working directory, so it checks the repository the session changed.
+- A `verifier` gate in a file under `~/.otari/` names its script relative to your home directory, for example `verifier: .otari/verifiers/lint-before-stop.sh`. The script must be inside `~/.otari/verifiers/`, and can be a symlink to a script you own that group and others cannot write ([the rule](agent-guardrails-reference.md#verifier)). It runs with the repository root as its working directory, so it checks the repository the session changed.
 - When a gate from `~/.otari/` fails, the message shows its `user:` ID. When more than one file composes, it also names the file, for example `[~/.otari/guardrails/git-safety.yml]`.
 - `otari guardrails validate` checks your files with the repository's, and lists which gates come from `~/.otari/` and which come from the repository. `--repo-only` checks the repository's files alone, so a warning in one of your own files cannot fail `--strict`.
 
@@ -338,7 +340,7 @@ not mean what its author intended: a `**` glob that skips the shallow case, a
 one-token `forbidden` phrase, a `path` gate naming only
 `pre_tool_use.edit_target`, more `judge` or `verifier` gates than one `Stop`
 event evaluates. `--strict` exits non-zero on a warning as well, which is what a
-CI invocation wants.
+CI invocation wants. A gate whose design a warning describes names that warning's code in its `accept_warnings`, and `--strict` then does not count it.
 
 `--path` and `--command` dry-run the guardrail against evidence supplied on the
 command line, at every moment a real session would offer it:
@@ -388,9 +390,9 @@ Every gate sees the paths the change touches as `stop.working_tree` evidence. A 
 | `command` | Cannot run. It needs the command a tool call is about to run. |
 | `command_if_changed` | Cannot run. It needs the commands a session ran. |
 
-A `required` gate that fails, errors or gets no result exits 1. A gate the change gives nothing to run against is reported as unable to run, and never changes the exit status. A `judge` gate is advisory, so its finding never changes the exit status either. The hook's caps apply here too: at most five judge gates and twenty verifier gates run.
+A `required` gate that fails, errors or gets no result exits 1. A gate the change gives nothing to run against is reported as unable to run, and never changes the exit status. A `judge` gate is advisory, so its finding never changes the exit status either. The hook's caps apply here too: at most five judge gates (or `--max-judges`) and twenty verifier gates run.
 
-`--type` runs only the gate types it names, and is repeatable. Without it, the report also lists the `command` and `command_if_changed` gates that cannot run. Naming `verifier` together with `--head` is a usage error. `--judge-model` and `--judge-cli` choose the judge's model and CLI, as they do for `otari hook`, and read the same environment variables. `--guardrails-from <directory>` reads the guardrail files and the verifier scripts from another checkout instead of the one being checked. A check reads the repository's own guardrail only, and leaves your files in `~/.otari/` out, so it reads the same on every machine.
+`--type` runs only the gate types it names, and is repeatable. Without it, the report also lists the `command` and `command_if_changed` gates that cannot run. Naming `verifier` together with `--head` is a usage error. `--judge-model`, `--judge-cli` and `--max-judges` choose the judge's model, its CLI and how many judge gates run, as they do for `otari hook`, and read the same environment variables. `--guardrails-from <directory>` reads the guardrail files and the verifier scripts from another checkout instead of the one being checked. A check reads the repository's own guardrail only, and leaves your files in `~/.otari/` out, so it reads the same on every machine.
 
 A verifier that finds what changed through `git status`, as `no-stranded-docblocks.py` does, sees only the uncommitted part of a change. The path and verifier job below stages the whole pull request against its merge base for that reason.
 
@@ -399,7 +401,7 @@ A verifier that finds what changed through `git status`, as `no-stranded-docbloc
 Two workflows run the check on every pull request to `main`. Both take the CLI, the guardrail files and the verifier scripts from the base commit, so a pull request that edits a gate, a verifier or the CLI is checked by the version it changes, not by its own.
 
 - **Path and verifier gates**, in `.github/workflows/otari-guardrails-check.yml`. The job checks out the base commit and the pull request side by side, stages the pull request against its merge base, and runs `otari guardrails check --type path --type verifier --guardrails-from <base>` in the pull request's tree. A `required` gate that does not pass fails the job.
-- **Judge gates**, in `.github/workflows/otari-guardrails-judges.yml`. The job checks out the base commit only, fetches the pull request as Git objects, and runs `otari guardrails check --base <base> --head <head> --type judge`. The judge calls `claude -p` with every tool and MCP server disabled, because the diff it reads is the pull request author's text. Findings go to the job summary. A failing judge also starts one comment on the pull request, which names the commit it describes and which later runs edit. A finding never fails the job.
+- **Judge gates**, in `.github/workflows/otari-guardrails-judges.yml`. The job checks out the base commit only, fetches the pull request as Git objects, and runs `otari guardrails check --base <base> --head <head> --type judge` with `OTARI_HOOK_MAX_JUDGES` set to 20, the ceiling, so every applicable judge gate runs. The judge calls `claude -p` with every tool and MCP server disabled, because the diff it reads is the pull request author's text. Findings go to the job summary. A failing judge also starts one comment on the pull request, which names the commit it describes and which later runs edit. A finding fails the job, so it shows in the pull request's checks, but the job is not a required check, so it does not block the merge.
 
 The judge job reads its credential from the `agent-guardrails` GitHub environment, which holds `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. Without either, the judges skip with a notice. A pull request from a fork skips them with a notice too, because it is not given the credential. In both workflows, a base commit whose CLI has no `otari guardrails check` skips the job with a notice, rather than take the command from the pull request.
 
@@ -462,17 +464,23 @@ pass, fail and error, and may be `required`. It carries the same trust as a
 Makefile target or a pre-commit hook. Keep it read-only: applicable verifiers run
 concurrently against one working tree.
 
-Keep `judge` gates few and scoped. Each costs one model call per applicable
-`Stop` event, at most five run per event, and all of them are advisory. Give a
-gate that must run a `priority`, and scope it with `when_changed` so a session
-that touched nothing relevant does not pay for it. Setting
-`OTARI_HOOK_JUDGE_DRY_RUN` in the harness's environment reports which calls would
-have been made, and their approximate size, without making them.
+Keep `judge` gates scoped. Each costs one model call per applicable `Stop`
+event, and all of them are advisory. Five run per event by default.
+`OTARI_HOOK_MAX_JUDGES` raises that cap to as many as twenty, which suits
+many judges that each decide one small thing. Raising it does not raise the
+time a run may take: eight judges run at a time, every judge in one event shares one 480-second
+budget, and a judge that cannot start before that budget runs out reports
+`error`. A high cap therefore suits fast judges. Give a gate that must run a
+`priority`, and scope it with `when_changed` so a session that touched nothing
+relevant does not pay for it. Setting `OTARI_HOOK_JUDGE_DRY_RUN` in the
+harness's environment reports which calls would have been made, and their
+approximate size, without making them.
 
 Run `otari guardrails validate --strict` in CI. A gate that has stopped matching
 reports the same as a gate that passed. A guardrail with more judge gates than
-one Stop event evaluates always carries the judge cap warning. `validate` has no
-way to accept a warning, so such a guardrail runs `validate` without `--strict`.
+one Stop event evaluates always carries the judge cap warning. `validate` reads
+the same `--max-judges` and `OTARI_HOOK_MAX_JUDGES` the hook does, so
+give it the value the hook runs with. When a guardrail has more judge gates than even that value by design, name `judge-gate-cap` in the `accept_warnings` of every judge gate, and `--strict` then passes. See [`accept_warnings`](agent-guardrails-reference.md#accept_warnings-on-any-gate).
 
 Run `otari guardrails check` on every pull request, with the gates and verifiers taken from the base commit, so a change made without the hook still meets them. See [Checking a pull request in CI](#checking-a-pull-request-in-ci).
 

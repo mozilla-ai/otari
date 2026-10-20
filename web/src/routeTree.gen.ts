@@ -15,20 +15,21 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as AliasesRouteImport } from './routes/aliases'
 import { Route as BudgetsRouteImport } from './routes/budgets'
-import { Route as DocsRouteImport } from './routes/docs'
+import { Route as HealthChecksRouteImport } from './routes/health-checks'
 import { Route as InvitationsRouteImport } from './routes/invitations'
 import { Route as KeysRouteImport } from './routes/keys'
 import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as PlaygroundRouteImport } from './routes/playground'
-import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RoutingRouteImport } from './routes/routing'
+import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
+import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -38,6 +39,8 @@ import { Route as OrganizationMembersRouteImport } from './routes/organization.m
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
 import { Route as OrganizationProviderKeysRouteImport } from './routes/organization.provider-keys'
 import { Route as OrganizationUsageRouteImport } from './routes/organization.usage'
+import { Route as RoutingIndexRouteImport } from './routes/routing.index'
+import { Route as RoutingNameRouteImport } from './routes/routing.$name'
 import { Route as ToolsIndexRouteImport } from './routes/tools.index'
 import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-execution'
 import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
@@ -74,9 +77,9 @@ const BudgetsRoute = BudgetsRouteImport.update({
   path: '/budgets',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DocsRoute = DocsRouteImport.update({
-  id: '/docs',
-  path: '/docs',
+const HealthChecksRoute = HealthChecksRouteImport.update({
+  id: '/health-checks',
+  path: '/health-checks',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvitationsRoute = InvitationsRouteImport.update({
@@ -109,14 +112,14 @@ const PlaygroundRoute = PlaygroundRouteImport.update({
   path: '/playground',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProvidersRoute = ProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const RoutingRoute = RoutingRouteImport.update({
   id: '/routing',
   path: '/routing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionsRoute = SessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -142,6 +145,11 @@ const WorkspacesRoute = WorkspacesRouteImport.update({
 const AdminAccountsRoute = AdminAccountsRouteImport.update({
   id: '/admin/accounts',
   path: '/admin/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminHostedProvidersRoute = AdminHostedProvidersRouteImport.update({
+  id: '/admin/hosted-providers',
+  path: '/admin/hosted-providers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
@@ -190,6 +198,16 @@ const OrganizationUsageRoute = OrganizationUsageRouteImport.update({
   path: '/usage',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const RoutingIndexRoute = RoutingIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => RoutingRoute,
+} as any)
+const RoutingNameRoute = RoutingNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => RoutingRoute,
+} as any)
 const ToolsIndexRoute = ToolsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -223,20 +241,21 @@ export interface FileRoutesByFullPath {
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
-  '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRoute
-  '/routing': typeof RoutingRoute
+  '/routing': typeof RoutingRouteWithChildren
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -244,12 +263,14 @@ export interface FileRoutesByFullPath {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
+  '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -259,17 +280,17 @@ export interface FileRoutesByTo {
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
-  '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRoute
-  '/routing': typeof RoutingRoute
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -277,12 +298,14 @@ export interface FileRoutesByTo {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
+  '/routing': typeof RoutingIndexRoute
   '/tools': typeof ToolsIndexRoute
 }
 export interface FileRoutesById {
@@ -293,20 +316,21 @@ export interface FileRoutesById {
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
-  '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRoute
-  '/routing': typeof RoutingRoute
+  '/routing': typeof RoutingRouteWithChildren
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -314,12 +338,14 @@ export interface FileRoutesById {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
+  '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
 }
 export interface FileRouteTypes {
@@ -331,20 +357,21 @@ export interface FileRouteTypes {
     | '/activity'
     | '/aliases'
     | '/budgets'
-    | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
     | '/models'
     | '/organization'
     | '/playground'
-    | '/providers'
     | '/routing'
+    | '/sessions'
     | '/settings'
     | '/tools'
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -352,12 +379,14 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/models/'
     | '/organization/'
+    | '/routing/'
     | '/tools/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -367,17 +396,17 @@ export interface FileRouteTypes {
     | '/activity'
     | '/aliases'
     | '/budgets'
-    | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
     | '/playground'
-    | '/providers'
-    | '/routing'
+    | '/sessions'
     | '/settings'
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -385,12 +414,14 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/models'
     | '/organization'
+    | '/routing'
     | '/tools'
   id:
     | '__root__'
@@ -400,20 +431,21 @@ export interface FileRouteTypes {
     | '/activity'
     | '/aliases'
     | '/budgets'
-    | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
     | '/models'
     | '/organization'
     | '/playground'
-    | '/providers'
     | '/routing'
+    | '/sessions'
     | '/settings'
     | '/tools'
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -421,12 +453,14 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/models/'
     | '/organization/'
+    | '/routing/'
     | '/tools/'
   fileRoutesById: FileRoutesById
 }
@@ -437,20 +471,21 @@ export interface RootRouteChildren {
   ActivityRoute: typeof ActivityRoute
   AliasesRoute: typeof AliasesRoute
   BudgetsRoute: typeof BudgetsRoute
-  DocsRoute: typeof DocsRoute
+  HealthChecksRoute: typeof HealthChecksRoute
   InvitationsRoute: typeof InvitationsRoute
   KeysRoute: typeof KeysRoute
   MembersRoute: typeof MembersRoute
   ModelsRoute: typeof ModelsRouteWithChildren
   OrganizationRoute: typeof OrganizationRouteWithChildren
   PlaygroundRoute: typeof PlaygroundRoute
-  ProvidersRoute: typeof ProvidersRoute
-  RoutingRoute: typeof RoutingRoute
+  RoutingRoute: typeof RoutingRouteWithChildren
+  SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRoute
   AdminAccountsRoute: typeof AdminAccountsRoute
+  AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -497,11 +532,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BudgetsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/docs': {
-      id: '/docs'
-      path: '/docs'
-      fullPath: '/docs'
-      preLoaderRoute: typeof DocsRouteImport
+    '/health-checks': {
+      id: '/health-checks'
+      path: '/health-checks'
+      fullPath: '/health-checks'
+      preLoaderRoute: typeof HealthChecksRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invitations': {
@@ -546,18 +581,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlaygroundRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/providers': {
-      id: '/providers'
-      path: '/providers'
-      fullPath: '/providers'
-      preLoaderRoute: typeof ProvidersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/routing': {
       id: '/routing'
       path: '/routing'
       fullPath: '/routing'
       preLoaderRoute: typeof RoutingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sessions': {
+      id: '/sessions'
+      path: '/sessions'
+      fullPath: '/sessions'
+      preLoaderRoute: typeof SessionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -593,6 +628,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/accounts'
       fullPath: '/admin/accounts'
       preLoaderRoute: typeof AdminAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/hosted-providers': {
+      id: '/admin/hosted-providers'
+      path: '/admin/hosted-providers'
+      fullPath: '/admin/hosted-providers'
+      preLoaderRoute: typeof AdminHostedProvidersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models/': {
@@ -657,6 +699,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/organization/usage'
       preLoaderRoute: typeof OrganizationUsageRouteImport
       parentRoute: typeof OrganizationRoute
+    }
+    '/routing/': {
+      id: '/routing/'
+      path: '/'
+      fullPath: '/routing/'
+      preLoaderRoute: typeof RoutingIndexRouteImport
+      parentRoute: typeof RoutingRoute
+    }
+    '/routing/$name': {
+      id: '/routing/$name'
+      path: '/$name'
+      fullPath: '/routing/$name'
+      preLoaderRoute: typeof RoutingNameRouteImport
+      parentRoute: typeof RoutingRoute
     }
     '/tools/': {
       id: '/tools/'
@@ -733,6 +789,19 @@ const OrganizationRouteWithChildren = OrganizationRoute._addFileChildren(
   OrganizationRouteChildren,
 )
 
+interface RoutingRouteChildren {
+  RoutingNameRoute: typeof RoutingNameRoute
+  RoutingIndexRoute: typeof RoutingIndexRoute
+}
+
+const RoutingRouteChildren: RoutingRouteChildren = {
+  RoutingNameRoute: RoutingNameRoute,
+  RoutingIndexRoute: RoutingIndexRoute,
+}
+
+const RoutingRouteWithChildren =
+  RoutingRoute._addFileChildren(RoutingRouteChildren)
+
 interface ToolsRouteChildren {
   ToolsCodeExecutionRoute: typeof ToolsCodeExecutionRoute
   ToolsGuardrailsRoute: typeof ToolsGuardrailsRoute
@@ -758,20 +827,21 @@ const rootRouteChildren: RootRouteChildren = {
   ActivityRoute: ActivityRoute,
   AliasesRoute: AliasesRoute,
   BudgetsRoute: BudgetsRoute,
-  DocsRoute: DocsRoute,
+  HealthChecksRoute: HealthChecksRoute,
   InvitationsRoute: InvitationsRoute,
   KeysRoute: KeysRoute,
   MembersRoute: MembersRoute,
   ModelsRoute: ModelsRouteWithChildren,
   OrganizationRoute: OrganizationRouteWithChildren,
   PlaygroundRoute: PlaygroundRoute,
-  ProvidersRoute: ProvidersRoute,
-  RoutingRoute: RoutingRoute,
+  RoutingRoute: RoutingRouteWithChildren,
+  SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRoute,
   AdminAccountsRoute: AdminAccountsRoute,
+  AdminHostedProvidersRoute: AdminHostedProvidersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -14,7 +14,7 @@ port: 8000
 # on first boot and prints it once.
 # master_key: choose-a-strong-management-key
 
-# Common models use the bundled genai-prices snapshot when no stored price
+# Common models use the bundled models.dev snapshot when no stored price
 # exists. Explicit database pricing always wins.
 default_pricing: true
 require_pricing: true
@@ -23,6 +23,9 @@ providers:
   openai:
     api_key: YOUR_OPENAI_API_KEY_HERE
     # api_base: "https://api.openai.com/v1"
+    # Retries the SDK makes before Otari sees a failure. Overrides
+    # provider_max_retries. See docs/configuration.md#provider-retries.
+    # max_retries: 0
 
   # A named OpenAI-compatible backend. The optional model list supplies
   # discovery when the backend has no /v1/models endpoint.
@@ -56,6 +59,19 @@ providers:
 #       on_failure:
 #         - anthropic:claude-haiku-4-5
 
+# Budgets and API keys written to the database at every start. A key's secret is
+# yours to choose ('tk-' plus random characters); see docs/configuration.md.
+# budgets:
+#   per-user-daily: {max_budget: 1.0, reset_alignment: calendar_day}
+#   service-global: {max_budget: 100, reset_alignment: calendar_month}
+# api_keys:
+#   my-service:
+#     secret: ${MY_SERVICE_KEY}
+#     user_id: my-service
+#     is_service_key: true
+#     end_user_budget_id: per-user-daily
+#     ceiling: service-global
+
 # Optional server controls.
 # rate_limit_rpm: 60
 # enable_metrics: true
@@ -70,6 +86,10 @@ providers:
 # OTARI_SECRET_KEY in the process environment.
 # Provider copies of attached files, on by default, require
 # OTARI_PROVIDER_ACCOUNT_PEPPER: its own random value of at least 32 characters.
+# Each provider call carries a per-end-user identifier, on by default. Set
+# OTARI_PROVIDER_USER_IDENTIFIER_KEY (32+ random characters) to key it. See
+# docs/configuration.md#end-user-identifiers.
+# provider_user_identifier_enabled: false
 
 # Optional email delivery. public_base_url is also used by passkeys and OAuth.
 # public_base_url: "https://otari.example.com"
@@ -86,7 +106,8 @@ providers:
 # mail_from_email: "otari@example.com"
 # mail_from_name: "Otari"
 
-# Passkeys default to the host of public_base_url. Set these only for a parent
+# Passkeys are on by default; set passkeys_enabled: false (OTARI_PASSKEYS_ENABLED)
+# to switch them off. They default to the host of public_base_url. Set these only for a parent
 # relying-party domain or multiple permitted dashboard origins.
 # webauthn_rp_id: "example.com"
 # webauthn_allowed_origins:
@@ -135,3 +156,10 @@ providers:
 # 0 releases every sandbox when its request ends.
 # sandbox_container_idle_ttl_sec: 600
 # sandbox_container_max_lifetime_sec: 3600
+
+# What a workspace with no tool policy of its own gets. false makes web access
+# (search, fetch, POST /api/v1/search) or code execution something a workspace
+# owner or admin turns on. Unset: on, except on a hosted deployment.
+# See docs/configuration.md.
+# web_search_workspace_default: false
+# code_execution_workspace_default: false

@@ -3,7 +3,8 @@
 The wire shapes for a deployment's organization-scoped provider credentials:
 the keys themselves, a workspace's departure from its organization's default,
 and the models a key offers with the rate each is charged at. Also the
-endpoints a workspace or one of its users owns.
+endpoints a workspace or one of its users owns, and the hosted providers the
+deployment serves on its own credentials.
 
 They are SQLModel rather than plain Pydantic because they are read straight off
 the rows in ``models/provider_keys.py``, whose tables are SQLModel too.
@@ -13,13 +14,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, Self
 
+from pydantic import model_validator
 from sqlmodel import Field, SQLModel
 
-from gateway.models.pricing import PriceSource
+from gateway.models.money import as_float
+from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
-from gateway.models.providers import ProviderEndpoint
+from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -65,18 +68,34 @@ class OrgProviderKeyPublic(SQLModel):
             "cannot read is still listed, because deleting or replacing it is what fixes it."
         )
     )
+    offered_count: int = Field(
+        description=(
+            "How many models the organization offers on this key. Zero means the key has never been "
+            "refreshed, so it is unnarrowed and reaches whatever its provider serves."
+        )
+    )
+    serving_count: int = Field(
+        description=(
+            "How many of the offered models have their serving switch on. A key offering models and "
+            "serving none refuses every request through it until one is switched on."
+        )
+    )
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, key: OrgProviderKey, *, usable: bool) -> OrgProviderKeyPublic:
+    def from_row(
+        cls, key: OrgProviderKey, *, usable: bool, offered_count: int = 0, serving_count: int = 0
+    ) -> OrgProviderKeyPublic:
         """Read one row for the API. Never includes the key, only ``last4``.
 
         ``usable`` is passed in rather than derived here: answering it means
         decrypting, which belongs to the service layer that owns the secret box.
         Required rather than defaulted so a caller cannot report a key as working
-        without having asked.
+        without having asked. The two counts come from the offered-models table,
+        and default to a key that offers nothing, which is the one a row has
+        before its first refresh.
 
         ``client_args`` is arbitrary JSON an admin can set (Bedrock's
         ``region_name``, other client kwargs), and a credential-shaped field
@@ -97,6 +116,8 @@ class OrgProviderKeyPublic(SQLModel):
             last4=key.last4,
             is_org_default=key.is_org_default,
             usable=usable,
+            offered_count=offered_count,
+            serving_count=serving_count,
             archived_at=key.archived_at,
             created_at=key.created_at,
             updated_at=key.updated_at,
@@ -179,10 +200,12 @@ class OrgProviderKeyModelPublic(SQLModel):
 
     ``price_source`` says which rung of ``services.pricing_service`` answered:
     ``organization`` for a rate an admin set, ``defaults`` for the
-    community-maintained rate this surface seeded or the genai-prices fallback,
+    community-maintained rate this surface seeded or the models.dev fallback,
     ``deployment`` for the deployment's own price list, and None when nothing
     prices the model yet. ``pricing_id`` names the organization's own row where
     there is one, so a client can edit that rate without re-deriving the key.
+    ``unit`` says what the rates are per, as on a pricing row: tokens, requests
+    or images, so a per-request rate is not read as a per-token one.
     """
 
     id: uuid.UUID
@@ -192,9 +215,9 @@ class OrgProviderKeyModelPublic(SQLModel):
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
+    unit: str = "tokens"
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
@@ -324,7 +347,530 @@ class ProviderEndpointsPublic(SQLModel):
     count: int
 
 
+class HostedProviderCreateRequest(SQLModel):
+    """Configure a provider this deployment will serve hosted inference on.
+
+    ``provider`` is the any-llm implementation. ``name`` is what requests
+    address it by (``name:model``), defaulting to ``provider``; a name of its
+    own lets two endpoints of one implementation coexist. ``api_key`` may be
+    left out for a backend that needs none, or for an endpoint of its own
+    (``api_base``), which is called with a placeholder key.
+
+    ``client_args`` is whatever the provider's SDK client needs beyond the key
+    (Bedrock's region and IAM pair), the same shape an organization provider
+    key takes. Values under credential-shaped names come back masked.
+    ``restricted_to_organization_id`` keeps the provider to one organization;
+    every other one is served as if it were not configured.
+    ``serves_unlisted_models`` serves a model the roster does not list, as a
+    ``config.yml`` instance does, and switches on every model it offers
+    whether or not something prices it.
+    """
+
+    model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
+
+    provider: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    api_base: str | None = Field(default=None, max_length=1024)
+    client_args: dict[str, Any] | None = None
+    enabled: bool = True
+    restricted_to_organization_id: uuid.UUID | None = None
+    serves_unlisted_models: bool = False
+
+
+class HostedProviderUpdateRequest(SQLModel):
+    """Rotate the key, repoint the base, or turn a provider off.
+
+    ``provider`` and ``name`` are immutable: changing either is a delete plus a
+    create, because the key belongs to the provider it was issued by and
+    requests address the name. Omitting ``api_key`` leaves the stored
+    credential untouched, so a toggle never re-sends a secret the caller does
+    not have; an explicit null removes it, where the provider can be served
+    without one. ``client_args`` omitted is left alone; an explicit
+    null clears it, and an entry echoed back as the mask keeps the stored value.
+    ``restricted_to_organization_id`` reads the same way: omitted keeps the
+    restriction, null lifts it.
+    """
+
+    # A toggle alone, so a reader who edits the example never re-sends a key.
+    model_config = {"json_schema_extra": {"example": {"enabled": False}}}
+
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    api_base: str | None = Field(default=None, max_length=1024)
+    client_args: dict[str, Any] | None = None
+    enabled: bool | None = None
+    restricted_to_organization_id: uuid.UUID | None = None
+    serves_unlisted_models: bool | None = None
+
+
+class HostedProviderPublic(SQLModel):
+    """One hosted provider, known by its name, its implementation and the tail of its key.
+
+    No shape in this section carries key material: a stored credential is
+    known by its last four characters and nothing else, ``client_args`` goes
+    out with credential-shaped values masked, and ``api_base`` with the
+    password in its userinfo and its query values masked.
+
+    ``name`` is what requests address and every route takes; ``provider`` is
+    the any-llm implementation. ``source`` says where the provider is defined.
+    A ``config`` provider comes from the ``hosted_providers:`` block, has no
+    row and so no ``id`` or timestamps, and is changed by editing the
+    configuration rather than through this API; its models are administered as
+    a stored provider's are. ``shadows_config`` marks a stored provider that
+    wins over a configuration entry of the same name, which serves again once
+    the row is deleted. ``has_api_key`` is false for one stored without a key,
+    and ``decryptable`` false for one whose key or extras no configured
+    ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
+    ``serves_unlisted_models`` is true for one that serves a model its roster
+    does not list.
+    """
+
+    id: uuid.UUID | None = None
+    name: str
+    provider: str
+    source: Literal["database", "config"] = "database"
+    has_api_key: bool = True
+    decryptable: bool = True
+    api_key_last4: str | None = None
+    api_base: str | None = None
+    client_args: dict[str, Any] | None = None
+    enabled: bool
+    restricted_to_organization_id: uuid.UUID | None = None
+    serves_unlisted_models: bool = False
+    shadows_config: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(
+        cls,
+        row: HostedProvider,
+        *,
+        client_args: dict[str, Any] | None,
+        api_base: str | None,
+        decryptable: bool,
+        shadows_config: bool = False,
+    ) -> HostedProviderPublic:
+        """Read one row for the API: no key, and the extras with credential-shaped values masked.
+
+        ``client_args`` is passed in decrypted, because the row holds them
+        encrypted and the service is what reads them back, and so is whether
+        they could be. ``api_base`` is passed in already masked, because the URL
+        masking lives in the service layer this one may not import.
+        """
+        return cls(
+            id=row.id,
+            name=row.name,
+            provider=row.provider,
+            source="database",
+            has_api_key=row.encrypted_api_key is not None,
+            decryptable=decryptable,
+            api_key_last4=row.api_key_last4,
+            api_base=api_base,
+            client_args=redact_secret_like_values(client_args),
+            enabled=row.enabled,
+            restricted_to_organization_id=row.restricted_to_organization_id,
+            serves_unlisted_models=row.serves_unlisted_models,
+            shadows_config=shadows_config,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    @classmethod
+    def from_config(
+        cls,
+        *,
+        name: str,
+        provider: str,
+        api_key_last4: str | None,
+        has_api_key: bool,
+        api_base: str | None,
+        client_args: dict[str, Any] | None,
+        enabled: bool,
+        restricted_to_organization_id: uuid.UUID | None,
+    ) -> HostedProviderPublic:
+        """Read one configuration entry for the API, masked as a row is.
+
+        ``api_base`` is passed in already masked, as for a row.
+        """
+        return cls(
+            name=name,
+            provider=provider,
+            source="config",
+            has_api_key=has_api_key,
+            api_key_last4=api_key_last4,
+            api_base=api_base,
+            client_args=redact_secret_like_values(client_args),
+            enabled=enabled,
+            restricted_to_organization_id=restricted_to_organization_id,
+        )
+
+
+class HostedProvidersPublic(SQLModel):
+    """A page of hosted providers, and how many there are in total."""
+
+    data: list[HostedProviderPublic]
+    count: int
+
+
+class HostedProviderTestRequest(SQLModel):
+    """Credentials to try against a provider without storing them.
+
+    The fields the create body takes. ``name`` naming an existing stored
+    provider lets a field left out fall back to what it stores, so an edit form
+    can test without re-entering the key; pointing the stored key at another
+    origin still needs the key typed again, as an update does.
+    """
+
+    model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
+
+    provider: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    api_base: str | None = Field(default=None, max_length=1024)
+    client_args: dict[str, Any] | None = None
+
+
+class HostedProviderTestPublic(SQLModel):
+    """What a connection test found: whether the provider answered, and how many models it lists.
+
+    ``discovery_unsupported`` is set for a provider with no model listing,
+    which a test cannot reach that way although it may still serve.
+    """
+
+    ok: bool
+    model_count: int = 0
+    error: str | None = None
+    discovery_unsupported: bool = False
+
+
+class HostedProvidersReencryptPublic(SQLModel):
+    """What re-encrypting the stored hosted provider credentials did.
+
+    ``unreadable`` counts providers no configured key reads, left as they were
+    to be re-entered; ``skipped`` those edited while the rotation ran, already
+    written under the primary key.
+    """
+
+    reencrypted: int
+    unreadable: int
+    skipped: int
+
+
+DeploymentProviderMigrationOutcome = Literal["migrate", "migrated", "conflict", "unreadable", "invalid", "failed"]
+
+
+class DeploymentProviderMigrationRowPublic(SQLModel):
+    """What moving one deployment provider onto a hosted provider does, or did.
+
+    ``instance`` is the deployment provider's name, which the hosted provider
+    keeps, so ``instance:model`` selectors keep working. ``outcome`` is
+    ``migrate`` in a preview and ``migrated`` once applied; ``conflict``,
+    ``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with
+    ``detail`` saying why. ``source_removed`` says whether the deployment
+    provider was removed: it is kept while the hosted provider offers no model,
+    and when it changed while the move ran. ``notes`` are what an operator
+    should check afterwards.
+    """
+
+    instance: str
+    provider: str | None = None
+    api_base: str | None = None
+    outcome: DeploymentProviderMigrationOutcome
+    detail: str | None = None
+    models: int | None = None
+    source_removed: bool = False
+    notes: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = Field(
+        default=None, description="The deployment provider's version, which an apply names to move this row as shown."
+    )
+
+
+class DeploymentProviderMigrationReviewedRow(SQLModel):
+    """One row of the preview the caller reviewed: its instance and the version it was shown at."""
+
+    instance: str
+    updated_at: datetime | None = None
+
+
+class DeploymentProviderMigrationRequest(SQLModel):
+    """Which deployment providers to move: the ones the caller reviewed, as reviewed.
+
+    ``rows`` names the rows of the preview the caller saw, each with the
+    ``updated_at`` it was shown at. A row the preview did not show, or one
+    changed since, is left where it is, so nothing moves that nobody reviewed.
+    Omitted, every row that can move does.
+    """
+
+    model_config = {
+        "json_schema_extra": {"example": {"rows": [{"instance": "openai-eu", "updated_at": "2026-10-19T09:00:00Z"}]}}
+    }
+
+    rows: list[DeploymentProviderMigrationReviewedRow] | None = None
+
+
+class DeploymentProviderMigrationPublic(SQLModel):
+    """The deployment providers the retired dashboard page stored, and how each moves onto a hosted provider."""
+
+    rows: list[DeploymentProviderMigrationRowPublic]
+
+
+def _rates_come_as_a_pair(request: HostedModelCreateRequest | HostedModelUpdateRequest) -> None:
+    """Refuse half a price.
+
+    ``model_pricing`` stores input and output in one row, so a single rate has
+    no shape to land in. The cache rates and the unit are that row's optional
+    half: each may come alone, but only beside the pair that gives the row its
+    base rates.
+    """
+    if (request.input_price_per_million is None) != (request.output_price_per_million is None):
+        msg = "input_price_per_million and output_price_per_million must be set together"
+        raise ValueError(msg)
+    rate_fields = {
+        "cache_read_price_per_million",
+        "cache_write_price_per_million",
+        "unit",
+    }
+    if request.input_price_per_million is None and rate_fields & request.model_fields_set:
+        msg = "cache rates and unit need input_price_per_million and output_price_per_million beside them"
+        raise ValueError(msg)
+
+
+class HostedModelCreateRequest(SQLModel):
+    """Offer a model on a hosted provider, optionally at a custom price.
+
+    Omitting the rates means the deployment serves the model at whatever the
+    price ladder already answers: a stored deployment price, else the community
+    default, which the offer stores as the deployment's own rate. ``unit`` is
+    what the rates are per, as on ``POST /pricing``: a request or image rate is
+    still stored per million.
+    """
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {"model": "gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10}
+        }
+    }
+
+    model: str = Field(min_length=1, max_length=255)
+    input_price_per_million: float | None = Field(default=None, ge=0)
+    output_price_per_million: float | None = Field(default=None, ge=0)
+    cache_read_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_price_per_million: float | None = Field(default=None, ge=0)
+    unit: Literal["tokens", "requests", "images"] | None = None
+
+    @model_validator(mode="after")
+    def _prices_come_as_a_pair(self) -> Self:
+        _rates_come_as_a_pair(self)
+        return self
+
+
+class HostedModelUpdateRequest(SQLModel):
+    """Reprice an offered model, toggle whether it is served, or both.
+
+    A price is the input/output pair or nothing: sending the pair writes a new
+    pricing version, and the cache rates then follow ``POST /pricing``'s own
+    semantics (a field the caller omits inherits the most recent stored value,
+    an explicit null clears it). An omitted ``unit`` carries the stored one
+    forward. ``enabled`` travels alone freely, so a toggle never re-sends rates
+    it did not change.
+    """
+
+    # A toggle alone: an example carrying zero rates would, edited for the
+    # switch, write a zero price as a new version.
+    model_config = {"json_schema_extra": {"example": {"enabled": False}}}
+
+    input_price_per_million: float | None = Field(default=None, ge=0)
+    output_price_per_million: float | None = Field(default=None, ge=0)
+    cache_read_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_price_per_million: float | None = Field(default=None, ge=0)
+    unit: Literal["tokens", "requests", "images"] | None = None
+    enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def _a_price_is_a_pair(self) -> Self:
+        _rates_come_as_a_pair(self)
+        return self
+
+
+class HostedModelRates(SQLModel):
+    """The rates a hosted model is currently served at, and which rung of the deployment's ladder said so."""
+
+    source: PriceSource
+    input_price_per_million: float
+    output_price_per_million: float
+    cache_read_price_per_million: float | None = None
+    cache_write_price_per_million: float | None = None
+    unit: str = "tokens"
+
+    @classmethod
+    def from_version(cls, version: ModelPricing, source: PriceSource) -> HostedModelRates:
+        """Read one pricing version, stored or transient, into the display shape."""
+        return cls(
+            source=source,
+            input_price_per_million=float(version.input_price_per_million),
+            output_price_per_million=float(version.output_price_per_million),
+            cache_read_price_per_million=as_float(version.cache_read_price_per_million),
+            cache_write_price_per_million=as_float(version.cache_write_price_per_million),
+            unit=version.unit or "tokens",
+        )
+
+
+class HostedModelPublic(SQLModel):
+    """One offered model, with the price the deployment currently serves it at.
+
+    ``price_source`` says which rung of the deployment's ladder answered:
+    ``deployment`` for a rate an operator set, ``defaults`` for the
+    community-maintained rate, whether this surface stored it or the fallback
+    supplies it, and None when nothing prices the model yet. ``unit`` says what
+    the rates are per, so a per-request rate is not read as a per-token one.
+    ``enabled`` is the serving switch; a model offered without a discoverable
+    price starts off.
+    """
+
+    id: uuid.UUID
+    provider: str
+    model: str
+    input_price_per_million: float | None = None
+    output_price_per_million: float | None = None
+    cache_read_price_per_million: float | None = None
+    cache_write_price_per_million: float | None = None
+    unit: str | None = None
+    price_source: PriceSource | None = None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(cls, row: HostedProviderModel, *, rates: HostedModelRates | None) -> HostedModelPublic:
+        """Read one offered row for the API, with whatever currently prices it."""
+        return cls(
+            id=row.id,
+            provider=row.provider,
+            model=row.model,
+            input_price_per_million=rates.input_price_per_million if rates else None,
+            output_price_per_million=rates.output_price_per_million if rates else None,
+            cache_read_price_per_million=rates.cache_read_price_per_million if rates else None,
+            cache_write_price_per_million=rates.cache_write_price_per_million if rates else None,
+            unit=rates.unit if rates else None,
+            price_source=rates.source if rates else None,
+            enabled=row.enabled,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class HostedModelsPublic(SQLModel):
+    """A page of one hosted provider's offered models, and how many there are in total."""
+
+    data: list[HostedModelPublic]
+    count: int
+
+
+class HostedModelsRefreshPublic(SQLModel):
+    """What a refresh did: the models newly offered, the seeded rates it moved, and the list's new size.
+
+    Failure is a field rather than a status, for the reason
+    ``HostedAvailableModelsPublic`` gives: the list is still standing, and the
+    panel renders the reason beside it.
+    """
+
+    added: list[str]
+    repriced: list[str]
+    count: int
+    error: str | None = None
+    discovery_unsupported: bool = False
+
+
+class HostedCatalogProviderRefreshPublic(SQLModel):
+    """What one hosted provider newly lists, as a catalog sweep found it.
+
+    Per provider rather than one total, because a dial that failed is a fact
+    about that provider, and the operator has to be told which one went quiet
+    rather than read a smaller number than they expected.
+    """
+
+    provider: str
+    added: list[str]
+    # Empty in a preview: moving a seeded price is a write.
+    repriced: list[str] = Field(default_factory=list)
+    error: str | None = None
+    discovery_unsupported: bool = False
+    # The stored key would not decrypt here, as against being refused upstream,
+    # so the page does not offer to remove a provider whose credential merely
+    # needs re-entering.
+    credential_unreadable: bool = False
+    # Where the provider is defined, so the page offers to remove only one it
+    # can delete: a provider from configuration is changed there.
+    source: Literal["database", "config"] = "database"
+
+
+class HostedCatalogKeptGroupPublic(SQLModel):
+    """Priced models a sweep left in place, grouped by the reason it did."""
+
+    reason: str
+    count: int
+    # A sample; ``count`` is the whole group.
+    models: list[str]
+
+
+class HostedCatalogRefreshPublic(SQLModel):
+    """What a catalog sweep did, or would do.
+
+    ``removed`` is a sample and ``removed_count`` the total, so a deployment
+    that has never been swept does not answer one button press with a few
+    thousand strings. ``orphaned_rosters`` names the providers that still have
+    a model list but nothing defining them, such as a removed ``config.yml``
+    entry: nothing serves them, and an apply deletes their model lists.
+    """
+
+    providers: list[HostedCatalogProviderRefreshPublic]
+    removed: list[str]
+    removed_count: int
+    removed_price_rows: int
+    removed_override_rows: int
+    kept: list[HostedCatalogKeptGroupPublic]
+    orphaned_rosters: list[str] = Field(default_factory=list)
+
+
+class HostedAvailableModelsPublic(SQLModel):
+    """What the provider says it serves on the stored credential.
+
+    Failure is a field rather than a status: an unreachable upstream, or a
+    provider with no model listing, is an answer about the provider rather than
+    about this request, and the form still has to render a plain text box when
+    the list cannot be fetched.
+    """
+
+    provider: str
+    models: list[str] = Field(default_factory=list)
+    error: str | None = None
+    discovery_unsupported: bool = False
+
+
 __all__ = [
+    "DeploymentProviderMigrationOutcome",
+    "DeploymentProviderMigrationPublic",
+    "DeploymentProviderMigrationRequest",
+    "DeploymentProviderMigrationReviewedRow",
+    "DeploymentProviderMigrationRowPublic",
+    "HostedAvailableModelsPublic",
+    "HostedCatalogKeptGroupPublic",
+    "HostedCatalogProviderRefreshPublic",
+    "HostedCatalogRefreshPublic",
+    "HostedModelCreateRequest",
+    "HostedModelPublic",
+    "HostedModelRates",
+    "HostedModelUpdateRequest",
+    "HostedModelsPublic",
+    "HostedModelsRefreshPublic",
+    "HostedProviderCreateRequest",
+    "HostedProviderPublic",
+    "HostedProviderTestPublic",
+    "HostedProviderTestRequest",
+    "HostedProviderUpdateRequest",
+    "HostedProvidersPublic",
+    "HostedProvidersReencryptPublic",
     "OrgProviderAvailableModelsPublic",
     "OrgProviderKeyCreateRequest",
     "OrgProviderKeyModelCreateRequest",

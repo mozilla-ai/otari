@@ -1,9 +1,11 @@
 """ORM tables for gateway-run tools, the executor column's vocabulary, and the web search policy a request reads."""
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
 from sqlalchemy import (
@@ -29,21 +31,25 @@ from gateway.models.secret_fields import redact_secret_like_values
 
 
 class SearchToolCredential(Base):
-    """A ``POST /v1/search`` tool configured at runtime through the dashboard.
+    """A search or fetch instance configured at runtime through the dashboard.
 
-    The database counterpart of a ``search_tools:`` entry in config.yml: it is
-    merged over the config-file tools at runtime (see
-    ``search_tool_store_service``), with the stored row winning on a name
-    collision, exactly as ``ProviderCredential`` does for providers. The API key
-    is held encrypted (``secret_box``) and is optional, because a ``searxng``
-    backend is normally keyless; ``last4`` is kept in clear only so the UI can
-    show which key is set without ever decrypting. Standalone mode only.
+    The database counterpart of a ``search_tools:`` or ``fetch_tools:`` entry in
+    config.yml, as ``kind`` says: it is merged over the config-file entries of
+    its kind at runtime (see ``search_tool_store_service``), with the stored row
+    winning on a name collision, exactly as ``ProviderCredential`` does for
+    providers. ``kind`` is fixed when the row is created, and ``fetch_tool`` is a
+    search row's enrichment instance. The API key is held encrypted
+    (``secret_box``) and is optional, because a ``searxng`` backend is normally
+    keyless; ``last4`` is kept in clear only so the UI can show which key is set
+    without ever decrypting. Standalone mode only.
     """
 
     __tablename__ = "search_tool_credentials"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(default="search", server_default="search")
     provider: Mapped[str] = mapped_column()
+    fetch_tool: Mapped[str | None] = mapped_column()
     api_base: Mapped[str | None] = mapped_column()
     encrypted_api_key: Mapped[str | None] = mapped_column()
     last4: Mapped[str | None] = mapped_column()
@@ -66,7 +72,9 @@ class SearchToolCredential(Base):
         """
         return {
             "name": self.name,
+            "kind": self.kind,
             "provider": self.provider,
+            "fetch_tool": self.fetch_tool,
             "api_base": self.api_base,
             "last4": self.last4,
             "timeout": self.timeout_seconds,
@@ -124,6 +132,10 @@ class WorkspaceMcpServer(Base):
     purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # The last connection check, in the shape ``WorkspaceMcpServerHealth``
+    # publishes; null until one has run, and cleared when the URL, the token or
+    # the allow-list changes, since it described the old ones.
+    health: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault``'s are: these
     # go over the wire and a naive SQLite round-trip would drop the offset.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
@@ -141,7 +153,7 @@ class CodeExecutor(StrEnum):
     """
 
     AUTO = "auto"
-    """The provider when it runs this tool natively for this model, else Otari."""
+    """Per attempt: the provider when that attempt's model runs this tool natively, else Otari."""
     OTARI = "otari"
     """Always the configured code-execution backend, whatever the provider offers."""
     PROVIDER = "provider"
@@ -156,6 +168,35 @@ class CodeExecutor(StrEnum):
             return None
         try:
             return cls(value.strip().lower())
+        except ValueError:
+            return None
+
+
+class SandboxProvider(StrEnum):
+    """What runs the code a code-execution tool call asks for, chosen per deployment.
+
+    Values are read without regard to case or surrounding whitespace.
+    """
+
+    PROTOCOL = "protocol"
+    """A backend at ``sandbox_url`` that speaks the published code-execution protocol."""
+    E2B = "e2b"
+    """E2B's hosted sandboxes, driven from this process."""
+
+    @classmethod
+    def parse(cls, value: object) -> "SandboxProvider | None":
+        """The member for a configured value, ``PROTOCOL`` for a blank one, or ``None`` for anything else."""
+        if isinstance(value, cls):
+            return value
+        if value is None:
+            return cls.PROTOCOL
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return cls.PROTOCOL
+        try:
+            return cls(normalized)
         except ValueError:
             return None
 
@@ -421,16 +462,44 @@ class WorkspaceWebSearchKeyOverride(Base):
     )
 
 
-@dataclass(frozen=True)
-class WebSearchCredential:
-    """The search provider and key a workspace's searches use in place of the deployment's.
+class WebToolCredentialSource(StrEnum):
+    """Where a workspace's web search or fetch credential came from."""
 
-    ``api_key`` is left out of the ``repr``, so a log line or an error that prints the
-    record never prints the key.
+    # The organization's own key, read from this deployment's rows.
+    ORG = "org"
+    # The control plane's answer to a hybrid data plane's resolve.
+    HYBRID = "hybrid"
+
+
+@dataclass(frozen=True)
+class WebToolCredential:
+    """A provider and key a workspace's web tool uses in place of the deployment's instance.
+
+    The base of :class:`WebSearchCredential` and :class:`WebFetchCredential`,
+    which are distinct types so a search key never serves a fetch, nor a fetch
+    key a search: each one's ``options`` are its own tool's.
+
+    ``api_key`` is ``None`` for a provider that takes none, such as ``searxng``.
+    The key, ``api_base`` and ``options`` are left out of the ``repr``, so a log
+    line or an error that prints the record never prints the key, nor a tenant's
+    endpoint, which can name a private host or carry userinfo.
     """
 
     provider: str
-    api_key: str = field(repr=False)
+    source: WebToolCredentialSource
+    api_key: str | None = field(default=None, repr=False)
+    api_base: str | None = field(default=None, repr=False)
+    options: Mapping[str, Any] = field(default=MappingProxyType({}), repr=False, hash=False)
+
+
+@dataclass(frozen=True)
+class WebSearchCredential(WebToolCredential):
+    """The search provider and key a workspace's searches use in place of the deployment's."""
+
+
+@dataclass(frozen=True)
+class WebFetchCredential(WebToolCredential):
+    """The fetch provider and key a workspace's fetches, and the enrichment of its searches, use."""
 
 
 @dataclass(frozen=True)
@@ -474,6 +543,8 @@ class ResolvedWebSearchConfig:
     authorized_tools: frozenset[str] | None
     # The workspace's own search key, which its searches use in place of the deployment's.
     credential: WebSearchCredential | None = None
+    # The workspace's own fetch key, which its fetches and the enrichment of its searches use.
+    fetch_credential: WebFetchCredential | None = None
 
 
 class SandboxContainer(Base):

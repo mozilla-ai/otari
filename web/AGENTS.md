@@ -83,9 +83,14 @@ through the explicit overlay seams.
 - `surface`, the deployment topology
 - `capability`, the installed or entitled feature
 - `operatorOnly`, deployment-wide authority
+- `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
+  caller with no organization can use (Overview today); every other row,
+  overlay rows included, is hidden from that caller, and from every caller
+  until `GET /v1/organizations/me` has answered
 
-These gates combine with AND. Organization and workspace authorization still
-comes from server responses.
+These gates combine with AND, and the top bar and the account menu gate their
+Playground link through the same predicate. Organization and workspace
+authorization still comes from server responses.
 
 The workspace and organization rails have separate registries. A sidebar item
 points to a real page, never a redirect. `/playground`, `/docs`, and `/account` are chrome
@@ -95,12 +100,14 @@ Overlay navigation uses the empty seam modules under `src/app/nav/` for new
 sections, items inserted into base sections, and label overrides. Keep their
 types aligned with otari-ai.
 
-Three more seams let a build whose one dashboard reaches several deployments
+More seams let a build whose one dashboard reaches several deployments
 say which: `shared/api/overlayRequestPolicy.ts` (the origin and credential every
 management request uses, settled before the bootstrap is read),
 `features/auth/overlayPublicAuthFields.tsx` (a control above the address on the
-pages that post one), and `app/nav/overlayAccountBadge.tsx` (the mark on the
-account control, the monogram here). Each ships inert; `src/overlaySeams.test.ts`
+pages that post one), `features/auth/overlayAuthShellSlot.tsx` (a control in the
+header of the public auth pages), `app/nav/overlayAccountMenuRows.tsx` (extra
+rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
+the account control, the monogram here). Each ships inert; `src/overlaySeams.test.ts`
 lists every seam and checks it is reached by its `@/…` specifier.
 
 ## Icons
@@ -170,8 +177,9 @@ and publishes it to Pages from `main`. `STORYBOOK_BASE_PATH` is what makes the
 published build resolve its assets under `/<repo>/`, since the merged
 `vite.config.ts` carries the app's own `base: "/"`.
 
-The bundled dashboard guide imports `docs/dashboard.md`. It remains available
-at `/#/docs` even when `docs_url` points the visible links elsewhere.
+The dashboard bundles no documentation. Its Documentation links open `docs_url`
+where a deployment sets one and `https://docs.otari.ai/` otherwise
+(`web/src/shared/helpers/docs.ts`).
 
 The PWA manifest is generated at build time by `web/pwaManifest.ts`, which
 prefixes `id`, `start_url`, `scope`, and each icon path with Vite's resolved

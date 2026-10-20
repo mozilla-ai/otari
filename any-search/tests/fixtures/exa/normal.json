@@ -1,0 +1,47 @@
+{
+  "status": 200,
+  "body": {
+    "requestId": "7ca68644584036359a8ed37c6669b749",
+    "resolvedSearchType": "",
+    "results": [
+      {
+        "id": "https://blog.python.org/2025/10/python-3140-final-is-here/",
+        "title": "Python 3.14.0 (final) is here! | Python Insider",
+        "url": "https://blog.python.org/2025/10/python-3140-final-is-here/",
+        "publishedDate": "2025-10-01T00:00:00.000Z",
+        "text": "Python 3.14.0 (final) is here! | Python Insider\n\n# Python 3.14.0 (final) is here!\n\nHugo van Kemenade/ October 7, 2025· Updated October 7, 2025\n\n# Python 3.14.0 is now available\n\npython.org/downloads/release/python-3140/\n\n# This is the stable release of Python 3.14.0\n\nPython 3.14.0 is the newest major release of the Python programming language, and it contains many new features and optimisations co",
+        "highlights": [
+          "Python 3.14.0 (final) is here! | Python Insider\n...\n# Python 3.14.0 is now available\n...\n# This is the stable release of Python 3.14.0\n\nPython 3.14.0 is the newest major release of the Python programming language, and it contains many new features and optimisations compared to Python 3.13."
+        ],
+        "image": "https://blog.python.org/og/python-3140-final-is-here.png"
+      },
+      {
+        "id": "https://python-docs-es.readthedocs.io/es/3.14/whatsnew/3.14.html",
+        "title": "",
+        "url": "https://python-docs-es.readthedocs.io/es/3.14/whatsnew/3.14.html",
+        "text": "### Navegación\n\n- índice\n- módulos |\n- siguiente |\n- anterior |\n- Python »\n- Documentación 3.14.0 »\n- Qué hay de nuevo en Python »\n- What’s new in Python 3.14\n- |\n- Tema Auto Claro Oscuro |\n\nNota\n\n¡Ayúdanos a traducir la documentación oficial de Python al Español! Puedes encontrar más información en Como contribuir. Ayuda a acercar Python a más personas de habla hispana.\n\n# What’s new in Python 3.",
+        "highlights": [
+          "This article explains the new features in Python 3.14, compared to 3.13. Python 3.14 was released on 7 October 2025. For full details, see the changelog.\n...\nof the Python programming language ... standard library. ... template string literals,"
+        ]
+      },
+      {
+        "id": "https://blog.python.org/2025/12/python-3141-is-now-available/",
+        "title": "Python 3.14.1 is now available! | Python Insider",
+        "url": "https://blog.python.org/2025/12/python-3141-is-now-available/",
+        "publishedDate": "2025-12-01T00:00:00.000Z",
+        "text": "Python 3.14.1 is now available! | Python Insider\n\n# Python 3.14.1 is now available!\n\nHugo van Kemenade/ December 2, 2025· Updated December 2, 2025\n\n# This is first maintenance release of Python 3.14\n\nPython 3.14.1 is the first maintenance release of 3.14, containing around 558 bugfixes, build improvements and documentation changes since 3.14.0.\n\n[Major new features of the 3.14 series, compared to ",
+        "highlights": [
+          "Python 3.14.1 is now available! | Python Insider\n\n# Python 3.14.1 is now available!\n...\n# This is first maintenance release of Python 3.14\n\nPython 3.14.1 is the first maintenance release of 3.14, containing around 558 bugfixes, build improvements and documentation changes since 3.14.0."
+        ],
+        "image": "https://blog.python.org/og/python-3141-is-now-available.png"
+      }
+    ],
+    "searchTime": 1808.6,
+    "costDollars": {
+      "total": 0.007,
+      "search": {
+        "neural": 0.007
+      }
+    }
+  }
+}

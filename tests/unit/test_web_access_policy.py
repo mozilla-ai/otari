@@ -107,6 +107,48 @@ def test_fetch_domains_that_share_nothing_with_the_workspace_are_refused() -> No
         )
 
 
+def test_a_fetch_declarations_own_domains_narrow_the_workspace_fetch_domains() -> None:
+    """A claimed ``web_fetch_<date>`` keyword can carry Anthropic's domain lists, and they bind."""
+    grant = apply_web_access_policy(
+        _policy(allowed_domains=("example.com",), blocked_domains=("blocked.example.com",)),
+        requested_tools=[WebTool.FETCH],
+        search_tool_entry=None,
+        fetch_tool_entry={
+            "type": "web_fetch_20250910",
+            "allowed_domains": ["docs.example.com"],
+            "blocked_domains": ["old.docs.example.com"],
+        },
+        config=_config(),
+    )
+
+    assert [rule.value for rule in grant.fetch_policy.allowed] == ["docs.example.com"]
+    assert [rule.value for rule in grant.fetch_policy.blocked] == ["blocked.example.com", "old.docs.example.com"]
+
+
+def test_a_fetch_allow_list_stands_in_for_the_search_one_and_both_block_lists_apply() -> None:
+    grant = apply_web_access_policy(
+        None,
+        requested_tools=[WebTool.SEARCH, WebTool.FETCH],
+        search_tool_entry={"type": "web_search_20250305", "allowed_domains": ["a.test"], "blocked_domains": ["x.test"]},
+        fetch_tool_entry={"type": "web_fetch_20250910", "allowed_domains": ["b.test"], "blocked_domains": ["y.test"]},
+        config=_config(),
+    )
+
+    assert [rule.value for rule in grant.fetch_policy.allowed] == ["b.test"]
+    assert [rule.value for rule in grant.fetch_policy.blocked] == ["x.test", "y.test"]
+
+
+def test_fetch_declaration_domains_that_share_nothing_with_the_workspace_are_refused() -> None:
+    with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
+        apply_web_access_policy(
+            _policy(allowed_domains=("example.com",)),
+            requested_tools=[WebTool.FETCH],
+            search_tool_entry=None,
+            fetch_tool_entry={"type": "web_fetch_20250910", "allowed_domains": ["other.test"]},
+            config=_config(),
+        )
+
+
 def test_search_domains_that_share_nothing_with_the_workspace_are_refused() -> None:
     with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
         apply_web_access_policy(

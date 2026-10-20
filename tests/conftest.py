@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import contextlib
+import json
 import os
 import re
 import shutil
@@ -8,8 +9,9 @@ import sys
 import zlib
 from collections.abc import AsyncIterator, Callable, Generator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import anyio
 import httpx
@@ -21,6 +23,11 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
+
+if TYPE_CHECKING:
+    from gateway.services.pricing import ModelsDevPriceIndex
+
+MODELS_DEV_MINI = ROOT / "tests" / "fixtures" / "models_dev_mini.json"
 
 
 class ControlPlaneHandler(Protocol):
@@ -101,7 +108,7 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     ``TestClient(create_app(...))``). Scoping this to ``tests/integration`` left
     every one of those making live models.dev fetches on CI, which is both wrong
     on its own terms and what surfaced the unbounded-shutdown bug that
-    ``_stop_refresher`` now guards against. A test that wants the real refresher
+    ``_stop_refreshers`` now guards against. A test that wants the real refresher
     calls it directly rather than through the lifespan.
     """
 
@@ -110,6 +117,29 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("gateway.main.run_discovery_refresher", _noop)
     monkeypatch.setattr("gateway.main.run_catalog_refresher", _noop)
+    monkeypatch.setattr("gateway.api.routes.health_checks.run_health_check_worker", _noop)
+
+
+@pytest.fixture(autouse=True)
+def _no_models_dev_fetch(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
+    """Answer every models.dev fetch as unreachable unless the test patches in a catalog.
+
+    The model listing joins models.dev, and with the refresher suppressed above
+    its cache starts empty, so every listing read would otherwise fetch the live
+    catalog: an outbound call from any test that lists a model, and limits that
+    move whenever models.dev does. A test that wants metadata patches
+    ``model_catalog_service._fetch`` itself. The cache is cleared on both sides,
+    so one test's answer, a failure included, is never the next one's.
+    """
+    from gateway.services import model_catalog_service
+
+    async def _unreachable() -> None:
+        return None
+
+    model_catalog_service.clear_catalog_cache()
+    monkeypatch.setattr(model_catalog_service, "_fetch", _unreachable)
+    yield
+    model_catalog_service.clear_catalog_cache()
 
 
 @pytest.fixture(autouse=True)
@@ -137,8 +167,8 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     later tests that call ``find_model_pricing`` directly. Reset to off, matching
     the config field's opt-in default; tests that need defaults enable explicitly.
 
-    Also clear the memoized genai-prices resolutions so a real price cached by one
-    test cannot mask another test that patches ``calc_price`` to fail.
+    Also drops the accepted price generations, so a snapshot accepted by one test
+    cannot price another's models.
     """
     from gateway.services.pricing_refresh_service import reset_price_refresh_state
     from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
@@ -150,6 +180,41 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     configure_default_pricing(False)
     configure_provider_types(None)
     reset_price_refresh_state()
+
+
+@pytest.fixture
+def install_models_dev() -> Callable[[dict[str, Any] | None], "ModelsDevPriceIndex"]:
+    """Serve a small models.dev catalog as the only accepted price generation.
+
+    Takes a parsed ``api.json`` document, the shared mini fixture by default, and
+    returns its index. The autouse reset above drops it after the test.
+    """
+
+    def install(catalog: dict[str, Any] | None = None) -> "ModelsDevPriceIndex":
+        from gateway.services.pricing import ModelsDevPriceIndex, PriceGeneration, set_accepted_generations
+
+        document = catalog if catalog is not None else json.loads(MODELS_DEV_MINI.read_text())
+        index = ModelsDevPriceIndex.from_catalog(document)
+        set_accepted_generations(
+            [PriceGeneration(effective_at=datetime(2020, 1, 1, tzinfo=UTC), index=index)], complete=False
+        )
+        return index
+
+    return install
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _builtin_fetcher_registered() -> None:
+    """Register otari's fetcher as any-fetch's ``builtin`` provider, once per worker.
+
+    ``create_app`` registers it at startup. A test that runs ``builtin`` without an
+    app, such as one that constructs the old web backend with its fetch half on,
+    must not depend on an earlier test having built one, which a sharded or
+    parallel run does not guarantee.
+    """
+    from gateway.services.tools import register_builtin_fetcher
+
+    register_builtin_fetcher()
 
 
 @pytest.fixture(scope="session")

@@ -31,17 +31,23 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+# Bedrock's cross-region inference profiles: where AWS may run the request, not what the model is.
+_ROUTING_PREFIX = re.compile(r"^(?:us-gov|us|eu|apac|au|ca|global|in|jp)\.")
+
+# models.dev names a routing profile after its region (``Kimi K3 (US)``), which describes the offering.
+_ROUTING_QUALIFIER = re.compile(r"\s*\((?:APAC|AU|CA|EU|Global|GovCloud|India|JP|US)\)$", re.IGNORECASE)
+
 # Provider-side path prefixes that say where a model is hosted, not what it is.
 _PATH_PREFIXES = (
     re.compile(r"^accounts/[^/]+/(?:models|routers)/"),  # Fireworks
-    re.compile(r"^(?:us|eu|apac|global|jp)\."),  # Bedrock region routing
+    _ROUTING_PREFIX,
     re.compile(r"^TEE/"),  # nano-gpt's confidential-compute variants
 )
 
 # Bedrock and its imitators write the vendor into the id with a dot:
-# ``anthropic.claude-sonnet-5-v1:0``. The vendor is kept as a hint and the
-# segment is dropped from the key.
-_DOTTED_VENDOR = re.compile(r"^(anthropic|openai|meta|qwen|deepseek|mistral|cohere|amazon|google|ai21|writer|nvidia)\.")
+# ``anthropic.claude-sonnet-5-v1:0``. A segment ``_ORG_VENDORS`` names is kept
+# as a hint and dropped from the key.
+_DOTTED_PREFIX = re.compile(r"^([a-z0-9-]+)\.", re.IGNORECASE)
 
 # Suffixes that name a version pin or a tier of service on one provider.
 _SUFFIXES = (
@@ -282,9 +288,9 @@ def clean_model_id(model_id: str) -> CleanedId:
         org, _, text = text.rpartition("/")
         vendor_hint = _ORG_VENDORS.get(org.rsplit("/", 1)[-1].lower())
 
-    dotted = _DOTTED_VENDOR.match(text)
-    if dotted:
-        vendor_hint = vendor_hint or _ORG_VENDORS.get(dotted.group(1))
+    dotted = _DOTTED_PREFIX.match(text)
+    if dotted and (dotted_vendor := _ORG_VENDORS.get(dotted.group(1).lower())):
+        vendor_hint = vendor_hint or dotted_vendor
         text = text[dotted.end() :]
 
     text, prefixed = _strip_vendor_prefix(text)
@@ -300,6 +306,11 @@ def clean_model_id(model_id: str) -> CleanedId:
         text = text[: quant.start()]
 
     return CleanedId(model=text, vendor_hint=vendor_hint, quantization=quantization)
+
+
+def _model_name(model_id: str, name: str) -> str:
+    """The models.dev name of the model an offering serves, without a routing profile's region."""
+    return _ROUTING_QUALIFIER.sub("", name) if _ROUTING_PREFIX.match(model_id) else name
 
 
 def _name_key(name: str) -> str:
@@ -325,7 +336,7 @@ def identity_key(provider_type: str, model_id: str, name: str | None) -> str:
     if override is not None:
         return override
     if name:
-        key = _name_key(name)
+        key = _name_key(_model_name(model_id, name))
         if key:
             return key
     key = normalize(clean_model_id(model_id).model)
@@ -412,8 +423,8 @@ def _vote_name(seeds: list[OfferingSeed], vendor: str | None) -> str:
         own = _VENDOR_PROVIDERS.get(vendor, frozenset())
         for seed in seeds:
             if seed.name and seed.provider_type in own:
-                return _display_name(seed.name)
-    spellings = [_display_name(seed.name) for seed in seeds if seed.name]
+                return _display_name(_model_name(seed.model_id, seed.name))
+    spellings = [_display_name(_model_name(seed.model_id, seed.name)) for seed in seeds if seed.name]
     if spellings:
         counts = Counter(spellings)
         return max(spellings, key=lambda name: (counts[name], -spellings.index(name)))

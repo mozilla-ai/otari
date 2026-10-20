@@ -69,7 +69,6 @@ const GLM_DETAIL: CatalogModelDetail = {
         output_price_per_million: 2,
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
-        cache_write_1h_price_per_million: null,
         pricing_tiers: [],
         unit: "tokens",
       },
@@ -219,13 +218,9 @@ describe("PublicCatalogPage", () => {
       "href",
       "#/",
     )
-    // The bundled guide sits behind sign-in, so a visitor gets the docs on GitHub.
     expect(
       within(nav).getByRole("link", { name: "Documentation" }),
-    ).toHaveAttribute(
-      "href",
-      "https://github.com/mozilla-ai/otari/blob/main/docs/index.md",
-    )
+    ).toHaveAttribute("href", "https://docs.otari.ai/")
     expect(within(nav).getByRole("link", { name: "GitHub" })).toHaveAttribute(
       "href",
       "https://github.com/mozilla-ai/otari",
@@ -243,7 +238,7 @@ describe("PublicCatalogPage", () => {
     mockApi()
     renderPage(undefined, true, {
       site_url: "https://otari.ai/",
-      docs_url: "https://docs.otari.ai/en/",
+      docs_url: "https://docs.example.com/",
     })
 
     expect(screen.getByRole("link", { name: "Otari home" })).toHaveAttribute(
@@ -257,7 +252,7 @@ describe("PublicCatalogPage", () => {
     )
     expect(
       within(nav).getByRole("link", { name: "Documentation" }),
-    ).toHaveAttribute("href", "https://docs.otari.ai/en/")
+    ).toHaveAttribute("href", "https://docs.example.com/")
     await screen.findByRole("list", { name: "Models" })
   })
 

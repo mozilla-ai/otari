@@ -31,6 +31,7 @@ describe("App", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
+    window.sessionStorage.clear()
     window.location.hash = ""
   })
 
@@ -212,7 +213,6 @@ describe("App", () => {
   })
 
   it("renders a public auth page ahead of the sign-in screen", async () => {
-    vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
     window.location.hash = "#/verify-email?token=abc123"
 
     renderApp(bootstrap())
@@ -220,7 +220,7 @@ describe("App", () => {
     // No session marker is stored, and the emailed token is this visitor's
     // whole credential, so the sign-in gate must not be what answers the link.
     expect(
-      await screen.findByRole("heading", { name: "Email verified" }),
+      await screen.findByRole("heading", { name: "Verify your email" }),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole("heading", { name: "Sign in to Otari" }),
@@ -260,6 +260,59 @@ describe("App", () => {
     expect(screen.queryByText("Checking with the gateway…")).toBeNull()
   })
 
+  describe("an OAuth sign-in that started on a page", () => {
+    // What `Login` and `SignupPage` store before leaving for the provider, then
+    // the provider's redirect back, through the real tree: whether the page or
+    // a model remembered on the catalog wins is decided by `SignedInRoot`.
+    function returnFromProvider(returnHash: string) {
+      window.sessionStorage.setItem("otari.oauth.state", "the-state")
+      window.sessionStorage.setItem("otari.oauth.return-hash", returnHash)
+      vi.mocked(siteFetch).mockResolvedValue({
+        build: "test-build",
+        version: "1.0.0",
+      } as never)
+      vi.mocked(apiFetch).mockResolvedValue([] as never)
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ expires_at: "2026-09-01T00:00:00Z" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      window.location.hash =
+        "#/auth/google/callback?code=the-code&state=the-state"
+      renderApp(bootstrap({ oauth_providers: ["google"] }))
+    }
+
+    it("lands on that page, ahead of a model remembered on the catalog", async () => {
+      rememberModel("z-ai/glm-5.3")
+
+      returnFromProvider("#/keys")
+
+      // `SignedInRoot` forgets the model on its first render, so this is the
+      // moment the choice between the two has been made.
+      await waitFor(() =>
+        expect(
+          window.localStorage.getItem("otari.catalog.remembered-model"),
+        ).toBeNull(),
+      )
+      expect(window.location.hash).toBe("#/keys")
+      // The shell titles the tab from the route it resolved, so this is the
+      // router on that page rather than only the address bar.
+      await waitFor(() => expect(document.title).toBe("API keys · Otari"))
+    })
+
+    it("reopens the remembered model when it started on the home page", async () => {
+      // A sign-up begun from the catalog's "use this model" returns home.
+      rememberModel("z-ai/glm-5.3")
+
+      returnFromProvider("#/")
+
+      await waitFor(() =>
+        expect(window.location.hash).toBe("#/models/z-ai/glm-5.3"),
+      )
+    })
+  })
+
   it("answers a mail-gated public auth path with a panel, not a form", () => {
     // The default fixture reports mail_ready: false, which is what hides the
     // link on the sign-in screen; the URL is still reachable from a bookmark.
@@ -270,6 +323,45 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { name: "Not available on this gateway" }),
     ).toBeInTheDocument()
+  })
+
+  it("opens an emailed link pasted into a tab that is already signed in", async () => {
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    vi.mocked(siteFetch).mockResolvedValue({
+      build: "test-build",
+      version: "1.0.0",
+    } as never)
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (path === "/invitations/validate") {
+        return {
+          email: "ada@example.com",
+          organization_name: "Acme",
+          role: "member",
+          expires_at: "2026-01-08T00:00:00+00:00",
+          needs_password: false,
+          can_sign_in: true,
+          ways_in: [],
+        } as never
+      }
+      return [] as never
+    })
+    window.location.hash = "#/"
+    renderApp(bootstrap())
+    expect(await screen.findByText("Lazy overview")).toBeInTheDocument()
+
+    // The router hears the hash change too, and its catch-all must not send
+    // the path to the overview before the page above it can read it.
+    window.location.hash = "#/accept-invitation?token=abc123"
+
+    expect(await screen.findByText("ada@example.com")).toBeInTheDocument()
+    expect(window.location.hash).toBe("#/accept-invitation?token=abc123")
+  })
+
+  it("titles closed signup after its heading", () => {
+    window.location.hash = "#/signup"
+    renderApp(bootstrap({ mail_ready: true, open_signup: false }))
+
+    expect(document.title).toBe("Claim account · Otari")
   })
 
   it("remounts with a fresh token when a different invitation link opens in the same tab", async () => {

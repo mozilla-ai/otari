@@ -197,6 +197,12 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # would let either confirm the other's address.
     email_verification_token: str | None = Field(default=None, unique=True, index=True)
     email_verified_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    # Set beside ``email_verified_at`` when the verification is an organization
+    # admin's word rather than a proof: a first password chosen through an
+    # invitation link, which the inviter also holds. Domain auto-join ignores a
+    # vouched address, a provider sign-in treats it as unverified, and a
+    # password reset (a mailbox proof) clears it.
+    email_vouched_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     # otari#650's own columns, added alongside rather than reusing
     # ``email_verification_token`` above: that one is carried verbatim for
     # hosted-edition parity and stores a raw token per its own comment, and
@@ -216,10 +222,15 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # alone. Provisioning therefore creates the organization first.
     active_organization_id: uuid.UUID = Field(foreign_key="organization.id", index=True)
     # The organization provisioned for this identity, which never moves when the
-    # active one does. Nothing in this edition reads it, and it is written once,
-    # by ``create_local_identity``: switching (mozilla-ai/otari#715) moves
+    # active one does. Nothing in this edition reads it, and it is written when
+    # the identity is created: switching (mozilla-ai/otari#715) moves
     # ``active_organization_id`` and deliberately leaves this where it was,
-    # which is the whole point of there being two columns. The hosted edition
+    # which is the whole point of there being two columns. One write re-homes
+    # it: ``OrganizationService.provision_tenancy_for_claim``, when open signup
+    # gives an identity no organization still wants its own organization as its
+    # address is first proven. That happens at most once, since an address is
+    # proven once, and only to an identity with no live membership, so nothing
+    # it earned is anchored to the organization it leaves. The hosted edition
     # anchors recurring offered credits to it precisely so they cannot be farmed
     # by creating or switching organizations. A column the hosted edition needs
     # has to live here or nowhere, and the overlay contributes adapters and
@@ -235,9 +246,8 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
         index=True,
     )
     # When this identity last had a dashboard session minted for it. Stamped in
-    # one place, ``dashboard_session_service.create_dashboard_session``, so every
-    # sign-in flow that mints a session records it and none of them has to
-    # remember to; see that function for why a re-mint counts.
+    # one place, ``IdentityService.start_session``, so every flow that mints a
+    # session records it, the re-mint after a master-key rotation included.
     #
     # A column rather than ``max(dashboard_sessions.created_at)``, which would
     # have needed no migration and would have been wrong: session rows are pruned
@@ -654,10 +664,12 @@ class ActiveOrganizationMemberPublic(SQLModel):
     """A member row joined to the identity behind it, as the roster shows it.
 
     Field-for-field the platform's shape, so the ported roster page is not
-    rewritten around a new contract, with two consequences of the OSS line:
-    ``email`` is nullable here (a local operator identity has no sign-in
-    address), and ``invitation_id`` is always null until the invitation flow
-    rehomes, which is what fills it.
+    rewritten around a new contract, except that ``email`` is nullable here (a
+    local operator identity has no sign-in address).
+
+    ``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's
+    current invitation, which may have expired, so the roster can offer to
+    revoke or reissue it.
 
     ``attribution_user_id`` is the addition the platform has no counterpart for.
     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
@@ -674,6 +686,10 @@ class ActiveOrganizationMemberPublic(SQLModel):
     user_id: uuid.UUID | None = None
     attribution_user_id: str | None = None
     invitation_id: uuid.UUID | None = None
+    invitation_expires_at: datetime | None = Field(
+        default=None,
+        description="When the invitation in invitation_id expires, or expired. Null when there is none.",
+    )
     email: str | None = None
     full_name: str | None = None
     role: str
@@ -714,14 +730,12 @@ class ActiveOrganizationMemberCreateRequest(SQLModel):
 
 
 class ActiveOrganizationMemberCreateResultPublic(SQLModel):
-    """The outcome of adding a member.
+    """The outcome of adding a member directly.
 
     The platform answers ``invited`` on both its branches, because being added
-    there always needs acceptance: a known address gets an ``invited``
-    membership, an unknown one an emailed invitation. This edition has neither
-    an invitation to send nor a way to accept one, so it answers on the other
-    arm of the same union, ``active``, and the invitation fields stay null until
-    that flow rehomes.
+    there always needs acceptance. A direct add here needs none, so it answers
+    on the other arm of the same union, ``active``, and the invitation fields
+    stay null; inviting answers ``InviteOrganizationMemberResultPublic``.
     """
 
     status: Literal["active", "invited"]
@@ -1045,6 +1059,10 @@ class InvitationUpdate(SQLModel):
     status: str | None = Field(default=None, max_length=32)
 
 
+# The ways an invitee whose link will not set a password can get in instead.
+InvitationWayIn = Literal["provider", "password_reset"]
+
+
 class InvitationPreviewPublic(SQLModel):
     """What an unauthenticated visitor sees before committing to accept.
 
@@ -1060,8 +1078,21 @@ class InvitationPreviewPublic(SQLModel):
     expires_at: datetime
     needs_password: bool = Field(
         description=(
-            "Whether the invited address has never signed in here, so accepting should also set its "
-            "password. False when the address already has a way in, and then accept refuses one."
+            "Whether accepting should also set the invited address's first password. False when the address "
+            "already has a way in, and also when another organization has it as a member or invitee, since this "
+            "link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a "
+            "password whenever this is false."
+        )
+    )
+    can_sign_in: bool = Field(
+        description="Whether the invited address can already sign in, with a password or through a provider."
+    )
+    ways_in: list[InvitationWayIn] = Field(
+        description=(
+            "When the address cannot sign in yet and this link will not set its password, what this deployment "
+            "offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and "
+            "'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when "
+            "the deployment offers neither, in which case whoever administers it has to help."
         )
     )
 
@@ -1094,11 +1125,23 @@ class InviteOrganizationMemberResultPublic(SQLModel):
     mail_sent: bool = Field(
         description=(
             "Whether the invitation email was actually dispatched. False when mail is not "
-            "configured, or the send itself failed; accept_link is set either way, so the "
-            "operator can share it themselves rather than the invitation being a dead end."
+            "configured, the send itself failed, or mail_limited."
         )
     )
-    accept_link: str
+    mail_limited: bool = Field(
+        default=False,
+        description=(
+            "Whether the email was held back because the organization or the address reached its invitation "
+            "mail limit for the day. Share the link yourself, or reissue the invitation later to email a new one."
+        ),
+    )
+    accept_link: str | None = Field(
+        default=None,
+        description=(
+            "The link to share with the invitee yourself, set only when mail_sent is false. A "
+            "delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them."
+        ),
+    )
     expires_at: datetime
     created_at: datetime
 
@@ -1174,6 +1217,24 @@ class AcceptInvitationResultPublic(SQLModel):
     organization_name: str
     role: str
     password_set: bool = Field(default=False, description="Whether this accept set the identity's password.")
+    verification_pending: bool = Field(
+        default=False,
+        description=(
+            "Whether the invited address chose a password through signup and has not verified it yet, "
+            "so it has to open its verification link before it can sign in."
+        ),
+    )
+    can_sign_in: bool = Field(
+        default=True,
+        description=(
+            "Whether the invited address can sign in now, with a password (this accept's included) or through "
+            "a provider. False when it accepted without one and has never signed in."
+        ),
+    )
+    ways_in: list[InvitationWayIn] = Field(
+        default_factory=list,
+        description="When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
+    )
 
 
 class PendingOrganizationInvitationPublic(SQLModel):
@@ -1269,7 +1330,7 @@ class Invitation(InvitationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin
     )
     token_hash: str = Field(unique=True, index=True, max_length=64)
     workspace_assignments: list[dict[str, str]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
-    expires_at: datetime = Field(sa_type=UtcDateTime())  # type: ignore[call-overload]
+    expires_at: datetime = Field(sa_type=UtcDateTime())
 
 
 # =============================================================================
@@ -1456,7 +1517,7 @@ class WebAuthnChallenge(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         column_kwargs={"server_default": func.now()},
     )
-    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)  # type: ignore[call-overload]
+    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)
 
     @field_validator("ceremony")
     @classmethod
@@ -1502,6 +1563,9 @@ class OAuthPendingState(SQLModel, table=True):
     # Hashed for the reason ``state_hash`` is.
     flow_hash: str = Field(max_length=64)
     code_verifier: str | None = Field(default=None, max_length=128)
+    # The OpenID nonce the authorization request sent, which the exchange
+    # checks the ID token against. Null for GitHub, which is not OpenID.
+    nonce: str | None = Field(default=None, max_length=128)
     # Kept rather than re-derived at exchange time so the URI sent with the
     # exchange is the one the authorization request was actually built with,
     # even across a ``public_base_url`` change mid-flight.
@@ -1510,7 +1574,7 @@ class OAuthPendingState(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         column_kwargs={"server_default": func.now()},
     )
-    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)  # type: ignore[call-overload]
+    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)
 
 
 class DashboardSession(Base):

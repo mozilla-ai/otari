@@ -25,7 +25,7 @@ def test_files_off_starts_without_a_store_it_cannot_build(caplog: pytest.LogCapt
     gateway_logger.addHandler(caplog.handler)
     try:
         with caplog.at_level(logging.WARNING, logger="gateway"):
-            store = _resolve_file_store(config, build_container(config=config))
+            store = _resolve_file_store(config, build_container(config=config, workspace_listener=None))
     finally:
         gateway_logger.removeHandler(caplog.handler)
 
@@ -37,14 +37,14 @@ def test_files_on_still_refuses_a_store_it_cannot_build() -> None:
     config = GatewayConfig(files_enabled=True, files_backend="s3", files_s3_bucket=None)
 
     with pytest.raises(ValueError, match="files_s3_bucket"):
-        _resolve_file_store(config, build_container(config=config))
+        _resolve_file_store(config, build_container(config=config, workspace_listener=None))
 
 
 def test_files_off_keeps_a_store_it_can_build(tmp_path: Path) -> None:
     """A stored ``file_id`` still resolves with the upload routes off, as before."""
     config = GatewayConfig(files_enabled=False, files_backend="local", files_local_dir=str(tmp_path))
 
-    store = _resolve_file_store(config, build_container(config=config))
+    store = _resolve_file_store(config, build_container(config=config, workspace_listener=None))
 
     assert isinstance(store, LocalDirFileStore)
 
@@ -62,7 +62,7 @@ async def test_lifespan_starts_with_files_off_and_no_bucket(tmp_path: Path) -> N
     app = FastAPI()
     app.state.config = config
     app.state.enabled_features = ()
-    app.state.container = build_container(config=config)
+    app.state.container = build_container(config=config, workspace_listener=None)
 
     async with _create_lifespan()(app):
         assert app.state.file_store is None

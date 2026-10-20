@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ResendVerificationPage } from "@/features/auth/ResendVerificationPage"
+import {
+  readSignInAddress,
+  rememberSignInAddress,
+} from "@/features/auth/signInAddress"
 import { apiFetch } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
@@ -43,6 +47,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  window.sessionStorage.clear()
   resetTelemetrySpy()
   window.location.hash = ""
 })
@@ -81,6 +86,23 @@ describe("ResendVerificationPage", () => {
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(
       "/auth/resend-verification",
     )
+  })
+
+  it("starts from the address the page before handed over, and passes it on", async () => {
+    rememberSignInAddress("ada@example.com")
+    vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com")
+    await user.clear(screen.getByLabelText("Email"))
+    await user.type(screen.getByLabelText("Email"), "grace@example.com")
+    await user.click(screen.getByRole("button", { name: "Send link" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/check-email?type=resend")
+    })
+    expect(readSignInAddress()).toBe("grace@example.com")
   })
 })
 

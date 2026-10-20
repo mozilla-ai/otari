@@ -277,8 +277,8 @@ def test_another_users_endpoint_does_not_resolve(client: TestClient) -> None:
 
     resp, calls = _chat(client, bob, "my-vllm:qwen3")
 
-    # Unresolved, so unpriced, so refused at the pricing gate before any dispatch.
-    assert resp.status_code == 402
+    assert resp.status_code == 400
+    assert resp.headers["Otari-Error-Code"] == "invalid_model"
     assert calls == []
 
 
@@ -289,8 +289,8 @@ def test_a_deleted_endpoint_stops_resolving(client: TestClient) -> None:
 
     resp, calls = _chat(client, headers, "my-vllm:qwen3")
 
-    # Unresolved, so unpriced, so refused at the pricing gate before any dispatch.
-    assert resp.status_code == 402
+    assert resp.status_code == 400
+    assert resp.headers["Otari-Error-Code"] == "invalid_model"
     assert calls == []
 
 

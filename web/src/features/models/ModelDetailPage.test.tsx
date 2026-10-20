@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -95,7 +95,6 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
       output_price_per_million: 2,
       cache_read_price_per_million: 0.05,
       cache_write_price_per_million: null,
-      cache_write_1h_price_per_million: null,
       pricing_tiers: [],
       unit: "tokens",
     },
@@ -122,7 +121,6 @@ const GLM_DETAIL: CatalogModelDetail = {
         output_price_per_million: 2.5,
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
-        cache_write_1h_price_per_million: null,
         pricing_tiers: [],
         unit: "tokens",
       },
@@ -229,8 +227,35 @@ describe("ModelDetailPage", () => {
     ).toBeInTheDocument()
     // The selector is not a lane; it opens under the row a reader picks.
     expect(within(offerings).queryByText("nebius:zai-org/GLM-5.3")).toBeNull()
-    // The provider models.dev knows and this deployment does not.
-    expect(screen.getByText(/Also served by Groq/)).toBeInTheDocument()
+    // Providers this deployment has not configured are not listed.
+    expect(screen.queryByText(/Also served by/)).toBeNull()
+  })
+
+  it("lists every capability under a heading, saying which the model has", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const section = await screen.findByRole("region", { name: "Capabilities" })
+    const items = within(section).getAllByRole("listitem")
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Reasoning: supported"),
+      expect.stringContaining("Tool calling: supported"),
+      expect.stringContaining("Structured output: not supported"),
+      expect.stringContaining("Attachments: not supported"),
+      expect.stringContaining("Temperature: supported"),
+    ])
+    // What each one means is a hover away, not printed on the page.
+    expect(
+      screen.queryByText("Can be held to a JSON schema you provide."),
+    ).toBeNull()
+    // Focus rather than hover: react-aria's hover never fires under jsdom.
+    const trigger = within(section)
+      .getByText("Structured output")
+      .closest<HTMLElement>("[data-slot='tooltip-trigger']")
+    act(() => trigger?.focus())
+    expect(
+      await screen.findByText("Can be held to a JSON schema you provide."),
+    ).toBeInTheDocument()
   })
 
   it("marks each offering's provider", async () => {
@@ -252,6 +277,48 @@ describe("ModelDetailPage", () => {
     })
   })
 
+  it("names each offering's model ID under its provider", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
+        return jsonResponse({
+          ...GLM_DETAIL,
+          offerings: [
+            offering({}),
+            offering({
+              selector: "bedrock:global.zai.glm-5.3",
+              short_selector: null,
+              provider: "bedrock",
+              provider_type: "bedrock",
+            }),
+            offering({
+              selector: "bedrock:us.zai.glm-5.3",
+              short_selector: null,
+              provider: "bedrock",
+              provider_type: "bedrock",
+            }),
+          ],
+        })
+      }
+      if (url.includes(`${API_ROOT}/catalog/models`))
+        return jsonResponse(CATALOG)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(organizationContext())
+      return jsonResponse([])
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const offerings = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const headers = within(offerings).getAllByRole("rowheader")
+    const byText = (id: string) =>
+      headers.filter((header) => within(header).queryByText(id) !== null)
+    expect(byText("global.zai.glm-5.3")).toHaveLength(1)
+    expect(byText("us.zai.glm-5.3")).toHaveLength(1)
+    expect(byText("zai-org/GLM-5.3")).toHaveLength(1)
+  })
+
   it("opens the drawer with the request to send, to the gateway's pick or a pinned provider", async () => {
     mockApi()
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
@@ -262,9 +329,9 @@ describe("ModelDetailPage", () => {
     )
 
     const drawer = await screen.findByRole("dialog", { name: "Use this model" })
-    // The model id first: the gateway picks the cheapest offering.
+    // The model id first: the gateway picks the first offering in the catalog's order.
     expect(
-      within(drawer).getByText(/cheapest offering it serves/),
+      within(drawer).getByText(/first offering in the catalog's order/),
     ).toBeInTheDocument()
     const curl = within(drawer).getByLabelText("cURL") as HTMLTextAreaElement
     expect(curl.value).toContain('"model": "z-ai/glm-5.3"')
@@ -276,12 +343,59 @@ describe("ModelDetailPage", () => {
     await user.click(
       within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
     )
-    await user.click(screen.getByRole("option", { name: /^fireworks/ }))
+    await user.click(screen.getByRole("option", { name: /^Fireworks/ }))
     await waitFor(() =>
       expect(
         (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value,
       ).toContain('"model": "fireworks:z-ai/glm-5.3"'),
     )
+  })
+
+  it("names each offering's model ID among the drawer's providers", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
+        return jsonResponse({
+          ...GLM_DETAIL,
+          offerings: [
+            offering({
+              selector: "bedrock:global.zai.glm-5.3",
+              short_selector: null,
+              provider: "bedrock",
+              provider_type: "bedrock",
+            }),
+            offering({
+              selector: "bedrock:us.zai.glm-5.3",
+              short_selector: null,
+              provider: "bedrock",
+              provider_type: "bedrock",
+            }),
+          ],
+        })
+      }
+      if (url.includes(`${API_ROOT}/catalog/models`))
+        return jsonResponse(CATALOG)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(organizationContext())
+      return jsonResponse([])
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
+    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
+    await user.click(
+      within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
+    )
+
+    expect(
+      screen.getByRole("option", { name: /global\.zai\.glm-5\.3/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: /us\.zai\.glm-5\.3/ }),
+    ).toBeInTheDocument()
   })
 
   it("offers a deployment operator no rate link on a deployment-supplied offering", async () => {

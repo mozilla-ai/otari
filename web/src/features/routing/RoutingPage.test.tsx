@@ -1,410 +1,38 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { useParams, useSearch } from "@tanstack/react-router"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type {
-  OrganizationContext,
-  OrganizationMember,
-  PolicySpec,
-  RoutingPolicyResponse,
-} from "@/client"
+import type { OrganizationContext } from "@/client"
 import { RoutingPage } from "@/features/routing/RoutingPage"
 import { API_ROOT } from "@/shared/api/client"
-import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import {
-  bootstrap,
-  organizationContext,
-  organizationMember,
-} from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import {
+  ADMIN_WORKSPACE,
+  adminContext,
+  CHAIN,
+  LEARNED,
+  MEMBERS,
+  mockApi,
+  policy,
+  renderInWorkspace,
+  renderPage,
+  WEIGHTED,
+} from "@/tests/routing"
 
-const policy = (
-  name: string,
-  spec: PolicySpec,
-  overrides: Partial<RoutingPolicyResponse> = {},
-): RoutingPolicyResponse => ({
-  name,
-  spec,
-  source: "stored",
-  user_id: null,
-  is_dynamic: false,
-  created_at: null,
-  updated_at: null,
-  ...overrides,
-})
-
-const CHAIN: PolicySpec = {
-  select: [{ default: "openai:gpt-5-mini" }],
-  on_failure: ["anthropic:claude-haiku-4-5"],
-}
-
-const LEARNED: PolicySpec = {
-  select: [
-    { router: "knn", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
-    { default: "openai:gpt-5" },
-  ],
-}
-
-const WEIGHTED: PolicySpec = {
-  select: [
-    {
-      router: "weighted",
-      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
-      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
-    },
-    { default: "openai:gpt-5" },
-  ],
-}
-
-const POLICIES: RoutingPolicyResponse[] = [
-  policy("fast", CHAIN),
-  policy(
-    "auto",
-    {
-      select: [
-        { when: { budget_used_pct: { gte: 80 } }, target: "openai:gpt-5-nano" },
-        { default: "openai:gpt-5-mini" },
-      ],
-    },
-    { source: "config", is_dynamic: true },
-  ),
-]
-
-const USERS = [
-  { user_id: "alice", alias: "alice", spend: 0, is_blocked: false },
-  { user_id: "u-bob", alias: "bob", spend: 0, is_blocked: false },
-  { user_id: "u-carol", alias: "carol", spend: 0, is_blocked: false },
-]
-
-// One of the three has a roster row behind them, so the same list exercises both
-// halves of the picker's labeling: a person the organization can name, and an
-// owner id nobody named, whose id is its name.
-const MEMBERS = [
-  organizationMember({
-    organization_member_id: "55555555-5555-5555-5555-555555555555",
-    user_id: "u-bob",
-    attribution_user_id: "u-bob",
-    full_name: "Bob Builder",
-    role: "member",
-  }),
-]
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  })
-}
-
-function mockApi(
-  policies: RoutingPolicyResponse[] = POLICIES,
-  guardrailsUrl: string | null = "http://guardrails:8000",
-  aliases: {
-    name: string
-    target: string
-    source: string
-    user_id: string | null
-  }[] = [],
-  opts: {
-    // The caller's membership context, an operator's by default: the page picks
-    // its list read off `deployment_operator`, and most tests here are about
-    // the management view.
-    context?: OrganizationContext
-    // What /api/v1/organizations/me/routing-policies answers, for member tests.
-    memberPolicies?: RoutingPolicyResponse[]
-    // What /api/v1/organizations/me/aliases answers, its sibling.
-    memberAliases?: {
-      name: string
-      target: string
-      source: string
-      user_id: string | null
-      workspace_id?: string
-    }[]
-    // What a delete of a deployment-wide policy answers, for the error path.
-    deleteBody?: { status: number; detail: string }
-    // The same for a save, which is the path the form's own banner reports.
-    saveBody?: { status: number; detail: string }
-    // The organization roster, which is what names a person behind an owner id.
-    members?: OrganizationMember[]
-    // Owner ids whose *first* policy write is refused. N scopes are N writes, so
-    // the retry has to be able to succeed for the one that failed while leaving
-    // the ones that landed alone.
-    refuseFirstWriteFor?: string[]
-  } = {},
-) {
-  let list = [...policies]
-  let aliasList = [...aliases]
-  let memberList = [...(opts.memberPolicies ?? [])]
-  let memberAliasList = [...(opts.memberAliases ?? [])]
-  const refuseOnce = new Set(opts.refuseFirstWriteFor ?? [])
-  const calls: { url: string; method: string; body: unknown }[] = []
-  const spy = vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(async (input, init) => {
-      const url = String(input)
-      const method = (init?.method ?? "GET").toUpperCase()
-      const body =
-        init?.body === undefined ? undefined : JSON.parse(String(init.body))
-      calls.push({ url, method, body })
-
-      if (url.includes(`${API_ROOT}/organizations/me/routing-policies`)) {
-        if (method === "POST") {
-          const row = policy(body.name, body.spec)
-          memberList = [
-            ...memberList.filter((item) => item.name !== row.name),
-            row,
-          ]
-          return jsonResponse(row)
-        }
-        if (method === "DELETE") {
-          const name = decodeURIComponent(
-            url.split("?")[0].split("/").pop() ?? "",
-          )
-          memberList = memberList.filter((item) => item.name !== name)
-          return new Response(null, { status: 204 })
-        }
-        return jsonResponse(memberList)
-      }
-      if (url.includes(`${API_ROOT}/organizations/me/aliases`)) {
-        if (method === "POST") {
-          const row = {
-            name: body.name as string,
-            target: body.target as string,
-            source: "stored",
-            user_id: null,
-            workspace_id: body.workspace_id as string | undefined,
-          }
-          memberAliasList = [
-            ...memberAliasList.filter((item) => item.name !== row.name),
-            row,
-          ]
-          return jsonResponse(row)
-        }
-        if (method === "DELETE") {
-          const name = decodeURIComponent(
-            url.split("?")[0].split("/").pop() ?? "",
-          )
-          memberAliasList = memberAliasList.filter((item) => item.name !== name)
-          return new Response(null, { status: 204 })
-        }
-        return jsonResponse(memberAliasList)
-      }
-      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse(opts.context ?? organizationContext())
-      }
-      // The user picker's roster read, which names the person behind an owner
-      // id. Paged, like the real endpoint: `fetchAllPaged` reads `data`, so a
-      // bare array here throws rather than answering an empty roster.
-      if (url.includes(`${API_ROOT}/organizations/me/members`)) {
-        const members = opts.members ?? []
-        return jsonResponse({ data: members, count: members.length })
-      }
-      if (url.includes(`${API_ROOT}/routing/policies/explain`)) {
-        return jsonResponse({
-          name: "fast",
-          selection_reason: "default",
-          is_dynamic: false,
-          candidates: [
-            {
-              position: 1,
-              instance: "openai",
-              model: "gpt-5-mini",
-              selection_reason: "default",
-              dispatch_model: "openai:gpt-5-mini",
-            },
-          ],
-          dropped: [
-            {
-              selector: "anthropic:claude-haiku-4-5",
-              reason: "not_allowed",
-              detail: "is not in allowed_models for this caller",
-            },
-          ],
-          guardrails: [],
-        })
-      }
-      if (url.includes(`${API_ROOT}/routing/status`)) {
-        return jsonResponse({
-          user_id: "alice",
-          embedding_model: "openai:text-embedding-3-small",
-          seed_count: 20,
-          granularity: "trace_sticky",
-          alpha: 0.3,
-          k: 5,
-          confidence_floor: 0,
-          default_pool: { records: 6, warm: false },
-          tasks: [{ task_id: "summaries", records: 21, warm: true }],
-          policies: [
-            {
-              name: "smart",
-              backend: "knn",
-              candidates: ["openai:gpt-5-nano", "openai:gpt-5"],
-              default_target: "openai:gpt-5",
-            },
-          ],
-        })
-      }
-      if (url.includes(`${API_ROOT}/routing/preferences/rank`)) {
-        return jsonResponse({
-          recorded: (body as { examples: unknown[] }).examples.length,
-          seed_count: 20,
-          pools: [{ task_id: null, records: 7, warm: false }],
-        })
-      }
-      if (url.includes(`${API_ROOT}/routing/policies`)) {
-        if (method === "POST") {
-          const scope = (body.user_id ?? null) as string | null
-          if (scope !== null && refuseOnce.has(scope)) {
-            refuseOnce.delete(scope)
-            return new Response(
-              JSON.stringify({ detail: `No room for ${scope}` }),
-              { status: 409, headers: { "Content-Type": "application/json" } },
-            )
-          }
-          if (opts.saveBody) {
-            // Not `jsonResponse`, which is a 200 by construction.
-            return new Response(
-              JSON.stringify({ detail: opts.saveBody.detail }),
-              {
-                status: opts.saveBody.status,
-                headers: { "Content-Type": "application/json" },
-              },
-            )
-          }
-          // An upsert, like the real endpoint: appending would put two rows under
-          // one name and scope, which is a state the API cannot produce. And
-          // `rename_from` moves the row rather than keying on `name`, so the old
-          // name has to leave the list; a mock that only added the new one would
-          // pass a test that the real API would fail.
-          const row = policy(body.name, body.spec, {
-            user_id: body.user_id ?? null,
-          })
-          const vacated: string[] = [
-            row.name,
-            ...(body.rename_from ? [body.rename_from as string] : []),
-          ]
-          list = [
-            ...list.filter(
-              (item) =>
-                item.user_id !== row.user_id || !vacated.includes(item.name),
-            ),
-            row,
-          ]
-          return jsonResponse(row)
-        }
-        if (method === "DELETE") {
-          if (opts.deleteBody) {
-            // Not `jsonResponse`, which is a 200 by construction.
-            return new Response(
-              JSON.stringify({ detail: opts.deleteBody.detail }),
-              {
-                status: opts.deleteBody.status,
-                headers: { "Content-Type": "application/json" },
-              },
-            )
-          }
-          const name = decodeURIComponent(
-            url.split("?")[0].split("/").pop() ?? "",
-          )
-          list = list.filter((item) => item.name !== name)
-          return new Response(null, { status: 204 })
-        }
-        return jsonResponse(list)
-      }
-      if (url.includes(`${API_ROOT}/aliases`)) {
-        if (method === "DELETE") {
-          aliasList = []
-          return new Response(null, { status: 204 })
-        }
-        return jsonResponse(aliasList)
-      }
-      if (url.includes(`${API_ROOT}/tool-settings`)) {
-        return jsonResponse({
-          fields: [
-            {
-              key: "guardrails_url",
-              service: "guardrails",
-              type: "url",
-              value: guardrailsUrl,
-            },
-          ],
-        })
-      }
-      if (url.includes(`${API_ROOT}/users`)) return jsonResponse(USERS)
-      if (url.includes(`${API_ROOT}/models`))
-        return jsonResponse({ object: "list", data: [] })
-      return jsonResponse([])
-    })
-  return { spy, calls }
-}
-
-// The user picker asks the organization roster what to call each owner, and that
-// read is gated on the `organizations` surface, so these pages need the
-// deployment context the shell always gives them.
-function renderPage(ui: ReactElement, url = "/") {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  return render(
-    <DeploymentProvider value={bootstrap()}>
-      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
-    </DeploymentProvider>,
-    { wrapper: withRouter({ url }) },
-  )
-}
-
-// The workspace a tenant admin's write is scoped to comes from the shell's
-// switcher, so the provider is part of the harness for those tests. Outside it
-// `useSelectedWorkspace` answers "none selected", which is the state that
-// leaves an admin with the read-only page.
-const ADMIN_WORKSPACE = "44444444-4444-4444-4444-444444444444"
-
-function renderInWorkspace(ui: ReactElement, url = "/") {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  return render(
-    <DeploymentProvider value={bootstrap()}>
-      <QueryClientProvider client={client}>
-        <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
-      </QueryClientProvider>
-    </DeploymentProvider>,
-    { wrapper: withRouter({ url }) },
-  )
-}
-
-function adminContext(): OrganizationContext {
-  return organizationContext({
-    deployment_operator: false,
-    role: "admin",
-    workspace_memberships: [
-      { workspace_id: ADMIN_WORKSPACE, name: "Alpha one", role: "admin" },
-    ],
-  })
-}
+// The list. Creating a policy is in RoutingPage.create.test.tsx, and a
+// policy's own page in PolicyDetailPage.test.tsx.
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 /**
- * The page's own create action, scoped to the heading's own header.
- *
- * Scoped rather than resolved by name, because "Create policy" is on screen
- * twice once the dialog is open: this one and the submit.
- *
- * It was three until the empty state's action took its own words
- * ("Create your first policy", matching keys and budgets), and that third copy
- * is why these calls were passing by accident: they ran while the list was
- * still loading, so the empty state had not rendered and the name was
- * momentarily unique. Awaiting the empty state before any one of them turned it
- * red with "Found multiple elements". The label fix removes that copy and the
- * scoping removes the dependence on when anything renders, which is why both
- * are here. The inner query awaits as well, because the action is gated on a
- * query and so arrives after the heading.
+ * The page's own create action, scoped to the heading's header: once the
+ * dialog is open its submit says "Create policy" too.
  */
 const createTrigger = async () => {
   const heading = await screen.findByRole("heading", { name: "Routing" })
@@ -413,89 +41,47 @@ const createTrigger = async () => {
   return within(header).findByRole("button", { name: "Create policy" })
 }
 
-type TestUser = ReturnType<typeof userEvent.setup>
-
-/** The two fields every policy needs, with the model popover dismissed after.
- *
- *  An open React Aria popover aria-hides the submit button, so leaving it up
- *  makes every later query in the dialog miss.
- */
-async function nameAndServe(
-  user: TestUser,
-  name: string,
-  target = "openai:gpt-5-nano",
-) {
-  await user.type(screen.getByRole("textbox", { name: /policy name/i }), name)
-  await user.type(screen.getByRole("combobox", { name: /^serves$/i }), target)
-  await user.keyboard("{Escape}")
-}
-
-/** Switch to the scoped tab and choose people, the way an operator does.
- *
- *  Each query is typed rather than the list being opened cold: the picker's
- *  menu triggers on input, and it matches the owner id as well as the label, so
- *  "bob" reaches a person the roster calls something else entirely.
- */
-async function pickUsers(user: TestUser, queries: string[]) {
-  const dialog = within(screen.getByRole("dialog"))
-  await user.click(dialog.getByRole("button", { name: "Specific users" }))
-  for (const query of queries) {
-    // Named by the field's own label: the multi-select primitive labels its
-    // search box that way rather than carrying an `aria-label` of its own.
-    const search = dialog.getByLabelText("Users")
-    // Cleared between queries, because the primitive keeps the query after a
-    // pick on purpose (see `MultiSelect`: clearing it would refill the list
-    // under the pointer). Typing the next name onto the last one matches
-    // nobody.
-    await user.clear(search)
-    await user.type(search, query)
-    await user.click(await screen.findByRole("option"))
-  }
-  await user.keyboard("{Escape}")
-}
-
-async function submitDialog(user: TestUser, label = "Create policy") {
-  await user.click(
-    within(screen.getByRole("dialog")).getByRole("button", { name: label }),
+/** Where a row's Edit or View lands: the policy's page, with its scope. */
+function PolicyProbe() {
+  const { name } = useParams({ strict: false }) as { name?: string }
+  const search = useSearch({ strict: false }) as { user?: string }
+  return (
+    <p>
+      Policy page for {name}
+      {search.user ? ` as ${search.user}` : ""}
+    </p>
   )
 }
 
-/** The bodies of the deployment-wide policy writes, in the order they were sent.
- *
- *  Matched on the exact path, not a prefix: `/routing/policies/explain` is a
- *  POST too, and counting one of those as a write would put a phantom row in
- *  every assertion about how many writes a submit made.
- */
-function policyWrites(
-  calls: { url: string; method: string; body: unknown }[],
-): { name: string; spec: PolicySpec; user_id?: string | null }[] {
-  return calls
-    .filter(
-      (call) =>
-        call.method === "POST" &&
-        call.url.endsWith(`${API_ROOT}/routing/policies`),
-    )
-    .map(
-      (call) =>
-        call.body as {
-          name: string
-          spec: PolicySpec
-          user_id?: string | null
-        },
-    )
-}
+const POLICY_PAGE = [{ path: "/routing/$name", element: <PolicyProbe /> }]
 
 describe("RoutingPage", () => {
-  it("lists policies with what they serve and where they come from", async () => {
+  it("lists each policy's main model, its backups and who it applies to", async () => {
     mockApi()
     renderPage(<RoutingPage />)
 
     const fastRow = (await screen.findByText("fast")).closest("tr")!
-    // The chain is summarised rather than hidden: an operator scanning the table
-    // needs to see that a fallback exists without opening the policy.
-    expect(within(fastRow).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
-    expect(within(fastRow).getByText(/\+1 on failure/)).toBeInTheDocument()
-    expect(within(fastRow).getByText("STORED")).toBeInTheDocument()
+    // By model and provider rather than as a selector, read off the selector
+    // itself so the table makes no catalog read per row.
+    expect(within(fastRow).getByText("gpt-5-mini")).toBeInTheDocument()
+    expect(within(fastRow).getByText("OpenAI")).toBeInTheDocument()
+    // The backups are spelled out in order, so a fallback is visible without
+    // opening the policy.
+    const backups = within(fastRow).getByRole("list", { name: "Backups" })
+    expect(within(backups).getAllByRole("listitem")).toHaveLength(1)
+    expect(backups).toHaveTextContent("claude-haiku-4-5 · Anthropic")
+    expect(within(fastRow).getByText("Every caller")).toBeInTheDocument()
+  })
+
+  it("says a policy has no backups rather than leaving the cell empty", async () => {
+    mockApi([policy("solo", { select: [{ default: "openai:gpt-5" }] })])
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("solo")).closest("tr")!
+    expect(within(row).getByText("None")).toBeInTheDocument()
+    expect(
+      within(row).queryByRole("list", { name: "Backups" }),
+    ).not.toBeInTheDocument()
   })
 
   it("marks a policy that decides per request, since it has no single target", async () => {
@@ -504,7 +90,11 @@ describe("RoutingPage", () => {
 
     const autoRow = (await screen.findByText("auto")).closest("tr")!
     expect(within(autoRow).getByText("DYNAMIC")).toBeInTheDocument()
-    expect(within(autoRow).getByText(/Chosen per request/)).toBeInTheDocument()
+    // The default target, and the condition that moves traffic off it.
+    expect(within(autoRow).getByText("gpt-5-mini")).toBeInTheDocument()
+    expect(
+      within(autoRow).getByText(/From 80% of budget: gpt-5-nano · OpenAI/),
+    ).toBeInTheDocument()
   })
 
   it("does not offer to edit or delete a policy that lives in config.yml", async () => {
@@ -514,8 +104,15 @@ describe("RoutingPage", () => {
     const autoRow = (await screen.findByText("auto")).closest("tr")!
     expect(within(autoRow).getByText("set in config.yml")).toBeInTheDocument()
     expect(
+      within(autoRow).queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument()
+    expect(
       within(autoRow).queryByRole("button", { name: "Delete" }),
     ).not.toBeInTheDocument()
+    // Its page still opens, read-only.
+    expect(
+      within(autoRow).getByRole("button", { name: "View" }),
+    ).toBeInTheDocument()
   })
 
   it("keeps the page's create action visible while the dialog is open", async () => {
@@ -530,279 +127,6 @@ describe("RoutingPage", () => {
     await user.click(trigger)
     await screen.findByRole("dialog")
     expect(trigger).toBeInTheDocument()
-  })
-
-  it("offers the same dialog from the empty state", async () => {
-    // The empty state's explanation is the page's onboarding and stays; what it
-    // gained is the action, so a first policy does not have to be started from
-    // the heading a reader has already scrolled past.
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    // Two of them on screen deliberately, the heading's and this one, so the
-    // press is scoped to the empty state rather than picked by position, which
-    // it no longer strictly needs now that its label is its own, and which is
-    // kept because scoping is the right query either way.
-    const empty = (
-      await screen.findByRole("heading", {
-        name: "No routing policies yet",
-      })
-    ).closest("div")!.parentElement!
-    await user.click(
-      within(empty).getByRole("button", { name: "Create your first policy" }),
-    )
-    const dialog = await screen.findByRole("dialog")
-    expect(dialog).toHaveAccessibleName("New policy")
-  })
-
-  it("names the object in the title and the policy in the description when editing", async () => {
-    // `title` is a string, so the old heading's `<code>` name moved into the
-    // description rather than being dropped: it is the policy's identity and it
-    // is what tells an operator which row they pressed Edit on.
-    mockApi()
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const fastRow = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(fastRow).getByRole("button", { name: "Edit" }))
-    const dialog = await screen.findByRole("dialog")
-    expect(dialog).toHaveAccessibleName("Edit policy")
-    expect(dialog).toHaveTextContent("fast")
-    expect(
-      within(dialog).getByRole("button", { name: "Save" }),
-    ).toBeInTheDocument()
-  })
-
-  it("guards a half-built policy against a stray Escape", async () => {
-    // This form grows a fallback chain, a condition tier and a guardrail list as
-    // they are asked for, so it is exactly the one where ten minutes of work sits
-    // behind one keystroke.
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "cheap",
-    )
-    await user.keyboard("{Escape}")
-
-    const dialog = screen.getByRole("dialog")
-    expect(dialog).toHaveTextContent("Unsaved changes")
-    expect(
-      within(dialog).getByRole("button", { name: "Keep editing" }),
-    ).toBeInTheDocument()
-    await user.click(
-      within(dialog).getByRole("button", { name: "Keep editing" }),
-    )
-    expect(
-      within(dialog).getByRole("button", { name: "Create policy" }),
-    ).toBeInTheDocument()
-  })
-
-  it("creates a one-target policy from three fields", async () => {
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "cheap",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5-nano",
-    )
-    // Close the combobox popover, which otherwise aria-hides the submit button.
-    await user.keyboard("{Escape}")
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    )
-
-    const post = calls.find((call) => call.method === "POST")
-    expect(post).toBeDefined()
-    const body = post!.body as { name: string; spec: PolicySpec }
-    expect(body.name).toBe("cheap")
-    // The fallthrough is explicit and last, which is what the schema requires.
-    expect(body.spec.select).toEqual([{ default: "openai:gpt-5-nano" }])
-    expect(body.spec.on_failure).toBeUndefined()
-  })
-
-  it("writes exactly one unscoped policy for every caller", async () => {
-    // The default tab, asserted rather than assumed: "every caller" and "scoped
-    // but nobody chosen" are two states, and only this one is one write.
-    const { calls } = mockApi([], null, [], { members: MEMBERS })
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await nameAndServe(user, "cheap")
-    await submitDialog(user)
-
-    const writes = policyWrites(calls)
-    expect(writes).toHaveLength(1)
-    expect(writes[0].user_id ?? null).toBeNull()
-  })
-
-  it("writes one policy per chosen user, each carrying its own scope", async () => {
-    // A policy's key is its name plus its user, so N people are N rows of the
-    // same name and spec. There is no batch endpoint; this is the whole design.
-    const { calls } = mockApi([], null, [], { members: MEMBERS })
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await nameAndServe(user, "cheap")
-    await pickUsers(user, ["bob", "carol"])
-    await submitDialog(user)
-
-    const writes = policyWrites(calls)
-    expect(writes).toHaveLength(2)
-    expect(writes.map((write) => write.user_id)).toEqual(["u-bob", "u-carol"])
-    // Same name and same spec on each: only the scope differs.
-    expect(new Set(writes.map((write) => write.name))).toEqual(
-      new Set(["cheap"]),
-    )
-    for (const write of writes) {
-      expect(write.spec.select).toEqual([{ default: "openai:gpt-5-nano" }])
-    }
-  })
-
-  it("shows the chosen people by name above the input, not as bare owner ids", async () => {
-    mockApi([], null, [], { members: MEMBERS })
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await nameAndServe(user, "cheap")
-    await pickUsers(user, ["bob"])
-
-    const dialog = within(screen.getByRole("dialog"))
-    // The roster names this one, so the chip says the person rather than the id
-    // the request plane bills to.
-    expect(
-      dialog.getByRole("button", { name: "Remove Bob Builder" }),
-    ).toBeInTheDocument()
-  })
-
-  it("will not submit a scoped policy with nobody chosen", async () => {
-    const { calls } = mockApi([], null, [], { members: MEMBERS })
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await nameAndServe(user, "cheap")
-    const dialog = within(screen.getByRole("dialog"))
-    await user.click(dialog.getByRole("button", { name: "Specific users" }))
-
-    expect(dialog.getByRole("button", { name: "Create policy" })).toBeDisabled()
-    await submitDialog(user)
-    expect(policyWrites(calls)).toHaveLength(0)
-  })
-
-  it("keeps the dialog open on a part-written save, naming who landed and who did not", async () => {
-    // Three writes with no transaction over them, so a refusal partway leaves
-    // the earlier rows in place. Saying "it failed" would leave the operator to
-    // work out which of the three exist by reading the table. The refusal is in
-    // the middle, so this also pins that the writes after it are still
-    // attempted rather than one conflict standing in for everyone behind it.
-    const { calls } = mockApi([], null, [], {
-      members: MEMBERS,
-      refuseFirstWriteFor: ["u-carol"],
-    })
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await nameAndServe(user, "cheap")
-    await pickUsers(user, ["bob", "carol", "alice"])
-    await submitDialog(user)
-
-    const alert = await screen.findByRole("alert")
-    expect(alert).toHaveTextContent("Created for Bob Builder, alice (alice).")
-    // By its id, since nobody named this one, and with the refusal's own reason
-    // rather than a swallowed "something went wrong".
-    expect(alert).toHaveTextContent("Not created for u-carol (carol)")
-    expect(alert).toHaveTextContent("No room for u-carol")
-    expect(screen.getByRole("dialog")).toBeInTheDocument()
-
-    // Pressing again rewrites nothing that already landed.
-    await submitDialog(user)
-    const scopes = policyWrites(calls).map((write) => write.user_id)
-    expect(scopes).toEqual(["u-bob", "u-carol", "alice", "u-carol"])
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
-  })
-
-  it("fixes who a policy applies to once a write for somebody has landed", async () => {
-    // Nothing here can take a policy back, so a scope that can still be edited
-    // after a partial write is a way to end up with rows the operator did not
-    // ask for: drop a written person from the selection and their policy lives
-    // on unmentioned, or switch to every caller and it lives on ALSO outranking
-    // the global one for exactly them, which is the precedence the field's own
-    // description promises. The controls are withheld instead, and say why.
-    mockApi([], null, [], {
-      members: MEMBERS,
-      refuseFirstWriteFor: ["u-carol"],
-    })
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await nameAndServe(user, "cheap")
-    await pickUsers(user, ["bob", "carol"])
-    await submitDialog(user)
-    await screen.findByRole("alert")
-
-    const dialog = within(screen.getByRole("dialog"))
-    // Neither tab, and no picker: the selection is settled.
-    expect(
-      dialog.queryByRole("button", { name: "Specific users" }),
-    ).not.toBeInTheDocument()
-    expect(
-      dialog.queryByRole("button", { name: "Every caller" }),
-    ).not.toBeInTheDocument()
-    expect(dialog.queryByLabelText("Users")).not.toBeInTheDocument()
-    // And the reason, since a control that vanishes without one teaches
-    // nothing. The route back out is naming the list, not this form.
-    expect(
-      dialog.getByText(/already been created/, { exact: false }),
-    ).toHaveTextContent("delete it from the list")
-  })
-
-  it("writes every scope again when the payload changed after a part-written save", async () => {
-    // The ids that landed are remembered against the payload they landed under,
-    // so correcting the name first is not the same policy: skipping them then
-    // would leave the corrected one unwritten for exactly the people the old
-    // one already reached.
-    const { calls } = mockApi([], null, [], {
-      members: MEMBERS,
-      refuseFirstWriteFor: ["u-carol"],
-    })
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await nameAndServe(user, "cheap")
-    await pickUsers(user, ["bob", "carol"])
-    await submitDialog(user)
-    expect(await screen.findByRole("alert")).toBeInTheDocument()
-
-    await user.type(screen.getByRole("textbox", { name: /policy name/i }), "er")
-    await submitDialog(user)
-
-    const writes = policyWrites(calls)
-    expect(writes.map((write) => [write.name, write.user_id])).toEqual([
-      ["cheap", "u-bob"],
-      ["cheap", "u-carol"],
-      ["cheaper", "u-bob"],
-      ["cheaper", "u-carol"],
-    ])
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
   it("lists a row per user for a policy written to several of them", async () => {
@@ -824,286 +148,28 @@ describe("RoutingPage", () => {
     ).toHaveLength(2)
   })
 
-  it("keeps the failure chain and guardrails out of the way until asked for", async () => {
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    // Naming one model must stay a short task, so neither section is present yet.
-    expect(screen.queryByText("If that fails, try")).not.toBeInTheDocument()
-    expect(screen.queryByText("Always check")).not.toBeInTheDocument()
-
-    await user.click(
-      screen.getByRole("button", { name: /Add a fallback chain/ }),
-    )
-    expect(screen.getByText("If that fails, try")).toBeInTheDocument()
-    // Adding another one belongs inside the section it extends, not in the row of
-    // links that start a section. Walked up to the bordered section rather than
-    // a fixed number of parents: the heading now sits in a row of its own with
-    // the section's Remove, so counting levels would pin the markup instead of
-    // the rule.
-    const section = screen
-      .getByText("If that fails, try")
-      .closest<HTMLElement>("div.border")!
-    expect(
-      within(section).getByRole("button", { name: /Another fallback/ }),
-    ).toBeInTheDocument()
-  })
-
-  it("takes a whole section away in one press, whatever it holds", async () => {
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.click(
-      screen.getByRole("button", { name: /Let a router pick the cheapest/ }),
-    )
-    // Two rows from one press, so the row control could never be a one-press
-    // way out of this section: that is the asymmetry the section control fixes.
-    expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(2)
-
-    await user.click(
-      screen.getByRole("button", { name: "Remove the routed pool" }),
-    )
-
-    expect(
-      screen.queryByRole("button", { name: "Remove" }),
-    ).not.toBeInTheDocument()
-    // The affordance that summons it is back, which is what says the section is
-    // gone rather than merely emptied.
-    expect(
-      screen.getByRole("button", { name: /Let a router pick the cheapest/ }),
-    ).toBeInTheDocument()
-  })
-
-  it("offers a section control beside every section that can be summoned", async () => {
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    for (const [summon, remove] of [
-      [/Tier down when the budget fills up/, "Remove the budget tier-down"],
-      [/Add a fallback chain/, "Remove the fallback chain"],
-      [/Add guardrails/, "Remove the guardrails"],
-    ] as const) {
-      await user.click(screen.getByRole("button", { name: summon }))
-      expect(screen.getByRole("button", { name: remove })).toBeInTheDocument()
-    }
-  })
-
-  it("disables the guardrails affordance when no guardrails service is configured", async () => {
-    mockApi([], null)
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    const add = await screen.findByRole("button", { name: /Add guardrails/ })
-
-    // Disabled, and never silently: the reason and the route to fixing it sit next
-    // to the control as text, so it works on touch and for a screen reader.
-    expect(add).toBeDisabled()
-    expect(
-      screen.getByText(/No guardrails service is configured/),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: /Tools & Guardrails/ }),
-    ).toHaveAttribute("href", "/tools")
-  })
-
-  it("refuses a policy name that would shadow a real model selector", async () => {
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "openai:gpt-4o",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5-nano",
-    )
-    await user.keyboard("{Escape}")
-
-    expect(screen.getByText(/cannot contain/)).toBeInTheDocument()
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    ).toBeDisabled()
-  })
-
-  it("warns when a guardrail makes the guardrails service a hard dependency", async () => {
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.click(screen.getByRole("button", { name: /Add guardrails/ }))
-
-    // block + block is the honest default, and its cost has to be visible where
-    // the choice is made: an outage then refuses every request through the policy.
-    expect(
-      screen.getByText(/rejects every request through this policy/),
-    ).toBeInTheDocument()
-  })
-
-  it("refuses a tier-down threshold that could never fire", async () => {
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "thrifty",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5-mini",
-    )
-    await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: /Tier down/ }))
-
-    const threshold = screen.getByRole("textbox", {
-      name: /budget used at least/i,
-    })
-    await user.clear(threshold)
-    await user.type(threshold, "100")
-
-    // The budget gate refuses the request before selection at 100%, so such a rule
-    // is dead config. Saying so here beats a 400 from the server.
-    expect(screen.getByText("Must be under 100.")).toBeInTheDocument()
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    ).toBeDisabled()
-  })
-
-  it("renames a policy through the name field, sending rename_from", async () => {
-    // The name is the key, so an edit that changes it has to say which row it moves.
-    // Posting the new name alone would create a second policy and leave the old one
-    // serving callers.
-    const { calls } = mockApi([policy("fast", CHAIN)])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    const nameField = screen.getByRole("textbox", { name: /policy name/i })
-    await user.clear(nameField)
-    await user.type(nameField, "speedy")
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    const body = post!.body as {
-      name: string
-      rename_from?: string
-      spec: PolicySpec
-    }
-    expect(body.name).toBe("speedy")
-    expect(body.rename_from).toBe("fast")
-    // The rest of the policy rides along on the same write, so a rename cannot land
-    // half-applied.
-    expect(body.spec.on_failure).toEqual(["anthropic:claude-haiku-4-5"])
-    expect(await screen.findByText("speedy")).toBeInTheDocument()
-    expect(screen.queryByText("fast")).not.toBeInTheDocument()
-  })
-
-  it("omits rename_from when an edit leaves the name alone", async () => {
-    // Sending it unchanged would be harmless server-side, but a plain spec edit
-    // reading as a rename in the audit log is not.
-    const { calls } = mockApi([policy("fast", CHAIN)])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    expect((post!.body as { rename_from?: string }).rename_from).toBeUndefined()
-  })
-
-  it("says what a pending rename will do before it is saved", async () => {
+  it("opens a policy's own page from Edit", async () => {
     mockApi([policy("fast", CHAIN)])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
 
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    const nameField = screen.getByRole("textbox", { name: /policy name/i })
-    await user.clear(nameField)
-    await user.type(nameField, "speedy")
-
-    // Renaming changes what callers must send and splits historical usage, so the
-    // consequence belongs next to the field rather than in a release note.
-    expect(
-      screen.getByText(/Callers have to send the new name/),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/usage already recorded keeps the old one/),
-    ).toBeInTheDocument()
+    expect(await screen.findByText("Policy page for fast")).toBeInTheDocument()
   })
 
-  it("refuses a renamed policy whose new name carries a delimiter", async () => {
-    // Same rule as a create: ":" or "/" would shadow a real model selector.
-    const { calls } = mockApi([policy("fast", CHAIN)])
+  it("carries a scoped row's user to its page", async () => {
+    mockApi([policy("cheap", CHAIN, { user_id: "u-bob" })], null, [], {
+      members: MEMBERS,
+    })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
+    const row = (await screen.findByText("cheap")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    const nameField = screen.getByRole("textbox", { name: /policy name/i })
-    await user.clear(nameField)
-    await user.type(nameField, "openai:gpt-5")
-
-    expect(screen.getByText(/cannot contain/)).toBeInTheDocument()
     expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    ).toBeDisabled()
-    expect(calls.some((call) => call.method === "POST")).toBe(false)
-  })
-
-  it("keeps an alias name fixed, since the alias API cannot rename", async () => {
-    mockApi([], "http://guardrails:8000", [
-      {
-        name: "gpt",
-        target: "openai:gpt-5-mini",
-        source: "stored",
-        user_id: null,
-      },
-    ])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("gpt")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    expect(
-      screen.queryByRole("textbox", { name: /policy name/i }),
-    ).not.toBeInTheDocument()
-    expect(screen.getByText(/An alias name is its key/)).toBeInTheDocument()
+      await screen.findByText("Policy page for cheap as u-bob"),
+    ).toBeInTheDocument()
   })
 
   it("does not offer Edit for a policy the form would silently truncate", async () => {
@@ -1124,7 +190,9 @@ describe("RoutingPage", () => {
     expect(
       within(row).queryByRole("button", { name: "Edit" }),
     ).not.toBeInTheDocument()
-    expect(within(row).getByText(/cannot show yet/)).toBeInTheDocument()
+    expect(
+      within(row).getByRole("button", { name: "View" }),
+    ).toBeInTheDocument()
     // Delete stays available: removing a policy is never lossy.
     expect(
       within(row).getByRole("button", { name: "Delete" }),
@@ -1145,7 +213,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
-    expect(within(row).getByText("openai:gpt-4o-mini")).toBeInTheDocument()
+    expect(within(row).getByText("gpt-4o-mini")).toBeInTheDocument()
     expect(within(row).getByText("alias")).toBeInTheDocument()
     expect(
       within(row).getByRole("button", { name: "Delete" }),
@@ -1190,122 +258,6 @@ describe("RoutingPage", () => {
 
     expect(calls.some((call) => call.method === "DELETE")).toBe(false)
     expect(screen.getByText("fast")).toBeInTheDocument()
-  })
-
-  it("returns focus to the page's action when the empty state's dialog closes", async () => {
-    // Creating the first policy fills the table, so the empty state unmounts and
-    // the node react-aria stored for focus restoration is gone: focus resets to
-    // `document.body` and the next Tab starts at the top of the document. The
-    // page's own trigger is where it lands instead.
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const empty = (
-      await screen.findByRole("heading", { name: "No routing policies yet" })
-    ).closest("div")!.parentElement!
-    await user.click(
-      within(empty).getByRole("button", { name: "Create your first policy" }),
-    )
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "cheap",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5-nano",
-    )
-    await user.keyboard("{Escape}")
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    )
-
-    const trigger = await createTrigger()
-    await waitFor(() => expect(trigger).toHaveFocus())
-  })
-
-  it("does not fetch the form's own reads until the dialog opens", async () => {
-    // The form stays mounted while closed so the frame can play its exit, which
-    // puts its queries on the page unless they are gated: the roster and the
-    // tool settings are the form's, not the table's.
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await screen.findByText("No routing policies yet")
-    const formReads = () =>
-      calls.filter(
-        (call) =>
-          call.url.includes(`${API_ROOT}/users`) ||
-          call.url.includes(`${API_ROOT}/tool-settings`),
-      )
-    expect(formReads()).toHaveLength(0)
-
-    await user.click(await createTrigger())
-    await waitFor(() => expect(formReads().length).toBeGreaterThan(0))
-  })
-
-  it("offers a fresh draft on each open of the create dialog", async () => {
-    // Reset on the way in, not on the way out: the frame keeps its content
-    // while it animates out, so clearing on close blanks the body in front of
-    // the operator. The page keys the form on an open counter instead.
-    mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "half-typed",
-    )
-
-    // Out through the guard, which is the only way out of a dirty form.
-    await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Discard" }))
-
-    await user.click(await createTrigger())
-    expect(screen.getByRole("textbox", { name: /policy name/i })).toHaveValue(
-      "",
-    )
-  })
-
-  it("reports a refused save inside the dialog, leaving the form filled", async () => {
-    // The failure this guards against is the silent one: the mutation refuses,
-    // the dialog stays, and nothing on screen says why. Its delete equivalent
-    // is below; a page-level banner is no use here, because the operator is
-    // looking at the modal and a message behind the backdrop is unread.
-    mockApi([], "http://guardrails:8000", [], {
-      saveBody: { status: 400, detail: "cheap already names an alias" },
-    })
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "cheap",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5-nano",
-    )
-    await user.keyboard("{Escape}")
-    const dialog = screen.getByRole("dialog")
-    await user.click(
-      within(dialog).getByRole("button", { name: "Create policy" }),
-    )
-
-    expect(
-      await within(dialog).findByText(/already names an alias/),
-    ).toBeVisible()
-    // Still open with the work intact, so the operator can correct the name
-    // rather than retyping the policy.
-    expect(screen.getByRole("dialog")).toBeInTheDocument()
-    expect(screen.getByRole("textbox", { name: /policy name/i })).toHaveValue(
-      "cheap",
-    )
   })
 
   it("reports a refused delete inside the dialog, leaving the row", async () => {
@@ -1387,32 +339,6 @@ describe("RoutingPage", () => {
     expect(deletes[0].url).toContain(`${API_ROOT}/aliases/legacy`)
   })
 
-  it("will not let an alias grow options an alias cannot hold", async () => {
-    mockApi([], "http://guardrails:8000", [
-      {
-        name: "legacy",
-        target: "openai:gpt-4o-mini",
-        source: "stored",
-        user_id: null,
-      },
-    ])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("legacy")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.click(
-      await screen.findByRole("button", { name: /Add a fallback chain/ }),
-    )
-
-    // Saving it as a policy would leave the alias row behind under the same name,
-    // and the API refuses that collision, so the form says so instead of failing.
-    expect(screen.getByText(/An alias holds one target/)).toBeInTheDocument()
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    ).toBeDisabled()
-  })
-
   it("summarises a learned policy by its pool rather than as an opaque dynamic row", async () => {
     // "Chosen per request" is true of a tier-down too. What an operator needs to
     // see here is that a router picks between named models, and which one serves
@@ -1422,127 +348,10 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("smart")).closest("tr")!
     expect(
-      within(row).getByText(/Learned . 2 candidates, openai:gpt-5 by default/),
+      within(row).getByText(
+        /Learned . 2 candidates, gpt-5 · OpenAI by default/,
+      ),
     ).toBeInTheDocument()
-  })
-
-  it("puts the fallback in the pool rather than asking for it twice", async () => {
-    // The fallback is always one of the models the router may choose, so the form
-    // shows one list with the safe one marked. A stored spec that omitted its default
-    // target from `candidates` still shows it, because the gateway appends it.
-    mockApi([
-      policy("smart", {
-        select: [
-          { router: "knn", candidates: ["openai:gpt-5-nano"] },
-          { default: "openai:gpt-5" },
-        ],
-      }),
-    ])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    // Both models in one list, and the default target marked.
-    expect(screen.getByRole("combobox", { name: /model 1/i })).toHaveValue(
-      "openai:gpt-5-nano",
-    )
-    expect(screen.getByRole("combobox", { name: /model 2/i })).toHaveValue(
-      "openai:gpt-5",
-    )
-    const marks = screen.getAllByRole("radio", { name: /serves when unsure/i })
-    expect(marks[1]).toBeChecked()
-    // ...and no second field asking for the same model again.
-    expect(
-      screen.queryByRole("combobox", { name: /^serves$/i }),
-    ).not.toBeInTheDocument()
-  })
-
-  it("marking a different model as the fallback changes the saved default", async () => {
-    const { calls } = mockApi([policy("smart", LEARNED, { is_dynamic: true })])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.click(
-      screen.getAllByRole("radio", { name: /serves when unsure/i })[0],
-    )
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    const spec = (post!.body as { spec: PolicySpec }).spec
-    expect(spec.select[1]).toEqual({ default: "openai:gpt-5-nano" })
-    // The pool is unchanged: marking a fallback is not reordering.
-    expect(spec.select[0]).toEqual({
-      router: "knn",
-      candidates: ["openai:gpt-5-nano", "openai:gpt-5"],
-    })
-  })
-
-  it("edits a learned policy without losing its candidate pool", async () => {
-    // A router entry the form can represent must be editable: showing it read-only
-    // would mean the only way to change a candidate is the API.
-    const { calls } = mockApi([policy("smart", LEARNED, { is_dynamic: true })])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-    expect(screen.getByRole("combobox", { name: /model 1/i })).toHaveValue(
-      "openai:gpt-5-nano",
-    )
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    const spec = (post!.body as { spec: PolicySpec }).spec
-    expect(spec.select[0]).toEqual({
-      router: "knn",
-      candidates: ["openai:gpt-5-nano", "openai:gpt-5"],
-    })
-    expect(spec.select[1]).toEqual({ default: "openai:gpt-5" })
-  })
-
-  it("will not save a pool of one, which is not a routing decision", async () => {
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "smart",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5",
-    )
-    await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: /let a router pick/i }))
-    // The pool is seeded with the policy's target plus one empty row, so removing
-    // the empty row leaves a single candidate.
-    await user.click(screen.getAllByRole("button", { name: "Remove" })[1])
-
-    expect(screen.getByText(/at least two models/i)).toBeInTheDocument()
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    )
-    expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
   it("summarises a weighted policy by its split, not by its pool size", async () => {
@@ -1556,333 +365,6 @@ describe("RoutingPage", () => {
     expect(
       within(row).getByText(/70% \/ 30% across 2 models/),
     ).toBeInTheDocument()
-  })
-
-  it("creates a weighted policy from the split control", async () => {
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "balanced",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5",
-    )
-    await user.keyboard("{Escape}")
-    await user.click(
-      screen.getByRole("button", { name: /split traffic across providers/i }),
-    )
-
-    // Seeded as an even split of the policy's own target plus one empty row, so the
-    // operator names the second provider and skews the shares.
-    await user.type(
-      screen.getByRole("combobox", { name: /model 2/i }),
-      "anthropic:claude-sonnet-4-5",
-    )
-    await user.keyboard("{Escape}")
-    const shares = screen.getAllByRole("textbox", { name: /share/i })
-    await user.clear(shares[0])
-    await user.type(shares[0], "70")
-    await user.clear(shares[1])
-    await user.type(shares[1], "30")
-    // Relative weights are hard to read, so the form says what they come to.
-    expect(screen.getByText("70% of requests")).toBeInTheDocument()
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    const spec = (post!.body as { spec: PolicySpec }).spec
-    expect(spec.select[0]).toEqual({
-      router: "weighted",
-      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
-      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
-    })
-    expect(spec.select[1]).toEqual({ default: "openai:gpt-5" })
-  })
-
-  it("creates a priority policy in the order the operator sets", async () => {
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "spill",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5",
-    )
-    await user.keyboard("{Escape}")
-    await user.click(
-      screen.getByRole("button", {
-        name: /next model when one hits its rate limit/i,
-      }),
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /model 2/i }),
-      "anthropic:claude-sonnet-4-5",
-    )
-    await user.keyboard("{Escape}")
-    // Order is the policy, so the rows move, and the opt-out mark moves with its model.
-    await user.click(screen.getByRole("button", { name: "Move model 2 up" }))
-    // Focus follows the model to the top, onto its one arrow that still moves it.
-    expect(
-      screen.getByRole("button", { name: "Move model 1 down" }),
-    ).toHaveFocus()
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    const spec = (post!.body as { spec: PolicySpec }).spec
-    expect(spec.select[0]).toEqual({
-      router: "priority",
-      candidates: ["anthropic:claude-sonnet-4-5", "openai:gpt-5"],
-    })
-    expect(spec.select[1]).toEqual({ default: "openai:gpt-5" })
-  })
-
-  it("edits a priority policy and labels it by its backend", async () => {
-    mockApi([
-      policy(
-        "spill",
-        {
-          select: [
-            {
-              router: "priority",
-              candidates: ["openai:gpt-5-mini", "openai:gpt-5"],
-            },
-            { default: "openai:gpt-5" },
-          ],
-        },
-        { is_dynamic: true },
-      ),
-    ])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("spill")).closest("tr")!
-    expect(within(row).getByText(/^Priority/)).toBeInTheDocument()
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    expect(
-      screen.getByText("Send each request to the first with room"),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Move model 1 up" }),
-    ).toBeDisabled()
-  })
-
-  it("edits a weighted policy without losing its split", async () => {
-    const { calls } = mockApi([
-      policy("balanced", WEIGHTED, { is_dynamic: true }),
-    ])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    const shares = screen.getAllByRole("textbox", { name: /share/i })
-    expect(shares[0]).toHaveValue("70")
-    expect(shares[1]).toHaveValue("30")
-    // Drain the second provider without deleting it, which is what a zero share is
-    // for. The form has to say the model is still there, or a zero reads as removal.
-    await user.clear(shares[1])
-    await user.type(shares[1], "0")
-    expect(
-      screen.getByText(/No weighted traffic; still tried if another fails/),
-    ).toBeInTheDocument()
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    const spec = (post!.body as { spec: PolicySpec }).spec
-    expect(spec.select[0]).toEqual({
-      router: "weighted",
-      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
-      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 0 },
-    })
-  })
-
-  it("keeps a fractional share typeable and refuses a non-numeric one", async () => {
-    // The field holds what was typed, so a decimal point survives the keystroke that
-    // follows it. "Infinity" and a negative parse but are refused, matching the API's
-    // finite, non-negative rule rather than being coerced to something else on save.
-    const { calls } = mockApi([
-      policy("balanced", WEIGHTED, { is_dynamic: true }),
-    ])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    const shares = screen.getAllByRole("textbox", { name: /share/i })
-    await user.clear(shares[0])
-    await user.type(shares[0], "Infinity")
-    expect(
-      screen.getByText(/Every share is a number of zero or more/),
-    ).toBeInTheDocument()
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    ).toBeDisabled()
-
-    await user.clear(shares[0])
-    await user.type(shares[0], "-5")
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    ).toBeDisabled()
-
-    // The decimal has to survive the round trip, not only the keystroke: a field
-    // that renders "7.5" but posts 7 would be the same bug one layer down.
-    await user.clear(shares[0])
-    await user.type(shares[0], "7.5")
-    expect(shares[0]).toHaveValue("7.5")
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    const spec = (post!.body as { spec: PolicySpec }).spec
-    expect(spec.select[0].weights).toEqual({
-      "openai:gpt-5": 7.5,
-      "anthropic:claude-sonnet-4-5": 30,
-    })
-  })
-
-  it("edits a weighted policy whose backend name is spelled loosely", async () => {
-    // The gateway resolves a backend on `name.strip().lower()`, so " Weighted " is a
-    // working policy. Reading it as an unknown backend would show it read-only and
-    // label it wrong on a page that otherwise offers to edit it.
-    const loose: PolicySpec = {
-      select: [
-        {
-          router: " Weighted ",
-          candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
-          weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
-        },
-        { default: "openai:gpt-5" },
-      ],
-    }
-    const { calls } = mockApi([policy("balanced", loose, { is_dynamic: true })])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(within(row).getByText("WEIGHTED")).toBeInTheDocument()
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-
-    // Loading it as weighted is half the claim; saving it back unchanged is the
-    // other half. The spelling is normalized on the way out, which is what the
-    // gateway would have resolved it to anyway.
-    const shares = screen.getAllByRole("textbox", { name: /share/i })
-    expect(shares[0]).toHaveValue("70")
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    )
-
-    const post = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    const spec = (post!.body as { spec: PolicySpec }).spec
-    expect(spec.select[0]).toEqual({
-      router: "weighted",
-      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
-      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
-    })
-  })
-
-  it("will not save a split where every share is zero", async () => {
-    // It would select nothing and the policy would always serve its marked model,
-    // which is a load balancer that balances nothing. The API refuses it too.
-    const { calls } = mockApi([
-      policy("balanced", WEIGHTED, { is_dynamic: true }),
-    ])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-    for (const share of screen.getAllByRole("textbox", { name: /share/i })) {
-      await user.clear(share)
-      await user.type(share, "0")
-    }
-
-    expect(
-      screen.getByText(/at least one model a share above zero/i),
-    ).toBeInTheDocument()
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    ).toBeDisabled()
-    expect(calls.some((call) => call.method === "POST")).toBe(false)
-  })
-
-  it("adds a model to a split with no traffic until a share is set", async () => {
-    // Adding a provider must not silently move traffic onto it.
-    mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.click(screen.getByRole("button", { name: "+ Another model" }))
-
-    const shares = screen.getAllByRole("textbox", { name: /share/i })
-    expect(shares[2]).toHaveValue("0")
-  })
-
-  it("will not save a split that names the same model twice", async () => {
-    // Two rows collapse to one key in the weight map, so the split saved would not be
-    // the split shown (and the API refuses a repeated candidate regardless).
-    const { calls } = mockApi([
-      policy("balanced", WEIGHTED, { is_dynamic: true }),
-    ])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
-    const second = screen.getByRole("combobox", { name: /model 2/i })
-    await user.clear(second)
-    await user.type(second, "openai:gpt-5")
-    await user.keyboard("{Escape}")
-
-    expect(screen.getByText(/name each model once/i)).toBeInTheDocument()
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
-    ).toBeDisabled()
-    expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
   it("names a router backend it does not know without claiming it learns", async () => {
@@ -2074,36 +556,6 @@ describe("RoutingPage", () => {
     expect(await screen.findByText("6 / 20 examples")).toBeInTheDocument()
   })
 
-  it("will not author a policy that dispatches more models than the server allows", async () => {
-    // The cap counts the routed pool plus the fallback chain. Authoring past it and
-    // finding out via a 400 on Save is the form lying about its own rules.
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "wide",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5",
-    )
-    await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: /let a router pick/i }))
-    // Seeded with 2 candidates; add three more to reach the cap of 5.
-    for (let i = 0; i < 3; i += 1) {
-      await user.click(screen.getByRole("button", { name: "+ Another model" }))
-    }
-
-    expect(
-      screen.getByRole("button", { name: "+ Another model" }),
-    ).toBeDisabled()
-    expect(screen.getByText(/dispatches at most 5 models/i)).toBeInTheDocument()
-    expect(calls.some((call) => call.method === "POST")).toBe(false)
-  })
-
   it("refuses to edit a policy whose router sits before its conditions", async () => {
     // Selection is order-sensitive server-side and the form always re-emits
     // conditions first, so editing this spec would silently change what it does.
@@ -2125,7 +577,9 @@ describe("RoutingPage", () => {
     expect(
       within(row).queryByRole("button", { name: "Edit" }),
     ).not.toBeInTheDocument()
-    expect(within(row).getByText(/cannot show yet/)).toBeInTheDocument()
+    expect(
+      within(row).getByRole("button", { name: "View" }),
+    ).toBeInTheDocument()
     // Reading its readiness is still fine.
     expect(
       within(row).getByRole("button", { name: "Examples" }),
@@ -2145,7 +599,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    expect(within(row).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
+    expect(within(row).getByText("gpt-5-mini")).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
@@ -2247,15 +701,6 @@ describe("RoutingPage", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("keeps the deep-linked add form for an operator", async () => {
-    mockApi([], null, [], { context: organizationContext() })
-    renderPage(<RoutingPage />, "/routing?target=openai:gpt-4o")
-
-    expect(
-      await screen.findByRole("button", { name: /Create policy/i }),
-    ).toBeInTheDocument()
-  })
-
   it("tells a member with no policies who defines them", async () => {
     mockApi([], null, [], {
       context: organizationContext({
@@ -2326,40 +771,6 @@ describe("RoutingPage scoped to the selected workspace", () => {
     }
   })
 
-  it("lands an operator's create in the workspace they are looking at", async () => {
-    // Without this the write omitted the workspace, so the row went to the
-    // deployment's default one and the page it was created from never showed it.
-    const { calls } = mockApi([], null, [], { context: operatorInWorkspace() })
-    const user = userEvent.setup()
-    renderInWorkspace(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "scoped",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5-mini",
-    )
-    await user.keyboard("{Escape}")
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    )
-
-    const written = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.endsWith(`${API_ROOT}/routing/policies`),
-    )
-    expect(written?.body).toMatchObject({
-      name: "scoped",
-      workspace_id: OPERATOR_WORKSPACE,
-    })
-  })
-
   it("names the row's workspace on an operator's delete", async () => {
     const OTHER_WORKSPACE = "66666666-6666-6666-6666-666666666666"
     const { calls } = mockApi(
@@ -2389,65 +800,6 @@ describe("RoutingPage scoped to the selected workspace", () => {
 // writes the tenant-scoped routers, which name the workspace and take no user
 // scope; an operator keeps the deployment-wide ones, unchanged above.
 describe("RoutingPage for an organization admin", () => {
-  it("writes a new policy through the tenant-scoped router", async () => {
-    const { calls } = mockApi([], null, [], {
-      context: adminContext(),
-      memberPolicies: [],
-    })
-    const user = userEvent.setup()
-    renderInWorkspace(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    await user.type(
-      screen.getByRole("textbox", { name: /policy name/i }),
-      "tenant-fast",
-    )
-    await user.type(
-      screen.getByRole("combobox", { name: /^serves$/i }),
-      "openai:gpt-5-mini",
-    )
-    // Close the combobox popover, which otherwise aria-hides the submit button.
-    await user.keyboard("{Escape}")
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Create policy",
-      }),
-    )
-
-    const written = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/organizations/me/routing-policies`),
-    )
-    expect(written).toBeDefined()
-    expect(written?.body).toMatchObject({
-      name: "tenant-fast",
-      workspace_id: ADMIN_WORKSPACE,
-    })
-    // The deployment-wide router is never reached, whatever the form did.
-    expect(
-      calls.some(
-        (call) =>
-          call.method === "POST" &&
-          call.url.endsWith(`${API_ROOT}/routing/policies`),
-      ),
-    ).toBe(false)
-  })
-
-  it("offers no user scope, which the tenant router refuses", async () => {
-    mockApi([], null, [], { context: adminContext(), memberPolicies: [] })
-    const user = userEvent.setup()
-    renderInWorkspace(<RoutingPage />)
-
-    await user.click(await createTrigger())
-    expect(
-      await screen.findByText(/applies to everyone in the selected workspace/i),
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: "Specific users" }),
-    ).not.toBeInTheDocument()
-  })
-
   it("deletes through the tenant-scoped router, naming the workspace", async () => {
     const { calls } = mockApi([], null, [], {
       context: adminContext(),
@@ -2471,32 +823,6 @@ describe("RoutingPage for an organization admin", () => {
     expect(deleted?.url).toContain(`workspace_id=${ADMIN_WORKSPACE}`)
   })
 
-  it("writes an edit back to the row's own workspace, not the selected one", async () => {
-    // An admin's list spans the organization, so the row being edited need not
-    // live in the workspace the switcher points at. Writing to the selection
-    // would create a second policy of that name and leave this one untouched.
-    const OTHER_WORKSPACE = "55555555-5555-5555-5555-555555555555"
-    const { calls } = mockApi([], null, [], {
-      context: adminContext(),
-      memberPolicies: [
-        policy("elsewhere", CHAIN, { workspace_id: OTHER_WORKSPACE }),
-      ],
-    })
-    const user = userEvent.setup()
-    renderInWorkspace(<RoutingPage />)
-
-    await screen.findByText("elsewhere")
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    await user.click(await screen.findByRole("button", { name: "Save" }))
-
-    const written = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/organizations/me/routing-policies`),
-    )
-    expect(written?.body).toMatchObject({ workspace_id: OTHER_WORKSPACE })
-  })
-
   it("lists the tenant-scoped aliases beside the policies", async () => {
     mockApi([], null, [], {
       context: adminContext(),
@@ -2514,39 +840,6 @@ describe("RoutingPage for an organization admin", () => {
 
     expect(await screen.findByText("mine")).toBeInTheDocument()
     expect(screen.getByText("tenant-alias")).toBeInTheDocument()
-  })
-
-  it("writes an alias edit back to the alias's own workspace", async () => {
-    // The sibling of the policy case above, and it was the one that regressed:
-    // `aliasAsRow` dropped `workspace_id`, so every alias row fell back to the
-    // selected workspace and an edit landed in the wrong one silently.
-    const OTHER_WORKSPACE = "66666666-6666-6666-6666-666666666666"
-    const { calls } = mockApi([], null, [], {
-      context: adminContext(),
-      memberPolicies: [],
-      memberAliases: [
-        {
-          name: "elsewhere-alias",
-          target: "openai:gpt-5",
-          source: "stored",
-          user_id: null,
-          workspace_id: OTHER_WORKSPACE,
-        },
-      ],
-    })
-    const user = userEvent.setup()
-    renderInWorkspace(<RoutingPage />)
-
-    await screen.findByText("elsewhere-alias")
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    await user.click(await screen.findByRole("button", { name: "Save" }))
-
-    const written = calls.find(
-      (call) =>
-        call.method === "POST" &&
-        call.url.includes(`${API_ROOT}/organizations/me/aliases`),
-    )
-    expect(written?.body).toMatchObject({ workspace_id: OTHER_WORKSPACE })
   })
 
   it("deletes an alias from the alias's own workspace", async () => {
@@ -2622,5 +915,52 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       screen.queryByRole("button", { name: "Delete" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("lists the automatic fallbacks the gateway reports, in its order", async () => {
+    const { calls } = mockApi(undefined, undefined, undefined, {
+      fallbacks: [
+        {
+          id: "anthropic/claude-sonnet-5.5",
+          name: "Claude Sonnet 5.5",
+          offerings: [
+            {
+              selector: "bedrock:anthropic.claude-sonnet-5-5",
+              provider: "bedrock",
+              provider_type: "bedrock",
+              own_tools: [],
+              otari_tools: ["web_search"],
+            },
+            {
+              selector: "anthropic:claude-sonnet-5-5",
+              provider: "anthropic",
+              provider_type: "anthropic",
+              own_tools: ["web_search"],
+              otari_tools: [],
+            },
+          ],
+          requests: 12,
+          fell_back: 2,
+          pinned: 0,
+          pinned_provider: null,
+        },
+      ],
+    })
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("Claude Sonnet 5.5")).closest("tr")!
+    // The server's order, not the catalog's: Bedrock is tried first here.
+    const bedrock = within(row).getByText("Bedrock")
+    const anthropic = within(row).getByText("Anthropic")
+    expect(
+      bedrock.compareDocumentPosition(anthropic) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(within(row).getByText("12")).toBeInTheDocument()
+    expect(
+      calls.some(({ url }) =>
+        url.endsWith(`${API_ROOT}/organizations/me/automatic-fallbacks`),
+      ),
+    ).toBe(true)
   })
 })

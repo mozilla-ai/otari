@@ -12,12 +12,14 @@ import { pickOption } from "@/tests/select"
 const PROVIDERS: SearchProviderInfo[] = [
   {
     id: "exa",
+    kind: "search",
     requires_api_key: true,
     requires_api_base: false,
     default_api_base: "https://api.exa.ai",
   },
   {
     id: "searxng",
+    kind: "search",
     requires_api_key: false,
     requires_api_base: true,
     default_api_base: "http://searxng:8080",
@@ -28,6 +30,7 @@ const TOOLS: SearchToolsResponse = {
   stored: [
     {
       name: "local",
+      kind: "search",
       provider: "searxng",
       api_base: "http://searxng:8080",
       last4: null,
@@ -42,6 +45,7 @@ const TOOLS: SearchToolsResponse = {
   config: [
     {
       name: "from-file",
+      kind: "search",
       provider: "exa",
       api_base: null,
       has_api_key: true,
@@ -238,6 +242,7 @@ describe("SearchToolsCard", () => {
       expect(call).toBeDefined()
       expect(JSON.parse(String(call?.[1]?.body))).toEqual({
         name: "second",
+        kind: "search",
         provider: "searxng",
         api_base: "http://other:8080",
         api_key: null,

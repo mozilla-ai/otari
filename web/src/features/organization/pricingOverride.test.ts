@@ -27,7 +27,6 @@ function override(
     output_price_per_million: 5,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     pricing_tiers: [],
     unit: "tokens",
     effective_from: new Date(NOW - HOUR).toISOString(),

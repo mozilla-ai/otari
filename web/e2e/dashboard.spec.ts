@@ -33,15 +33,16 @@ test.describe("dashboard core flows", () => {
     await expect(page.getByText("Welcome to Otari")).toBeVisible()
 
     await page.getByRole("button", { name: "Add your first provider" }).click()
-    // Scoped: the heading's trigger and the dialog's submit both say "Add
-    // provider", so an unscoped press is ambiguous.
-    const dialog = page.getByRole("dialog", { name: "New provider" })
-    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
-    await dialog.getByLabel("Name").fill("e2e-llm")
-    await dialog.getByLabel("API base").fill("http://e2e-box:8000/v1")
+    const dialog = page.getByRole("dialog", { name: "Add hosted provider" })
+    await dialog.getByRole("combobox", { name: "Provider" }).fill("OpenAI")
+    await page.getByRole("option", { name: "OpenAI", exact: true }).click()
+    await dialog.getByRole("textbox", { name: "Name" }).fill("e2e-llm")
+    await dialog
+      .getByRole("textbox", { name: "API base URL" })
+      .fill("http://e2e-box:8000/v1")
     await dialog.getByRole("button", { name: "Add provider" }).click()
 
-    await expect(page.getByText("e2e-llm")).toBeVisible()
+    await expect(page.getByText("e2e-llm")).toBeVisible({ timeout: 30_000 })
     // Onboarding clears once a provider exists.
     await expect(page.getByText("Welcome to Otari")).toBeHidden()
   })
@@ -124,7 +125,7 @@ test.describe("dashboard core flows", () => {
     // Routing and Tools nest their pages, so each is reached through its group.
     await openNested(page, "Routing", "Policies")
     await expect(pageHeading(page, "Routing")).toBeVisible()
-    await openNested(page, "Tools", "Web search")
+    await openNested(page, "Tools", "Web search, Beta")
     await expect(pageHeading(page, "Web search")).toBeVisible()
     // The one Tools child that is not a filtered view of the page above, so
     // reaching it proves its own route resolves rather than that the filter did.
@@ -133,11 +134,7 @@ test.describe("dashboard core flows", () => {
 
     await openOrganization(page)
     for (const [link, heading] of [
-      // Two provider rows on this rail, told apart by their labels: the
-      // organization's own credentials and the process-wide ones a deployment
-      // operator manages.
       ["Providers", "Providers"],
-      ["Deployment providers", "Deployment providers"],
       ["Spend & budgets", "Budgets"],
     ]) {
       await nav(page).getByRole("link", { name: link, exact: true }).click()
@@ -158,13 +155,17 @@ test.describe("dashboard core flows", () => {
 
     // The deployment's own rail, which neither loop above reaches: it is entered
     // from the account menu rather than from a row, and the menu closes on the
-    // way, so the rail is what carries you between its two pages once you are
+    // way, so the rail is what carries you between its pages once you are
     // in. Exact, because the organization rail also carries "Org settings".
     const menu = await openAccountMenu(page)
     await menu.getByRole("link", { name: "Deployment" }).click()
     await expect(pageHeading(page, "Settings")).toBeVisible()
     await nav(page).getByRole("link", { name: "Accounts", exact: true }).click()
     await expect(pageHeading(page, "Accounts")).toBeVisible()
+    await nav(page)
+      .getByRole("link", { name: "Hosted providers", exact: true })
+      .click()
+    await expect(pageHeading(page, "Hosted providers")).toBeVisible()
     // The way out names where it goes. Queried on the page rather than inside
     // the Sidebar landmark: the back row is in the scope band above the nav, the
     // same place the workspace switcher sits on the other rail.
@@ -322,14 +323,21 @@ test.describe("dashboard core flows", () => {
     await page.getByRole("button", { name: "Create policy" }).first().click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
+    // The dialog asks what the policy is for first; a fallback is the default.
+    await expect(dialog.getByRole("radio", { name: "Fallback" })).toBeChecked()
+    await dialog.getByRole("button", { name: "Continue" }).click()
     // Role-scoped for the same reason as the user form: policy rows carry a
     // "Copy policy name" control.
-    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("fast")
-    // "Serves" is a model combobox (allows custom values); type the selector, then
-    // put the popover away so it does not aria-hide the submit button.
-    const serves = dialog.getByRole("combobox", { name: /Serves/ })
+    await dialog.getByRole("textbox", { name: /^Name/ }).fill("fast")
+    // "Main model" is a model combobox (allows custom values); type the selector,
+    // then put the popover away so it does not aria-hide the submit button.
+    const serves = dialog.getByRole("combobox", { name: "Main model" })
     await serves.fill("openai:gpt-4o")
     await dismissComboBoxInDialog(serves)
+    // A fallback needs a backup before it can be created.
+    const backup = dialog.getByRole("combobox", { name: "Backup 1" })
+    await backup.fill("anthropic:claude-3-5-haiku-latest")
+    await dismissComboBoxInDialog(backup)
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // The policy name is the table's row-header cell (react-aria rowheader).
@@ -344,28 +352,32 @@ test.describe("dashboard core flows", () => {
     await page.getByRole("button", { name: "Create policy" }).first().click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
-    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("chained")
-    const serves = dialog.getByRole("combobox", { name: /Serves/ })
+    await dialog.getByRole("button", { name: "Continue" }).click()
+    await dialog.getByRole("textbox", { name: /^Name/ }).fill("chained")
+    const serves = dialog.getByRole("combobox", { name: "Main model" })
     await serves.fill("openai:gpt-4o")
     await dismissComboBoxInDialog(serves)
 
-    // The failure chain is summoned, not presented, so naming one model stays a
-    // short task.
-    await expect(page.getByText("If that fails, try")).toBeHidden()
-    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
-    const fallback = page.getByRole("combobox", { name: /Fallback 1/ })
+    // A fallback opens on its first backup row, which it cannot be created
+    // without.
+    await expect(
+      dialog.getByRole("button", { name: "Create policy" }),
+    ).toBeDisabled()
+    const fallback = page.getByRole("combobox", { name: "Backup 1" })
     await fallback.fill("anthropic:claude-3-5-haiku-latest")
     await dismissComboBoxInDialog(fallback)
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
-    // Scoped to the row this test created: "+1 on failure" anywhere on the page
+    // Scoped to the row this test created: a backup chip anywhere on the page
     // would also be satisfied by another policy's chain, so a `chained` saved
-    // without its fallback would still pass.
+    // without its backup would still pass.
     const chained = page
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
     await expect(chained).toBeVisible()
-    await expect(chained).toContainText(/\+1 on failure/)
+    await expect(
+      chained.getByRole("list", { name: "Backups" }).getByRole("listitem"),
+    ).toHaveText(["claude-3-5-haiku-latest · Anthropic"])
   })
 
   test("renames a policy in place", async ({ page }) => {
@@ -387,10 +399,13 @@ test.describe("dashboard core flows", () => {
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
     await chained.getByRole("button", { name: "Edit" }).click()
-    // The edit opens the same dialog, so its fields are scoped the same way.
-    const dialog = page.getByRole("dialog")
-    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("renamed")
-    await dialog.getByRole("button", { name: "Save" }).click()
+    // Edit opens the policy's own page, where the name is a section of its own.
+    await expect(pageHeading(page, "chained")).toBeVisible()
+    await page.getByRole("textbox", { name: /^Name/ }).fill("renamed")
+    await page.getByRole("button", { name: "Rename" }).click()
+    // The page follows the policy to its new address.
+    await expect(pageHeading(page, "renamed")).toBeVisible()
+    await page.getByRole("link", { name: "← Routing" }).click()
 
     // A rename moves the row rather than copying it, so the old name has to be
     // gone: two rows would mean callers could still reach the policy either way.
@@ -398,7 +413,9 @@ test.describe("dashboard core flows", () => {
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "renamed" }) })
     await expect(renamed).toBeVisible()
-    await expect(renamed).toContainText(/\+1 on failure/)
+    await expect(
+      renamed.getByRole("list", { name: "Backups" }).getByRole("listitem"),
+    ).toHaveCount(1)
     await expect(page.getByRole("rowheader", { name: "chained" })).toBeHidden()
   })
 

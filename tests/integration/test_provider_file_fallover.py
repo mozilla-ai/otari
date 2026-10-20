@@ -183,3 +183,82 @@ def test_a_fallover_to_a_provider_that_cannot_hold_a_copy_is_not_sent_the_reques
     skipped = [row for row in rows if row.status == "absorbed"]
     assert [row.provider for row in skipped] == ["openai"]
     assert (skipped[0].error_message or "").startswith("Skipped: ")
+
+
+# --- a fallback whose code runs on the sandbox ------------------------------------------------
+
+
+class _Sandboxed:
+    """The sandbox loops and sandboxes a request opened."""
+
+    def __init__(self) -> None:
+        self.loop_kwargs: list[dict[str, Any]] = []
+        self.sandboxes: list[dict[str, Any]] = []
+
+    async def loop(self, *, completion_kwargs: Any, pool: Any, max_iterations: int, **extra: Any) -> MessageResponse:
+        self.loop_kwargs.append(completion_kwargs)
+        return _reply()
+
+    def sandbox(self, **kwargs: Any) -> Any:
+        self.sandboxes.append(kwargs)
+        backend = AsyncMock()
+        backend.purpose_hints = lambda: []
+        backend.__aenter__ = AsyncMock(return_value=backend)
+        backend.__aexit__ = AsyncMock(return_value=None)
+        return backend
+
+
+def _run_with_sandbox(
+    client: TestClient, headers: dict[str, str], file_id: str, provider: AsyncMock
+) -> tuple[Any, _Sandboxed]:
+    sandboxed = _Sandboxed()
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=sandboxed.loop),
+        patch("gateway.api.routes._pipeline.SandboxBackend", new=sandboxed.sandbox),
+    ):
+        response = _run(client, headers, "then-openai", file_id, provider)
+    return response, sandboxed
+
+
+def test_a_native_head_is_sent_its_copy_and_no_sandbox_opens(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    file_store: None,
+    account_files: _AccountFiles,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    file_id = _upload_file(client, api_key_header)
+    provider = AsyncMock(return_value=_reply())
+
+    response, sandboxed = _run_with_sandbox(client, api_key_header, file_id, provider)
+
+    assert response.status_code == 200, response.text
+    sent = [call.kwargs["messages"][0]["content"][0] for call in provider.await_args_list]
+    assert sent == [{"type": "container_upload", "file_id": "file_copy_for_sk-ant-a"}]
+    assert sandboxed.sandboxes == []
+
+
+def test_a_fallback_that_runs_the_code_on_the_sandbox_is_given_the_file_there(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    file_store: None,
+    account_files: _AccountFiles,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The OpenAI fallback cannot hold a copy, and needs none: its sandbox holds the upload."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    file_id = _upload_file(client, api_key_header)
+    provider = AsyncMock(side_effect=[_unavailable()])
+
+    response, sandboxed = _run_with_sandbox(client, api_key_header, file_id, provider)
+
+    assert response.status_code == 200, response.text
+    # Only the head was given a copy; the fallback's account was never written to.
+    assert account_files.uploads == ["sk-ant-a"]
+    [loop_kwargs] = sandboxed.loop_kwargs
+    assert loop_kwargs["messages"][0]["content"] == [
+        {"type": "text", "text": "[File available in the code execution sandbox: data.csv]"}
+    ]
+    [backend_kwargs] = sandboxed.sandboxes
+    assert [staged.file_id for staged in backend_kwargs["files"].inputs] == [file_id]

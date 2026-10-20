@@ -61,11 +61,15 @@ class Attempt:
 
     selection_reason: SelectionReason = "static"
     """Why this candidate is here: ``static``, ``default``, ``condition:<key>``,
-    ``router:<name>``, or ``on_failure``."""
+    ``router:<name>``, ``catalog``, or ``on_failure``."""
 
     attempt_id: str | None = None
     """Correlation id when an external control plane supplied the attempt.
     ``None`` for locally resolved attempts."""
+
+    deployment_paid: bool = False
+    """Served on a credential the deployment owns (``ModelProviderPort``), and
+    priced at the rate such a request settles at."""
 
     @property
     def dispatch_model(self) -> str:

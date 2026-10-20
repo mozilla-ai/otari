@@ -27,14 +27,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.api.routes._helpers import resolve_managed_workspace_id
+from gateway.api.deps import CallerWorkspaceQuery, get_config, get_db, require_deployment_operator
+from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
 from gateway.models.providers import ModelAlias
 from gateway.repositories.users_repository import get_active_user
-from gateway.services.alias_service import all_alias_names, refresh_alias_cache
+from gateway.services.alias_service import all_alias_names, list_stored_aliases, refresh_alias_cache
 from gateway.services.policy_store import all_policy_names
+from gateway.services.providers import hosted_implementation
 
 router = APIRouter(
     prefix="/aliases",
@@ -135,7 +137,7 @@ def _validate(config: GatewayConfig, name: str, target: str, user_id: str | None
         )
     alias_names = all_alias_names(config) | {name}
     try:
-        config.validate_alias(name, target, alias_names=alias_names)
+        config.validate_alias(name, target, alias_names=alias_names, hosted_implementation=hosted_implementation)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -158,28 +160,26 @@ async def _require_user(db: AsyncSession, user_id: str) -> None:
 async def list_aliases(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_ids: CallerWorkspaceQuery,
     workspace_id: Annotated[
         uuid.UUID | None,
         Query(
             description=(
                 "Only stored entries in this workspace. Config-file entries are always included, "
-                "being deployment-wide. Omit to list the stored entries of every workspace."
+                "being deployment-wide. Omit to list the stored entries of every workspace in your organization."
             )
         ),
     ] = None,
 ) -> list[AliasResponse]:
-    """List every alias in force, from config.yml and from storage.
+    """List every alias in force in your organization, from config.yml and from storage.
 
     Every scope at once, workspace-wide and user-scoped alike: this is the
     master-key management view, not what any one caller resolves.
     """
-    statement = select(ModelAlias)
-    if workspace_id is not None:
-        # Stored rows only. A config.yml entry has no workspace: it is
-        # deployment-wide and in force in every one of them, so filtering
-        # it out would misreport what actually resolves.
-        statement = statement.where(ModelAlias.workspace_id == workspace_id)
-    rows = (await db.execute(statement.order_by(ModelAlias.name))).scalars().all()
+    # Stored rows only when a workspace is named. A config.yml entry has no
+    # workspace: it is deployment-wide and in force in every one of them, so
+    # filtering it out would misreport what actually resolves.
+    rows = await list_stored_aliases(db, workspaces=workspace_ids, workspace_id=workspace_id)
     # Keyed on (workspace, name, user) rather than name: the same display name can
     # exist in several workspaces, and within one both workspace-wide and per
     # user, and every one of those is a real row to manage.
@@ -246,12 +246,9 @@ async def upsert_alias_in_workspace(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("upsert alias in workspace", exc) from None
     await db.refresh(alias)
     # The write is committed; a cache-refresh failure must not turn it into a 500.
     # This worker serves the new alias on its next background refresh, others
@@ -313,12 +310,9 @@ async def delete_alias_in_workspace(
     await db.delete(alias)
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("delete alias in workspace", exc) from None
     # The delete is committed; a cache-refresh failure must not turn it into a 500.
     try:
         await refresh_alias_cache(db)

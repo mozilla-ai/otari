@@ -74,34 +74,30 @@ class UtcDateTime(TypeDecorator[datetime]):
 def _timestamp_field(*, default: Any = None, default_factory: Any = None, column_kwargs: dict[str, Any]) -> Any:
     """Build a timezone-aware timestamp field.
 
-    Two things are worked around here, once, instead of at five inheriting
-    tables. SQLModel's ``Field`` overloads type ``sa_type`` as a *class*, while
-    the type we want is an *instance* (the runtime accepts either and hands it
-    straight to ``Column``). And the type has to arrive as ``sa_type`` rather
-    than a ready-made ``sa_column``, because a ``Column`` instance declared on a
-    mixin cannot be attached to more than one table; ``sa_type`` plus kwargs
-    lets SQLModel build a fresh column per model.
+    The type arrives as ``sa_type`` rather than a ready-made ``sa_column``,
+    because a ``Column`` instance declared on a mixin cannot be attached to more than one table.
+    ``sa_type`` plus kwargs lets SQLModel build a fresh column per model.
     """
     if default_factory is not None:
-        return Field(  # type: ignore[call-overload]
+        return Field(
             default_factory=default_factory,
             sa_type=UtcDateTime(),
             sa_column_kwargs=column_kwargs,
         )
-    return Field(  # type: ignore[call-overload]
+    return Field(
         default=default,
         sa_type=UtcDateTime(),
         sa_column_kwargs=column_kwargs,
     )
 
 
-class PrimaryKeyMixin:
+class PrimaryKeyMixin(SQLModel):
     """A UUID primary key, rendered as CHAR(32) on SQLite and native on PostgreSQL."""
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
 
 
-class CreatedAtMixin:
+class CreatedAtMixin(SQLModel):
     """Creation timestamp, defaulted in Python and in the database."""
 
     created_at: datetime = _timestamp_field(
@@ -110,7 +106,7 @@ class CreatedAtMixin:
     )
 
 
-class UpdatedAtMixin:
+class UpdatedAtMixin(SQLModel):
     """Last-modification timestamp, stamped by the database on update.
 
     ``default=None`` and not merely a nullable annotation: without an explicit

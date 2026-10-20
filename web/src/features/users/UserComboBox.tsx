@@ -5,9 +5,12 @@ import {
   ComboBoxField,
   type ComboBoxOption,
 } from "@/design-system/forms/ComboBoxField"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import {
+  useMemberAttributionEmails,
+  useMemberAttributionLabels,
+} from "@/features/organization/attribution"
 
-import { userOptionText } from "./userOptions"
+import { isVirtualUser, userOptionTexts } from "./userOptions"
 
 // A required "owner" picker for a new API key: choose an existing user or type a
 // new id to create one (the keys API creates a named user for any id it does not
@@ -26,6 +29,7 @@ export function UserComboBox({
   label = "Owner",
   placeholder = "Pick a user, or type a new id…",
   unknownHint,
+  isRequired,
 }: {
   value: string
   onChange: (userId: string) => void
@@ -38,26 +42,27 @@ export function UserComboBox({
   // rejects an unknown id must override it rather than promise a creation that
   // will 404.
   unknownHint?: ReactNode
+  isRequired?: boolean
 }) {
   // Read here rather than taken as a prop, so no call site can forget it and
   // leave a person reading as the UUID their identity was minted under. The
   // read is gated on the `organizations` surface and shares its query key with
   // every other reader of the roster.
   const memberLabels = useMemberAttributionLabels()
+  const memberEmails = useMemberAttributionEmails()
 
-  // The id stays the value submitted whatever the row reads as, and rides along
-  // as the hint so it is still what a search can match.
-  const options: ComboBoxOption[] = users
-    .filter((user) => !user.user_id.startsWith("apikey-"))
-    .map((user) => ({
-      value: user.user_id,
-      ...userOptionText(user, memberLabels),
-    }))
+  // The id stays the value submitted whatever the row reads as, and a search
+  // still matches it. The second line is the email, or the id only where two
+  // rows would otherwise be indistinguishable.
+  const owners = users.filter((user) => !isVirtualUser(user.user_id))
+  const texts = userOptionTexts(owners, memberLabels, memberEmails)
+  const options: ComboBoxOption[] = owners
+    .map((user, i) => ({ value: user.user_id, ...texts[i] }))
     .sort((a, b) => {
-      // A roster-named row is the one carrying a hint, and it sorts to the
-      // front: a member is who someone means when issuing a key, where a
-      // hand-made id like `ci-bot` is a tool.
-      if (Boolean(a.hint) !== Boolean(b.hint)) return a.hint ? -1 : 1
+      // A roster member sorts to the front: a member is who someone means when
+      // issuing a key, where a hand-made id like `ci-bot` is a tool.
+      const aMember = memberLabels.has(a.value)
+      if (aMember !== memberLabels.has(b.value)) return aMember ? -1 : 1
       return a.label.localeCompare(b.label)
     })
 
@@ -71,7 +76,8 @@ export function UserComboBox({
       (option) =>
         !q ||
         option.value.toLowerCase().includes(q) ||
-        option.label.toLowerCase().includes(q),
+        option.label.toLowerCase().includes(q) ||
+        option.hint?.toLowerCase().includes(q),
     )
     .slice(0, 50)
 
@@ -96,6 +102,7 @@ export function UserComboBox({
       onQueryChange={setQuery}
       options={visible}
       description={creatingHint}
+      isRequired={isRequired}
       placeholder={placeholder}
       allowsCustomValue
       // The whole list on focus, filtered as you type, which is what a

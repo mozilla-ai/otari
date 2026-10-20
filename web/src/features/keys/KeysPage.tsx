@@ -28,6 +28,7 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
@@ -37,13 +38,18 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Tooltip } from "@/design-system/overlays/Tooltip"
 import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import {
+  useCurrentOwnerId,
+  useMemberAttributionLabels,
+} from "@/features/organization/attribution"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
+import { isVirtualUser } from "@/features/users/userOptions"
 import {
   useCreateKey,
   useDeleteKey,
@@ -70,13 +76,24 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 import { ExpiryFields } from "./ExpiryFields"
 import { KeyActionsMenu } from "./KeyActionsMenu"
 import {
+  type CappingBudget,
+  ceilingLabel,
+  ceilingUsage,
+  draftFor,
+  EMPTY_KEY_BUDGET,
+  KeyBudgetField,
+  type KeyCeiling,
+  keyBudgetIncomplete,
+  useKeyBudgets,
+} from "./KeyBudgetField"
+import {
   NO_SERVICE_KEY,
   ServiceKeyFields,
   serviceKeyBody,
   serviceKeyChoice,
   useServiceKeyReady,
 } from "./ServiceKeyFields"
-import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
+import { keyFingerprint, secretCaption } from "./secretCaption"
 
 // ---------- helpers ----------
 
@@ -440,7 +457,9 @@ function CreateKeyDialog({
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [userId, setUserId] = useState("")
+  // Undefined until the operator touches the picker; "" is a deliberate clear.
+  const [pickedOwner, setPickedOwner] = useState<string>()
+  const currentOwnerId = useCurrentOwnerId()
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     undefined,
   )
@@ -449,6 +468,8 @@ function CreateKeyDialog({
   const [rejectUserMismatch, setRejectUserMismatch] =
     useState<UserMismatchChoice>("inherit")
   const [scopeValid, setScopeValid] = useState(true)
+  const [budgetDraft, setBudgetDraft] = useState(EMPTY_KEY_BUDGET)
+  const keyBudgets = useKeyBudgets(isDeploymentWide, isOpen)
   // The secret, once there is one. Its presence is the step: unset is the form.
   const [created, setCreated] = useState<CreateKeyResponse>()
   const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
@@ -462,6 +483,12 @@ function CreateKeyDialog({
 
   const expiresInPast =
     expiresAt !== "" && new Date(expiresAt).getTime() < Date.now()
+  // Defaults to the signed-in user, but only if the picker offers them.
+  const defaultOwner =
+    currentOwnerId && ownerOptions.some((u) => u.user_id === currentOwnerId)
+      ? currentOwnerId
+      : ""
+  const userId = pickedOwner ?? defaultOwner
   // User-first: an operator's key must name its owner (an existing user or a new
   // id, which the API creates as a named user). This is what keeps the dashboard
   // from minting the anonymous virtual users an omitted id would. A member's key
@@ -478,8 +505,14 @@ function CreateKeyDialog({
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
   const serviceKeyReady = useServiceKeyReady(serviceKey)
+  const budgetIncomplete =
+    !excludeFromBudget && keyBudgetIncomplete(budgetDraft)
   const isBlocked =
-    !scopeValid || !serviceKeyReady || ownerMissing || workspaceUnresolved
+    !scopeValid ||
+    !serviceKeyReady ||
+    ownerMissing ||
+    workspaceUnresolved ||
+    budgetIncomplete
 
   // What the form owns, handed to the guard whole rather than compared field by
   // field: the two drifted apart once already, with the guard armed for three
@@ -494,25 +527,28 @@ function CreateKeyDialog({
   const { isDirty } = useDirtySnapshot({
     keyName,
     expiresAt,
-    userId,
+    pickedOwner,
     allowedModels,
     excludeFromBudget,
     serviceKey,
     rejectUserMismatch,
     scopeValid,
+    budgetDraft,
   })
 
   const resetForm = () => {
     setKeyName("")
     setExpiresAt("")
     setShowAdvanced(false)
-    setUserId("")
+    setPickedOwner(undefined)
     setAllowedModels(undefined)
     setExcludeFromBudget(false)
     setServiceKey(NO_SERVICE_KEY)
     setRejectUserMismatch("inherit")
     setScopeValid(true)
+    setBudgetDraft(EMPTY_KEY_BUDGET)
     create.reset()
+    keyBudgets.reset()
   }
 
   const close = () => {
@@ -551,9 +587,14 @@ function CreateKeyDialog({
           ...serviceKeyBody(serviceKey),
         }
       : shared
+    // An exempt key is never gated, so a cap on it would never bind.
+    const cap = excludeFromBudget ? EMPTY_KEY_BUDGET : budgetDraft
     create.mutate(body, {
       onSuccess: (result) => {
         setCreated(result)
+        // After the secret is on screen, never before: the ceiling names the
+        // key, and a refused cap must not cost the operator the key.
+        keyBudgets.apply(result.id, result.key_name ?? result.id, cap)
       },
     })
   }
@@ -598,6 +639,15 @@ function CreateKeyDialog({
           memberLabels={memberLabels}
           secretRef={secretRef}
         />
+        {keyBudgets.applyError ? (
+          <p role="alert" className="text-sm text-danger">
+            The key was created, but its budget was not applied (
+            {errorMessage(keyBudgets.applyError)}). Apply one under Spend &amp;
+            budgets.
+          </p>
+        ) : keyBudgets.applied ? (
+          <p className="text-caption">Capped by {keyBudgets.applied}.</p>
+        ) : null}
       </FormDialog>
     )
   }
@@ -613,6 +663,11 @@ function CreateKeyDialog({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={isBlocked}
+      footerStart={
+        ownerMissing ? (
+          <p className="text-caption">Choose an owner to create this key.</p>
+        ) : undefined
+      }
       error={create.error}
       isDirty={isDirty}
     >
@@ -642,8 +697,9 @@ function CreateKeyDialog({
       {isDeploymentWide ? (
         <UserComboBox
           value={userId}
-          onChange={setUserId}
+          onChange={setPickedOwner}
           users={ownerOptions}
+          isRequired
         />
       ) : (
         <p className="text-caption">
@@ -651,6 +707,15 @@ function CreateKeyDialog({
           your budget.
         </p>
       )}
+      {keyBudgets.canCap ? (
+        <KeyBudgetField
+          value={budgetDraft}
+          onChange={setBudgetDraft}
+          budgets={keyBudgets.budgets}
+          isLoading={keyBudgets.isLoading}
+          isExempt={excludeFromBudget}
+        />
+      ) : null}
       <button
         type="button"
         className="self-start text-xs font-medium text-link hover:text-link-hover"
@@ -755,6 +820,17 @@ function EditKeyForm({
   onClose: () => void
 }) {
   const update = useUpdateKey()
+  const keyBudgets = useKeyBudgets(isDeploymentWide)
+  const ceiling = keyBudgets.ceilings.find((row) => row.scope_id === apiKey.id)
+  // Seeded from the key's ceiling once it has been read. Until it has, the
+  // field stays off: a draft seeded as "none" would save a second ceiling over
+  // the one the key already has.
+  const [initialBudget, setInitialBudget] = useState(() =>
+    keyBudgets.ceilingsReady ? draftFor(ceiling) : undefined,
+  )
+  const [budgetDraft, setBudgetDraft] = useState(
+    initialBudget ?? EMPTY_KEY_BUDGET,
+  )
   // Operator-only, like the create form's picker; a member edits only their own
   // key and the note it feeds names other owners.
   const users = useUsers(isDeploymentWide)
@@ -776,7 +852,7 @@ function EditKeyForm({
   const serviceKeyReady = useServiceKeyReady(
     isDeploymentWide ? serviceKey : NO_SERVICE_KEY,
   )
-  const { isDirty } = useDirtySnapshot({
+  const { isDirty, reset: reseed } = useDirtySnapshot({
     keyName,
     expiresAt,
     allowedModels,
@@ -784,10 +860,40 @@ function EditKeyForm({
     serviceKey,
     rejectUserMismatch,
     scopeValid,
+    budgetDraft,
   })
+  // Ceilings that land after the form opened are part of its seed, not an edit.
+  // The rest of the seed is the key as it was, so anything already typed still
+  // reads as unsaved.
+  if (initialBudget === undefined && keyBudgets.ceilingsReady) {
+    const seeded = draftFor(ceiling)
+    setInitialBudget(seeded)
+    setBudgetDraft(seeded)
+    reseed({
+      keyName: apiKey.key_name ?? "",
+      expiresAt: toDatetimeLocal(apiKey.expires_at),
+      allowedModels: apiKey.allowed_models ?? undefined,
+      excludeFromBudget: apiKey.exclude_from_budget,
+      serviceKey: serviceKeyChoice(apiKey),
+      rejectUserMismatch: userMismatchChoice(apiKey.reject_user_mismatch),
+      scopeValid: true,
+      budgetDraft: seeded,
+    })
+  }
+  const showBudget = keyBudgets.canCap && initialBudget !== undefined
+  // An exempt key is never gated, so its cap is left as it is.
+  const budgetChanged =
+    showBudget &&
+    !excludeFromBudget &&
+    budgetDraft.choice !== initialBudget?.choice
+  const isBlocked =
+    !scopeValid ||
+    !serviceKeyReady ||
+    (budgetChanged && keyBudgetIncomplete(budgetDraft))
+  const isSaving = update.isPending || keyBudgets.isApplying
 
   const submit = () => {
-    if (update.isPending || !scopeValid || !serviceKeyReady) return
+    if (isSaving || isBlocked) return
     const shared = {
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
@@ -802,7 +908,23 @@ function EditKeyForm({
           ...serviceKeyBody(serviceKey),
         }
       : shared
-    update.mutate({ id: apiKey.id, body }, { onSuccess: onClose })
+    update.mutate(
+      { id: apiKey.id, body },
+      {
+        onSuccess: () => {
+          if (!budgetChanged) return onClose()
+          // A refusal stays on the form, reported through `applyError`.
+          keyBudgets
+            .change({
+              keyId: apiKey.id,
+              keyLabel: keyName.trim() || apiKey.id,
+              draft: budgetDraft,
+              current: ceiling,
+            })
+            .then(onClose, () => {})
+        },
+      },
+    )
   }
 
   return (
@@ -817,10 +939,10 @@ function EditKeyForm({
       description={<code>{apiKey.key_name ?? apiKey.id}</code>}
       submitLabel="Save"
       onSubmit={submit}
-      isPending={update.isPending}
-      isSubmitDisabled={!scopeValid || !serviceKeyReady}
+      isPending={isSaving}
+      isSubmitDisabled={isBlocked}
       isDirty={isDirty}
-      error={update.error}
+      error={update.error ?? keyBudgets.applyError}
     >
       <Field
         label="Name"
@@ -836,6 +958,23 @@ function EditKeyForm({
         onChange={setExpiresAt}
         description="Blank clears the expiry."
       />
+      {showBudget ? (
+        <KeyBudgetField
+          value={budgetDraft}
+          onChange={setBudgetDraft}
+          budgets={keyBudgets.budgets}
+          isLoading={keyBudgets.isLoading}
+          isExempt={excludeFromBudget}
+          current={
+            ceiling
+              ? {
+                  budgetId: ceiling.budget_id,
+                  label: ceilingLabel(ceiling, keyBudgets.budgets),
+                }
+              : undefined
+          }
+        />
+      ) : null}
       {isDeploymentWide && apiKey.user_id ? (
         <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
       ) : null}
@@ -875,6 +1014,31 @@ function EditKeyForm({
 }
 
 // ---------- status + rows ----------
+
+/** A key's own cap as one line, for the phone list. */
+function keyBudgetLine(ceiling: KeyCeiling | undefined): string {
+  return ceiling ? `Budget: ${ceilingUsage(ceiling)}` : "No budget"
+}
+
+/** A key's own cap: what it has spent against the limit, with the budget on hover. */
+function KeyBudgetCell({
+  ceiling,
+  budgets,
+}: {
+  ceiling: KeyCeiling | undefined
+  budgets: readonly CappingBudget[]
+}) {
+  if (!ceiling) {
+    return <span className="text-mono-caption text-subtle">None</span>
+  }
+  return (
+    <Tooltip content={ceilingLabel(ceiling, budgets)} delay={0}>
+      <span className="truncate text-mono-caption text-muted">
+        {ceilingUsage(ceiling)}
+      </span>
+    </Tooltip>
+  )
+}
 
 /**
  * A key's state: a square dot for the family and the word for the severity,
@@ -996,6 +1160,15 @@ export function KeysPage() {
   const rotateKey = useRotateKey()
   const deleteKey = useDeleteKey()
   const memberLabels = useMemberAttributionLabels()
+  const {
+    canCap,
+    budgets: capBudgets,
+    ceilings: keyCeilings,
+  } = useKeyBudgets(isDeploymentWide)
+  const ceilingByKey = useMemo(
+    () => new Map(keyCeilings.map((ceiling) => [ceiling.scope_id, ceiling])),
+    [keyCeilings],
+  )
 
   const [addOpen, setAddOpen] = useState(false)
   // Bumped on each open, and the create dialog is keyed on it, so the draft is
@@ -1138,6 +1311,7 @@ export function KeysPage() {
         triggerRef={lastAction === apiKey.id ? actionTriggerRef : undefined}
         onAction={() => setLastAction(apiKey.id)}
         owner={isDeploymentWide ? ownerLabel(apiKey) : undefined}
+        hasIdentity={layout === "mobile"}
         // Those lanes are off the row below `wide`, so the menu is the only
         // place left that can show them whole.
         hasDetails={layout !== "wide"}
@@ -1172,9 +1346,30 @@ export function KeysPage() {
         isRowHeader: true,
         cell: (apiKey) => (
           <div className="flex min-w-0 flex-col gap-1">
-            <span className="truncate text-base text-foreground">
-              {apiKey.key_name ?? <span className="text-muted">(unnamed)</span>}
-            </span>
+            <div className="flex min-w-0 items-baseline gap-1.5">
+              <span className="truncate text-base text-foreground">
+                {apiKey.key_name ?? (
+                  <span className="text-muted">(unnamed)</span>
+                )}
+              </span>
+              {/* The tail tells two keys of one name apart; the whole stand-in
+                  is on hover. `shrink-0` so a long name truncates, not this. */}
+              {apiKey.key_prefix && apiKey.key_suffix ? (
+                <span className="shrink-0">
+                  <Tooltip content={keyFingerprint(apiKey)} delay={0}>
+                    <span className="text-mono-caption text-muted">
+                      ({apiKey.key_suffix})
+                    </span>
+                  </Tooltip>
+                </span>
+              ) : keyFingerprint(apiKey) ? (
+                // A key minted before suffixes were stored has only its prefix,
+                // which is short enough to show whole.
+                <span className="shrink-0 text-mono-caption text-muted">
+                  ({keyFingerprint(apiKey)})
+                </span>
+              ) : null}
+            </div>
             {/* Folded, the line joins the owner and the last use to the meta
               facts, so it takes one face throughout rather than setting an
               uppercase mono run between two runs of body text. */}
@@ -1201,6 +1396,22 @@ export function KeysPage() {
         header: "Status",
         cell: (apiKey) => <StatusMark apiKey={apiKey} />,
       },
+      // Only for a caller who could change it: a member is refused every
+      // ceiling read, so the column would be blank for them.
+      ...(canCap
+        ? [
+            {
+              id: "budget",
+              header: "Budget",
+              cell: (apiKey: ApiKey) => (
+                <KeyBudgetCell
+                  ceiling={ceilingByKey.get(apiKey.id)}
+                  budgets={capBudgets}
+                />
+              ),
+            } satisfies DataTableColumn<ApiKey>,
+          ]
+        : []),
       // Every key on a member's page is their own, so an Owner column there
       // would repeat one name down the table.
       ...(isDeploymentWide
@@ -1246,20 +1457,6 @@ export function KeysPage() {
           ]
         : []),
       {
-        id: "key",
-        header: "Key",
-        cell: renderFingerprint,
-      },
-      {
-        id: "created",
-        header: "Created",
-        cell: (apiKey) => (
-          <span className="text-mono-caption text-muted">
-            {formatDate(apiKey.created_at)}
-          </span>
-        ),
-      },
-      {
         id: "last_used",
         header: "Last used",
         cell: (apiKey) => (
@@ -1291,14 +1488,22 @@ export function KeysPage() {
         cell: renderActions,
       },
     ],
-    [layout, isDeploymentWide, memberLabels, ownerLabel, renderActions],
+    [
+      layout,
+      isDeploymentWide,
+      memberLabels,
+      ownerLabel,
+      renderActions,
+      canCap,
+      ceilingByKey,
+      capBudgets,
+    ],
   )
   const visibleColumns = useMemo(
     () =>
       layout === "compact"
         ? columns.filter(
-            (column) =>
-              !["owner", "created", "last_used", "expires"].includes(column.id),
+            (column) => !["owner", "last_used", "expires"].includes(column.id),
           )
         : columns,
     [columns, layout],
@@ -1344,7 +1549,8 @@ export function KeysPage() {
           links inside a sentence, which is what that ink is for. */}
       {isDeploymentWide ? (
         <p className="max-w-[38.75rem] pb-5 text-sm text-muted">
-          A key spends against its owner's budget. Owners live under{" "}
+          A key spends against its owner's budget, and against a budget of its
+          own when you give it one. Owners live under{" "}
           <Link
             to="/organization/members"
             className="font-medium text-link hover:text-link-hover"
@@ -1540,6 +1746,11 @@ export function KeysPage() {
                     <KeyMetaLine apiKey={apiKey} face="text-caption" /> · used{" "}
                     {relative(apiKey.last_used_at) ?? "never"}
                   </div>
+                  {canCap ? (
+                    <div className="truncate text-caption">
+                      {keyBudgetLine(ceilingByKey.get(apiKey.id))}
+                    </div>
+                  ) : null}
                 </div>
                 {renderActions(apiKey)}
               </li>

@@ -18,4 +18,11 @@ class WorkspaceListener(Protocol):
         """A workspace was just created."""
 
 
-__all__ = ["WorkspaceListener"]
+class NullWorkspaceListener:
+    """Sets up nothing, for a deployment where a new workspace needs nothing staged."""
+
+    async def workspace_created(self, workspace_id: uuid.UUID) -> None:
+        """Do nothing."""
+
+
+__all__ = ["NullWorkspaceListener", "WorkspaceListener"]

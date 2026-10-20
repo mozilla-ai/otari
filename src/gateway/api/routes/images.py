@@ -8,15 +8,16 @@ from any_llm.types.image import ImageGenerationParams, ImagesResponse
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._passthrough import BillingMeters, run_passthrough
+from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key_if_needed
+from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
+from gateway.services.budgets import count_estimate
+from gateway.services.inference import IMAGES_BILLING
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import per_image_cost
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["images"])
@@ -43,8 +44,8 @@ async def create_image(
     raw_request: Request,
     response: Response,
     request: ImageGenerationRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any]:
@@ -60,29 +61,7 @@ async def create_image(
     requested_images = request.n if request.n is not None else 1
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
-        return per_image_cost(requested_images, pricing) if pricing else Decimal(0)
-
-    def compute_cost(result: ImagesResponse, pricing: ModelPricing | None) -> Decimal | None:
-        if pricing is None:
-            return None
-        n_images = len(result.data) if result.data else requested_images
-        return per_image_cost(n_images, pricing)
-
-    def compute_meters(result: ImagesResponse, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
-        if pricing is None:
-            return None
-        n_images = len(result.data) if result.data else requested_images
-        # ``float`` because the breakdown is a JSON column and JSON has no exact
-        # decimal; the settled amount is ``UsageLog.cost``, which stays Decimal.
-        breakdown = [
-            {
-                "meter": "images",
-                "units": n_images,
-                "unit_rate": float(pricing.input_price_per_million),
-                "cost": float(cost),
-            }
-        ]
-        return {"images": n_images}, breakdown
+        return count_estimate(pricing, meter="images", count=requested_images)
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
         # Forward every field the schema accepts (it is derived from
@@ -100,9 +79,9 @@ async def create_image(
         return await aimage_generation(**image_kwargs)
 
     # Only an explicitly configured rate counts (pricing_use_defaults=False), for
-    # the same unit mismatch audio, moderations, and search avoid: images bill per
-    # image (per_image_cost reads input_price_per_million as raw USD per image)
-    # while genai-prices quotes USD per million tokens. gpt-image-1 is in that
+    # the same unit mismatch audio, moderations, and search avoid: a token rate is
+    # still read per image here for now (see ``price_usage``'s legacy reading)
+    # while models.dev quotes USD per million tokens. gpt-image-1 is in that
     # dataset at 5.0, which would bill $5.00 for one image and, because this route
     # reserves its estimate, hold that $5.00 against the budget before the call.
     outcome = await run_passthrough(
@@ -116,11 +95,11 @@ async def create_image(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        request_params=request.model_fields_set,
         pricing_use_defaults=False,
         estimate=estimate,
         enforce_require_pricing=True,
-        compute_cost=compute_cost,
-        compute_meters=compute_meters,
+        billing=IMAGES_BILLING,
         relabel=False,
     )
     return outcome.result.model_dump()

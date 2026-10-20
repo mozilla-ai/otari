@@ -22,6 +22,7 @@ def _make_openai_model(model_id: str, owned_by: str = "openai", created: int = 1
 def discovery_config(postgres_url: str) -> GatewayConfig:
     """Config with a fake openai provider and discovery enabled."""
     return GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",
@@ -37,6 +38,7 @@ def discovery_config(postgres_url: str) -> GatewayConfig:
 def no_discovery_config(postgres_url: str) -> GatewayConfig:
     """Config with discovery disabled."""
     return GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",
@@ -124,6 +126,7 @@ def test_list_models_excludes_env_only_provider(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
     config = GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",
@@ -170,6 +173,7 @@ def test_list_models_includes_keyless_local_provider(
     from any_llm.types.model import Model
 
     config = GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",
@@ -508,6 +512,7 @@ def two_provider_config(postgres_url: str) -> GatewayConfig:
     Discovery is off to prove the discoverable endpoint ignores the flag.
     """
     return GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",
@@ -607,6 +612,7 @@ def test_discoverable_falls_back_to_declared_models(
     """A backend with no /v1/models reports the operator's declared models."""
     get_model_cache().clear()
     config = GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",
@@ -931,6 +937,7 @@ def cached_discovery_client(postgres_url: str) -> Generator[TestClient]:
     get_model_cache().clear()
     yield from build_test_client(
         GatewayConfig(
+            import_configured_providers=False,
             database_url=postgres_url,
             master_key="test-master-key",
             host="127.0.0.1",
@@ -1051,6 +1058,7 @@ def uncached_discovery_client(postgres_url: str) -> Generator[TestClient]:
     get_model_cache().clear()
     yield from build_test_client(
         GatewayConfig(
+            import_configured_providers=False,
             database_url=postgres_url,
             master_key="test-master-key",
             host="127.0.0.1",
@@ -1101,7 +1109,7 @@ def test_model_detail_agrees_with_the_listing_on_a_stale_entry(
     sleeps its interval *after* each round, so an entry is expired from the moment
     the next round starts until its dials finish. A TTL-bounded peek in the detail
     endpoint would disagree with the listing for that whole window, for any
-    provider model with no pricing row and no genai-prices fallback.
+    provider model with no pricing row and no models.dev fallback.
     """
     _warm_cache_with_expired_entry("gpt-4o")
 
@@ -1139,7 +1147,7 @@ def test_model_detail_does_not_serve_a_cached_failure_as_a_model(
 
     resp = cached_discovery_client.get(f"{API_ROOT}/models/openai:never-seen", headers=discovery_master_header)
 
-    # Falls through to the pricing/genai-prices answer rather than inventing a
+    # Falls through to the pricing/models.dev answer rather than inventing a
     # discovered model out of a failed dial.
     assert resp.status_code in (200, 404)
     if resp.status_code == 200:

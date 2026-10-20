@@ -71,6 +71,10 @@ class MessagesCodeExecutionRendering:
         """Whether the caller asked in Anthropic's dated keyword, which is what asks for the pair."""
         return native_code_execution_dialect(tool_entry) is Dialect.MESSAGES
 
+    def started(self, call: NativeCall) -> list[Any]:
+        """Nothing: the pair describes an execution once it has run."""
+        return []
+
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The pair for each execution the backend kept since the last call, whether or not it succeeded.
 

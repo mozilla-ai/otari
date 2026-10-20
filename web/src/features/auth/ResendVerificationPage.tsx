@@ -12,6 +12,7 @@ import {
   PublicAuthLayout,
   PublicAuthLink,
 } from "./PublicAuthLayout"
+import { readSignInAddress, rememberSignInAddress } from "./signInAddress"
 
 /**
  * `#/resend-verification`: mail a fresh verification link.
@@ -23,12 +24,13 @@ import {
  *
  * Enumeration-safe like signup, so success goes to `#/check-email?type=resend`
  * without reading the response: the server sends the same sentence whether the
- * address is unknown, already verified, or genuinely just re-sent.
+ * address is unknown, already verified, or genuinely just re-sent. The address
+ * typed on the page before is filled in, and goes on to the check-email page.
  */
 export function ResendVerificationPage() {
   const resend = useResendVerification()
   const { recordEvent } = useTelemetry()
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState(readSignInAddress)
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to
@@ -51,6 +53,7 @@ export function ResendVerificationPage() {
         // refused is not counted as a link somebody was sent. Enumeration-safe
         // like signup, so there is nothing in the response to read.
         recordEvent(TELEMETRY_EVENTS.RESEND_VERIFICATION_CLICKED)
+        rememberSignInAddress(email.trim())
         goToPublicAuthPage("#/check-email?type=resend")
       },
     })
@@ -58,6 +61,7 @@ export function ResendVerificationPage() {
 
   return (
     <PublicAuthLayout
+      isBusy={resend.isPending}
       title="Send a new verification link"
       description="Enter the address you signed up with and we will mail a fresh link."
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}

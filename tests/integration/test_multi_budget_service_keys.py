@@ -372,19 +372,80 @@ def test_end_users_are_scoped_to_the_keys_owner(client: TestClient, master_key_h
     assert _end_user(client, master_key_header, "no-such-key", "alice").status_code == 404
 
 
-def test_a_new_end_user_id_may_not_contain_a_slash(client: TestClient, master_key_header: dict[str, str]) -> None:
+def test_an_end_user_id_may_contain_a_slash(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """An App Attest key id is standard base64, so about half of them contain '/'."""
     key_id, headers = _mlpa(client, master_key_header)
+    url = f"{API_ROOT}/keys/{key_id}/end-users"
+    device = "/Ab+cd//ef0123456789ABCDEFghijklmnopqrstuvw="
 
-    chat = _chat(client, headers, "org/alice")
-    put = client.put(
-        f"{API_ROOT}/keys/{key_id}/end-users/org/alice", json={"budget_id": "eu-ai"}, headers=master_key_header
+    served = _chat(client, headers, device)
+    listed = client.get(url, params={"external_id": device, "include_total": True}, headers=master_key_header)
+    blocked = client.patch(url, params={"external_id": device}, json={"blocked": True}, headers=master_key_header)
+    refused = _chat(client, headers, device)
+    moved = client.patch(
+        url,
+        params={"external_id": device},
+        json={"blocked": False, "budget_id": "eu-ai-dev"},
+        headers=master_key_header,
+    )
+    created = client.put(
+        url, params={"external_id": "org/alice"}, json={"budget_id": "eu-memories"}, headers=master_key_header
+    )
+    repeated = client.put(
+        url, params={"external_id": "org/alice"}, json={"budget_id": "eu-memories"}, headers=master_key_header
     )
 
-    assert chat.status_code == 400, chat.text
-    assert put.status_code == 400, put.text
-    assert _end_user(client, master_key_header, key_id, "org/alice").status_code == 404
-    for dots in (".", ".."):
-        assert _chat(client, headers, dots).status_code == 400, dots
+    assert served.status_code == 200, served.text
+    assert listed.status_code == 200, listed.text
+    assert [user["external_id"] for user in listed.json()] == [device]
+    assert listed.headers["Otari-Total-Count"] == "1"
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["blocked"] is True
+    assert refused.status_code == 403
+    assert refused.headers["Otari-Error-Code"] == "user_blocked"
+    assert moved.json()["blocked"] is False
+    assert moved.json()["budget_id"] == "eu-ai-dev"
+    assert _chat(client, headers, device).headers[BUDGET_HEADER] == "eu-ai-dev"
+    assert created.status_code == 201, created.text
+    assert created.json()["external_id"] == "org/alice"
+    assert repeated.status_code == 200
+    assert _chat(client, headers, "org/alice").headers[BUDGET_HEADER] == "eu-memories"
+
+
+def test_the_operator_lists_a_keys_end_users(client: TestClient, master_key_header: dict[str, str]) -> None:
+    key_id, headers = _mlpa(client, master_key_header)
+    for user in ("a", "b/c"):
+        assert _chat(client, headers, user).status_code == 200
+    url = f"{API_ROOT}/keys/{key_id}/end-users"
+
+    everyone = client.get(url, params={"include_total": True}, headers=master_key_header)
+    nobody = client.get(url, params={"external_id": "b"}, headers=master_key_header)
+    missing = client.patch(url, params={"external_id": "nobody"}, json={"blocked": True}, headers=master_key_header)
+    unnamed = client.put(url, json={"budget_id": "eu-ai"}, headers=master_key_header)
+
+    assert [user["external_id"] for user in everyone.json()] == ["a", "b/c"]
+    assert everyone.headers["Otari-Total-Count"] == "2"
+    assert nobody.json() == []
+    assert missing.status_code == 404
+    assert unnamed.status_code == 422
+
+
+def test_a_dot_segment_is_refused_only_in_a_path(client: TestClient, master_key_header: dict[str, str]) -> None:
+    key_id, headers = _mlpa(client, master_key_header)
+    url = f"{API_ROOT}/keys/{key_id}/end-users"
+
+    for dots in (".", "..", "a/../b"):
+        assert _chat(client, headers, dots).status_code == 200, dots
+        listed = client.get(url, params={"external_id": dots}, headers=master_key_header)
+        assert [user["external_id"] for user in listed.json()] == [dots]
+    # Encoded, so the client does not collapse them before Otari sees them.
+    for encoded in ("%2E", "%2E%2E", "a/%2E%2E/b", "%2E/a"):
+        path = f"{url}/{encoded}"
+        assert client.get(path, headers=master_key_header).status_code == 400, encoded
+        assert client.put(path, json={"budget_id": "eu-ai"}, headers=master_key_header).status_code == 400, encoded
+        assert client.patch(path, json={"blocked": True}, headers=master_key_header).status_code == 400, encoded
+    # A dot inside a segment is not a dot segment.
+    assert client.put(f"{url}/v1.2/a..b", json={"budget_id": "eu-ai"}, headers=master_key_header).status_code == 201
 
 
 def test_put_refuses_an_end_user_of_a_blocked_owner(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -399,7 +460,7 @@ def test_put_refuses_an_end_user_of_a_blocked_owner(client: TestClient, master_k
     assert _end_user(client, master_key_header, key_id, "early").status_code == 404
 
 
-def test_an_end_user_created_with_a_slash_before_the_rule_still_works(
+def test_the_path_form_still_reaches_an_end_user_with_a_slash(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
     key_id, headers = _mlpa(client, master_key_header)

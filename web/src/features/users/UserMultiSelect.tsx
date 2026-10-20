@@ -2,9 +2,12 @@ import type { ReactNode } from "react"
 
 import type { User } from "@/client"
 import { MultiSelect } from "@/design-system/forms/MultiSelect"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import {
+  useMemberAttributionEmails,
+  useMemberAttributionLabels,
+} from "@/features/organization/attribution"
 
-import { userOptionText } from "./userOptions"
+import { isVirtualUser, userOptionTexts } from "./userOptions"
 
 // A picker of people, for assigning a budget to several at once. Only lists
 // named rows (virtual apikey-* shadows are excluded); it never creates one,
@@ -33,13 +36,11 @@ export function UserMultiSelect({
   description?: ReactNode
 }) {
   const memberLabels = useMemberAttributionLabels()
+  const memberEmails = useMemberAttributionEmails()
 
-  const options = users
-    .filter((user) => !user.user_id.startsWith("apikey-"))
-    .map((user) => ({
-      id: user.user_id,
-      ...userOptionText(user, memberLabels),
-    }))
+  const people = users.filter((user) => !isVirtualUser(user.user_id))
+  const texts = userOptionTexts(people, memberLabels, memberEmails)
+  const options = people.map((user, i) => ({ id: user.user_id, ...texts[i] }))
 
   return (
     <MultiSelect

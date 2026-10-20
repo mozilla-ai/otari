@@ -32,18 +32,24 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, NamedTuple, TypeVar
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
 from fastapi import HTTPException, status
 
+from gateway.api.routes._attempt_metrics import record_abandoned_attempt
 from gateway.api.routes._platform import (
     _provider_failure_http_exc,
-    is_provider_billing_error,
-    record_abandoned_attempt,
-    upstream_exception_shape,
+    get_shared_rejection,
 )
 from gateway.log_config import logger
+from gateway.services.inference import (
+    is_empty_completion,
+    is_provider_billing_error,
+    upstream_exception_shape,
+)
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.provider_kwargs import missing_credential
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 from gateway.types.attempt import Attempt
@@ -80,13 +86,15 @@ class CandidateCannotServe(Exception):
         self.refusal = refusal
 
 
-class AttemptFailure(NamedTuple):
-    """One failed attempt, for the exhaustion log line."""
+@dataclass(frozen=True)
+class AttemptFailure:
+    """One failed attempt: what the exhaustion log line names, and the error behind it."""
 
     position: int
     instance: str
     model: str
     error_class: str
+    error: BaseException = field(repr=False)
 
 
 def classify_local_attempt_error(exc: BaseException) -> tuple[bool, str]:
@@ -96,6 +104,11 @@ def classify_local_attempt_error(exc: BaseException) -> tuple[bool, str]:
     remains for its generic callback shape; classifications only label logs and
     usage rows. Gateway-side failures are caught before this function runs.
     """
+    if missing_credential(exc) is not None:
+        return True, "missing_credential"
+    if is_empty_completion(exc):
+        return True, "empty_completion"
+
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:
         return True, kind
@@ -130,6 +143,7 @@ async def walk_attempts(
     policy_name: str | None = None,
     classify_error: Callable[[BaseException], tuple[bool, str]] = classify_local_attempt_error,
     build_kwargs: Callable[[Attempt, dict[str, Any]], dict[str, Any]] | None = None,
+    credential_attempt: Callable[[Attempt], Awaitable[Attempt]] | None = None,
     prepare_kwargs: PrepareKwargs | None = None,
     admit_attempt: AdmitAttempt | None = None,
     on_absorbed: Callable[[Attempt, BaseException, int], Awaitable[None]] | None = None,
@@ -165,6 +179,10 @@ async def walk_attempts(
     and rebuilds its Codex extra-body per provider), so the transformation happens
     for the candidate being tried rather than for the one that failed.
 
+    ``credential_attempt`` runs first, and returns the candidate as it will be
+    sent: itself, or itself served on a credential the deployment owns, which
+    may name another instance. It may raise :class:`CandidateCannotServe`.
+
     ``prepare_kwargs`` then turns those kwargs into what the candidate is sent,
     for work that depends on the account a candidate's credential reaches.
     It may raise :class:`CandidateCannotServe`, which skips the candidate without
@@ -194,6 +212,7 @@ async def walk_attempts(
     exactly as naming that model directly would), and a generic 502 for a
     multi-candidate fallthrough, which aggregates heterogeneous failures and must
     not attribute one provider's status to the whole plan.
+    A fallthrough whose candidates all rejected the request alike answers as :func:`get_shared_rejection` says.
     """
     if not attempts:
         logger.error("Attempt plan was empty policy=%s", policy_name)
@@ -209,7 +228,9 @@ async def walk_attempts(
     unrecorded_skips: list[tuple[Attempt, HTTPException]] = []
     last_failed: Attempt | None = None
 
-    for attempt in attempts:
+    for planned in attempts:
+        # Rebound to the candidate as it is sent once ``credential_attempt`` has run.
+        attempt = planned
         locked_in = False
         drop_admission: DropAdmission | None = None
         sent = False
@@ -226,6 +247,8 @@ async def walk_attempts(
             )
 
         try:
+            if credential_attempt is not None:
+                attempt = await credential_attempt(attempt)
             call_kwargs = make_kwargs(attempt, base_request_fields)
             if admit_attempt is not None:
                 drop_admission = await admit_attempt(attempt)
@@ -310,7 +333,7 @@ async def walk_attempts(
                 if on_terminal is not None:
                     on_terminal(attempt)
                 raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
-            failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class))
+            failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class, exc))
             unabsorbed = (attempt, exc)
             if drop_admission is not None:
                 await drop_admission(sent)
@@ -348,4 +371,6 @@ async def walk_attempts(
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail) from last_exc
     if single and last_exc is not None:
         raise _provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
+    if (rejection := get_shared_rejection([failure.error for failure in failures])) is not None:
+        raise rejection from last_exc
     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=ALL_ATTEMPTS_FAILED_DETAIL) from last_exc

@@ -12,7 +12,7 @@ export function UnavailableHere({ title }: { title: string }) {
   return (
     <EmptyState
       title={`${title} is not available here`}
-      description="This deployment declares the page but does not serve it. Pick a destination from the sidebar."
+      description="This deployment declares the page but does not serve it. Choose another page from the menu."
     />
   )
 }

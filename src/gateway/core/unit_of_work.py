@@ -13,7 +13,7 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.database import DATABASE_ERRORS, create_log_session, create_session
+from gateway.core.database import DATABASE_ERRORS, create_log_session, create_session, describe_database_error
 from gateway.log_config import logger
 
 
@@ -79,8 +79,8 @@ class UnitOfWork:
         """Roll back, leaving the error that ended the step as the one the caller sees."""
         try:
             await self._session.rollback()
-        except DATABASE_ERRORS:
-            logger.warning("Could not roll back a unit of work", exc_info=True)
+        except DATABASE_ERRORS as exc:
+            logger.warning("Could not roll back a unit of work: %s", describe_database_error(exc))
 
 
 def session_for(uow: UnitOfWork) -> AsyncSession:
@@ -112,11 +112,25 @@ async def create_log_unit_of_work() -> AsyncIterator[UnitOfWork]:
         yield UnitOfWork(session)
 
 
+@asynccontextmanager
+async def create_unit_of_work_with_session() -> AsyncIterator[tuple[AsyncSession, UnitOfWork]]:
+    """Yield a worker job's session beside its Unit of Work, on the request pool.
+
+    For a worker whose own reads are still in the old shape and take the
+    session, and which also resolves a port whose adapter needs the Unit of
+    Work. Both are over the one session, so the job still has exactly one
+    transaction scope. Deletable once such a worker reads through repositories.
+    """
+    async with create_session() as session:
+        yield session, UnitOfWork(session)
+
+
 __all__ = [
     "OutsideUnitOfWorkError",
     "UnitOfWork",
     "UnitOfWorkRolledBackError",
     "create_log_unit_of_work",
     "create_unit_of_work",
+    "create_unit_of_work_with_session",
     "session_for",
 ]

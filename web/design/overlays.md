@@ -46,12 +46,15 @@ required label and its 44px box intact.
 **It opens after 300ms, not HeroUI's 1.5s.** The library reads `--tooltip-delay`
 off the document root and ships it at react-aria's warmup default, which is long
 enough that a lane of icon actions reads as having no labels at all. The
-component sets the delay itself, so a call site never has to.
+component sets the delay itself, so a call site never has to. One that is hovered
+to be read, rather than crossed on the way to something else (a key's whole
+fingerprint behind its last four characters), passes `delay={0}`.
 
 **Which of the two forms you want depends on whether the trigger takes DOM
 props.** HeroUI's own trigger is a `div` the library gives `role="button"` and
-`tabIndex=0`, which is what makes a non-interactive trigger reachable at all and
-is wrong around a real `<button>`: it announces "Delete button" inside "Delete
+`tabIndex=0`, which is what makes a non-interactive trigger reachable at all (the
+component keeps it on the default cursor, so the role does not make text look
+clickable) and is wrong around a real `<button>`: it announces "Delete button" inside "Delete
 button", takes a tab stop of its own, and gives every `getByRole("button")` two
 matches instead of one. Hand the function form a native control instead, and it
 spreads the props it is given onto that control, so the trigger and the control

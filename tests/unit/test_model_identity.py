@@ -1,6 +1,6 @@
 """The identity rules, pinned on the ids that motivated them.
 
-Every example here is a real spelling from models.dev or genai-prices. The two
+Every example here is a real spelling from models.dev. The two
 Fireworks cases are the ones the rules were designed against: a path prefix
 around the id, and ``p`` where the version has a point.
 """
@@ -53,6 +53,9 @@ def test_normalize_folds_case_and_punctuation_only(text: str, expected: str) -> 
         ("gpt-oss:120b", "gpt-oss:120b", None, None),
         ("nemotron-3-ultra-550b-a55b:free", "nemotron-3-ultra-550b-a55b", None, None),
         ("nvidia.nemotron-nano-9b-v2", "nemotron-nano-9b-v2", "NVIDIA", None),
+        ("moonshotai.kimi-k2-thinking", "kimi-k2-thinking", "Moonshot AI", None),
+        # A dot after something that is not a vendor is part of the model.
+        ("gpt-4.1", "gpt-4.1", None, None),
         # A vendor's name in front of its own family is the vendor, not the model.
         ("nvidia-nemotron-3-super-120b-a12b", "nemotron-3-super-120b-a12b", "NVIDIA", None),
         ("openai-gpt-oss-120b", "gpt-oss-120b", "OpenAI", None),
@@ -229,6 +232,20 @@ def test_a_model_nobody_names_is_named_after_its_cleaned_id() -> None:
     assert identity.id == "alibaba/qwen3-32b"
 
 
+def test_a_bedrock_dotted_vendor_groups_with_the_vendor_s_own_offering() -> None:
+    seeds = [
+        OfferingSeed("bedrock:moonshotai.kimi-k2-thinking", "bedrock", "moonshotai.kimi-k2-thinking", None),
+        OfferingSeed("moonshot:kimi-k2-thinking", "moonshot", "kimi-k2-thinking", None),
+    ]
+
+    groups = group_offerings(seeds)
+
+    assert set(groups) == {"kimik2thinking"}
+    assert groups["kimik2thinking"].id == "moonshotai/kimi-k2-thinking"
+    # Alone, the Bedrock offering still gets an id with its vendor in it.
+    assert group_offerings(seeds[:1])["kimik2thinking"].id == "moonshotai/kimi-k2-thinking"
+
+
 def test_slug_removes_to_the_key() -> None:
     for name in ("GLM-5.3", "DeepSeek V4 Pro", "Kimi K2.6", "gpt-oss-120b", "Claude Sonnet 4.6"):
         assert normalize(slugify(name)) == normalize(name)
@@ -259,3 +276,47 @@ def test_slug_keeps_a_version_s_dot(name: str, slug: str) -> None:
 )
 def test_vendor_slug_spells_the_vendor_the_way_the_ecosystem_does(vendor: str, slug: str) -> None:
     assert vendor_slug(vendor) == slug
+
+
+def test_bedrock_routing_profiles_of_one_model_are_one_model() -> None:
+    """models.dev names each profile after its region, as ``Kimi K3 (US)``, and that region is the offering's."""
+    seeds = [
+        OfferingSeed(
+            "bedrock:global.moonshotai.kimi-k3",
+            "bedrock",
+            "global.moonshotai.kimi-k3",
+            "Kimi K3 (Global)",
+            "moonshotai/kimi-k3",
+        ),
+        OfferingSeed(
+            "bedrock:us.moonshotai.kimi-k3", "bedrock", "us.moonshotai.kimi-k3", "Kimi K3 (US)", "moonshotai/kimi-k3"
+        ),
+    ]
+
+    identities = list(group_offerings(seeds).values())
+
+    assert len(identities) == 1
+    assert identities[0].name == "Kimi K3"
+    assert identities[0].slug == "kimi-k3"
+    assert identities[0].selectors == ("bedrock:global.moonshotai.kimi-k3", "bedrock:us.moonshotai.kimi-k3")
+
+
+@pytest.mark.parametrize("prefix", ["au", "ca", "in", "us-gov"])
+def test_every_bedrock_routing_prefix_is_stripped(prefix: str) -> None:
+    assert clean_model_id(f"{prefix}.anthropic.claude-sonnet-5").model == "claude-sonnet-5"
+
+
+def test_a_parenthesized_name_without_a_routing_prefix_is_kept() -> None:
+    assert identity_key("nvidia", "nemotron-nano", "Nemotron Nano (25.02)") == normalize("Nemotron Nano (25.02)")
+
+
+def test_a_routing_profile_keeps_a_qualifier_that_is_not_a_region() -> None:
+    """``(Thinking)`` names a different model, so only a region label leaves the name."""
+    seeds = [
+        OfferingSeed("bedrock:us.vendor.example", "bedrock", "us.vendor.example", "Example (US)"),
+        OfferingSeed(
+            "bedrock:us.vendor.example-thinking", "bedrock", "us.vendor.example-thinking", "Example (Thinking)"
+        ),
+    ]
+
+    assert len(group_offerings(seeds)) == 2

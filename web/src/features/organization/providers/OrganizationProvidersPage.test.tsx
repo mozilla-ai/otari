@@ -174,6 +174,38 @@ describe("OrganizationProvidersPage", () => {
     expect(screen.getByText(/Re-enter the API key/i)).toBeInTheDocument()
   })
 
+  it("counts each key's serving models and flags a key serving none", async () => {
+    // A key whose every offered model is switched off refuses every request
+    // through it, and before the counts nothing on the page said so.
+    mockApi({
+      keys: [
+        orgProviderKey({
+          id: "66666666-6666-6666-6666-666666666661",
+          name: "Production",
+          offered_count: 141,
+          serving_count: 2,
+        }),
+        orgProviderKey({
+          id: "66666666-6666-6666-6666-666666666662",
+          name: "Staging",
+          offered_count: 20,
+          serving_count: 0,
+        }),
+        orgProviderKey({
+          id: "66666666-6666-6666-6666-666666666663",
+          name: "Fresh",
+        }),
+      ],
+    })
+    await renderPage(<OrganizationProvidersPage />)
+
+    expect(await screen.findByText("2 of 141 serving")).toHaveClass(
+      "text-muted",
+    )
+    expect(screen.getByText("0 of 20 serving")).toHaveClass("text-danger")
+    expect(screen.getByText("all models")).toBeInTheDocument()
+  })
+
   it("says nothing about decryption when every key is readable", async () => {
     mockApi({ keys: [orgProviderKey({ name: "Production" })] })
     await renderPage(<OrganizationProvidersPage />)
@@ -315,9 +347,9 @@ describe("OrganizationProvidersPage", () => {
   })
 
   it("reads the organization's own keys, not the deployment's credentials", async () => {
-    // The whole reason this page exists: /api/v1/provider-credentials is keyed on
-    // an instance name and belongs to the process, so a page that read it would
-    // be showing every tenant the same rows.
+    // The whole reason this page exists: /api/v1/hosted-providers belongs to
+    // the process, so a page that read it would be showing every tenant the
+    // same rows.
     const requests = mockApi({ keys: [orgProviderKey()] })
     await renderPage(<OrganizationProvidersPage />)
 
@@ -329,7 +361,7 @@ describe("OrganizationProvidersPage", () => {
     ).toBe(true)
     expect(
       requests.some((request) =>
-        request.url.includes(`${API_ROOT}/provider-credentials`),
+        request.url.includes(`${API_ROOT}/hosted-providers`),
       ),
     ).toBe(false)
   })
@@ -607,13 +639,36 @@ describe("OrganizationProvidersPage", () => {
     await renderPage(<OrganizationProvidersPage />)
 
     await user.click(
-      await screen.findByRole("button", { name: "Make default" }),
+      await screen.findByRole("button", { name: "Make default provider" }),
     )
 
     await waitFor(() => {
       expect(requests.some((request) => request.url.endsWith("/default"))).toBe(
         true,
       )
+    })
+  })
+
+  it("removes the organization default from the key that holds it", async () => {
+    const requests = mockApi({
+      keys: [orgProviderKey({ is_org_default: true })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Default provider, click to remove",
+      }),
+    )
+
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" && request.url.endsWith("/default"),
+        ),
+      ).toBe(true)
     })
   })
 
@@ -896,6 +951,47 @@ describe("OrganizationProvidersPage", () => {
     expect(
       await screen.findByRole("grid", { name: "Models on Production" }),
     ).toBeInTheDocument()
+  })
+
+  it("opens the models panel outside the key table's scroll frame", async () => {
+    // The key table scrolls sideways where it is wider than its frame, and a
+    // panel rendered as one of its rows scrolls along and is clipped. The panel
+    // has to sit outside that frame, in its own region after the table.
+    mockApi({
+      keys: [orgProviderKey({ id: KEY_ID, name: "Production" })],
+      models: [orgProviderModel({ model: "gpt-4o" })],
+    })
+
+    await renderPage(<OrganizationProvidersPage />)
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Models on Production" }),
+    )
+
+    const panel = await screen.findByRole("region", {
+      name: "Models on Production",
+    })
+    const keyTable = screen.getByRole("grid", {
+      name: "Organization provider keys",
+    })
+    expect(panel).not.toContainElement(keyTable)
+    expect(keyTable).not.toContainElement(panel)
+    expect(panel.closest(".otari-provider-keys-table")).toBeNull()
+    expect(
+      within(panel).getByRole("grid", { name: "Models on Production" }),
+    ).toBeInTheDocument()
+    expect(
+      keyTable.compareDocumentPosition(panel) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Models on Production" }),
+    )
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "Models on Production" }),
+      ).not.toBeInTheDocument(),
+    )
   })
 
   it("reports a rate list that could not be read instead of opening an empty editor", async () => {

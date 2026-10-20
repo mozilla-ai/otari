@@ -1,4 +1,4 @@
-.PHONY: help dev dashboard test test-unit test-integration lint lint-python lint-web check-architecture typecheck typecheck-python typecheck-web openapi-check postman postman-check changelog check-migrations railway-template-check
+.PHONY: help dev dashboard test test-unit test-integration test-libs test-frameworks lint lint-python lint-web check-architecture typecheck typecheck-python typecheck-web openapi-check postman postman-check changelog check-migrations railway-template-check
 
 help:
 	@printf "Available targets:\n"
@@ -7,6 +7,8 @@ help:
 	@printf "  test Run full test suite (unit + integration)\n"
 	@printf "  test-unit Run unit tests\n"
 	@printf "  test-integration Run integration tests\n"
+	@printf "  test-libs Run the any-search and any-fetch tests\n"
+	@printf "  test-frameworks Run the agent-framework packages and docs pages against a real Otari\n"
 	@printf "  lint Run every linter, fixing what it can (lint-python + lint-web)\n"
 	@printf "  lint-python Run the pre-commit hooks: architecture, migrations, Ruff lint and format\n"
 	@printf "  lint-web Run Biome over the dashboard\n"
@@ -56,6 +58,17 @@ test-unit:
 test-integration:
 	uv run pytest -v tests/integration
 
+# One run per library: both have test files of the same names, and the
+# repository's pytest imports a test module by its file name (the default
+# import mode), so one run would fail to collect the second of each pair.
+test-libs:
+	uv run pytest -v any-search/tests
+	uv run pytest -v any-fetch/tests
+
+# Its own environment and lock (integrations/e2e/README.md), so the frameworks never enter uv.lock.
+test-frameworks:
+	cd integrations/e2e && uv run --locked pytest -v -c pyproject.toml --rootdir . . ../pydantic-ai-otari/tests ../langchain-otari/tests
+
 # NOTE: The linters fix what they can in place, so a run can leave changes to commit.
 lint: lint-python lint-web
 
@@ -78,8 +91,14 @@ check-migrations:
 
 typecheck: typecheck-python typecheck-web
 
+# The libraries' tests and scripts get a run each, for the same reason as
+# test-libs: one mypy run refuses two modules of the same name. Those runs skip
+# the unused-config note, since the gateway's per-module overrides name modules
+# they never import.
 typecheck-python:
 	uv run mypy
+	uv run mypy --no-warn-unused-configs any-search/tests any-search/scripts
+	uv run mypy --no-warn-unused-configs any-fetch/tests any-fetch/scripts
 
 typecheck-web: web/node_modules/.install-stamp
 	pnpm --dir web run typecheck

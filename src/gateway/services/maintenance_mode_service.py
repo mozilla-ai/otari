@@ -23,8 +23,8 @@ so the table holds one vocabulary rather than two.
 
 **Every door has to close, and a scan is what keeps that true.** The freeze is
 only as good as its least-remembered sign-in path, so
-``tests/unit/test_maintenance_mode.py`` enumerates the routes that call
-``create_dashboard_session`` and fails on one that neither checks this flag nor
+``tests/unit/test_maintenance_mode.py`` enumerates the routes that start a
+dashboard session and fails on one that neither checks this flag nor
 declares why it closes no door. WebAuthn and OAuth (#651, #652) each end by
 minting a session, so each will answer to it.
 

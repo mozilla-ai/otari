@@ -1,0 +1,582 @@
+{
+  "description": "What one successful pass-through attempt costs at a rate. Shared by otari's settlement tests and otari.ai's, so both editions are held to one table. Rates are per million: tokens, requests or images. A token rate read the legacy way on image generation is raw USD per image. Every expected cost is worked out by hand from the rate and the counts, not generated from the code. An expected value of null means the rate prices nothing the attempt reported.",
+  "cases": [
+    {
+      "name": "a requests rate bills the requests count",
+      "rate": {
+        "unit": "requests",
+        "input": "2000"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 1
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.002000",
+        "meters": {
+          "requests": 1
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 1,
+            "unit_rate": 0.002,
+            "cost": 0.002
+          }
+        ]
+      }
+    },
+    {
+      "name": "a requests rate bills each search unit",
+      "rate": {
+        "unit": "requests",
+        "input": "2000"
+      },
+      "tokens": {
+        "input": 40,
+        "output": 0
+      },
+      "units": {
+        "search_units": 3
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.006000",
+        "meters": {
+          "search_units": 3
+        },
+        "lines": [
+          {
+            "meter": "search_units",
+            "units": 3,
+            "unit_rate": 0.002,
+            "cost": 0.006
+          }
+        ]
+      }
+    },
+    {
+      "name": "a requests rate bills one request for a completion that reports only tokens",
+      "rate": {
+        "unit": "requests",
+        "input": "5000"
+      },
+      "tokens": {
+        "input": 2000,
+        "output": 500
+      },
+      "units": {},
+      "legacy": false,
+      "expected": {
+        "cost": "0.005000",
+        "meters": {
+          "requests": 1
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 1,
+            "unit_rate": 0.005,
+            "cost": 0.005
+          }
+        ]
+      }
+    },
+    {
+      "name": "a requests rate on embeddings bills one request, not the tokens",
+      "rate": {
+        "unit": "requests",
+        "input": "5000"
+      },
+      "tokens": {
+        "input": 1000,
+        "output": 0
+      },
+      "units": {},
+      "legacy": true,
+      "expected": {
+        "cost": "0.005000",
+        "meters": {
+          "requests": 1
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 1,
+            "unit_rate": 0.005,
+            "cost": 0.005
+          }
+        ]
+      }
+    },
+    {
+      "name": "a requests rate on image generation bills one request, not one rate per image",
+      "rate": {
+        "unit": "requests",
+        "input": "2000"
+      },
+      "tokens": null,
+      "units": {
+        "images": 2
+      },
+      "legacy": true,
+      "expected": {
+        "cost": "0.002000",
+        "meters": {
+          "requests": 1
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 1,
+            "unit_rate": 0.002,
+            "cost": 0.002
+          }
+        ]
+      }
+    },
+    {
+      "name": "a requests count is preferred over search units and never summed with them",
+      "rate": {
+        "unit": "requests",
+        "input": "2000"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 2,
+        "search_units": 5
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.004000",
+        "meters": {
+          "requests": 2
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 2,
+            "unit_rate": 0.002,
+            "cost": 0.004
+          }
+        ]
+      }
+    },
+    {
+      "name": "zero requests cost nothing and carry no meter",
+      "rate": {
+        "unit": "requests",
+        "input": "2000"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 0
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.000000",
+        "meters": {},
+        "lines": []
+      }
+    },
+    {
+      "name": "a free requests rate costs nothing and carries no meter",
+      "rate": {
+        "unit": "requests",
+        "input": "0"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 1
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.000000",
+        "meters": {},
+        "lines": []
+      }
+    },
+    {
+      "name": "a per-request price under half a micro-dollar rounds a single request to nothing",
+      "rate": {
+        "unit": "requests",
+        "input": "0.4"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 1
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.000000",
+        "meters": {},
+        "lines": []
+      }
+    },
+    {
+      "name": "sub-micro-dollar requests are summed before rounding",
+      "rate": {
+        "unit": "requests",
+        "input": "0.4"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 3
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.000001",
+        "meters": {
+          "requests": 3
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 3,
+            "unit_rate": 4e-07,
+            "cost": 1e-06
+          }
+        ]
+      }
+    },
+    {
+      "name": "an unknown meter is ignored",
+      "rate": {
+        "unit": "requests",
+        "input": "2000"
+      },
+      "tokens": null,
+      "units": {
+        "seconds": 30
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.002000",
+        "meters": {
+          "requests": 1
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 1,
+            "unit_rate": 0.002,
+            "cost": 0.002
+          }
+        ]
+      }
+    },
+    {
+      "name": "an images rate bills each image returned",
+      "rate": {
+        "unit": "images",
+        "input": "40000"
+      },
+      "tokens": null,
+      "units": {
+        "images": 2
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.080000",
+        "meters": {
+          "images": 2
+        },
+        "lines": [
+          {
+            "meter": "images",
+            "units": 2,
+            "unit_rate": 0.04,
+            "cost": 0.08
+          }
+        ]
+      }
+    },
+    {
+      "name": "an images rate is per million images, as the dashboard stores $40 per 1,000 images",
+      "rate": {
+        "unit": "images",
+        "input": "40000"
+      },
+      "tokens": null,
+      "units": {
+        "images": 1
+      },
+      "legacy": true,
+      "expected": {
+        "cost": "0.040000",
+        "meters": {
+          "images": 1
+        },
+        "lines": [
+          {
+            "meter": "images",
+            "units": 1,
+            "unit_rate": 0.04,
+            "cost": 0.04
+          }
+        ]
+      }
+    },
+    {
+      "name": "an images rate bills the largest count one attempt may report",
+      "rate": {
+        "unit": "images",
+        "input": "40000"
+      },
+      "tokens": null,
+      "units": {
+        "images": 1000000
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "40000.000000",
+        "meters": {
+          "images": 1000000
+        },
+        "lines": [
+          {
+            "meter": "images",
+            "units": 1000000,
+            "unit_rate": 0.04,
+            "cost": 40000.0
+          }
+        ]
+      }
+    },
+    {
+      "name": "no images returned cost nothing",
+      "rate": {
+        "unit": "images",
+        "input": "40000"
+      },
+      "tokens": null,
+      "units": {
+        "images": 0
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.000000",
+        "meters": {},
+        "lines": []
+      }
+    },
+    {
+      "name": "an images rate prices nothing on an endpoint that reports no images",
+      "rate": {
+        "unit": "images",
+        "input": "40000"
+      },
+      "tokens": {
+        "input": 1000,
+        "output": 0
+      },
+      "units": {},
+      "legacy": true,
+      "expected": null
+    },
+    {
+      "name": "an images rate prices nothing on an endpoint billed per request",
+      "rate": {
+        "unit": "images",
+        "input": "40000"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 1
+      },
+      "legacy": true,
+      "expected": null
+    },
+    {
+      "name": "a token rate prices a token-billed image on its tokens, never at the rate per image",
+      "rate": {
+        "unit": "tokens",
+        "input": "5",
+        "output": "40"
+      },
+      "tokens": {
+        "input": 50,
+        "output": 4160
+      },
+      "units": {
+        "images": 1
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.166650"
+      }
+    },
+    {
+      "name": "a token rate prices nothing for an image that reported no tokens",
+      "rate": {
+        "unit": "tokens",
+        "input": "5",
+        "output": "40"
+      },
+      "tokens": null,
+      "units": {
+        "images": 1
+      },
+      "legacy": false,
+      "expected": null
+    },
+    {
+      "name": "the legacy reading prices a token rate on an image endpoint per image",
+      "rate": {
+        "unit": "tokens",
+        "input": "0.04",
+        "output": "0"
+      },
+      "tokens": {
+        "input": 50,
+        "output": 4160
+      },
+      "units": {
+        "images": 2
+      },
+      "legacy": true,
+      "expected": {
+        "cost": "0.080000",
+        "meters": {
+          "images": 2
+        },
+        "lines": [
+          {
+            "meter": "images",
+            "units": 2,
+            "unit_rate": 0.04,
+            "cost": 0.08
+          }
+        ]
+      }
+    },
+    {
+      "name": "a token rate prices a token-billed transcription on its tokens",
+      "rate": {
+        "unit": "tokens",
+        "input": "2.5",
+        "output": "10"
+      },
+      "tokens": {
+        "input": 1000,
+        "output": 100
+      },
+      "units": {
+        "requests": 1
+      },
+      "legacy": false,
+      "expected": {
+        "cost": "0.003500"
+      }
+    },
+    {
+      "name": "the legacy reading prices a token rate on a per-request endpoint per request",
+      "rate": {
+        "unit": "tokens",
+        "input": "2.5",
+        "output": "10"
+      },
+      "tokens": {
+        "input": 1000,
+        "output": 100
+      },
+      "units": {
+        "requests": 1
+      },
+      "legacy": true,
+      "expected": {
+        "cost": "0.000003",
+        "meters": {
+          "requests": 1
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 1,
+            "unit_rate": 2.5e-06,
+            "cost": 3e-06
+          }
+        ]
+      }
+    },
+    {
+      "name": "a token rate on rerank prices the tokens and leaves the search units",
+      "rate": {
+        "unit": "tokens",
+        "input": "50",
+        "output": "0"
+      },
+      "tokens": {
+        "input": 1000,
+        "output": 0
+      },
+      "units": {
+        "search_units": 1
+      },
+      "legacy": true,
+      "expected": {
+        "cost": "0.050000"
+      }
+    },
+    {
+      "name": "a token rate on rerank prices nothing when the provider reports only search units",
+      "rate": {
+        "unit": "tokens",
+        "input": "50",
+        "output": "0"
+      },
+      "tokens": null,
+      "units": {
+        "search_units": 1
+      },
+      "legacy": true,
+      "expected": null
+    },
+    {
+      "name": "a token rate prices embeddings on their input tokens",
+      "rate": {
+        "unit": "tokens",
+        "input": "2",
+        "output": "8"
+      },
+      "tokens": {
+        "input": 1000,
+        "output": 0
+      },
+      "units": {},
+      "legacy": false,
+      "expected": {
+        "cost": "0.002000"
+      }
+    },
+    {
+      "name": "a token rate prices nothing when no tokens were reported",
+      "rate": {
+        "unit": "tokens",
+        "input": "2",
+        "output": "8"
+      },
+      "tokens": {
+        "input": 0,
+        "output": 0
+      },
+      "units": {},
+      "legacy": false,
+      "expected": null
+    },
+    {
+      "name": "no rate prices nothing",
+      "rate": null,
+      "tokens": {
+        "input": 1000,
+        "output": 0
+      },
+      "units": {
+        "requests": 1
+      },
+      "legacy": true,
+      "expected": null
+    }
+  ]
+}

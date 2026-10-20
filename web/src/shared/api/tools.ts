@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  CheckWorkspaceMcpServerRequest,
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
   CreateWorkspaceMcpServerRequest,
@@ -21,6 +22,7 @@ import type {
   UpdateWorkspaceWebSearchConfigRequest,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
   WorkspaceMcpServers,
   WorkspaceWebSearchConfig,
 } from "@/client"
@@ -34,6 +36,7 @@ import {
   TOOL_SETTINGS,
   TOOLS,
   WORKSPACES,
+  workspaceMeta,
 } from "@/shared/api/queryKeys"
 
 export function useToolSettings(enabled = true) {
@@ -267,6 +270,7 @@ export function useDeleteOrganizationGuardrail() {
 export function useWorkspaceCodeExecutionPolicy(workspaceId: string | null) {
   return useQuery({
     queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceCodeExecutionPolicy>(
         `/workspaces/${encodeURIComponent(workspaceId as string)}/code-execution-policy`,
@@ -326,6 +330,7 @@ export function useClearWorkspaceCodeExecutionPolicy() {
 export function useWorkspaceWebSearchConfig(workspaceId: string | null) {
   return useQuery({
     queryKey: [WORKSPACES, workspaceId, "web-search"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceWebSearchConfig>(
         `/workspaces/${encodeURIComponent(workspaceId as string)}/web-search`,
@@ -391,6 +396,7 @@ const MCP_SERVERS_PAGE_SIZE = 1000
 export function useWorkspaceMcpServers(workspaceId: string | null) {
   return useQuery({
     queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceMcpServers>(
         `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers?limit=${MCP_SERVERS_PAGE_SIZE}`,
@@ -445,6 +451,49 @@ export function useUpdateWorkspaceMcpServer() {
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
     },
+  })
+}
+
+// Connects to a stored server now and records the outcome as its `health`. A
+// server that fails answers 200 like one that passes; only a busy gateway (429)
+// is an error here.
+export function useCheckWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}/check`,
+        { method: "POST" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+    },
+  })
+}
+
+// Checks connection details without storing anything: the dialog's Test
+// button. Nothing to invalidate, since nothing was written.
+export function useTestWorkspaceMcpServerConnection() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: CheckWorkspaceMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServerHealth>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/check`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 

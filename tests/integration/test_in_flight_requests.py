@@ -256,12 +256,9 @@ def test_a_pass_through_request_is_registered_too(client: TestClient, api_key_he
     [
         # Rejected by the preamble's own gates, before the registration point.
         ("", 0),
-        # Reaches the registration point: nothing resolved locally, so the raw
-        # selector is recorded, and the refusal comes from the dispatch that
-        # follows. The window is a function call wide, but it is not zero, so the
-        # honest claim is "refused by a gate, never listed", not "refused, never
-        # listed".
-        ("nosuchprovider:nosuchmodel", 1),
+        # Nothing resolves it locally, so the preamble refuses it as invalid_model
+        # before dispatch and it is never listed.
+        ("nosuchprovider:nosuchmodel", 0),
     ],
 )
 def test_which_refusals_reach_the_registry(

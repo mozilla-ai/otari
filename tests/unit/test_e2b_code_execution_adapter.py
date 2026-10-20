@@ -23,6 +23,7 @@ from gateway.adapters.code_execution_adapter import (
     verify_code_execution_ready,
 )
 from gateway.core.config import GatewayConfig
+from gateway.models.tools import SandboxProvider
 from gateway.ports.code_execution_port import (
     OutputOverBudget,
     SandboxNotReachableError,
@@ -368,7 +369,7 @@ def test_the_deployment_picks_its_adapter_and_e2b_needs_no_url() -> None:
     assert isinstance(protocol, ProtocolCodeExecutionAdapter)
     assert protocol.label == "http://sandbox:8080"
 
-    hosted = GatewayConfig(sandbox_provider="e2b")
+    hosted = GatewayConfig(sandbox_provider=SandboxProvider.E2B)
     assert build_code_execution_port(hosted).label == "e2b"
     # No URL, and code execution is still configured: that is the whole point.
     assert hosted.sandbox_configured()
@@ -379,13 +380,13 @@ def test_the_deployment_picks_its_adapter_and_e2b_needs_no_url() -> None:
 
 def test_an_unknown_provider_is_refused_at_config_load() -> None:
     with pytest.raises(ValueError, match="sandbox_provider must be one of"):
-        GatewayConfig(sandbox_provider="not-a-provider")
+        GatewayConfig.model_validate({"sandbox_provider": "not-a-provider"})
 
 
 def test_a_provider_that_cannot_be_reached_is_refused_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hosted provider is advertised on the strength of the setting alone, so
     a missing extra or credential has to fail the boot rather than every request."""
-    hosted = GatewayConfig(sandbox_provider="e2b")
+    hosted = GatewayConfig(sandbox_provider=SandboxProvider.E2B)
 
     def _no_sdk() -> Any:
         raise SandboxNotReachableError("sandbox_provider 'e2b' requires the E2B SDK")

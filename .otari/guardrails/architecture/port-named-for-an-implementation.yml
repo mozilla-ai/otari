@@ -16,3 +16,4 @@ gates:
       port's name names an implementation or a vendor rather than a domain capability,
       for example E2BPort rather than CodeExecutionPort. This is cardinal rule 4 in
       ARCHITECTURE.md. Pass if the diff adds or renames no port.
+    accept_warnings: [judge-gate-cap]

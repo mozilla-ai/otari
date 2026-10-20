@@ -1,11 +1,11 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { DeploymentBootstrap } from "@/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap } from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
 
@@ -27,10 +27,27 @@ function renderActions(
 const cluster = async () =>
   (await screen.findByRole("link", { name: "Documentation" })).parentElement
 
+// Playground waits on the membership read like every rail row, so a case that
+// counts the cluster waits for it first.
+const settledCluster = async () => {
+  await screen.findByRole("link", { name: "Playground" })
+  return cluster()
+}
+
 describe("TopBarActions", () => {
+  // A member, so Playground's membership gate has an answer to settle on.
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(organizationContext()),
+    )
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("places the local Playground immediately before Documentation", async () => {
     await renderActions()
-    const link = screen.getByRole("link", { name: "Playground" })
+    const link = await screen.findByRole("link", { name: "Playground" })
     expect(link).toHaveAttribute("href", "/playground")
     expect(link.nextElementSibling).toBe(
       screen.getByRole("link", { name: "Documentation" }),
@@ -45,6 +62,21 @@ describe("TopBarActions", () => {
     expect(await cluster()).toHaveTextContent("Documentation")
   })
 
+  it("omits Playground for a caller with no organization", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    await renderActions()
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("link", { name: "Playground" }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(await cluster()).toHaveTextContent("Documentation")
+    vi.restoreAllMocks()
+  })
+
   it("contributes nothing where the balance goes", async () => {
     await renderActions()
 
@@ -52,7 +84,7 @@ describe("TopBarActions", () => {
     // none, so the seam is mounted and empty. Asserting the cluster's whole
     // membership rather than the absence of one chip is what would catch a
     // placeholder growing here later.
-    expect((await cluster())?.children).toHaveLength(2)
+    expect((await settledCluster())?.children).toHaveLength(2)
   })
 
   it("renders the slot module's own empty default", () => {
@@ -67,26 +99,23 @@ describe("TopBarActions", () => {
     await renderActions({ management_url: "https://otari.ai/" })
 
     // A management URL does not retarget the local Playground.
-    expect((await cluster())?.children).toHaveLength(2)
+    expect((await settledCluster())?.children).toHaveLength(2)
   })
 
-  it("points Documentation at the bundled guide when no docs site is configured", async () => {
+  it("points Documentation at docs.otari.ai when no docs site is configured", async () => {
     await renderActions()
 
-    // The hash route, because the guide ships with this gateway: a router Link
-    // renders the router's own href rather than an absolute URL.
     const link = await screen.findByRole("link", { name: "Documentation" })
-    expect(link).toHaveAttribute("href", "/docs")
-    expect(link).not.toHaveAttribute("target")
+    expect(link).toHaveAttribute("href", "https://docs.otari.ai/")
+    expect(link).toHaveAttribute("target", "_blank")
   })
 
   it("retargets Documentation at the deployment's own docs site", async () => {
-    await renderActions({ docs_url: "https://docs.otari.ai/en/" })
+    await renderActions({ docs_url: "https://docs.example.com/" })
 
     const link = await screen.findByRole("link", { name: "Documentation" })
-    expect(link).toHaveAttribute("href", "https://docs.otari.ai/en/")
-    // A new tab, like every other link out of the dashboard: this one leaves the
-    // app, where the bundled guide is a page inside it.
+    expect(link).toHaveAttribute("href", "https://docs.example.com/")
+    // A new tab, like every other link out of the dashboard.
     expect(link).toHaveAttribute("target", "_blank")
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
   })

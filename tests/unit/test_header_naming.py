@@ -26,6 +26,8 @@ X_LITERAL = re.compile(r"""["']([Xx]-[A-Za-z0-9-]+)["']""")
 # alone. Each reason says what owns the name.
 INHERITED_HEADERS = {
     "x-api-key": "Anthropic's credential header, which its SDKs send.",
+    "x-claude-code-agent-id": "Claude Code's own subagent header, which traces read so a subagent opens no turn.",
+    "x-claude-code-session-id": "Claude Code's own session header, which traces read to group its requests.",
     "X-Content-Type-Options": "Browser security header, honored under this name only.",
     "X-Frame-Options": "Browser security header, honored under this name only.",
     "X-Forwarded-Proto": "Proxy convention, read and never sent.",
@@ -35,6 +37,7 @@ INHERITED_HEADERS = {
     "X-Subscription-Token": "The Brave Search API's own header.",
     "X-Gateway-Token": "Platform wire contract; the platform must accept a new name first.",
     "X-User-Token": "Platform wire contract; the platform must accept a new name first.",
+    "x-should-retry": "The OpenAI and Anthropic SDKs' retry override, read under this name only.",
 }
 
 # Literals of the same shape that name no header at all.

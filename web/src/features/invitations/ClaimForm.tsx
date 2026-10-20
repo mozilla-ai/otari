@@ -2,8 +2,8 @@ import { Button } from "@heroui/react"
 import { useState } from "react"
 import type { InvitationPreview } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Checkbox } from "@/design-system/forms/Checkbox"
 import { AuthPasswordField, AuthTextField } from "@/features/auth/AuthFields"
+import { TermsAcceptanceField } from "@/features/auth/TermsAcceptanceField"
 import type { useAcceptInvitation } from "@/shared/api/organizations"
 import {
   MAX_PASSWORD_BYTES,
@@ -14,7 +14,10 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // Accepts and sets the first password in one call, for an address that has
 // never signed in. Kept apart from `SignupPage`: that form ends in a
-// verification email, and this one ends ready to sign in.
+// verification email, and this one ends ready to sign in. The published terms
+// gate the provider way in as well: that sign-in is the address's first, which
+// the gateway refuses without them, so the accept carries the acceptance on to
+// the page that offers the providers.
 export function ClaimForm({
   token,
   preview,
@@ -33,11 +36,12 @@ export function ClaimForm({
   const [isTermsAccepted, setIsTermsAccepted] = useState(false)
 
   const problem = newPasswordProblem(password, confirmPassword)
+  const awaitsTerms = terms_url !== null && !isTermsAccepted
   const canSubmit =
     password !== "" &&
     confirmPassword !== "" &&
     problem === null &&
-    (terms_url === null || isTermsAccepted)
+    !awaitsTerms
 
   const submit = () => {
     if (!canSubmit || accept.isPending) return
@@ -81,29 +85,12 @@ export function ClaimForm({
         onChange={setConfirmPassword}
         autoComplete="new-password"
       />
-      {/* Beside the checkbox rather than inside its label, for the reason
-          `SignupPage` gives: nested, the link only ticked the box. */}
       {terms_url !== null ? (
-        <div className="flex flex-wrap items-center gap-x-1 text-caption">
-          <Checkbox
-            isSelected={isTermsAccepted}
-            onChange={setIsTermsAccepted}
-            ariaLabel="I accept the terms of service"
-          >
-            <span className="text-caption">I accept the</span>
-          </Checkbox>
-          <span>
-            <a
-              href={terms_url}
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-link hover:text-link-hover"
-            >
-              terms of service
-            </a>
-            .
-          </span>
-        </div>
+        <TermsAcceptanceField
+          termsUrl={terms_url}
+          isAccepted={isTermsAccepted}
+          onChange={setIsTermsAccepted}
+        />
       ) : null}
 
       <ErrorBanner error={accept.error} />
@@ -121,8 +108,13 @@ export function ClaimForm({
         <Button
           variant="ghost"
           fullWidth
-          isDisabled={accept.isPending}
-          onPress={() => accept.mutate({ token })}
+          isDisabled={accept.isPending || awaitsTerms}
+          onPress={() =>
+            accept.mutate({
+              token,
+              ...(terms_url !== null ? { terms_accepted: true } : {}),
+            })
+          }
         >
           Accept and sign in with a provider instead
         </Button>

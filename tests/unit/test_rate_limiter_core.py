@@ -29,6 +29,21 @@ def test_rate_limiter_returns_rate_limit_info() -> None:
     assert info2.remaining == 3
 
 
+def test_require_room_counts_nothing_and_refuses_once_the_allowance_is_spent() -> None:
+    limiter = RateLimiter(rpm=2)
+    for _ in range(5):
+        limiter.require_room("ip-1")
+    limiter.check("ip-1")
+    limiter.require_room("ip-1")
+    limiter.check("ip-1")
+
+    with pytest.raises(HTTPException) as refused:
+        limiter.require_room("ip-1")
+    assert refused.value.status_code == 429
+    assert "Retry-After" in (refused.value.headers or {})
+    limiter.require_room("ip-2")
+
+
 def test_rate_limiter_reset_is_wall_clock() -> None:
     limiter = RateLimiter(rpm=5)
 

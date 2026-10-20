@@ -1,27 +1,18 @@
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import type {
   InFlightResponse,
   SummaryDimension,
   UsageBucket,
   UsageCount,
-  UsageDeleteResult,
   UsageEntry,
   UsageFilters,
   UsageGroupBy,
   UsageGroupedSeries,
-  UsageMutationSelection,
-  UsageSetPriceRequest,
-  UsageSetPriceResult,
   UsageSummary,
 } from "@/client"
-import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
+import { ApiError, apiFetch } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { USAGE } from "@/shared/api/queryKeys"
+import { USAGE, workspaceMeta } from "@/shared/api/queryKeys"
 import { isoAgo } from "@/shared/helpers/timeRange"
 
 // ---------- activity / request log ----------
@@ -59,9 +50,6 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   if (filters.source_label) params.set("source_label", filters.source_label)
   if (filters.tool) params.set("tool", filters.tool)
   if (filters.priced !== undefined) params.set("priced", String(filters.priced))
-  if (filters.counts_toward_budget !== undefined) {
-    params.set("counts_toward_budget", String(filters.counts_toward_budget))
-  }
   return params
 }
 
@@ -123,6 +111,7 @@ export function useUsageLogs(
   const scope = useUsageScope()
   return useQuery({
     queryKey: [USAGE, "list", scope.base, filters, page, pageSize],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () => {
       const params = usageParams(filters)
       params.set("skip", String(page * pageSize))
@@ -148,15 +137,16 @@ export function useUsageLogs(
 // Deliberately as frozen as the log it counts (see `useUsageLogs`): the total
 // describes the page on screen, so a total that moved on its own would disagree
 // with the rows the operator can actually page through.
-export function useUsageCount(filters: UsageFilters, enabled = true) {
+export function useUsageCount(filters: UsageFilters) {
   const scope = useUsageScope()
   return useQuery({
     queryKey: [USAGE, "count", scope.base, filters],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () =>
       apiFetch<UsageCount>(
         `${scope.base}/count?${usageParams(filters).toString()}`,
       ),
-    enabled: enabled && scope.isReady,
+    enabled: scope.isReady,
     placeholderData: keepPreviousData,
     staleTime: 10_000,
   })
@@ -180,6 +170,7 @@ export function useLiveUsageCount(filters: UsageFilters, enabled = true) {
   const scope = useUsageScope()
   return useQuery({
     queryKey: [USAGE, "count", "live", scope.base, filters],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () =>
       apiFetch<UsageCount>(
         `${scope.base}/count?${usageParams(filters).toString()}`,
@@ -291,6 +282,7 @@ export function useUnpricedUsage(
       workspaceId,
       windowSeconds,
     ],
+    meta: workspaceMeta(workspaceId),
     queryFn: () => {
       const params = usageParams({
         workspace_id: workspaceId || undefined,
@@ -343,46 +335,6 @@ export function useRequestGroups(groupIds: readonly string[]) {
   })
 }
 
-// Delete imported usage rows by selection (ids or by_filter). Only rows the server
-// treats as imported are removed, which is provenance as well as budget participation
-// (see `UsageEntry.bulk_editable`); every usage view is invalidated so the list, count,
-// and analytics refresh.
-//
-// Given the long deadline, not apiFetch's default: a by_filter delete is one
-// unbounded DELETE server-side, so its duration tracks the number of matched
-// rows. Timing out here would report failure for a delete that committed anyway.
-export function useDeleteUsage() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: UsageMutationSelection) =>
-      apiFetch<UsageDeleteResult>("/usage", {
-        method: "DELETE",
-        body: JSON.stringify(body),
-        signal: longRequestSignal(),
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [USAGE] })
-    },
-  })
-}
-
-// Set the cost of imported usage rows from manual per-1M rates. Long deadline
-// for the same reason as the delete: the server reprices every matched row.
-export function useSetUsagePrice() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: UsageSetPriceRequest) =>
-      apiFetch<UsageSetPriceResult>("/usage/set-price", {
-        method: "POST",
-        body: JSON.stringify(body),
-        signal: longRequestSignal(),
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [USAGE] })
-    },
-  })
-}
-
 // ---------- usage analytics summary ----------
 
 // Pass this as `dimensions` to read only `totals` / `series`. Named rather than a
@@ -418,6 +370,7 @@ export function useUsageSummary(
       bucket,
       dimensions ?? "all",
     ],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () => {
       const params = usageParams(filters)
       params.set("bucket", bucket)
@@ -452,6 +405,7 @@ export function useUsageGroupedSeries(
   const scope = useUsageScope(usageScope)
   return useQuery({
     queryKey: [USAGE, "series", scope.base, filters, bucket, groupBy],
+    meta: workspaceMeta(filters.workspace_id),
     queryFn: () => {
       const params = usageParams(filters)
       params.set("bucket", bucket)

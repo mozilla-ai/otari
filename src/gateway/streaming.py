@@ -2,27 +2,34 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import aclosing, suppress
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
+import anyio
 from any_llm.types.completion import CompletionUsage
 
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.usage import (
     GatewayUsage,
     cache_read_tokens_of,
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    provider_web_searches_of,
     reasoning_tokens_of,
 )
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
 
+if TYPE_CHECKING:
+    from gateway.core.config import GatewayConfig
+
 A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
 S = TypeVar("S")  # Settlement type, opaque to this module
+T = TypeVar("T")
 
 
 DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS = 2.0
@@ -51,6 +58,18 @@ class StreamingAttemptFailure:
     is_final_attempt: bool
 
 
+class IncompleteStreamError(Exception):
+    """The upstream ended a stream without the event that completes it, and raised nothing.
+
+    Carries counts only, never content, so its text is safe to log and to store
+    on a usage row.
+    """
+
+    def __init__(self, chunks_received: int) -> None:
+        self.chunks_received = chunks_received
+        super().__init__(f"upstream stream ended without completing ({chunks_received} chunks received)")
+
+
 @dataclass(frozen=True)
 class StreamFormat:
     """SSE formatting configuration for a streaming protocol."""
@@ -67,11 +86,25 @@ _ANTHROPIC_ERROR = json.dumps(
 )
 
 
-def openai_error_event(fmt: StreamFormat, code: str | None) -> str:
-    """``fmt``'s error event, with ``code`` as the OpenAI error object's ``code`` when there is one."""
-    if code is None:
+def openai_error_event(
+    fmt: StreamFormat,
+    code: str | None,
+    message: str | None = None,
+    provider_failure: Mapping[str, object] | None = None,
+) -> str:
+    """``fmt``'s error event, carrying ``code`` and ``message`` in the OpenAI error object where given.
+
+    ``message`` must already be safe to show the caller; without one the event says only that streaming failed.
+    ``provider_failure`` adds the fields a provider's own failure may show (``provider``, ``status``, ``tag``,
+    ``retryable``), under ``error.provider_failure``.
+    """
+    if code is None and message is None and provider_failure is None:
         return fmt.error_payload
-    error = {"message": "An error occurred during streaming", "type": "server_error", "code": code}
+    error: dict[str, object] = {"message": message or "An error occurred during streaming", "type": "server_error"}
+    if code is not None:
+        error["code"] = code
+    if provider_failure is not None:
+        error["provider_failure"] = dict(provider_failure)
     return fmt.error_payload.replace(_OPENAI_ERROR, json.dumps({"error": error}))
 
 
@@ -92,6 +125,9 @@ RESPONSES_STREAM_FORMAT = StreamFormat(
     yield_done_on_error=False,
     keepalive=_SSE_COMMENT_KEEPALIVE,
 )
+
+# The events a Responses stream ends a response with.
+RESPONSES_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed"})
 
 ANTHROPIC_STREAM_FORMAT = StreamFormat(
     done_marker="event: done\ndata: {}\n\n",
@@ -121,7 +157,15 @@ def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> Com
         # "in prompt" never masks the Anthropic shape.
         cache_tokens_in_prompt=cache_tokens_in_prompt_of(update) and cache_tokens_in_prompt_of(current),
         reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
+        provider_web_searches=provider_web_searches_of(update) or provider_web_searches_of(current),
     )
+
+
+def _describe_settlement_error(exc: Exception) -> str:
+    """Name a settlement failure without the row data a database error's message can carry."""
+    if isinstance(exc, DATABASE_ERRORS):
+        return describe_database_error(exc)
+    return type(exc).__name__
 
 
 _KEEPALIVE_DUE = object()
@@ -160,7 +204,9 @@ async def _chunks_or_keepalive(stream: AsyncIterator[Any], interval_seconds: flo
     finally:
         if pending is not None:
             pending.cancel()
-            with suppress(BaseException):
+            # Unshielded, a canceled scope would cancel ``pending`` again on every
+            # loop pass and cut short the cleanup its one cancellation starts.
+            with anyio.CancelScope(shield=True), suppress(BaseException):
                 await pending
 
 
@@ -181,6 +227,7 @@ async def streaming_generator(
     attach_settlement: Callable[[Any, S], bool] | None = None,
     on_first_chunk: Callable[[], None] | None = None,
     error_payload: Callable[[BaseException], str] | None = None,
+    completes_stream: Callable[[Any], bool] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -222,6 +269,11 @@ async def streaming_generator(
         error_payload: Renders the SSE error event for the exception that ended
             the stream, so a dialect can say what kind of failure it was. When
             omitted, ``fmt.error_payload`` is sent for every failure.
+        completes_stream: Says, after each chunk, whether the stream so far is
+            complete; its answer after the last chunk decides. When set, an
+            upstream that ends incomplete is failed with
+            :class:`IncompleteStreamError` through the error path, so the client
+            gets an error event rather than a 200 that silently carried nothing.
 
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
@@ -233,6 +285,8 @@ async def streaming_generator(
     buffering_terminal = False
     overflow_logged = False
     settlement_task: asyncio.Task[S | None] | None = None
+    chunks_received = 0
+    completed = completes_stream is None
 
     keepalive_interval = keepalive_interval_seconds if fmt.keepalive else 0.0
 
@@ -261,6 +315,9 @@ async def streaming_generator(
                 if chunk is _KEEPALIVE_DUE:
                     yield fmt.keepalive
                     continue
+                chunks_received += 1
+                if completes_stream is not None:
+                    completed = completes_stream(chunk)
                 chunk_usage = extract_usage(chunk)
                 if chunk_usage:
                     usage = merge_stream_usage(usage, chunk_usage)
@@ -303,9 +360,14 @@ async def streaming_generator(
 
                 yield _format_and_mark_first(chunk)
 
-        # Once the upstream is exhausted, hybrid mode settles before emitting
-        # the buffered terminal suffix. Standalone mode retains the historical
-        # order: chunks, done marker, then reconciliation.
+        if not completed:
+            raise IncompleteStreamError(chunks_received)
+
+        # Once the upstream is exhausted, a caller that settles inline does so
+        # before the buffered terminal suffix; otherwise the order is chunks,
+        # done marker, then settlement. A settlement a client disconnect cut off
+        # would never run again, as the stream already counts as settled, so
+        # each one is shielded from the response's canceled scope.
         if settle_before_done:
             settled = True
             settlement: S | None = None
@@ -326,12 +388,12 @@ async def streaming_generator(
                                 yield fmt.keepalive
                         settlement = settlement_task.result()
                     else:
-                        settlement = await on_complete(usage)
+                        settlement = await _shielded(on_complete, usage)
                 elif on_no_usage is not None:
-                    await on_no_usage()
+                    await _shielded(on_no_usage)
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to log streaming usage for %s: %s", label, log_err)
+                logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
             if settlement is not None and attach_settlement is not None:
                 try:
                     attach_settlement(cost_carrier, settlement)
@@ -350,22 +412,12 @@ async def streaming_generator(
             settled = True
             try:
                 if has_usage:
-                    await on_complete(usage)
+                    await _shielded(on_complete, usage)
                 elif on_no_usage is not None:
-                    await on_no_usage()
+                    await _shielded(on_no_usage)
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to log streaming usage for %s: %s", label, log_err)
-    except asyncio.CancelledError:
-        if settlement_task is not None and not settlement_task.done():
-            settlement_task.cancel()
-            with suppress(BaseException):
-                await settlement_task
-        if not settled and on_incomplete is not None:
-            with suppress(Exception):
-                await on_incomplete()
-        settled = True
-        raise
+                logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
     except Exception as e:
         # A carrier may have been buffered just before the upstream failed. It
         # remains an ordinary provider event and must precede the safe error.
@@ -377,22 +429,34 @@ async def streaming_generator(
             yield fmt.done_marker
         settled = True
         try:
-            await on_error(e)
+            await _shielded(on_error, e)
         except Exception as log_err:
-            logger.error("Failed to log streaming error usage: %s", log_err)
+            logger.error("Failed to log streaming error usage: %s", _describe_settlement_error(log_err))
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Streaming error for %s: %s", label, e)
     finally:
-        if settlement_task is not None and not settlement_task.done():
-            settlement_task.cancel()
-            with suppress(BaseException):
-                await settlement_task
-        if not settled and on_incomplete is not None:
-            try:
-                await on_incomplete()
-            except Exception as log_err:
-                # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
+        # A client disconnect cancels the response's anyio scope, which then
+        # cancels every await made inside it, these included.
+        with anyio.CancelScope(shield=True):
+            if settlement_task is not None and not settlement_task.done():
+                try:
+                    await settlement_task
+                except Exception as log_err:
+                    # codeql[py/clear-text-logging-sensitive-data]
+                    logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
+            if not settled and on_incomplete is not None:
+                try:
+                    await on_incomplete()
+                except Exception as log_err:
+                    logger.error(
+                        "Failed to settle incomplete stream for %s: %s",
+                        # codeql[py/clear-text-logging-sensitive-data]
+                        label,
+                        _describe_settlement_error(log_err),
+                    )
+            # Iterating the source never closes it, so a stream the client abandoned
+            # would hold the provider's connection until garbage collection.
+            await close_stream_quietly(stream)
 
 
 async def iterate_streaming_attempts(
@@ -402,6 +466,7 @@ async def iterate_streaming_attempts(
     on_attempt_failed: Callable[[A, StreamingAttemptFailure], Awaitable[None]],
     first_chunk_timeout_seconds: float = DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS,
     final_attempt_extra_seconds: float = 0.0,
+    first_chunk_timeouts: Callable[[A], tuple[float, float]] | None = None,
 ) -> tuple[A, AsyncIterator[C]]:
     """Iterate over ``attempts`` until one yields its first chunk; return that
     attempt and an iterator that re-emits the chunk followed by the rest of
@@ -432,6 +497,9 @@ async def iterate_streaming_attempts(
     failed attempt, retryable failures skip-and-continue, non-retryable
     failures propagate immediately, and the last exception is raised if every
     attempt is exhausted with retryable failures.
+
+    ``first_chunk_timeouts`` gives an attempt its own pair of those two values,
+    in place of the ones above.
 
     Latency contract: zero added latency in the success case — we hold the
     first chunk only long enough to call this function's caller. In the
@@ -465,9 +533,13 @@ async def iterate_streaming_attempts(
         # The failover cap only buys something when a next attempt exists, so the
         # sole/final attempt gets extra grace on top of it rather than being cut
         # off with nothing to fall over to.
-        attempt_timeout = first_chunk_timeout_seconds
+        attempt_timeout, final_extra = (
+            first_chunk_timeouts(attempt)
+            if first_chunk_timeouts is not None
+            else (first_chunk_timeout_seconds, final_attempt_extra_seconds)
+        )
         if is_final_attempt:
-            attempt_timeout += final_attempt_extra_seconds
+            attempt_timeout += final_extra
 
         first_chunk: C
         try:
@@ -490,7 +562,7 @@ async def iterate_streaming_attempts(
                     is_final_attempt=is_final_attempt,
                 ),
             )
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
             last_exception = exc
             continue
         except BaseException as exc:
@@ -504,23 +576,107 @@ async def iterate_streaming_attempts(
                     is_final_attempt=is_final_attempt or not retryable,
                 ),
             )
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
             last_exception = exc
             if not retryable:
                 raise
             continue
 
-        return attempt, _stitched(first_chunk, stream)
+        first: asyncio.Future[C] = asyncio.get_running_loop().create_future()
+        first.set_result(first_chunk)
+        return attempt, _Prefetched(first, stream)
 
     if last_exception is not None:
         raise last_exception
     raise RuntimeError("iterate_streaming_attempts: no attempts provided")
 
 
-async def _stitched(first: C, remaining: AsyncIterator[C]) -> AsyncIterator[C]:
-    yield first
-    async for chunk in remaining:
-        yield chunk
+async def hold_for_first_chunk(stream: AsyncIterator[C], config: "GatewayConfig") -> AsyncIterator[C]:
+    """``stream``, held for its first chunk as ``streaming_first_chunk_hold_ms`` says.
+
+    Holding lets a provider failure before any output raise before the caller
+    sends a status line, so it is answered with the status the same request gets
+    unstreamed, and a routing policy can still fall over. A hold of 0 returns
+    ``stream`` unread, so the response is committed as soon as it opens.
+    """
+    hold_ms = config.streaming_first_chunk_hold_ms
+    if hold_ms <= 0:
+        return stream
+    return await await_first_chunk(stream, hold_ms / 1000)
+
+
+async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> AsyncIterator[C]:
+    """Wait up to ``window_seconds`` for ``stream``'s first chunk, so a failure before it raises here.
+
+    A provider stream can fail before producing anything: an SDK that refuses a
+    keyword only once the stream is iterated, or an upstream that answers the
+    request with an error status. Raised here, before the caller has sent a
+    status line, that failure can be answered with its own status instead of a
+    ``200`` whose body is one error event.
+
+    Returns an iterator that re-emits the first chunk and then the rest of the
+    stream. When the window elapses first, the returned iterator resumes the
+    same pending read, so a chunk arriving just after the window is not lost and
+    a failure after it reaches the caller of the iterator, as it would have
+    without this wait. A non-positive window waits for the first chunk however
+    long it takes. Nothing here cuts a slow stream off.
+    """
+    first = asyncio.ensure_future(stream.__anext__())
+    # A read left pending is never awaited if the iterator is dropped unread;
+    # retrieve its outcome so a late failure is not reported as unhandled.
+    first.add_done_callback(lambda done: done.cancelled() or done.exception())
+    try:
+        await asyncio.wait((first,), timeout=window_seconds if window_seconds > 0 else None)
+    except BaseException:
+        first.cancel()
+        with suppress(BaseException):
+            await first
+        await close_stream_quietly(stream)
+        raise
+    if first.done():
+        try:
+            first.result()
+        except StopAsyncIteration:
+            return _empty_async_iter()
+        except BaseException:
+            await close_stream_quietly(stream)
+            raise
+    return _Prefetched(first, stream)
+
+
+class _Prefetched(AsyncIterator[C]):
+    """A first read, finished or still pending, followed by the rest of the stream.
+
+    A class rather than a generator so ``aclose`` reaches the source stream and
+    any pending read even when iteration never started: closing an unstarted
+    generator runs none of its body, which would leave the provider's
+    connection open until garbage collection.
+    """
+
+    def __init__(self, first: asyncio.Future[C], remaining: AsyncIterator[C]) -> None:
+        self._first: asyncio.Future[C] | None = first
+        self._remaining = remaining
+
+    def __aiter__(self) -> AsyncIterator[C]:
+        return self
+
+    async def __anext__(self) -> C:
+        first, self._first = self._first, None
+        if first is None:
+            return await self._remaining.__anext__()
+        try:
+            return await first
+        finally:
+            if not first.done():
+                first.cancel()
+
+    async def aclose(self) -> None:
+        first, self._first = self._first, None
+        if first is not None and not first.done():
+            first.cancel()
+            with suppress(BaseException):
+                await first
+        await close_stream_quietly(self._remaining)
 
 
 async def _empty_async_iter() -> AsyncIterator[C]:
@@ -528,8 +684,23 @@ async def _empty_async_iter() -> AsyncIterator[C]:
     yield  # unreachable; makes this a generator
 
 
-async def _close_stream_quietly(stream: AsyncIterator[Any]) -> None:
+async def _shielded(settle: Callable[..., Awaitable[T]], *args: Any) -> T:
+    """Run a settlement callback to the end even when the client has disconnected.
+
+    A disconnect cancels the response's task scope, and anyio then cancels every
+    await left inside it, so a settlement's database writes would stop with the
+    stream and the request would go unbilled. A client that hangs up the
+    moment it reads the last event, as Claude Code's ``WebSearch`` does, lands
+    there on every request.
+    """
+    with anyio.CancelScope(shield=True):
+        result = await settle(*args)
+    return result
+
+
+async def close_stream_quietly(stream: AsyncIterator[Any]) -> None:
+    """Close ``stream`` if it can be closed, even while a client disconnect is canceling the caller."""
     close = getattr(stream, "aclose", None)
     if callable(close):
-        with suppress(BaseException):
+        with anyio.CancelScope(shield=True), suppress(BaseException):
             await close()

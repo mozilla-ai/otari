@@ -659,6 +659,12 @@ def tokenize_commands(commands: tuple[str, ...]) -> dict[str, list[list[str]]]:
     return {command: _command_segments(command) for command in commands}
 
 
+def _cached_segments(command: str, segment_cache: dict[str, list[list[str]]]) -> list[list[str]]:
+    """Return `command`'s segments from the cache, tokenizing only on a miss; a command with no segments is a hit."""
+    segments = segment_cache.get(command)
+    return segments if segments is not None else _command_segments(command)
+
+
 def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     """Whether `phrase`'s tokens appear, in order and unbroken, inside `segment`.
 
@@ -762,7 +768,7 @@ def evaluate_command(
         for command in evidence.commands
         if any(
             _contains_subsequence(segment, phrase)
-            for segment in (segments_by_command.get(command) or _command_segments(command))
+            for segment in _cached_segments(command, segments_by_command)
             for phrase in forbidden_phrases
         )
     )
@@ -878,7 +884,7 @@ def evaluate_command_if_changed(
     satisfied = any(
         _contains_subsequence(segment, phrase)
         for command in command_evidence.commands
-        for segment in (segments_by_command.get(command) or _command_segments(command))
+        for segment in _cached_segments(command, segments_by_command)
         for phrase in required_phrases
     )
     if satisfied:
@@ -990,9 +996,9 @@ def evaluate_judge(gate: JudgeGate, path_evidence: PathEvidence | None, evidence
     evaluated (see :class:`JudgeEvidence`); a gate whose id has no matching
     verdict here resolves ``unknown``: unlike ``evidence`` being absent
     outright, this caller did run judge gates for this event and is
-    genuinely missing one, most often ``_HOOK_JUDGE_MAX_GATES_PER_RUN``
-    (or, now, its own judge time budget) skipping a gate this run never got
-    to rather than it resolving cleanly.
+    genuinely missing one.
+
+    A ``"not_run"`` verdict resolves ``not_run``, with the caller's reason as its detail.
 
     The caller's own ``"error"`` outcome (its model call failed or returned
     something unparsable) maps to :class:`Outcome.ERROR`: this is
@@ -1031,6 +1037,15 @@ def evaluate_judge(gate: JudgeGate, path_evidence: PathEvidence | None, evidence
             enforcement=gate.enforcement,
             outcome=Outcome.UNKNOWN,
             message="No model verdict was submitted for this gate.",
+        )
+
+    if verdict.outcome == "not_run":
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.NOT_RUN,
+            message="This judge gate was skipped.",
+            detail=verdict.reasoning or None,
         )
 
     if verdict.outcome == "error":

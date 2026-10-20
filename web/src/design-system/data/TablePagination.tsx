@@ -136,7 +136,9 @@ export function TablePagination({
         {isFetching ? <Spinner size="sm" aria-hidden="true" /> : null}
       </div>
 
-      <div className="flex items-center gap-3">
+      {/* Wraps as well as the row around it: with 44px arrows on a coarse
+          pointer, the summary and the pager together are wider than a phone. */}
+      <div className="flex flex-wrap items-center gap-3">
         {/* The live text the spinner above defers to: the range changes in
             place on every page, page-size and filter change, and a screen
             reader has nothing else to learn the new one from. */}

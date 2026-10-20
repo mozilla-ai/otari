@@ -44,7 +44,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as ApiUser
-from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -63,6 +63,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
 _CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"
@@ -372,7 +373,7 @@ def test_a_blank_provider_narrowing_is_refused(
 ) -> None:
     """A ceiling narrowed to nothing would be created, listed, and never enforced.
 
-    ``applicable_budgets`` matches ``provider_key_id == provider_instance OR IS
+    ``get_provider_ceilings`` matches ``provider_key_id == provider_instance OR IS
     NULL``, and a blank string is neither: it stores as a narrowed row under
     ``uq_scoped_budgets_scope_with_key`` and binds to no request ever. That is the
     same permissive-direction failure a scope naming nothing has, so it is refused
@@ -550,9 +551,12 @@ def _service(async_db: AsyncSession) -> BudgetService:
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
-        OrganizationService(async_db, membership_listener=None),
-        ApiKeyService(ApiKeyRepository(uow)),
-        WorkspaceAccess(async_db, OrganizationService(async_db, membership_listener=None)),
+        OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
+        WorkspaceAccess(
+            async_db,
+            OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        ),
     )
 
 

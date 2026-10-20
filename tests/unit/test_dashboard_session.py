@@ -154,10 +154,17 @@ def test_sign_out_revokes_the_session_server_side(tmp_path: Path) -> None:
         response = client.delete(f"{API_ROOT}/auth/session")
         assert response.status_code == 204
 
+        # The clear carries the attributes the cookie was set with.
+        assert "samesite=strict" in response.headers["set-cookie"].lower()
+        assert "httponly" in response.headers["set-cookie"].lower()
+
         # Even a kept copy of the cookie is dead after sign-out (server-side
         # revocation, not just cookie deletion in the browser).
         client.cookies.set(SESSION_COOKIE_NAME, stolen_cookie)
-        assert client.get(f"{API_ROOT}/settings").status_code == 401
+        refused = client.get(f"{API_ROOT}/settings")
+        assert refused.status_code == 401
+        # Worded for a browser whose session ended, not for an API client missing a key header.
+        assert refused.json()["detail"] == "Your dashboard session has ended. Sign in again."
 
 
 def test_sign_out_without_a_session_is_a_no_op(tmp_path: Path) -> None:

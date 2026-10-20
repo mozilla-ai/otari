@@ -72,6 +72,33 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
     reset_db()
 
 
+def test_hybrid_mode_explains_that_sign_in_happens_on_the_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A script or an old bookmark reaching a sign-in path learns where to go, as the other stubs say."""
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+
+    config = GatewayConfig(
+        mode="hybrid",
+        platform={"base_url": "http://localhost:8100/api/v1"},
+    )
+    app = create_app(config)
+
+    with TestClient(app) as client:
+        responses = [
+            client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": "pw"}),
+            client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": "pw"}),
+            client.get(f"{API_ROOT}/auth/oauth/google/authorize"),
+            client.get("/auth/google/callback?code=c&state=s", follow_redirects=False),
+        ]
+
+    expected = {"detail": "Dashboard sign-in is not available in hybrid mode. Sign in through the platform UI."}
+    for response in responses:
+        assert response.status_code == 404, response.text
+        assert response.json() == expected
+
+    reset_config()
+    reset_db()
+
+
 def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     # The admin-dashboard management surface is standalone-only; in hybrid mode
     # it must be unavailable (owned by the platform), with the same helpful hint.

@@ -42,14 +42,14 @@ from typing import TYPE_CHECKING
 from any_llm import aembedding
 from any_llm.exceptions import AnyLLMError
 from sqlalchemy import delete, func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.routing import RoutingMemory
 from gateway.services.pricing_service import find_model_pricing
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_kwargs import require_declared_credential, resolve_provider_selector
 from gateway.services.routing.backends import RoutingContext, RoutingDecision
 
 if TYPE_CHECKING:
@@ -195,24 +195,29 @@ class KnnRoutingMemory:
         if not prompt.strip() or not scores:
             return 0
         embedding = await self._embed(prompt)
-        async with create_session() as db:
-            db.add(
-                RoutingMemory(
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                    embedding_model=self.embedding_model,
-                    embedding=embedding,
-                    qualities={model: float(score) for model, score in scores.items()},
-                    task_id=task_id,
-                    label_source=label_source,
+        try:
+            async with create_session() as db:
+                db.add(
+                    RoutingMemory(
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        embedding_model=self.embedding_model,
+                        embedding=embedding,
+                        qualities={model: float(score) for model, score in scores.items()},
+                        task_id=task_id,
+                        label_source=label_source,
+                    )
                 )
-            )
-            try:
-                await db.commit()
-            except SQLAlchemyError:
-                await db.rollback()
-                raise
-        await self._evict_if_needed(user_id, workspace_id)
+                try:
+                    await db.commit()
+                except SQLAlchemyError:
+                    await db.rollback()
+                    raise
+            await self._evict_if_needed(user_id, workspace_id)
+        except TimeoutError as exc:
+            # A connect timeout arrives bare, the same type an embedding timeout
+            # has; raised as a database error so the caller can tell them apart.
+            raise OperationalError("database connection timed out", None, exc) from exc
         return 1
 
     # -- scoring -----------------------------------------------------------
@@ -517,6 +522,7 @@ class KnnRoutingMemory:
         others fixes.
         """
         resolved = resolve_provider_selector(self.config, self.embedding_model)
+        require_declared_credential(self.config, resolved.instance, resolved.provider, resolved.kwargs)
         result = await aembedding(model=resolved.model, inputs=text, provider=resolved.provider, **resolved.kwargs)
         vector = list(result.data[0].embedding)
         return _unit([float(x) for x in vector])

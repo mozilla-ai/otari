@@ -394,6 +394,19 @@ describe("the type scale's two halves", () => {
   })
 })
 
+describe("the keyboard focus ring on a text field", () => {
+  // A guard rather than a check: jsdom does not compute the cascade, so this
+  // only pins where the rule lives.
+  it("is drawn from the utilities layer, because HeroUI's `.input` is outline-none in the components layer", () => {
+    const rule = CSS.match(
+      /@layer utilities\s*\{\s*\.input\[data-focus-visible="true"\],\s*\.textarea\[data-focus-visible="true"\]\s*\{([^}]*)\}/,
+    )
+    expect(rule, "the field ring is not in `@layer utilities`").not.toBeNull()
+    expect(rule?.[1]).toContain("outline: 2px solid")
+    expect(rule?.[1]).toContain("var(--color-focus)")
+  })
+})
+
 describe("the flat surface: no corners, no elevation", () => {
   // Both halves of the divided-surface direction are one-line token changes
   // that reach the whole app, and both fail silently if they land in the wrong
@@ -723,6 +736,7 @@ describe("a table is a region, not a card", () => {
     "otari-provider-keys-table",
     "otari-providers-table",
     "otari-routing-table",
+    "otari-sessions-table",
     "otari-workspaces-table",
   ]
 
@@ -783,6 +797,17 @@ describe("a table is a region, not a card", () => {
     expect(
       offenders,
       "delete the declaration; `.otari-table` is what decides these three",
+    ).toEqual([])
+  })
+
+  it("names a body cell's column by data-column, never by data-key", () => {
+    // A body cell's `data-key` is a generated collection key (`react-aria-5`),
+    // so a rule keyed on it matches nothing and a pinned header leaves its
+    // cells to scroll away underneath it.
+    const bare = CSS.replace(/\/\*[\s\S]*?\*\//g, "")
+    expect(
+      bare.match(/\.table__cell\[data-key=[^\]]*\]/g) ?? [],
+      "use `.table__cell[data-column=…]`, which DataTable stamps on every cell",
     ).toEqual([])
   })
 })
@@ -1159,19 +1184,13 @@ describe("content text wears a type role", () => {
     ],
     // Page-referent: prose that describes the page rather than a control on
     // it. The auth pages' centered text was ruled this explicitly.
-    ["features/auth/Login.tsx", "the divider row and the page's footer prose"],
+    [
+      "features/auth/AuthProviderButtons.tsx",
+      "the divider row between the provider rows and the address form",
+    ],
     [
       "features/invitations/AcceptInvitationPage.tsx",
       "the centered next-step prose, page-referent",
-    ],
-    // The named edge: a note about what an action will do, in the row with
-    // the button, rather than about how to operate a control. Two entries for
-    // one ruling, because the form moved to its own module and took four of the
-    // five notes with it; the page kept the candidate cap.
-    ["features/routing/PolicyForm.tsx", "consequence notes in the button row"],
-    [
-      "features/routing/RoutingPage.tsx",
-      "the candidate cap, a consequence note in the button row",
     ],
   ]
   const RULED = new Map(CAPTION_SIZE_IS_RULED)

@@ -4,6 +4,7 @@ import json
 from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
@@ -97,6 +98,31 @@ def test_responses_endpoint_scopes_prompt_cache_key(
     assert len(scoped_cache_key) == 64
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_responses_endpoint_does_not_send_the_user_upstream(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    responses_request_body: dict[str, Any],
+    stream: bool,
+) -> None:
+    """The billed user stays the gateway's, as on Chat Completions, so a provider refusing ``user`` still serves."""
+    responses_request_body["stream"] = stream
+    usage = _FakeUsage(5, 7)
+    completed = _FakeStreamEvent("response.completed", {"event": "completed"}, response=_FakeResponse({}, usage))
+    reply: Any = _make_stream([completed]) if stream else _FakeResponse({"id": "resp_123", "output": []}, usage)
+    mock_aresponses = AsyncMock(return_value=reply)
+
+    with patch("gateway.api.routes.responses.aresponses", new=mock_aresponses):
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
+
+    assert result.status_code == 200, result.text
+    if stream:
+        assert "event: response.completed" in result.text
+        assert '"error"' not in result.text
+    assert mock_aresponses.await_args is not None
+    assert "user" not in mock_aresponses.await_args.kwargs
+
+
 def test_responses_endpoint_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -119,16 +145,17 @@ def test_responses_endpoint_rejects_unsupported_provider(
     master_key_header: dict[str, str],
     responses_request_body: dict[str, Any],
 ) -> None:
-    """Requests to providers without Responses support are rejected."""
+    """Requests to providers that support neither Responses nor chat completions are rejected."""
 
     responses_request_body["model"] = "anthropic:claude-3-5"
 
     class _UnsupportedProvider:
         SUPPORTS_RESPONSES = False
+        SUPPORTS_COMPLETION = False
 
     with (
         patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock) as mock_call,
-        patch("gateway.api.routes.responses.AnyLLM.get_provider_class", return_value=_UnsupportedProvider),
+        patch("any_llm.AnyLLM.get_provider_class", return_value=_UnsupportedProvider),
     ):
         result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 

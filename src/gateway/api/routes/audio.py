@@ -1,6 +1,7 @@
 """OpenAI-compatible audio transcription and speech endpoints."""
 
-from decimal import Decimal
+import io
+import mimetypes
 from typing import Annotated, Any
 
 from any_llm import aspeech, atranscription
@@ -9,15 +10,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._passthrough import BillingMeters, run_passthrough
+from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key_if_needed
+from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
-from gateway.models.pricing import ModelPricing
+from gateway.services.inference import ONE_REQUEST_BILLING, TRANSCRIPTION_BILLING
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import flat_request_cost, per_request_meters
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["audio"])
@@ -41,12 +41,27 @@ _SPEECH_CONTENT_TYPES: dict[str | None, str] = {
 }
 
 
+def _named_audio(data: bytes, upload: UploadFile) -> io.BytesIO:
+    """Wrap an upload so providers see its file name and type.
+
+    OpenAI-style upstreams infer the audio format from the multipart file name;
+    bare bytes arrive nameless and are rejected as an unsupported format.
+    """
+    name = upload.filename
+    if not name:
+        extension = mimetypes.guess_extension(upload.content_type or "") or ".mp3"
+        name = f"audio{extension}"
+    named = io.BytesIO(data)
+    named.name = name
+    return named
+
+
 @router.post("/audio/transcriptions", response_model=None)
 async def create_transcription(
     raw_request: Request,
     response: Response,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     file: UploadFile = File(...),
@@ -66,6 +81,8 @@ async def create_transcription(
     """
 
     async def call_provider(resolved: ResolvedProvider) -> Transcription:
+        # A hybrid gateway calls this once per attempt it falls back through.
+        await file.seek(0)
         file_bytes = await file.read()
         if len(file_bytes) > _MAX_AUDIO_UPLOAD_BYTES:
             raise HTTPException(
@@ -75,7 +92,7 @@ async def create_transcription(
 
         transcription_kwargs: dict[str, Any] = {
             "model": resolved.model,
-            "file": file_bytes,
+            "file": _named_audio(file_bytes, file),
             "provider": resolved.provider,
             **resolved.kwargs,
         }
@@ -90,21 +107,12 @@ async def create_transcription(
 
         return await atranscription(**transcription_kwargs)
 
-    def compute_cost(result: Transcription, pricing: ModelPricing | None) -> Decimal:
-        # Audio bills per request like moderations: ``input_price_per_million``
-        # stores the per-request rate scaled by 1e6 (see flat_request_cost), and
-        # an unpriced model is free by design.
-        return flat_request_cost(pricing)
-
-    def compute_meters(result: Transcription, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
-        return per_request_meters(cost)
-
     # Audio is exempt from require_pricing and has no measurable cost unit yet
     # (tokens, seconds, etc.), so the reservation estimate is 0; the reservation
     # still enforces existing per-user state (user exists, not blocked, not
     # already over budget). When pricing is configured, the cost is recorded as
     # an auditable per-request charge line. Only an explicitly configured rate
-    # counts (pricing_use_defaults=False): genai-prices quotes audio models such
+    # counts (pricing_use_defaults=False): models.dev quotes audio models such
     # as gpt-4o-transcribe per million tokens, which this per-request convention
     # would misread as a per-million-request rate.
     outcome = await run_passthrough(
@@ -118,12 +126,21 @@ async def create_transcription(
         model=model,
         user=user,
         call_provider=call_provider,
+        request_params=[
+            name
+            for name, value in (
+                ("language", language),
+                ("prompt", prompt),
+                ("response_format", response_format),
+                ("temperature", temperature),
+            )
+            if value is not None
+        ],
         lookup_pricing=True,
         pricing_use_defaults=False,
         reserve_before_resolve=True,
         relabel=False,
-        compute_cost=compute_cost,
-        compute_meters=compute_meters,
+        billing=TRANSCRIPTION_BILLING,
     )
     return outcome.result.model_dump()
 
@@ -164,8 +181,8 @@ async def create_speech(
     raw_request: Request,
     response: Response,
     request: AudioSpeechRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> StreamingResponse:
@@ -192,21 +209,12 @@ async def create_speech(
         }
         return await aspeech(**speech_kwargs)
 
-    def compute_cost(result: bytes, pricing: ModelPricing | None) -> Decimal:
-        # Speech bills per request like moderations: ``input_price_per_million``
-        # stores the per-request rate scaled by 1e6 (see flat_request_cost), and
-        # an unpriced model is free by design.
-        return flat_request_cost(pricing)
-
-    def compute_meters(result: bytes, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
-        return per_request_meters(cost)
-
     # Audio is exempt from require_pricing and has no measurable cost unit yet
     # (tokens, seconds, characters, etc.), so the reservation estimate is 0; the
     # reservation still enforces existing per-user state. When pricing is
     # configured, the cost is recorded as an auditable per-request charge line.
     # Only an explicitly configured rate counts (pricing_use_defaults=False):
-    # genai-prices quotes speech models such as gpt-4o-mini-tts per million
+    # models.dev quotes speech models such as gpt-4o-mini-tts per million
     # tokens, which this per-request convention would misread as a
     # per-million-request rate.
     outcome = await run_passthrough(
@@ -220,12 +228,12 @@ async def create_speech(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        request_params=request.model_fields_set,
         lookup_pricing=True,
         pricing_use_defaults=False,
         reserve_before_resolve=True,
         relabel=False,
-        compute_cost=compute_cost,
-        compute_meters=compute_meters,
+        billing=ONE_REQUEST_BILLING,
     )
 
     content_type = _SPEECH_CONTENT_TYPES.get(request.response_format, "audio/mpeg")

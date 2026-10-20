@@ -1,5 +1,6 @@
+import type { Query, QueryClient } from "@tanstack/react-query"
 import { useQueryClient } from "@tanstack/react-query"
-import { useCallback, useSyncExternalStore } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { FiAlertTriangle } from "react-icons/fi"
 
 import { ApiError } from "@/shared/api/client"
@@ -12,10 +13,36 @@ function isUnreachable(error: unknown): boolean {
   return error instanceof ApiError && error.status === 0
 }
 
-// True while at least one query is currently failing to reach the gateway. It
-// watches the whole query cache rather than any one page, so the alert is the
-// same wherever the operator is standing, and it clears itself the moment a
-// request succeeds again.
+function failedToConnect(query: Query): boolean {
+  return query.state.status === "error" && isUnreachable(query.state.error)
+}
+
+// Whether the most recent request anywhere in the cache failed to connect. Kept
+// from the cache's events rather than read off each query's state: any answer
+// from the gateway, an error included, clears it, so an errored query left
+// behind by a page the operator moved on from cannot hold the alert, and a
+// query refetching (which puts one with no data back to `pending`) does not
+// flip it on its way to the same failure. `error` fires once retries are spent.
+function trackConnection(queryClient: QueryClient) {
+  let failing = false
+  return {
+    subscribe: (onStoreChange: () => void) =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (event.type !== "updated") return
+        const { action } = event
+        // A manual cache write (`setQueryData`) reaches no gateway, so it says
+        // nothing about the connection.
+        if (action.type === "success" && !action.manual) failing = false
+        else if (action.type === "error") failing = isUnreachable(action.error)
+        else return
+        onStoreChange()
+      }),
+    getSnapshot: () => failing,
+  }
+}
+
+// It watches the whole query cache rather than any one page, so the alert is
+// the same wherever the operator is standing.
 //
 // The cache is an external store and is read as one. Subscribing in an effect
 // and calling `setState` from the listener does not hold here: the cache emits
@@ -26,33 +53,10 @@ function isUnreachable(error: unknown): boolean {
 // timing, so the same notification arrives safely.
 function useGatewayUnreachable(): boolean {
   const queryClient = useQueryClient()
-
-  // `useSyncExternalStore` identity-checks `subscribe` and re-subscribes when it
-  // changes, so this is held stable rather than rebuilt every render. That is
-  // the "a reference something else identity-checks" case performance.md keeps,
-  // not memoization by reflex.
-  const subscribe = useCallback(
-    (onStoreChange: () => void) =>
-      queryClient.getQueryCache().subscribe(onStoreChange),
-    [queryClient],
-  )
-
-  // Runs on every notification and more than once per render, so it stays a
-  // scan that returns a boolean. React compares snapshots with `Object.is`, so
-  // returning anything carrying an identity of its own would loop.
-  const getSnapshot = useCallback(
-    () =>
-      queryClient
-        .getQueryCache()
-        .getAll()
-        .some(
-          (query) =>
-            query.state.status === "error" && isUnreachable(query.state.error),
-        ),
-    [queryClient],
-  )
-
-  return useSyncExternalStore(subscribe, getSnapshot)
+  // Built once per client: `useSyncExternalStore` identity-checks `subscribe`
+  // and re-subscribes when it changes, and the tracker holds the state.
+  const [connection] = useState(() => trackConnection(queryClient))
+  return useSyncExternalStore(connection.subscribe, connection.getSnapshot)
 }
 
 // A bottom-right toast that surfaces a lost backend connection at the app level,
@@ -60,9 +64,33 @@ function useGatewayUnreachable(): boolean {
 // answering is a whole-app condition, so it belongs above any single page. Not
 // dismissible: it is tied to live state and disappears on its own once the
 // gateway responds.
+//
+// Shown only once the failing queries have been asked again and failed again.
+// One dropped request is routine (a laptop waking, a proxy closing an idle
+// connection) and the build poll does not retry, so alarming on the first
+// failure put the banner up over a healthy gateway.
 export function ConnectionStatus() {
-  const isUnreachable = useGatewayUnreachable()
-  if (!isUnreachable) {
+  const queryClient = useQueryClient()
+  const failing = useGatewayUnreachable()
+  const [confirmed, setConfirmed] = useState(false)
+
+  useEffect(() => {
+    if (!failing) {
+      setConfirmed(false)
+      return
+    }
+    let current = true
+    // A recheck that succeeds clears `failing`, which ends this run before the
+    // banner is confirmed.
+    void queryClient.refetchQueries({ predicate: failedToConnect }).then(() => {
+      if (current) setConfirmed(true)
+    })
+    return () => {
+      current = false
+    }
+  }, [failing, queryClient])
+
+  if (!failing || !confirmed) {
     return null
   }
 

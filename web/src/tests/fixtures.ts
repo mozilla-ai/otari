@@ -36,6 +36,7 @@ import type {
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
   WorkspaceMember,
   WorkspaceProviderKeyOverride,
   WorkspaceWebSearchConfig,
@@ -133,7 +134,6 @@ export function pricingResponse(
     output_price_per_million: 0,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     pricing_tiers: [],
     unit: "tokens",
     origin: "api",
@@ -146,17 +146,19 @@ export function pricingResponse(
 // The surface names a standalone gateway hosts, kept in step with
 // STANDALONE_SURFACES in src/gateway/api/routes/bootstrap.py. A test that wants
 // a surface hidden overrides `surfaces` rather than editing this.
-const STANDALONE_SURFACES = [
+export const STANDALONE_SURFACES = [
   "admin",
   "budgets",
+  "health_checks",
+  "hosted_providers",
   "keys",
   "models",
   "organization_guardrails",
   "organization_providers",
+  "organization_usage",
   "organizations",
   "playground",
   "pricing",
-  "providers",
   "routing",
   "settings",
   "tools",
@@ -166,22 +168,19 @@ const STANDALONE_SURFACES = [
 ]
 
 // The same list for a hosted (multi-tenant) deployment, kept in step with
-// HOSTED_SURFACES beside it: the process-global provider page drops, because a
-// credential keyed on an instance name alone is served to every tenant; the
-// Playground drops because a control plane serves no inference (otari#822); and
-// the organization-wide Usage page appears, being a destination only where "my
-// organization" is narrower than "everything" (otari-ai#1963).
+// HOSTED_SURFACES beside it: the Playground drops because a control plane
+// serves no inference (otari#822), and health checks drop because a control
+// plane sends no inference of its own to check.
 //
-// `organization_providers` is not part of that difference: it is on the
-// standalone list above too, because the page behind it is where an
-// organization's models are offered, priced and switched, which is a tenant's
-// question whether or not the deployment has more than one tenant.
-const HOSTED_DROPS = new Set(["providers", "playground"])
+// `organization_providers` and `organization_usage` are not part of that
+// difference: both are on the standalone list above too, because what each page
+// answers is a tenant's question whether or not the deployment has more than
+// one tenant.
+const HOSTED_DROPS = new Set(["playground", "health_checks"])
 
-export const HOSTED_SURFACES = [
-  ...STANDALONE_SURFACES.filter((surface) => !HOSTED_DROPS.has(surface)),
-  "organization_usage",
-]
+export const HOSTED_SURFACES = STANDALONE_SURFACES.filter(
+  (surface) => !HOSTED_DROPS.has(surface),
+)
 
 /** The deployment bootstrap, standalone by default. See useDeployment. */
 export function bootstrap(
@@ -199,8 +198,8 @@ export function bootstrap(
     // served this page is the address that serves the API. The hosted-mode
     // snippet tests set it.
     data_plane_url: null,
-    // Null, because a fixture describes a deployment whose documentation is the
-    // bundled guide; the tests about an operator-configured docs site set it.
+    // Null, so Documentation links open docs.otari.ai; the tests about an
+    // operator-configured docs site set it.
     docs_url: null,
     // Unset, like docs_url: this fixture's deployment publishes none. The
     // account-menu tests set them.
@@ -211,6 +210,9 @@ export function bootstrap(
     // Not frozen, because a fixture describes a deployment somebody can sign
     // in to; the maintenance-mode tests override it.
     maintenance_mode: false,
+    // On, the setting default: the tests about a deployment that switched
+    // passkeys off say so.
+    passkeys_enabled: true,
     // Off by default, matching a deployment that has not set public_base_url:
     // the passkey tests turn it on rather than every other test turning it off.
     passkeys_ready: false,
@@ -219,7 +221,7 @@ export function bootstrap(
     // clearing a list it does not care about.
     oauth_providers: [],
     mail_ready: false,
-    feedback_enabled: false,
+    feedback_enabled: true,
     // Off by default, matching the config default; the public-catalog tests
     // turn it on.
     public_catalog: false,
@@ -715,7 +717,6 @@ export function organizationPricingOverride(
     output_price_per_million: 10,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     pricing_tiers: [],
     unit: "tokens",
     effective_from: "2026-01-01T00:00:00Z",
@@ -745,9 +746,9 @@ export function orgProviderModel(
     output_price_per_million: 10,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     price_source: "defaults",
     pricing_id: null,
+    unit: "tokens",
     enabled: true,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
@@ -772,6 +773,9 @@ export function orgProviderKey(
     // The default is a key this deployment can actually read. A test wanting the
     // other case says so, because that is the state the dashboard has to show.
     usable: true,
+    // Never refreshed: the key offers no rows and is unnarrowed.
+    offered_count: 0,
+    serving_count: 0,
     archived_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
@@ -808,6 +812,8 @@ export function workspaceCodeExecutionPolicy(
     // policy: nothing configured, nothing narrowed.
     configured: false,
     sandbox_configured: true,
+    // What no policy means on this deployment: on, as on a default one.
+    default_enabled: true,
     // The default deployment has curated no images, so a workspace may pin
     // none. `available_tools` is what this deployment's sandbox serves, which
     // is one tool today, not the wider vocabulary a policy may be written in.
@@ -835,6 +841,8 @@ export function workspaceWebSearchConfig(
     // one: nothing configured, nothing narrowed.
     configured: false,
     web_search_configured: true,
+    // What no row means on this deployment: on, as on a default one.
+    default_enabled: true,
     enabled: true,
     max_results: null,
     purpose_hint: null,
@@ -857,14 +865,30 @@ export function workspaceMcpServer(
     url: "https://mcp.example.com/github",
     purpose_hint: null,
     // Null is how "no allow-list" is stored, which is the neutral state a
-    // builder wants. Not interchangeable with `[]` as a stored value, even
-    // though `mcp_client` happens to read both as "expose everything".
+    // builder wants. Not interchangeable with `[]`, which admits no tool.
     allowed_tools: null,
     enabled: true,
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
+    // Never checked, which is how a row stored before checks existed reads.
+    health: null,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function workspaceMcpServerHealth(
+  overrides: Partial<WorkspaceMcpServerHealth> = {},
+): WorkspaceMcpServerHealth {
+  return {
+    status: "healthy",
+    checked_at: "2026-08-01T00:00:00+00:00",
+    error: null,
+    http_status: null,
+    tool_count: 2,
+    missing_allowed_tools: [],
+    tools: ["list_issues", "get_issue"],
     ...overrides,
   }
 }

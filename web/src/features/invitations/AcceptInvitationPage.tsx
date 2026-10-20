@@ -15,31 +15,82 @@
  * away with no verification
  * email: the link already proves what that email would, and it is the only
  * way in on a deployment that sends no mail. When the address can already
- * sign in, accepting is one button and the next step is signing in.
+ * sign in, accepting is one button and the next step is signing in. When it
+ * cannot and the link may not set its password either (another organization
+ * has it too), the page names the way in the gateway offers instead.
  *
- * A session is treated as this browser's state rather than proof of who is
- * reading: accepting takes no identity, so a signed-in visitor still gets the
- * page the link was meant for.
+ * Accepting takes no identity, so the membership always goes to the invited
+ * address whoever is signed in here. A session for a different address is
+ * therefore told who the invitation is for and offered a way to sign out and
+ * continue, rather than an accept that reads as if it joined them.
  */
 
-import { Button, Link } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
+import type { CallerIdentity } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { useAuth } from "@/features/auth/AuthContext"
 import { LoginPageShell } from "@/features/auth/LoginPageShell"
+import { OAuthContinueRows } from "@/features/auth/OAuthContinueRows"
+import { renderableOAuthProviders } from "@/features/auth/oauthProviders"
 import {
   goToPublicAuthPage,
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
+import { rememberSignInAddress } from "@/features/auth/signInAddress"
+import { useProfile } from "@/shared/api/auth"
+import { ApiError } from "@/shared/api/client"
 import {
   useAcceptInvitation,
   useValidateInvitation,
 } from "@/shared/api/organizations"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
-import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { ClaimForm } from "./ClaimForm"
+import { waysInSentence } from "./waysIn"
+
+/**
+ * Whose session this browser holds, against the invited address.
+ *
+ * `"invited"` only when the session's address is known and is the invited
+ * one. An address that cannot be known (an identity with none, or a gateway
+ * older than the profile read, which 404s) counts as someone else's, since the
+ * accept would not go to it either. Any other failed read is `"unreadable"`:
+ * neither answer can be claimed, so the page holds its actions.
+ */
+type SessionStanding =
+  | "signed-out"
+  | "checking"
+  | "unreadable"
+  | "invited"
+  | "someone-else"
+
+function sessionStanding(
+  isAuthenticated: boolean,
+  profile: { data?: CallerIdentity; error: unknown; isPending: boolean },
+  invitedEmail: string | undefined,
+): SessionStanding {
+  if (!isAuthenticated) {
+    return "signed-out"
+  }
+  if (profile.isPending) {
+    return "checking"
+  }
+  if (
+    profile.error &&
+    !(profile.error instanceof ApiError && profile.error.status === 404)
+  ) {
+    return "unreadable"
+  }
+  const sessionEmail = profile.data?.email
+  return sessionEmail &&
+    invitedEmail &&
+    sessionEmail.toLowerCase() === invitedEmail.toLowerCase()
+    ? "invited"
+    : "someone-else"
+}
 
 export function AcceptInvitationPage() {
   // Read once, safely: App.tsx renders this keyed on the hash
@@ -51,16 +102,19 @@ export function AcceptInvitationPage() {
   const [token] = useState(() => tokenFromHash(window.location.hash))
   const preview = useValidateInvitation(token ?? "")
   const accept = useAcceptInvitation()
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, logout } = useAuth()
+  // The profile rather than the organization context, which 404s for a caller
+  // with no organization and so cannot say whose session this is.
+  const profile = useProfile(isAuthenticated)
+  const sessionEmail = profile.data?.email ?? ""
+  const invitedEmail = preview.data?.email
+  const standing = sessionStanding(isAuthenticated, profile, invitedEmail)
   const deployment = useDeployment()
-  // Absent on a hosted deployment, which serves no such page; see
-  // `welcomeGuideHref`. The rule above it goes with it, since a card ending in
-  // a bordered empty row reads as something that failed to load.
-  const welcomeHref = welcomeGuideHref(deployment)
   // A provider-verified address resolves a rostered identity that has no
   // password (`adapters/identity_provider_adapter.py`), so where there is a
   // provider, setting a password here is one way in rather than the only one.
-  const offersProviderSignIn = deployment.oauth_providers.length > 0
+  const providers = renderableOAuthProviders(deployment.oauth_providers)
+  const offersProviderSignIn = providers.length > 0
 
   return (
     <LoginPageShell>
@@ -75,9 +129,7 @@ export function AcceptInvitationPage() {
               )
             }
           />
-          {/* A refusal still owes a door: Back onto a spent token lands here,
-              and a card whose only other link is the welcome guide strands
-              whoever reads it. */}
+          {/* A refusal still owes a door: Back onto a spent token lands here. */}
           <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
         </>
       ) : accept.isSuccess ? (
@@ -89,11 +141,11 @@ export function AcceptInvitationPage() {
           {/* No article before the role: two of the three ("a owner", "a
               admin") read wrong, and the roles are the server's words. */}
           <p className="text-sm text-foreground">
-            You're now a member of{" "}
-            <strong>{accept.data.organization_name}</strong>, with the{" "}
+            <strong>{invitedEmail ?? "The invited address"}</strong> is now a
+            member of <strong>{accept.data.organization_name}</strong>, with the{" "}
             <strong>{accept.data.role}</strong> role.
           </p>
-          {isAuthenticated && !accept.data.password_set ? (
+          {standing === "invited" && !accept.data.password_set ? (
             <>
               <p className="text-center text-xs text-muted">
                 You're already signed in, so there is nothing left to set up.
@@ -106,26 +158,60 @@ export function AcceptInvitationPage() {
                 Go to the dashboard
               </Button>
             </>
+          ) : !accept.data.password_set &&
+            !accept.data.verification_pending &&
+            preview.data?.needs_password &&
+            offersProviderSignIn ? (
+            // "Sign in with a provider instead": the providers are offered
+            // here rather than on the sign-in screen, so the terms accepted
+            // above travel with the sign-in that is this address's first.
+            <>
+              <p className="text-center text-xs text-muted">
+                Sign in with your provider to get started.
+              </p>
+              <OAuthContinueRows
+                providers={providers}
+                termsAccepted={accept.variables?.terms_accepted === true}
+              />
+            </>
           ) : (
             <>
               <p className="text-center text-xs text-muted">
                 {accept.data.password_set
                   ? `Your password is set. Sign in as ${preview.data?.email ?? "the invited address"} to get started.`
-                  : preview.data?.needs_password && offersProviderSignIn
-                    ? "Sign in with one of the providers on the sign-in screen to get started."
-                    : "Sign in to get started."}
+                  : accept.data.verification_pending
+                    ? `Verify ${preview.data?.email ?? "the invited address"} first: open the verification link we emailed when you signed up, then sign in.`
+                    : accept.data.can_sign_in === false
+                      ? `${invitedEmail ?? "The invited address"} has no password yet. To get started, ${waysInSentence(accept.data.ways_in ?? [], deployment.oauth_providers)}`
+                      : "Sign in to get started."}
               </p>
               <Button
                 variant="primary"
                 fullWidth
-                onPress={() => goToPublicAuthPage("#/")}
+                onPress={() => {
+                  if (invitedEmail) rememberSignInAddress(invitedEmail)
+                  goToPublicAuthPage("#/")
+                }}
               >
                 Go to sign in
               </Button>
+              {accept.data.can_sign_in === false &&
+              accept.data.ways_in?.includes("password_reset") ? (
+                <PublicAuthLink to="#/recover-password">
+                  Choose a password
+                </PublicAuthLink>
+              ) : null}
+              {/* Whoever signed up may not be this invitee, who then takes the
+                  address back by choosing a password through the mailbox. */}
+              {accept.data.verification_pending ? (
+                <PublicAuthLink to="#/recover-password">
+                  Didn't sign up? Set a password instead
+                </PublicAuthLink>
+              ) : null}
             </>
           )}
         </>
-      ) : preview.isLoading ? (
+      ) : preview.isLoading || standing === "checking" ? (
         <p className="text-sm text-muted">Checking your invitation…</p>
       ) : preview.error ? (
         <>
@@ -139,7 +225,21 @@ export function AcceptInvitationPage() {
             <strong>{preview.data.email}</strong> to join with the{" "}
             <strong>{preview.data.role}</strong> role.
           </p>
-          {preview.data.needs_password ? (
+          {standing === "unreadable" ? (
+            // Either action would be a guess about whose session this is.
+            <ErrorBanner error={profile.error} />
+          ) : standing === "someone-else" ? (
+            <>
+              <InfoBanner tone="warning">
+                This invitation is for {preview.data.email}, and you're signed
+                in as {sessionEmail || "someone else"}. Sign out to accept it as{" "}
+                {preview.data.email}.
+              </InfoBanner>
+              <Button variant="primary" fullWidth onPress={() => void logout()}>
+                Sign out and continue
+              </Button>
+            </>
+          ) : preview.data.needs_password ? (
             <ClaimForm
               token={token}
               preview={preview.data}
@@ -148,6 +248,20 @@ export function AcceptInvitationPage() {
             />
           ) : (
             <>
+              {/* Another organization has this address too, so neither link
+                  may choose its password; say which way in exists instead of
+                  ending at a sign-in screen it cannot pass. Compared with
+                  false because an older gateway sends no such field. */}
+              {preview.data.can_sign_in !== false ? null : (
+                <InfoBanner>
+                  This link can't set a password for {preview.data.email}.
+                  Accept the invitation, then{" "}
+                  {waysInSentence(
+                    preview.data.ways_in ?? [],
+                    deployment.oauth_providers,
+                  )}
+                </InfoBanner>
+              )}
               <ErrorBanner error={accept.error} />
               <Button
                 variant="primary"
@@ -160,17 +274,6 @@ export function AcceptInvitationPage() {
             </>
           )}
         </>
-      ) : null}
-
-      {welcomeHref ? (
-        <div className="flex border-t border-border pt-2">
-          <Link
-            href={welcomeHref}
-            className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
-          >
-            Open the welcome guide
-          </Link>
-        </div>
       ) : null}
     </LoginPageShell>
   )

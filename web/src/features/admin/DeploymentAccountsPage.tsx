@@ -1,14 +1,25 @@
 import { useMemo, useState } from "react"
-import { FiCheckCircle, FiShield, FiSlash, FiUserX } from "react-icons/fi"
+import {
+  FiCheckCircle,
+  FiKey,
+  FiShield,
+  FiSlash,
+  FiUserX,
+} from "react-icons/fi"
 
 import type { DeploymentUser } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import {
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+} from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -18,12 +29,16 @@ import {
   useUpdateDeploymentUser,
 } from "@/shared/api/deployment"
 import { formatRelative } from "@/shared/helpers/format"
+import { useUrlState } from "@/shared/helpers/urlState"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 import {
   accountLabel,
   accountLockoutReason,
   organizationSummary,
+  passwordLinkBlockedReason,
 } from "./accounts"
+import { PasswordLinkDialog } from "./PasswordLinkDialog"
 
 // Every account on the deployment, which is the one identity list that is not
 // scoped to an organization. The workspace roster and Members & roles both read
@@ -31,12 +46,19 @@ import {
 // suspended, which is exactly the account an operator comes looking for; before
 // this page the recourse was SQL.
 //
-// Three controls, matching the three the API serves: deactivate (which also ends
-// that account's dashboard sessions), reactivate, and grant or remove operator
-// access. Creating an account is not here, because an account without a
+// The controls match what the API serves: deactivate (which also ends that
+// account's dashboard sessions), reactivate, grant or remove operator access,
+// and send a password link to someone who cannot sign in. Creating an account
+// is not here, because an account without a
 // membership can do nothing and memberships are the organization surface's; nor
 // is deleting one, because historical attribution resolves through rows that
 // hang off it.
+
+const URL_DEFAULTS = { q: "", page: "0", size: String(PAGE_SIZE_OPTIONS[0]) }
+
+// The route's `max_length` on `search`: a longer term from a hand-edited URL
+// would be refused with a 422 rather than searched.
+const MAX_SEARCH_LENGTH = 200
 
 /**
  * The access mark, affirmative: an account that reaches more than the ordinary
@@ -63,11 +85,20 @@ export function DeploymentAccountsPage() {
   // the console on every non-operator load to learn what `access` is about to
   // say, and the query would be discarded either way.
   const isGranted = access.data === true
-  const accounts = useDeploymentUsers(isGranted)
+  const url = useUrlState(URL_DEFAULTS)
+  // Clamped, because the URL is editable and the route refuses a negative
+  // `skip` or a `limit` of zero.
+  const page = Math.max(0, url.getNumber("page"))
+  const pageSize =
+    PAGE_SIZE_OPTIONS.find((size) => size === url.getNumber("size")) ??
+    PAGE_SIZE_OPTIONS[0]
+  const search = useDebounced(url.get("q").trim().slice(0, MAX_SEARCH_LENGTH))
+  const accounts = useDeploymentUsers({ page, pageSize, search }, isGranted)
   const update = useUpdateDeploymentUser()
   const [deactivating, setDeactivating] = useState<DeploymentUser>()
+  const [linkFor, setLinkFor] = useState<DeploymentUser>()
 
-  const rows = accounts.data ?? []
+  const rows = accounts.data?.data ?? []
 
   const columns = useMemo<DataTableColumn<DeploymentUser>[]>(
     () => [
@@ -138,8 +169,16 @@ export function DeploymentAccountsPage() {
         align: "end",
         cell: (account) => {
           const blocked = accountLockoutReason(account)
+          const linkBlocked = passwordLinkBlockedReason(account)
           return (
             <RowActionRow>
+              <RowAction
+                icon={FiKey}
+                label="Password link"
+                isDisabled={linkBlocked !== undefined}
+                ariaLabel={`Send ${accountLabel(account)} a password link${linkBlocked ? ` (${linkBlocked})` : ""}`}
+                onPress={() => setLinkFor(account)}
+              />
               {/* The reason is folded into each control's own name, as the
                   organization roster does it: a disabled control is not
                   focusable, so an `aria-describedby` would never be announced
@@ -247,7 +286,9 @@ export function DeploymentAccountsPage() {
       <PageIntro title="Accounts">
         Every account on this deployment, across all its organizations.
         Deactivating one ends its dashboard sessions immediately; operator
-        access is what reaches this page.
+        access is what reaches this page. A password link lets someone who
+        forgot their password back in, including where this deployment sends no
+        mail.
       </PageIntro>
 
       <ErrorBanner error={accounts.error ?? update.error} />
@@ -258,16 +299,37 @@ export function DeploymentAccountsPage() {
         access here. Everything else on this page applies to them normally.
       </InfoBanner>
 
+      <SearchField
+        label="Search accounts"
+        placeholder="Search by name or email"
+        value={url.get("q")}
+        onChange={(value) => url.patch({ q: value, page: 0 })}
+        className="mb-3 md:w-80"
+      />
+
       <TableScrollFrame className="otari-accounts-table">
         <DataTable
+          mobileLayout="cards"
           ariaLabel="Deployment accounts"
           columns={columns}
           rows={rows}
           getRowKey={(account) => account.id}
           isLoading={accounts.isLoading}
-          emptyContent="No accounts yet."
+          emptyContent={
+            search ? "No accounts match this search." : "No accounts yet."
+          }
         />
       </TableScrollFrame>
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={accounts.data?.count ?? null}
+        rowsOnPage={rows.length}
+        onPageChange={(next) => url.patch({ page: next })}
+        onPageSizeChange={(size) => url.patch({ size, page: 0 })}
+        isFetching={accounts.isFetching}
+        label="accounts"
+      />
 
       <ConfirmDialog
         isOpen={deactivating !== undefined}
@@ -297,6 +359,11 @@ export function DeploymentAccountsPage() {
             )
           }
         }}
+      />
+
+      <PasswordLinkDialog
+        account={linkFor}
+        onClose={() => setLinkFor(undefined)}
       />
     </div>
   )

@@ -60,6 +60,8 @@ interface ActivityTimelineProps {
   loading?: boolean
   ariaLabel?: string
   action?: ReactNode
+  // What a bar counts, in the heading and the tooltip.
+  unitLabel?: string
 }
 
 function formatTick(iso: string, bucket: UsageBucket): string {
@@ -107,6 +109,7 @@ export function ActivityTimeline({
   loading = false,
   ariaLabel = "Request volume over the selected window",
   action,
+  unitLabel = "Requests",
 }: ActivityTimelineProps) {
   const starts = series.map((point) => point.bucketStart)
   const n = series.length
@@ -117,7 +120,7 @@ export function ActivityTimeline({
   const hasErrors = series.some((point) => (point.errors ?? 0) > 0)
   const chartSeries = hasErrors
     ? [SUCCESS_SERIES, ERROR_SERIES]
-    : [PLAIN_SERIES]
+    : [{ ...PLAIN_SERIES, label: unitLabel }]
   const data: StackedPoint[] = series.map((point): StackedPoint => {
     const errors = Math.min(point.errors ?? 0, point.requests)
     return hasErrors
@@ -292,7 +295,7 @@ export function ActivityTimeline({
         <div className="flex items-center justify-between gap-2 px-1 pb-1">
           <span className="flex items-center gap-3">
             <span className="text-overline">
-              Requests / {bucket === "hour" ? "hour" : "day"}
+              {unitLabel} / {bucket === "hour" ? "hour" : "day"}
             </span>
             <ChartLegend series={chartSeries} />
           </span>

@@ -1,7 +1,10 @@
 import { useMemo } from "react"
 
 import type { OrganizationMember } from "@/client"
-import { useOrganizationMembers } from "@/shared/api/organizations"
+import {
+  useOrganizationContext,
+  useOrganizationMembers,
+} from "@/shared/api/organizations"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { memberLabel } from "./roles"
@@ -43,4 +46,47 @@ export function useMemberAttributionLabels(): ReadonlyMap<string, string> {
     () => memberLabelsByAttributionId(members.data),
     [members.data],
   )
+}
+
+/** Sign-in addresses by the owner id they bill through, for members who have one. */
+function memberEmailsByAttributionId(
+  members: OrganizationMember[] | undefined,
+): ReadonlyMap<string, string> {
+  return new Map(
+    (members ?? []).flatMap((member): [string, string][] =>
+      member.attribution_user_id && member.email
+        ? [[member.attribution_user_id, member.email]]
+        : [],
+    ),
+  )
+}
+
+/** The addresses behind `useMemberAttributionLabels`, from the same roster read. */
+export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
+  const hasSurface = useSurfaces()
+  const members = useOrganizationMembers(hasSurface("organizations"))
+  return useMemo(
+    () => memberEmailsByAttributionId(members.data),
+    [members.data],
+  )
+}
+
+/**
+ * The owner id the signed-in person bills through. Undefined while the reads
+ * are pending or failed, and for a member with no attribution row.
+ */
+export function useCurrentOwnerId(): string | undefined {
+  const hasSurface = useSurfaces()
+  const context = useOrganizationContext()
+  const members = useOrganizationMembers(hasSurface("organizations"))
+  const callerId = context.data?.caller?.user_id
+  const memberId = context.data?.organization_member_id
+  return useMemo(() => {
+    const me = (members.data ?? []).find(
+      (member) =>
+        (callerId && member.user_id === callerId) ||
+        (memberId && member.organization_member_id === memberId),
+    )
+    return me?.attribution_user_id ?? undefined
+  }, [members.data, callerId, memberId])
 }

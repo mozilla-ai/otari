@@ -18,3 +18,4 @@ gates:
       cardinal rule 7 in ARCHITECTURE.md. Fail only when neither the diff nor the
       session shows a second implementation or a hard boundary. Pass if the diff adds no
       port.
+    accept_warnings: [judge-gate-cap]

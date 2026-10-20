@@ -10,8 +10,8 @@ import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
+import { WorkspaceToolStatus } from "@/features/tools/WorkspaceToolStatus"
 import { useOrganizationContext } from "@/shared/api/organizations"
-import { usePlaygroundTools } from "@/shared/api/playground"
 import {
   useClearWorkspaceCodeExecutionPolicy,
   useSetWorkspaceCodeExecutionPolicy,
@@ -24,11 +24,8 @@ import { useAutosave } from "@/shared/hooks/useAutosave"
 // narrow limits, the image and the tool kinds. The card shows only the switch;
 // the narrowing fields are set through the API.
 //
-// What "none" means depends on the deployment. Standalone, no policy narrows
-// nothing, so it reads as on, and switching on deletes a policy that narrows
-// nothing else. Hosted, the control plane's resolver treats a workspace with no
-// policy as off (code execution is something a workspace turns on), so the
-// switch reads the stored `enabled` alone and only ever writes it.
+// What "none" means is the deployment's `default_enabled`. Switching to that
+// value deletes a policy that narrows nothing else, and any other change writes.
 
 /** Whether a stored policy narrows anything beyond allowing or blocking. */
 function narrowsAnything(policy: WorkspaceCodeExecutionPolicy): boolean {
@@ -62,44 +59,6 @@ function staleParts(policy: WorkspaceCodeExecutionPolicy, isHosted: boolean) {
 }
 
 /**
- * Whether a member's workspace allows code execution, read-only.
- *
- * The policy itself is for owners and admins, so this reads the playground's
- * per-workspace answer, which any member may and which reads "no policy" the
- * way the deployment does (on standalone, off on a hosted control plane).
- */
-function MemberStatus({
-  leading,
-  workspace,
-}: {
-  leading?: ReactNode
-  workspace: { workspace_id: string; name: string }
-}) {
-  const status = usePlaygroundTools(workspace.workspace_id).data?.code_execution
-  if (!leading && !status?.configured) return null
-  return (
-    <SettingsGroup isBounded>
-      {leading}
-      {status?.configured ? (
-        <SettingRow
-          label={`Allowed in ${workspace.name}`}
-          help={
-            status.enabled
-              ? "Set by an owner or admin."
-              : "An owner or admin can turn it on for this workspace."
-          }
-          control={
-            <span className="text-caption text-foreground">
-              {status.enabled ? "Yes" : "No"}
-            </span>
-          }
-        />
-      ) : null}
-    </SettingsGroup>
-  )
-}
-
-/**
  * Whether requests billed to this workspace may run generated code.
  *
  * A policy can only narrow what the deployment above allows; it never grants a
@@ -112,8 +71,8 @@ export function WorkspaceCodeExecutionPolicyCard({
   /** Rows above the switch, so the tool and its switch read as one card. */
   leading?: ReactNode
   /**
-   * A hosted control plane, where no policy means off and the sandbox is the
-   * platform's rather than this process's, so `sandbox_configured` says nothing.
+   * A hosted control plane, where the sandbox is the platform's rather than
+   * this process's, so `sandbox_configured` says nothing.
    */
   isHosted?: boolean
 }) {
@@ -168,13 +127,19 @@ export function WorkspaceCodeExecutionPolicyCard({
   }
 
   if (!manages) {
-    return <MemberStatus leading={leading} workspace={selected} />
+    return (
+      <WorkspaceToolStatus
+        tool="code_execution"
+        leading={leading}
+        workspace={selected}
+      />
+    )
   }
 
   const policy = query.data
-  const isOn = isHosted
-    ? Boolean(policy?.configured && policy.enabled)
-    : !(policy?.configured && !policy.enabled)
+  const isOn = policy?.configured
+    ? policy.enabled
+    : (policy?.default_enabled ?? true)
   const hasSandbox = isHosted || (policy?.sandbox_configured ?? true)
   const organizationName = context.data?.organization.name
   const stale = policy
@@ -188,9 +153,9 @@ export function WorkspaceCodeExecutionPolicyCard({
 
   const setAllowed = (allowed: boolean) =>
     save.run(() =>
-      isHosted || !allowed || (policy && narrowsAnything(policy))
-        ? write({ enabled: allowed })
-        : clearPolicy.mutateAsync({ workspaceId: selected.workspace_id }),
+      policy && allowed === policy.default_enabled && !narrowsAnything(policy)
+        ? clearPolicy.mutateAsync({ workspaceId: selected.workspace_id })
+        : write({ enabled: allowed }),
     )
   // Drops only what is stale, so a valid limit beside it survives.
   const clearStale = () =>

@@ -43,7 +43,7 @@ vi.mock("./overlayNavItems", () => ({
     // workspace's scope nor a tenant's.
     {
       sectionId: "deployment-general",
-      items: [{ to: "/settings", label: "Hosted providers", icon: FiCpu }],
+      items: [{ to: "/settings", label: "Credit grants", icon: FiCpu }],
     },
   ],
 }))
@@ -69,7 +69,7 @@ describe("a build that replaces the nav-item module", () => {
   it("appends into the workspace rail from that same list", () => {
     expect(
       section(NAV_SECTIONS, "observe")?.items.map((item) => item.label),
-    ).toEqual(["Activity", "Usage", "Reports"])
+    ).toEqual(["Activity", "Sessions", "Usage", "Reports"])
   })
 
   it("appends into the deployment rail from that same list", () => {
@@ -77,7 +77,13 @@ describe("a build that replaces the nav-item module", () => {
       section(DEPLOYMENT_NAV_SECTIONS, "deployment-general")?.items.map(
         (item) => item.label,
       ),
-    ).toEqual(["Settings", "Accounts", "Hosted providers"])
+    ).toEqual([
+      "Settings",
+      "Accounts",
+      "Hosted providers",
+      "Health",
+      "Credit grants",
+    ])
   })
 
   it("leaves every section no contribution names alone", () => {

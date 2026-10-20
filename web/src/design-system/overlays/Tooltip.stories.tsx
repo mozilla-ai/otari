@@ -100,3 +100,16 @@ export const ExactValue: Story = {
     </Tooltip>
   ),
 }
+
+/**
+ * `delay={0}` for a value read by hovering it, rather than an icon a pointer
+ * crosses on its way somewhere else: here a key's tail, with its whole
+ * fingerprint behind it.
+ */
+export const OpensAtOnce: Story = {
+  render: () => (
+    <Tooltip content="gw-AbC3dE…7xKp" delay={0}>
+      <span className="text-mono-caption text-muted">(7xKp)</span>
+    </Tooltip>
+  ),
+}

@@ -13,6 +13,8 @@ from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageA
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import BudgetResetLog
+from gateway.models.tenancy import Workspace
+from gateway.models.traces import Trace
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 
@@ -301,3 +303,32 @@ def test_delete_user_leaves_the_user_active_when_telemetry_erasure_fails(
 
     # The retry succeeds once the store recovers, which is the point of the order.
     assert client.delete(f"{API_ROOT}/users/erase-fail-user", headers=master_key_header).status_code == 204
+
+
+def test_delete_user_erases_their_agent_traces(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    client.post(f"{API_ROOT}/users", json={"user_id": "trace-del-user"}, headers=master_key_header)
+    workspace = db_session.query(Workspace).first()
+    assert workspace is not None
+    now = datetime.now(UTC)
+    for trace_id, user_id in (("s-theirs", "trace-del-user"), ("s-other", None)):
+        db_session.add(
+            Trace(
+                workspace_id=workspace.id,
+                trace_id=trace_id,
+                user_id=user_id,
+                session_source="none",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+    db_session.commit()
+
+    response = client.delete(f"{API_ROOT}/users/trace-del-user", headers=master_key_header)
+
+    assert response.status_code == 204
+    db_session.expire_all()
+    assert [row.trace_id for row in db_session.query(Trace).all()] == ["s-other"]

@@ -4,55 +4,29 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.types.rerank import RerankMeta, RerankResponse, RerankResult, RerankUsage
+from any_llm.utils.exception_handler import convert_exception
+from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
 
 from gateway.core.config import API_ROOT
 
 
-class _RerankUsage(BaseModel):
-    """Mock RerankUsage for testing until SDK ships rerank types."""
-
-    total_tokens: int | None = None
-
-
-class _RerankResult(BaseModel):
-    """Mock RerankResult for testing."""
-
-    index: int
-    relevance_score: float
-
-
-class _RerankMeta(BaseModel):
-    """Mock RerankMeta for testing."""
-
-    billed_units: dict[str, float] | None = None
-    tokens: dict[str, int] | None = None
-
-
-class _RerankResponse(BaseModel):
-    """Mock RerankResponse for testing."""
-
-    id: str
-    results: list[_RerankResult]
-    meta: _RerankMeta | None = None
-    usage: _RerankUsage | None = None
-
-
-def _mock_rerank_response() -> _RerankResponse:
+def _mock_rerank_response() -> RerankResponse:
     """Create a mock RerankResponse for testing."""
-    return _RerankResponse(
+    return RerankResponse(
         id="rerank-test-123",
+        model="rerank-v3.5",
         results=[
-            _RerankResult(index=0, relevance_score=0.95),
-            _RerankResult(index=2, relevance_score=0.80),
-            _RerankResult(index=1, relevance_score=0.30),
+            RerankResult(index=0, relevance_score=0.95),
+            RerankResult(index=2, relevance_score=0.80),
+            RerankResult(index=1, relevance_score=0.30),
         ],
-        meta=_RerankMeta(
+        meta=RerankMeta(
             billed_units={"search_units": 1.0},
             tokens={"input_tokens": 100},
         ),
-        usage=_RerankUsage(total_tokens=100),
+        usage=RerankUsage(total_tokens=100),
     )
 
 
@@ -85,6 +59,7 @@ def test_rerank_with_api_key(
     assert "results" in data
     assert len(data["results"]) == 3
     assert data["results"][0]["relevance_score"] == 0.95
+    assert data["model"] == "rerank-v3.5"
 
 
 def test_rerank_master_key_requires_user(
@@ -294,6 +269,73 @@ def test_rerank_billing_meters_tracked_with_pricing(
     usage_resp = client.get(f"{API_ROOT}/usage", params={"endpoint": "/v1/rerank"}, headers=master_key_header)
     logs = usage_resp.json()
     assert len(logs) >= 1
-    assert logs[0]["billing_meters"] == {"total_input_tokens": 100}
+    assert logs[0]["billing_meters"] == {
+        "total_input_tokens": 100,
+        "fresh_input_tokens": 100,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cache_write_1h_tokens": 0,
+        "completion_tokens": 0,
+    }
     breakdown = logs[0]["pricing_breakdown"]
     assert breakdown == [{"meter": "input", "units": 100, "rate_per_million": 2.0, "cost": pytest.approx(0.0002)}]
+
+
+def test_rerank_on_a_model_whose_provider_cannot_rerank_is_a_400(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A provider with no rerank operation is a permanent refusal naming the operation, not a 502."""
+    with patch(
+        "gateway.api.routes.rerank.arerank",
+        new_callable=AsyncMock,
+        side_effect=NotImplementedError("Provider doesn't support rerank."),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/rerank", json={**RERANK_PAYLOAD, "model": "openai:gpt-5-mini"}, headers=api_key_header
+        )
+    assert resp.status_code == 400
+    assert "rerank" in resp.json()["detail"]
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage",
+        params={"user_id": api_key_obj["user_id"], "endpoint": "/v1/rerank"},
+        headers=master_key_header,
+    )
+    assert usage_resp.status_code == 200, usage_resp.text
+    rows = [log for log in usage_resp.json() if log["status"] == "error"]
+    assert [row["status_code"] for row in rows] == [400]
+
+
+def test_rerank_upstream_bad_request_is_a_400(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """The provider rejecting the request (here an empty query) is the caller's to fix.
+
+    Cohere's SDK puts its message in a ``body`` dict and stringifies it after the
+    response headers, so the detail is the sentence from the body and nothing else.
+    """
+    upstream = CohereBadRequestError(
+        body={"id": "c0ffee", "message": "invalid request: query must be a non-empty string"},
+        headers={"x-debug-trace-id": "trace-9f3a"},
+    )
+    with patch(
+        "gateway.api.routes.rerank.arerank",
+        new_callable=AsyncMock,
+        side_effect=convert_exception(upstream, "cohere"),
+    ):
+        resp = client.post(f"{API_ROOT}/rerank", json={**RERANK_PAYLOAD, "query": ""}, headers=api_key_header)
+    assert resp.status_code == 400
+    assert resp.json() == {"detail": "invalid request: query must be a non-empty string"}
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage",
+        params={"user_id": api_key_obj["user_id"], "endpoint": "/v1/rerank"},
+        headers=master_key_header,
+    )
+    assert [row["status_code"] for row in usage_resp.json() if row["status"] == "error"] == [400]

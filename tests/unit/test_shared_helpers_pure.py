@@ -196,6 +196,7 @@ def test_resolve_user_id_empty_string_treated_as_missing() -> None:
 def test_budget_response_from_model() -> None:
     budget = MagicMock()
     budget.budget_id = "budget-1"
+    budget.origin = None
     budget.organization_id = None
     budget.name = "team-free"
     budget.max_budget = 100.0
@@ -224,6 +225,7 @@ def test_budget_response_carries_the_owning_organization() -> None:
     organization_id = uuid.uuid4()
     budget = MagicMock()
     budget.budget_id = "budget-3"
+    budget.origin = None
     budget.organization_id = organization_id
     budget.name = "Engineering monthly"
     budget.max_budget = 250.0
@@ -238,6 +240,7 @@ def test_budget_response_carries_the_owning_organization() -> None:
 def test_budget_response_from_model_nullable_fields() -> None:
     budget = MagicMock()
     budget.budget_id = "budget-2"
+    budget.origin = None
     budget.organization_id = None
     budget.name = None
     budget.max_budget = None
@@ -250,6 +253,7 @@ def test_budget_response_from_model_nullable_fields() -> None:
     assert resp.name is None
     assert resp.max_budget is None
     assert resp.budget_duration_sec is None
+    assert resp.origin is None
 
 
 def test_pricing_response_from_model() -> None:

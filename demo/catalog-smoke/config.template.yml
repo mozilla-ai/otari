@@ -6,7 +6,7 @@
 # either here (an instance with a real key, restart) or on the dashboard's
 # Providers page as the platform admin, which stores the key encrypted.
 # Discovery is on, so a real key lists that provider's models, priced from the
-# genai-prices defaults until you set a rate.
+# models.dev defaults until you set a rate.
 
 master_key: __MASTER_KEY__
 database_url: sqlite:///__DB__

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base
@@ -74,15 +74,26 @@ class UsageLog(Base):
     # Provenance. "gateway" for requests Otari served itself; a source slug (e.g.
     # "claude_code") for usage imported through POST /v1/usage/external-events.
     # source_event_id is the upstream event id used for idempotent import (NULL for
-    # gateway rows); source_label carries optional session/project attribution.
+    # gateway rows); source_label carries optional session/project attribution:
+    # the imported label, or on a gateway row the trace id of the session the
+    # request named (see ``services/traces/_identity.py``).
     source: Mapped[str] = mapped_column(default=SERVED_HERE_SLUG, index=True)
     source_event_id: Mapped[str | None] = mapped_column()
     source_label: Mapped[str | None] = mapped_column()
+    # Caller-supplied tags from the request's ``metadata`` (``purpose``, ``country``,
+    # ...), bounded at intake; see ``api/routes/_request_tags.py``. Null when the
+    # request sent none, and on every row written before the column existed.
+    tags: Mapped[dict[str, str] | None] = mapped_column(JSON)
     # Whether this row's cost participates in budget enforcement. True for normal
     # gateway rows; false for imported usage and for rows from keys flagged
     # exclude_from_budget. False rows are recorded (and appear in cost analytics)
     # but their cost is never written to User.spend.
     counts_toward_budget: Mapped[bool] = mapped_column(default=True)
+    # True when the request was served on a credential the deployment pays for,
+    # one ``ModelProviderPort`` handed out, and so charged through ``BillingPort``
+    # where an overlay binds one. False for every other row, and for every row
+    # written before the column existed.
+    deployment_paid: Mapped[bool] = mapped_column(default=False, server_default=false())
 
     prompt_tokens: Mapped[int | None] = mapped_column()
     completion_tokens: Mapped[int | None] = mapped_column()
@@ -115,7 +126,8 @@ class UsageLog(Base):
 
     # Why ``cost`` is the amount it is, which the row cannot re-derive on its own:
     # ``pricing_source`` names the price list that settled it ("organization",
-    # "managed", "genai_prices"), ``pricing_reference`` identifies the entry in it
+    # "managed", "defaults"; older rows read "genai_prices"), ``pricing_reference``
+    # identifies the entry in it
     # (a pricing row's id, or a ``provider:model`` key), ``pricing_effective_at``
     # is when that rate took effect, and ``pricing_version`` pins the revision of
     # the list. ``calculated_at`` is when the amount was priced, which is not
@@ -158,7 +170,7 @@ class UsageLog(Base):
     #
     # `policy_name` is the name the caller sent. `selection_reason` says why this
     # candidate was chosen ("default", "condition:<keys>", "on_failure",
-    # "router:<name>"). `attempt_position` and `attempt_count` locate the row in
+    # "router:<name>", "catalog"). `attempt_position` and `attempt_count` locate the row in
     # the plan, so "served on attempt 2 of 3" is a query rather than a log grep.
     # `request_group_id` ties a request's rows together, which is what makes the
     # absorbed attempts findable from the row that served. The gateway writes the
@@ -221,6 +233,7 @@ class UsageLog(Base):
             "endpoint": self.endpoint,
             "source": self.source,
             "source_label": self.source_label,
+            "tags": self.tags,
             "counts_toward_budget": self.counts_toward_budget,
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,

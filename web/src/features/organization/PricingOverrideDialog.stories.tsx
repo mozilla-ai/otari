@@ -26,7 +26,6 @@ function override(
     output_price_per_million: 0.6,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
     pricing_tiers: [],
     unit: "tokens",
     effective_from: "2026-01-01T00:00:00Z",

@@ -1,0 +1,115 @@
+# The load-test stack: one Otari replica on cores of its own, Postgres, Redis, a
+# fake provider, and the tools container the measuring and the checks run in.
+# ./run.sh drives it; see README.md.
+name: otari-loadtest
+
+# The fake provider's fixed timing, which the analysis subtracts.
+x-provider: &provider
+  FAKE_LATENCY_MS: 50
+  FAKE_TTFT_MS: 50
+  FAKE_CHUNKS: 5
+  FAKE_CHUNK_INTERVAL_MS: 10
+
+# The replica under test gets cores 0-1 and everything else 2-3, so their work
+# does not land on the cores whose time is measured. Fits a 4-vCPU CI runner.
+x-others: &others
+  cpuset: "${LOADTEST_OTHER_CPUS:-2-3}"
+
+services:
+  postgres:
+    <<: *others
+    image: postgres:17-alpine
+    command:
+      - postgres
+      - -c
+      - max_connections=300
+      - -c
+      - shared_buffers=256MB
+      # For counting statements per request.
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+    environment:
+      - POSTGRES_USER=otari
+      - POSTGRES_PASSWORD=otari
+      - POSTGRES_DB=otari
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otari"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    <<: *others
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  fakeprovider:
+    <<: *others
+    image: python:3.14-slim
+    command: ["python", "-u", "/app/fakeprovider.py"]
+    volumes:
+      - ./fakeprovider.py:/app/fakeprovider.py:ro
+    environment: *provider
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/healthz')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The image under test; run.sh recreates it with each build and its database.
+  otari:
+    image: ${OTARI_IMAGE:-otari:head}
+    cpuset: "${LOADTEST_OTARI_CPUS:-0-1}"
+    command: ["otari", "serve", "--config", "/app/config.yml", "--log-level", "WARNING"]
+    volumes:
+      - ./otari-config.yml:/app/config.yml:ro
+    environment:
+      - OTARI_PROVIDER_ACCOUNT_PEPPER=loadtest-pepper-not-a-secret-0123456789abcdef
+      - OTARI_DATABASE_URL=${LOADTEST_DATABASE_URL:-postgresql://otari:otari@postgres:5432/otari}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fakeprovider:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      # Every second while starting, so a swap sees the replica healthy as soon as
+      # it is; then rarely, because each probe starts a Python process on the
+      # cores whose time a run is measuring.
+      start_period: 180s
+      start_interval: 1s
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # Measures and checks from inside the network, so latency is not measured
+  # through Docker Desktop's port forwarding.
+  # The repository is mounted for its lock: run.sh installs the `loadtest`
+  # dependency group from it, into an environment outside the mount.
+  tools:
+    <<: *others
+    image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+    working_dir: /work/loadtest
+    volumes:
+      - ../:/work
+      - uv-cache:/root/.cache/uv
+    environment:
+      <<: *provider
+      UV_LINK_MODE: copy
+      UV_PROJECT_ENVIRONMENT: /venv
+    entrypoint: ["sleep", "infinity"]
+
+# External, so the `down -v` that clears the stack's databases keeps the cache.
+volumes:
+  uv-cache:
+    name: otari-loadtest-uv-cache
+    external: true

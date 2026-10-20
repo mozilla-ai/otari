@@ -90,28 +90,26 @@ def test_upstream_status_is_recorded_on_the_error_row(
     assert rows[0]["status_code"] == upstream
 
 
-def test_upstream_credential_fault_is_classifiable_despite_the_generic_502(
+def test_upstream_credential_fault_is_recorded_as_the_upstream_status(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """An upstream 401 is recorded as 401 even though the caller sees 502.
+    """An upstream 401 is recorded as 401 even though the caller sees 424.
 
-    This is the case that makes the column load-bearing rather than cosmetic. A
-    provider rejecting the gateway's credentials is a gateway-config fault, so
-    the response deliberately says only "502 / provider error" and the raw
-    provider message never reaches the caller. That leaves the operator with no
-    way to tell "my key is wrong" from "the provider is down": the client-facing
-    status is 502 for both, ``status`` is "error" for both, and matching the
-    error prose is the brittle heuristic this issue exists to remove.
+    A provider rejecting the gateway's credentials is a gateway-config fault, so
+    the response says only that the provider rejected the gateway's credentials,
+    and the raw provider message never reaches the caller. The row keeps the
+    provider's own status, so the operator can tell a 401 from a 403 without
+    matching error prose.
     """
     with _upstream_fails(_StatusError(401)):
         response = client.post(
             f"{API_ROOT}/chat/completions", json={"model": _MODEL, "messages": _MESSAGES}, headers=api_key_header
         )
-    # What the caller is told: a generic 502, with no trace of the upstream 401.
-    assert response.status_code == 502
+    # What the caller is told: a fixed-detail 424, with no trace of the upstream 401.
+    assert response.status_code == 424
     assert "401" not in response.text
     assert "SECRET" not in response.text
 
@@ -313,20 +311,20 @@ def test_passthrough_provider_failure_records_the_upstream_status(
     with patch(
         "gateway.api.routes.embeddings.aembedding",
         new_callable=AsyncMock,
-        side_effect=_StatusError(429),
+        side_effect=_StatusError(503),
     ):
         response = client.post(
             f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hi"},
             headers=api_key_header,
         )
-    # The caller sees the deliberately generic provider error, not the upstream 429.
+    # The caller sees the deliberately generic provider error, not the upstream 503.
     assert response.status_code == 502
     assert "SECRET" not in response.text
 
     rows = _error_rows(client, master_key_header, endpoint="/v1/embeddings")
     assert len(rows) == 1
-    assert rows[0]["status_code"] == 429
+    assert rows[0]["status_code"] == 503
 
 
 def test_batch_create_failure_records_the_upstream_status(

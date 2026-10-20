@@ -20,7 +20,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import pytest
 from sqlalchemy import select
@@ -57,7 +57,7 @@ def _run(scenario: Callable[[AsyncSession], Awaitable[T]]) -> T:
     return asyncio.run(main())
 
 
-async def _round_trip(session: AsyncSession, **fields: object) -> Organization:
+async def _round_trip(session: AsyncSession, **fields: Any) -> Organization:
     """Store an organization and read it back off the database, not the identity map."""
     session.add(Organization(name="Acme", slug="acme", **fields))
     await session.commit()

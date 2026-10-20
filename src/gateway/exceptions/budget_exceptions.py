@@ -1,6 +1,7 @@
 """Errors that the budgets domain may raise.
 
-The surface errors carry the HTTP status each renders as.
+Most surface errors carry the HTTP status each renders as.
+A surface error that carries none is mapped to a status by the API layer.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
@@ -11,6 +12,7 @@ from gateway.exceptions import (
     TenancyNotFoundError,
     TenancyValidationError,
 )
+from gateway.models.budgets import ScopeType
 
 
 class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
@@ -201,6 +203,22 @@ class SpendCeilingAlreadyExistsError(Exception):
         super().__init__(f"A spend ceiling already exists for {scope_type} {scope_id}")
 
 
+class SpendCeilingExceededError(Exception):
+    """A scoped ceiling has no room for a request on one of its axes.
+
+    ``retry_after`` is the seconds until the ceiling's window ends, None when waiting would not help.
+    """
+
+    def __init__(self, detail: str, *, scope_type: ScopeType, retry_after: int | None = None) -> None:
+        super().__init__(detail)
+        self.scope_type = scope_type
+        self.retry_after = retry_after
+
+
+class ProviderSpendCeilingExceededError(SpendCeilingExceededError):
+    """A scoped ceiling on one provider has no room for a request, which may still fit on another provider."""
+
+
 class EndUserBudgetNotFoundError(TenancyNotFoundError):
     """A service key names an end-user budget that does not exist, or that a tenant owns.
 
@@ -249,6 +267,16 @@ class EndUserIdInvalidError(TenancyValidationError):
         super().__init__(f"'user' {requirement} to name an end user")
 
 
+class EndUserPathInvalidError(TenancyValidationError):
+    """An end user was named in a URL path by an id that a path cannot carry intact."""
+
+    def __init__(self, external_id: str):
+        super().__init__(
+            f"End user '{external_id}' has a '.' or '..' segment, which HTTP clients collapse in a path; "
+            "name it with the external_id query parameter instead"
+        )
+
+
 class EndUserOwnerUnavailableError(TenancyForbiddenError):
     """The service key's own user is blocked or deleted, so none of its end users may spend."""
 
@@ -264,6 +292,7 @@ __all__ = [
     "EndUserIdInvalidError",
     "EndUserNotFoundError",
     "EndUserOwnerUnavailableError",
+    "EndUserPathInvalidError",
     "MemberBudgetPolicyAlreadyExistsError",
     "NotAServiceKeyError",
     "OrganizationBudgetHeldElsewhereError",
@@ -272,8 +301,20 @@ __all__ = [
     "OrganizationScopeNotFoundError",
     "OrganizationScopedBudgetAlreadyExistsError",
     "OrganizationScopedBudgetNotFoundError",
+    "ProviderSpendCeilingExceededError",
     "SpendCeilingAlreadyExistsError",
+    "SpendCeilingExceededError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",
 ]
+
+
+class DeclaredAccessError(TenancyValidationError):
+    """config.yml declares a budget or an API key this deployment cannot apply, so the gateway does not start.
+
+    The message names the config entry and never a key's secret.
+    """
+
+    def __init__(self, entry: str, reason: str):
+        super().__init__(f"{entry}: {reason}")

@@ -11,13 +11,14 @@ from gateway.exceptions.budget_exceptions import (
     EndUserIdInvalidError,
     EndUserNotFoundError,
     EndUserOwnerUnavailableError,
+    EndUserPathInvalidError,
     NotAServiceKeyError,
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget
 from gateway.models.users import User
 from gateway.repositories.budgets import BudgetRepositories
-from gateway.schemas.budgets import EndUserPublic
+from gateway.schemas.budgets import EndUserBudgetPublic, EndUserPublic
 from gateway.services.budgets._periods import budget_window
 
 # Long enough for an email address or an opaque id, short enough that a caller
@@ -68,7 +69,6 @@ class _EndUsers:
                 existing.deleted_at = None
             return ResolvedEndUser(existing.user_id, existing.budget_id)
 
-        _check_new_external_id(external_id)
         budget = requested
         if budget is None and api_key.end_user_budget_id:
             budget = await self._repositories.budgets.get(api_key.end_user_budget_id)
@@ -93,7 +93,6 @@ class _EndUsers:
         owner_user_id = await self._available_owner(api_key)
         user = await self._repositories.end_users.find(owner_user_id, external_id)
         if user is None:
-            _check_new_external_id(external_id)
             user = _new_end_user(owner_user_id, external_id, budget)
             if await self._repositories.end_users.add(user):
                 return EndUserPublic.from_model(user), True
@@ -116,6 +115,59 @@ class _EndUsers:
             user.blocked = blocked
         return EndUserPublic.from_model(user)
 
+    async def page(
+        self,
+        api_key: APIKey,
+        *,
+        external_id: str | None,
+        budget_id: str | None,
+        blocked: bool | None,
+        skip: int,
+        limit: int,
+        created_before: datetime | None = None,
+    ) -> list[EndUserPublic]:
+        """A page of the key owner's end users."""
+        _require_service_key(api_key)
+        users = await self._repositories.end_users.page(
+            str(api_key.user_id),
+            external_id=external_id,
+            budget_id=budget_id,
+            blocked=blocked,
+            skip=skip,
+            limit=limit,
+            created_before=created_before,
+        )
+        return [EndUserPublic.from_model(user) for user in users]
+
+    async def count(
+        self, api_key: APIKey, *, external_id: str | None, budget_id: str | None, blocked: bool | None
+    ) -> int:
+        """How many of the key owner's end users ``page`` lists across every page."""
+        _require_service_key(api_key)
+        return await self._repositories.end_users.count_matching(
+            str(api_key.user_id), external_id=external_id, budget_id=budget_id, blocked=blocked
+        )
+
+    async def budgets(self, api_key: APIKey) -> list[EndUserBudgetPublic]:
+        """The budgets the key may assign, each with how many of its owner's end users are on it."""
+        _require_service_key(api_key)
+        budget_ids = api_key.assignable_end_user_budgets()
+        counts = await self._repositories.end_users.count_by_budget(str(api_key.user_id), budget_ids)
+        return [
+            EndUserBudgetPublic(
+                budget_id=budget_id,
+                is_default=budget_id == api_key.end_user_budget_id,
+                end_user_count=counts.get(budget_id, (0, 0))[0],
+                blocked_end_user_count=counts.get(budget_id, (0, 0))[1],
+            )
+            for budget_id in budget_ids
+        ]
+
+    async def require_owner(self, api_key: APIKey) -> None:
+        """Refuse a service key whose own user is blocked or deleted."""
+        _require_service_key(api_key)
+        await self._available_owner(api_key)
+
     async def _available_owner(self, api_key: APIKey) -> str:
         """The key's user, refused when it is blocked or deleted, since its end users bill through it."""
         owner_user_id = str(api_key.user_id)
@@ -135,6 +187,16 @@ class _EndUsers:
         if budget_id not in api_key.assignable_end_user_budgets():
             raise EndUserBudgetNotAllowedError(budget_id)
         return await self._assignable_budget(budget_id)
+
+    async def delete(self, api_key: APIKey, user_ids: list[str]) -> int:
+        """Soft-delete these end users of the key's owner, and return how many were deleted.
+
+        The rows stay, with what they spent: an end user named again is revived
+        with its counters, as ``resolve`` does, so deleting one cannot clear its
+        spend. A deleted end user is neither listed nor counted.
+        """
+        _require_service_key(api_key)
+        return await self._repositories.end_users.soft_delete(str(api_key.user_id), user_ids, datetime.now(UTC))
 
     async def _existing(self, api_key: APIKey, external_id: str) -> User:
         _require_service_key(api_key)
@@ -172,16 +234,14 @@ def _check_external_id(external_id: str) -> None:
         raise EndUserIdInvalidError(f"must be at most {MAX_EXTERNAL_ID_LENGTH} characters")
 
 
-def _check_new_external_id(external_id: str) -> None:
-    """Refuse an id for a new end user that the end-user routes could not address as one path segment.
+def check_path_external_id(external_id: str) -> None:
+    """Refuse an end user's id with a '.' or '..' segment where a URL path carries it.
 
-    Checked on creation only, so an end user created before the rule still bills.
+    HTTP clients collapse dot segments, so a path naming one can reach another end user or another route. Only the
+    path form refuses them: an end user may go by any id, and the other form names it intact.
     """
-    if "/" in external_id:
-        raise EndUserIdInvalidError("must not contain '/'")
-    # HTTP clients collapse these as dot segments, so a request for one reaches another route.
-    if external_id in (".", ".."):
-        raise EndUserIdInvalidError("must not be '.' or '..'")
+    if any(segment in (".", "..") for segment in external_id.split("/")):
+        raise EndUserPathInvalidError(external_id)
 
 
 def _require_service_key(api_key: APIKey) -> None:

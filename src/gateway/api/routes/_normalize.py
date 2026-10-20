@@ -46,12 +46,14 @@ from gateway.services.files import FileService, StagedFile, provider_holds_copie
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import ProviderAccounts, effective_credential
 from gateway.services.tools import (
+    CODE_EXECUTION_TOOL,
+    CandidateTools,
     Dialect,
-    decide_code_executor,
+    ProviderToolDeclaration,
+    decide_candidate_tools,
     extract_code_execution_tool,
     first_provider_code_execution_tool,
     parse_code_execution_header,
-    provider_runs_code_natively,
     resolve_code_executor_preference,
 )
 
@@ -75,55 +77,90 @@ def _executor_preference(
     return preference
 
 
+def _keyword_candidates(
+    keyword: dict[str, Any],
+    *,
+    config: GatewayConfig,
+    providers: Sequence[LLMProvider | None],
+    dialect: Dialect,
+    code_execution_header: str | None,
+    workspace_executor: CodeExecutor | None,
+) -> list[CandidateTools] | None:
+    """What each candidate is sent for ``keyword``, as admission decides it, head first.
+
+    ``None`` where admission refuses the request: a header outside the vocabulary,
+    or ``otari`` with no sandbox to run it on.
+    """
+    preference = _executor_preference(config, code_execution_header, workspace_executor)
+    if preference is None or (preference is CodeExecutor.OTARI and not config.sandbox_configured()):
+        return None
+    declaration = ProviderToolDeclaration(
+        tool=CODE_EXECUTION_TOOL,
+        entry=keyword,
+        preference=preference,
+        backend_configured=config.sandbox_configured(),
+    )
+    names = [provider.value if provider is not None else None for provider in providers] or [None]
+    return decide_candidate_tools([declaration], providers=names, dialect=dialect)
+
+
 def provider_container_requested(
     tools: list[dict[str, Any]] | None,
     *,
     config: GatewayConfig,
-    provider: LLMProvider | None,
+    providers: Sequence[LLMProvider | None],
     dialect: Dialect,
     code_execution_header: str | None,
     workspace_executor: CodeExecutor | None = None,
 ) -> bool:
-    """Whether this request's code will run in the dispatched provider's own container.
+    """Whether some attempt of this request runs its code in the provider's own container.
 
     The other side of ``sandbox_requested``: a provider's own declaration, in the
-    wire format that declaration is native to, which the executor leaves with the
-    provider. A file the request attaches then has to be one that provider holds,
-    so it is copied there rather than read for the model.
+    wire format that declaration is native to, which the executor leaves with a
+    candidate that runs it natively. A file the request attaches then has to be one
+    that provider holds, so it is copied there rather than read for the model.
+    ``providers`` is every candidate the request may dispatch to, head first; unless
+    ``auto`` splits them, the head decides.
     """
     explicit, remaining = extract_code_execution_tool(tools)
-    if explicit is not None:
-        return False
     keyword = first_provider_code_execution_tool(remaining)
-    if keyword is None or not provider_runs_code_natively(
-        keyword, provider=provider.value if provider is not None else None, dialect=dialect
-    ):
+    if explicit is not None or keyword is None:
         return False
-    preference = _executor_preference(config, code_execution_header, workspace_executor)
-    if preference is None:
+    candidates = _keyword_candidates(
+        keyword,
+        config=config,
+        providers=providers,
+        dialect=dialect,
+        code_execution_header=code_execution_header,
+        workspace_executor=workspace_executor,
+    )
+    if not candidates:
         return False
-    decided = decide_code_executor(preference, sandbox_configured=config.sandbox_configured(), native_available=True)
-    return decided is CodeExecutor.PROVIDER
+    claimed = [CODE_EXECUTION_TOOL.name in candidate.claimed for candidate in candidates]
+    if any(claimed) and not all(claimed):
+        return True
+    return CODE_EXECUTION_TOOL.name in candidates[0].native
 
 
 def sandbox_requested(
     tools: list[dict[str, Any]] | None,
     *,
     config: GatewayConfig,
-    provider: LLMProvider | None,
+    providers: Sequence[LLMProvider | None],
     dialect: Dialect,
     code_execution_header: str | None,
     workspace_executor: CodeExecutor | None = None,
 ) -> bool:
-    """Whether this request's code will run on the gateway's sandbox.
+    """Whether some attempt of this request runs its code on the gateway's sandbox.
 
     True for the explicit ``otari_code_execution`` type, and for a provider's own
-    declaration the executor would bring here (see ``_tools.decide_code_executor``):
-    a file the request attaches is then staged for the sandbox rather than only
-    shown to the model. Decided from the same three layers admission uses, the
-    workspace pin (``workspace_executor``, read once in the preamble), the header
-    and the deployment default, against the dispatched provider. A header outside
-    the vocabulary answers false here and is refused at admission.
+    declaration the executor would bring here for any candidate (see
+    ``_tools.decide_code_executor``): a file the request attaches is then staged for
+    the sandbox rather than only shown to the model. Decided from the same three
+    layers admission uses, the workspace pin (``workspace_executor``, read once in
+    the preamble), the header and the deployment default, against every candidate
+    the request may dispatch to (``providers``, head first). A header outside the
+    vocabulary answers false here and is refused at admission.
     """
     explicit, remaining = extract_code_execution_tool(tools)
     if explicit is not None:
@@ -131,13 +168,15 @@ def sandbox_requested(
     keyword = first_provider_code_execution_tool(remaining)
     if keyword is None or not config.sandbox_configured():
         return False
-    preference = _executor_preference(config, code_execution_header, workspace_executor)
-    if preference is None:
-        return False
-    native = provider_runs_code_natively(
-        keyword, provider=provider.value if provider is not None else None, dialect=dialect
+    candidates = _keyword_candidates(
+        keyword,
+        config=config,
+        providers=providers,
+        dialect=dialect,
+        code_execution_header=code_execution_header,
+        workspace_executor=workspace_executor,
     )
-    return decide_code_executor(preference, sandbox_configured=True, native_available=native) is CodeExecutor.OTARI
+    return any(CODE_EXECUTION_TOOL.name in candidate.claimed for candidate in candidates or [])
 
 
 async def normalize_request_messages(
@@ -218,9 +257,12 @@ def container_copies_step(
     A refusal is rendered with ``render``, the dialect's own envelope.
     A copy that could not be made raises :class:`ProviderUploadFailedError`,
     which is that candidate's own failure rather than a refusal of the request.
+    A candidate sent no ``container_upload`` block, as one whose sandbox holds the files is, needs no copy.
     """
 
     async def _prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if not has_container_blocks(kwargs["messages"], "anthropic"):
+            return kwargs
         provider, _ = AnyLLM.split_model_provider(kwargs["model"])
         if not isinstance(provider, LLMProvider) or not provider_holds_copies(provider):
             raise CandidateCannotServe(render(NoCandidateHoldsCopiesError()))

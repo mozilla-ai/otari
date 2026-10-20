@@ -5,7 +5,6 @@ Kept apart from ``services/tools``, whose package import reaches
 this package, so the two cannot share one.
 """
 
-from gateway.services.code_execution._workspace_defaults import CodeExecutionWorkspaceDefaults
 from gateway.services.code_execution.containers import (
     CONTAINER_AUTO,
     CONTAINER_CLAIM_TTL_S,
@@ -25,7 +24,6 @@ __all__ = [
     "CONTAINER_AUTO",
     "CONTAINER_CLAIM_TTL_S",
     "CONTAINER_ID_PREFIX",
-    "CodeExecutionWorkspaceDefaults",
     "ContainerBusyError",
     "ContainerLease",
     "ContainerNotFoundError",

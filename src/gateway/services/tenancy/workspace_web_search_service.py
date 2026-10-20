@@ -29,14 +29,13 @@ from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.web_retrieval_policy import read_domain_list
 
-# The backend's own ceiling on returned hits. A stored value above it would read
-# as a configured limit and do nothing, since the backend clamps to this anyway,
-# so it is refused at the write rather than silently clamped at resolve time.
-# Same call as `workspace_code_execution_policy_service` makes for its two.
-_MAX_RESULTS = MAX_RESULTS_CAP
+# The largest result ceiling the column holds, a 32-bit integer. Not a ceiling
+# of the gateway's own, which sets none (decision 65): a larger value is refused
+# as malformed rather than failing in the database.
+_MAX_STORED_RESULTS = 2_147_483_647
 # Bound the opaque bag so one workspace's row cannot grow without limit; the
 # same numbers the hosted `WorkspaceWebSearchConfigUpdate` uses, since this is
 # the same configuration.
@@ -93,10 +92,11 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
     max_results: int | None = Field(
         default=None,
         gt=0,
-        le=_MAX_RESULTS,
+        le=_MAX_STORED_RESULTS,
         description=(
-            "Search only: ceiling on results one search returns; only ever lowers "
-            f"the effective limit, so at most {_MAX_RESULTS}"
+            "Search only: ceiling on results one search returns, through otari_web_search and "
+            "POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the "
+            "provider's own maximum is the only limit."
         ),
     )
     purpose_hint: str | None = Field(
@@ -149,6 +149,9 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
     # this row sits under: a workspace switched on where the deployment has no
     # backend reads as unavailable rather than as working.
     web_search_configured: bool
+    # What a workspace with no row gets on this deployment: on, or off until a
+    # workspace admin turns it on (``web_search_workspace_default``).
+    default_enabled: bool
     enabled: bool
     max_results: int | None
     purpose_hint: str | None
@@ -159,12 +162,15 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
     updated_at: str | None
 
     @classmethod
-    def unconfigured(cls, workspace_id: uuid.UUID, *, web_search_configured: bool) -> WorkspaceWebSearchConfigPublic:
+    def unconfigured(
+        cls, workspace_id: uuid.UUID, *, web_search_configured: bool, default_enabled: bool
+    ) -> WorkspaceWebSearchConfigPublic:
         return cls(
             workspace_id=workspace_id,
             configured=False,
             web_search_configured=web_search_configured,
-            enabled=True,
+            default_enabled=default_enabled,
+            enabled=default_enabled,
             max_results=None,
             purpose_hint=None,
             allowed_domains=None,
@@ -176,12 +182,13 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
 
     @classmethod
     def from_model(
-        cls, config: WorkspaceWebSearchConfig, *, web_search_configured: bool
+        cls, config: WorkspaceWebSearchConfig, *, web_search_configured: bool, default_enabled: bool
     ) -> WorkspaceWebSearchConfigPublic:
         return cls(
             workspace_id=config.workspace_id,
             configured=True,
             web_search_configured=web_search_configured,
+            default_enabled=default_enabled,
             enabled=config.enabled,
             max_results=config.max_results,
             purpose_hint=config.purpose_hint,
@@ -227,9 +234,9 @@ def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig
         raise ValueError("enabled must be a boolean")
     max_results = answer.get("max_results")
     if max_results is not None and (
-        not isinstance(max_results, int) or isinstance(max_results, bool) or not 1 <= max_results <= _MAX_RESULTS
+        not isinstance(max_results, int) or isinstance(max_results, bool) or max_results < 1
     ):
-        raise ValueError(f"max_results must be an integer from 1 to {_MAX_RESULTS}")
+        raise ValueError("max_results must be an integer of at least 1")
     purpose_hint = answer.get("purpose_hint")
     if purpose_hint is not None and (not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH):
         raise ValueError(f"purpose_hint must be a string of at most {_MAX_PURPOSE_HINT_LENGTH} characters")
@@ -259,13 +266,16 @@ def _stored_domains(value: object) -> tuple[str, ...] | None:
 class WorkspaceWebSearchService:
     """Read, upsert and clear one workspace's web-search configuration."""
 
-    def __init__(self, db: AsyncSession, *, web_search_configured: bool):
+    def __init__(self, db: AsyncSession, *, web_search_configured: bool, default_enabled: bool):
         self.db = db
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
         # Passed in rather than read here: whether a backend is configured is a
         # question about the running deployment's config, which the route layer
         # already holds and a service has no business reaching for.
         self.web_search_configured = web_search_configured
+        self.default_enabled = default_enabled
 
     async def get_config(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         """The workspace's configuration. Reading it takes the same role as setting it."""
@@ -273,7 +283,7 @@ class WorkspaceWebSearchService:
         config = await self.db.get(WorkspaceWebSearchConfig, workspace.id)
         if config is None:
             return self._unconfigured(workspace.id)
-        return WorkspaceWebSearchConfigPublic.from_model(config, web_search_configured=self.web_search_configured)
+        return self._public(config)
 
     async def set_config(
         self,
@@ -290,7 +300,7 @@ class WorkspaceWebSearchService:
         of the whole configuration is idempotent: the loser re-reads the row the
         winner created and applies its own values over it, which is the same
         outcome it would have reached had it arrived a moment later. The same
-        handling as ``workspace_code_execution_policy_service``, for the same
+        handling as the code execution policy service, for the same
         reason: one row per workspace and nothing to disambiguate.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
@@ -318,7 +328,7 @@ class WorkspaceWebSearchService:
             self._apply(config, request)
             await self._commit()
         await self.db.refresh(config)
-        return WorkspaceWebSearchConfigPublic.from_model(config, web_search_configured=self.web_search_configured)
+        return self._public(config)
 
     async def clear_config(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         """Drop the workspace's configuration, returning it to the deployment's behavior.
@@ -359,9 +369,14 @@ class WorkspaceWebSearchService:
         config.blocked_domains = request.blocked_domains
         config.provider_options = request.provider_options
 
+    def _public(self, config: WorkspaceWebSearchConfig) -> WorkspaceWebSearchConfigPublic:
+        return WorkspaceWebSearchConfigPublic.from_model(
+            config, web_search_configured=self.web_search_configured, default_enabled=self.default_enabled
+        )
+
     def _unconfigured(self, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         return WorkspaceWebSearchConfigPublic.unconfigured(
-            workspace_id, web_search_configured=self.web_search_configured
+            workspace_id, web_search_configured=self.web_search_configured, default_enabled=self.default_enabled
         )
 
     async def _resolve_manageable(self, *, user: User, workspace_id: uuid.UUID) -> Workspace:

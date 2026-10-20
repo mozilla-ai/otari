@@ -13,7 +13,7 @@ The template stands up two services and a bucket:
 
 | Service | Source | Notes |
 | --- | --- | --- |
-| **otari** | `mzdotai/otari:0.15.0` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health/readiness`, which fails while the database is unreachable. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
+| **otari** | `mzdotai/otari:0.27.0` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health/readiness`, which fails while the database is unreachable. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
 | **otari-files** | Railway bucket | S3-compatible object storage for the bytes behind the Files API: uploads, attachments, and files a sandbox produced. They survive a redeploy and every replica reads the same bucket. Billed per stored GB; see [Files](#files). |
 
@@ -36,7 +36,7 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_SECRET_KEY` | auto-generated Fernet key | Encrypts the provider credentials you add on the Providers page. Keep it: losing it makes them unrecoverable. |
 | `OTARI_PROVIDER_ACCOUNT_PEPPER` | auto-generated (`${{secret(43)}}`) | Names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. |
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so a fresh deploy serves models that have no configured pricing. |
-| `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
+| `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled models.dev snapshot without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
 | `OTARI_FORWARDED_ALLOW_IPS` | `*` | Pre-set, so the per-IP sign-in and public-catalog limits see the real client, not Railway's ingress. Safe here because the ingress is the only path to the container; see [Behind a reverse proxy](../../docs/deployment.md#behind-a-reverse-proxy). |
 | `OTARI_PUBLIC_BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` | Pre-wired to the service's Railway domain. OAuth redirect URIs, the passkey relying-party ID and email links are built from it. Change it if you attach a custom domain. |
 | `OTARI_FILES_BACKEND` | `s3` | Pre-set, so uploaded files go to the bucket rather than the container's disk; see [Files](#files). |
@@ -66,7 +66,7 @@ Notes:
   see [Full config via environment](../../docs/configuration.md#full-config-via-environment).
 - `OTARI_DEFAULT_PRICING=true` is also pre-set so that, paired with the above,
   common models are metered using community-maintained rates (the bundled
-  genai-prices dataset) instead of being served unpriced. These are estimates
+  models.dev snapshot) instead of being served unpriced. These are estimates
   and can lag real provider rates, so set explicit prices on the dashboard's
   Models page or via `/api/v1/pricing` for anything you bill on; database prices
   always win over the fallback. The Models page shows, per model, whether this
@@ -162,7 +162,7 @@ To upgrade:
    added to it later. The release notes name such variables; [`template.json`](template.json) at the target
    release's tag shows what a new deploy would get.
 4. On the otari service, open Settings → Source and change the image tag to the
-   target release (for example `0.16.0`). Railway
+   target release (for example `0.28.0`). Railway
    redeploys, and Otari migrates the schema on startup.
 5. Check `/api/v1/health/readiness` and make one real request, as in [Verify](#verify).
 
@@ -170,7 +170,7 @@ To take patch releases without doing this by hand, turn on Railway's
 [Image Auto Updates](https://docs.railway.com/deployments/image-auto-updates):
 on the otari service, open Settings → Source → **Configure Auto Updates**,
 choose **Patches only**, and pick a maintenance window. Railway then moves the
-pinned tag within its minor line (`0.15.0` to `0.15.1`) and notifies workspace
+pinned tag within its minor line (`0.27.0` to `0.27.1`) and notifies workspace
 admins. Avoid **Minor updates and patches**: a minor release can migrate the
 schema, and the backup Railway takes before an update covers the otari
 service's volumes, not the Postgres service.

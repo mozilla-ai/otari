@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -21,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from gateway.api.deps import reset_config
 from gateway.api.routes import bootstrap as bootstrap_route
 from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, published_surfaces
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 
@@ -102,7 +103,9 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
     assert response.json() == {
         "deployment_type": "standalone",
         "session_type": "local_operator",
-        "surfaces": sorted(STANDALONE_SURFACES),
+        # The trace explorer and the Health page are core features, published on top of the declared surfaces
+        # while they are on.
+        "surfaces": sorted({*STANDALONE_SURFACES, "health_checks", "traces"}),
         "sign_in_methods": ["master_key"],
         "management_url": None,
         "data_plane_url": None,
@@ -111,9 +114,10 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "privacy_url": None,
         "site_url": None,
         "maintenance_mode": False,
+        "passkeys_enabled": True,
         "passkeys_ready": False,
         "oauth_providers": [],
-        "feedback_enabled": False,
+        "feedback_enabled": True,
         "mail_ready": False,
         "public_catalog": False,
         "open_signup": False,
@@ -193,6 +197,47 @@ def test_passkeys_ready_turns_on_with_an_address_alone(tmp_path: Path) -> None:
         assert "passkey" not in answered["sign_in_methods"]
 
 
+def test_a_deployment_can_turn_passkeys_off_entirely(tmp_path: Path) -> None:
+    """The switch is the setting, not the absence of an address.
+
+    An address is also what OAuth redirects and mail links are built from, so a
+    deployment that serves those cannot switch passkeys off by leaving one out.
+    With the setting off the deployment says so, publishes no passkey sign-in,
+    and takes the ceremony and management routes out of the API altogether.
+    """
+    off = _standalone(tmp_path)
+    off.public_base_url = "https://otari.example.com"
+    off.passkeys_enabled = False
+
+    with TestClient(create_app(off)) as client:
+        answered = client.get(f"{API_ROOT}/bootstrap").json()
+        assert answered["passkeys_enabled"] is False
+        assert answered["passkeys_ready"] is False
+        assert "passkey" not in answered["sign_in_methods"]
+        # Not mounted, so a 404 rather than the 503 a missing relying party gives.
+        for method, path in (
+            ("post", "/auth/webauthn/authenticate/options"),
+            ("post", "/auth/webauthn/authenticate"),
+            ("post", "/auth/webauthn/register/options"),
+            ("get", "/auth/webauthn/credentials"),
+            ("delete", "/auth/webauthn/credentials/00000000-0000-0000-0000-000000000000"),
+        ):
+            response = getattr(client, method)(f"{API_ROOT}{path}")
+            assert response.status_code == 404, (method, path, response.status_code)
+
+
+def test_passkeys_stay_on_by_default_and_mounted(tmp_path: Path) -> None:
+    on = _standalone(tmp_path)
+    on.public_base_url = "https://otari.example.com"
+
+    with TestClient(create_app(on)) as client:
+        answered = client.get(f"{API_ROOT}/bootstrap").json()
+        assert answered["passkeys_enabled"] is True
+        assert answered["passkeys_ready"] is True
+        # Mounted: refused for want of a session, not for want of a route.
+        assert client.get(f"{API_ROOT}/auth/webauthn/credentials").status_code in {401, 403}
+
+
 def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
     """What the dashboard gates a mail-dependent affordance on.
 
@@ -257,6 +302,8 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 # check is for is a surface whose API went away, and a name that reaches one
 # mounted route has not.
 SURFACE_ROUTE_PREFIXES = {
+    "hosted_providers": f"{API_ROOT}/hosted-providers",
+    "health_checks": f"{API_ROOT}/health-checks",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",
@@ -277,10 +324,26 @@ def test_both_editions_publish_the_organization_guardrail_surface(tmp_path: Path
     assert "organization_guardrails" in STANDALONE_SURFACES
     assert "organization_guardrails" in HOSTED_SURFACES
 
-    mounted = {getattr(route, "path", "") for route in create_app(_standalone(tmp_path)).routes}
+    mounted = {route.path or "" for route in iter_route_contexts(create_app(_standalone(tmp_path)).routes)}
 
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrails") for path in mounted)
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrail-definitions") for path in mounted)
+
+
+@pytest.mark.parametrize("build", [_standalone, _hosted], ids=["standalone", "hosted"])
+def test_both_editions_publish_the_organization_usage_surface(
+    tmp_path: Path, build: Callable[[Path], GatewayConfig]
+) -> None:
+    """The organization-wide Usage page, which no other page answers on either edition.
+
+    ``/usage`` reads the workspace the sidebar selected, so a standalone
+    deployment serving several organizations needs this page as much as a hosted
+    one does.
+    """
+    with TestClient(create_app(build(tmp_path))) as client:
+        answered = client.get(f"{API_ROOT}/bootstrap").json()
+
+    assert "organization_usage" in answered["surfaces"]
 
 
 @pytest.mark.parametrize(
@@ -304,7 +367,7 @@ def test_every_surface_names_a_route_the_gateway_mounts(
     """
     config = build(tmp_path)
     app = create_app(config)
-    mounted = {getattr(route, "path", "") for route in app.routes}
+    mounted = {route.path or "" for route in iter_route_contexts(app.routes)}
 
     # The fixed tuple and what the endpoint publishes, which adds each enabled
     # registry feature's surface: a feature whose route is not mounted fails here.
@@ -324,9 +387,9 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     ``organization_providers`` is published by both topologies, because the page
     behind it is where an organization's models are offered, priced and switched,
     which is a tenant's question whether or not the deployment has more than one
-    tenant. ``organization_usage`` is the row that exists only where tenants do:
-    standalone's organization is the deployment, so ``/usage`` already answers it
-    whole (otari-ai#1963).
+    tenant. ``organization_usage`` is on both for the same reason: the ``/usage``
+    page reads the sidebar's selected workspace, so neither edition has another
+    page answering for the organization as a whole.
 
     ``playground`` is the one row withheld for a reason that is not about
     credentials or scope at all, and not about the topology either: the page
@@ -350,9 +413,9 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "organization_usage",
+        "health_checks",
         "playground",
-        "providers",
+        "traces",
     }
 
 
@@ -373,10 +436,18 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
     assert "playground" in answered["surfaces"]
     # The rest of the hosted set is unchanged by the address: this is one row's
     # availability, not a different edition.
-    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "organization_usage",
-        "providers",
-    }
+    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {"health_checks", "traces"}
+
+
+def test_hosted_publishes_the_health_page(tmp_path: Path) -> None:
+    """A check goes straight to the provider on the hosted provider's own key, so a control plane can run it."""
+    app = create_app(_hosted(tmp_path))
+
+    with TestClient(app) as client:
+        assert "health_checks" in client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
+        assert (
+            client.get(f"{API_ROOT}/health-checks", headers={API_KEY_HEADER: f"Bearer {MASTER_KEY}"}).status_code == 200
+        )
 
 
 def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:
@@ -436,6 +507,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "privacy_url": None,
         "site_url": None,
         "maintenance_mode": False,
+        "passkeys_enabled": False,
         "passkeys_ready": False,
         "oauth_providers": [],
         "feedback_enabled": False,

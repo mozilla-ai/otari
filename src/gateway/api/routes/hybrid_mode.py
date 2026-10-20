@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 
 _DISABLED_DETAIL = "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."
+_SIGN_IN_DISABLED_DETAIL = "Dashboard sign-in is not available in hybrid mode. Sign in through the platform UI."
 
 # The method list every stub below shares. ``HEAD`` is enumerated rather than
 # inherited, for the reason ``hosted_mode`` spells out: FastAPI derives it from
@@ -96,3 +97,10 @@ async def workspaces_disabled() -> None:
 @router.api_route("/invitations", methods=_METHODS)
 async def invitations_disabled() -> None:
     _raise_disabled()
+
+
+# A hybrid gateway runs no dashboard sessions: people sign in to the platform, which holds the accounts.
+@router.api_route("/auth/{path:path}", methods=_METHODS)
+@router.api_route("/auth", methods=_METHODS)
+async def auth_disabled() -> None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_SIGN_IN_DISABLED_DETAIL)

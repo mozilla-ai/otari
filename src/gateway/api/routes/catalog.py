@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.api.deps import (
-    ModelProviderPortDep,
+    RequestSessionModelProviderPortDep,
     get_config,
     get_db,
     get_session_identity,
@@ -53,23 +53,22 @@ from gateway.models.tenancy import Workspace
 from gateway.models.usage import UsageLog
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.schemas.catalog import CatalogCapabilities, CatalogFacets, CatalogModelSummary, CatalogQuery
-from gateway.services.catalog import query_catalog
-from gateway.services.catalog_selectors import (
+from gateway.services.catalog import (
     current_selector_index,
     model_selector_for_slug,
+    query_catalog,
     short_selector_for,
 )
 from gateway.services.merged_catalog_service import (
     MergedCatalog,
     ModelPricingInfo,
-    build_merged_catalog,
+    build_real_model_catalog,
     served_on_deployment_key,
+    viewer_organization,
     viewer_price,
 )
 from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
-    background_catalog_enabled,
-    load_models_dev_catalog,
     models_dev_provider_id,
 )
 from gateway.services.model_identity import (
@@ -79,7 +78,7 @@ from gateway.services.model_identity import (
     group_offerings,
     identity_key,
 )
-from gateway.services.pricing_refresh_service import GENAI_PRICES_SOURCE
+from gateway.services.pricing_refresh_service import MODELS_DEV_SOURCE
 from gateway.services.pricing_service import (
     default_pricing_enabled,
     load_organization_override_index,
@@ -91,7 +90,6 @@ from gateway.services.selector_index_service import (
     real_offerings,
     rebuild_selector_index,
 )
-from gateway.services.workspace_scope import organization_for_key_id
 
 # ``verify_catalog_reader_or_public`` rather than ``verify_catalog_reader``: a
 # visitor reads too while ``public_catalog`` is on, and is answered from what
@@ -155,8 +153,8 @@ class CatalogOffering(BaseModel):
         default=None,
         description=(
             "The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog "
-            "id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's cheapest offering "
-            "on it. Null for a dearer sibling on the same instance, or until the gateway has indexed the catalog."
+            "id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's best offering "
+            "on it. Null for another build on the same instance, or until the gateway has indexed the catalog."
         ),
     )
     provider: str = Field(description="The provider instance the selector names.")
@@ -178,18 +176,19 @@ class CatalogOffering(BaseModel):
         default=None,
         description=(
             "Which price list `pricing` came from, for this viewer: the organization's own override, the "
-            "deployment's stored row, or the genai-prices defaults. Null when nothing prices it."
+            "deployment's stored row, or the models.dev defaults. Null when nothing prices it."
         ),
     )
     price_reference: str | None = Field(
         default=None,
-        description="For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.",
+        description="For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.",
     )
     metadata_input_price_per_million: float | None = Field(
         default=None,
         description=(
-            "What models.dev lists this provider charging, for a cross-check. Not billed from: two "
-            "independent datasets disagreeing is the cheapest stale-price detector there is."
+            "What the live models.dev catalog lists this provider charging. The default is billed from the "
+            "accepted models.dev snapshot, which can lag the live catalog, so a difference means a price "
+            "update is waiting for review."
         ),
     )
     metadata_output_price_per_million: float | None = None
@@ -207,7 +206,7 @@ class CatalogModelDetail(CatalogModelSummary):
     """One model with everything the detail page shows."""
 
     default_pricing: bool = Field(
-        description="Whether an unpriced model is metered at the genai-prices default.",
+        description="Whether an unpriced model is metered at the models.dev default.",
     )
     offerings: list[CatalogOffering]
     also_available_from: list[CatalogElsewhere]
@@ -216,9 +215,10 @@ class CatalogModelDetail(CatalogModelSummary):
 class CatalogResponse(BaseModel):
     """The grouped catalog, and the facts a reader needs to interpret its prices."""
 
-    default_pricing: bool = Field(description="Whether an unpriced model is metered at the genai-prices default.")
+    default_pricing: bool = Field(description="Whether an unpriced model is metered at the models.dev default.")
     defaults_as_of: datetime | None = Field(
-        description="When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.",
+        description="When the accepted models.dev snapshot, which the defaults are billed from, was taken. "
+        "Null while the bundled snapshot serves.",
     )
     metadata_available: bool = Field(
         description="False when models.dev could not be read; descriptions are then absent."
@@ -236,23 +236,6 @@ class _Offering:
     metadata: ModelCatalogEntry | None
     model_id: str
     """The provider's own id, which a usage row carries beside the instance."""
-
-
-async def _viewer_organization(
-    db: AsyncSession, caller: CatalogCaller, session_identity: TenancyUser | None
-) -> uuid.UUID | None:
-    """The organization whose overrides price this viewer's requests.
-
-    Resolved the way settlement resolves it: a session acts in its active
-    organization, an API key in its workspace's, and a master key in the default
-    workspace's. Never from the request. A visitor has none.
-    """
-    if session_identity is not None:
-        return session_identity.active_organization_id
-    if caller is None:
-        return None
-    api_key, _ = caller
-    return await organization_for_key_id(db, api_key.id if api_key is not None else None)
 
 
 async def _usage_by_selector(
@@ -323,7 +306,7 @@ async def _usage_by_selector(
 
 
 async def _defaults_as_of(db: AsyncSession) -> datetime | None:
-    stmt = select(PricingSnapshot.updated_at).where(PricingSnapshot.source == GENAI_PRICES_SOURCE)
+    stmt = select(PricingSnapshot.updated_at).where(PricingSnapshot.source == MODELS_DEV_SOURCE)
     taken = (await db.execute(stmt)).scalar_one_or_none()
     return normalize_effective_at(taken) if taken is not None else None
 
@@ -351,7 +334,7 @@ class SelectorIndexResponse(BaseModel):
 async def refresh_selector_index(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> SelectorIndexResponse:
     """Re-index the short spellings now, rather than on the refresher's next tick."""
     await rebuild_selector_index(db, config, model_provider=model_provider, fetch=True)
@@ -369,11 +352,12 @@ async def _group(
     caller: CatalogCaller,
     session_identity: TenancyUser | None,
 ) -> _Grouped:
-    catalog = await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
+    """The merged catalog's offerings grouped into models, each priced at the viewer's rate."""
+    catalog = merged.models_dev
     now = normalize_effective_at(None)
     real = real_offerings(merged)
 
-    organization_id = await _viewer_organization(db, caller, session_identity)
+    organization_id = await viewer_organization(db, caller, session_identity)
     overrides = (
         await load_organization_override_index(
             db, organization_id, (key for obj in real for key in pricing_key_forms(obj.id))
@@ -402,8 +386,9 @@ async def _group(
                     hosted=obj.deployment_managed or served_on_deployment_key(merged.deployment_key_models, obj.id),
                 ),
                 discovered=obj.id in merged.discovered_keys,
-                context_window=(metadata.context_window if metadata else None) or obj.context_window,
-                max_output_tokens=metadata.max_output_tokens if metadata else None,
+                # From the merged catalog, so the flat listing reports the same limits.
+                context_window=obj.context_window,
+                max_output_tokens=obj.max_output_tokens,
                 quantization=clean_model_id(model_id).quantization,
                 pricing=pricing,
                 price_source=source,
@@ -572,10 +557,10 @@ async def _merged_for(
     model_provider: ModelProviderPort,
 ) -> MergedCatalog:
     if caller is None:
-        return await build_merged_catalog(
+        return await build_real_model_catalog(
             db, config, auth=(None, False), session_identity=None, anonymous=True, model_provider=model_provider
         )
-    return await build_merged_catalog(
+    return await build_real_model_catalog(
         db, config, auth=caller, session_identity=session_identity, model_provider=model_provider
     )
 
@@ -586,16 +571,17 @@ async def list_catalog(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
     query: Annotated[CatalogQuery, Query()],
 ) -> CatalogResponse:
     """The models this caller may use, one entry each however many providers serve it.
 
     Prices are the caller's: an organization's override where one applies, else
-    the deployment's row, else the genai-prices default. Aliases and routing
+    the deployment's row, else the models.dev default. Aliases and routing
     policies are not models and are not listed; see Routing. A visitor, where
     the catalog is public, sees the configured instances and the hosted
-    models at the deployment's rates, and nothing that belongs to a tenant.
+    models every organization reaches, at the deployment's rates, and nothing
+    that belongs to a tenant.
     """
     merged = await _merged_for(db, config, caller, session_identity, model_provider)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
@@ -626,7 +612,7 @@ async def get_catalog_model(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    model_provider: ModelProviderPortDep,
+    model_provider: RequestSessionModelProviderPortDep,
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 

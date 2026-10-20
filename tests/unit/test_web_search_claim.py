@@ -6,10 +6,11 @@ from typing import Any
 
 import pytest
 
+from gateway.core.config import GatewayConfig
+from gateway.exceptions.tools_exceptions import WebSearchInterceptedError
 from gateway.models.tools import CodeExecutor
-from gateway.services.tools import Dialect
+from gateway.services.tools import WEB_SEARCH_TOOL_NAME, Dialect, decide_candidate_tools, read_web_declarations
 from gateway.services.tools._web_declarations import (
-    claims_provider_web_search,
     first_provider_web_search_tool,
     parse_web_search_header,
     provider_runs_web_search_natively,
@@ -43,23 +44,79 @@ def test_native_only_in_the_providers_own_wire_format(
     assert provider_runs_web_search_natively(entry, provider=provider, dialect=dialect) is native
 
 
-def _claims(
+@pytest.mark.parametrize(
+    ("entry", "dialect", "model", "native"),
+    [
+        (ANTHROPIC_DATED, Dialect.MESSAGES, "deepseek-flash", True),
+        (ANTHROPIC_DATED, Dialect.MESSAGES, "deepseek-v4-pro", True),
+        (ANTHROPIC_DATED, Dialect.MESSAGES, None, True),
+        (OPENAI_BARE, Dialect.RESPONSES, "deepseek-v4-pro", True),
+        # deepseek-flash ignores the keyword on Responses and answers without searching.
+        (OPENAI_BARE, Dialect.RESPONSES, "deepseek-flash", False),
+        (OPENAI_BARE, Dialect.RESPONSES, None, False),
+        ({"type": "web_search_preview"}, Dialect.RESPONSES, "deepseek-v4-pro", False),
+        (ANTHROPIC_DATED, Dialect.RESPONSES, "deepseek-v4-pro", False),
+        (OPENAI_BARE, Dialect.MESSAGES, "deepseek-v4-pro", False),
+        (ANTHROPIC_DATED, Dialect.CHAT, "deepseek-v4-pro", False),
+    ],
+)
+def test_deepseek_runs_both_keywords_on_the_matching_api_and_responses_on_v4_pro_only(
+    entry: dict[str, str], dialect: Dialect, model: str | None, native: bool
+) -> None:
+    assert provider_runs_web_search_natively(entry, provider="deepseek", dialect=dialect, model=model) is native
+
+
+def test_auto_decides_each_deepseek_candidate_by_its_model() -> None:
+    config = GatewayConfig(web_search_url="http://search.invalid")
+    declarations = read_web_declarations([OPENAI_BARE], web_search_header="auto", config=config, uniform=False)
+    decided = decide_candidate_tools(
+        declarations,
+        providers=["deepseek", "deepseek"],
+        models=["deepseek-v4-pro", "deepseek-flash"],
+        dialect=Dialect.RESPONSES,
+    )
+    assert [WEB_SEARCH_TOOL_NAME in candidate.native for candidate in decided] == [True, False]
+    assert [WEB_SEARCH_TOOL_NAME in candidate.claimed for candidate in decided] == [False, True]
+
+
+def test_without_models_no_candidate_runs_a_search_only_some_models_run() -> None:
+    config = GatewayConfig(web_search_url="http://search.invalid")
+    declarations = read_web_declarations([OPENAI_BARE], web_search_header="auto", config=config, uniform=False)
+    (decided,) = decide_candidate_tools(declarations, providers=["deepseek"], dialect=Dialect.RESPONSES)
+    assert WEB_SEARCH_TOOL_NAME in decided.claimed
+
+
+@pytest.fixture(autouse=True)
+def _no_search_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("OTARI_WEB_SEARCH_URL", "OTARI_WEB_SEARCH_INTERCEPT", "OTARI_WEB_SEARCH_PROVIDER"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _claimed(
     *,
     requested: CodeExecutor | None,
     intercept: bool = False,
     backend_configured: bool = True,
-    provider: str | None = "bedrock",
-    providers: list[str | None] | None = None,
+    providers: list[str | None],
     entry: dict[str, Any] | None = ANTHROPIC_DATED,
-) -> bool:
-    return claims_provider_web_search(
-        entry,
-        requested=requested,
-        intercept=intercept,
-        backend_configured=backend_configured,
-        providers=[provider] if providers is None else providers,
-        dialect=Dialect.MESSAGES,
+    uniform: bool = False,
+) -> list[bool]:
+    """Whether Otari runs the search on each candidate in ``providers``, head first."""
+    config = GatewayConfig(
+        web_search_url="http://search.invalid" if backend_configured else None, web_search_intercept=intercept
     )
+    declarations = read_web_declarations(
+        [entry] if entry is not None else [],
+        web_search_header=requested.value if requested is not None else None,
+        config=config,
+        uniform=uniform,
+    )
+    decided = decide_candidate_tools(declarations, providers=providers, dialect=Dialect.MESSAGES)
+    return [WEB_SEARCH_TOOL_NAME in candidate.claimed for candidate in decided]
+
+
+def _claims(*, provider: str | None = "bedrock", **kwargs: Any) -> bool:
+    return _claimed(providers=[provider], **kwargs)[0]
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "bedrock"])
@@ -82,16 +139,32 @@ def test_auto_claims_a_search_the_provider_cannot_run() -> None:
 
 @pytest.mark.parametrize(
     ("providers", "claimed"),
-    [(["anthropic", "anthropic"], False), (["anthropic", "bedrock"], True), ([], True)],
-    ids=["all-native", "non-native-fallback", "unknown-chain"],
+    [
+        (["anthropic", "anthropic"], [False, False]),
+        (["anthropic", "bedrock"], [False, True]),
+        (["bedrock", "anthropic"], [True, False]),
+        (["anthropic", None], [False, True]),
+    ],
+    ids=["all-native", "non-native-fallback", "non-native-head", "unknown-fallback"],
 )
-def test_auto_claims_unless_every_candidate_runs_the_search(providers: list[str | None], claimed: bool) -> None:
-    assert _claims(requested=CodeExecutor.AUTO, providers=providers) is claimed
+def test_auto_decides_each_candidate_on_its_own(providers: list[str | None], claimed: list[bool]) -> None:
+    assert _claimed(requested=CodeExecutor.AUTO, providers=providers) == claimed
 
 
-@pytest.mark.parametrize("requested", list(CodeExecutor))
-def test_the_header_cannot_undo_interception(requested: CodeExecutor) -> None:
+def test_a_uniform_auto_claims_for_every_candidate_unless_all_run_the_search() -> None:
+    """How hybrid mode decides, since the platform's attempts share one set of tools."""
+    assert _claimed(requested=CodeExecutor.AUTO, providers=["anthropic", "bedrock"], uniform=True) == [True, True]
+    assert _claimed(requested=CodeExecutor.AUTO, providers=["anthropic", "anthropic"], uniform=True) == [False, False]
+
+
+@pytest.mark.parametrize("requested", [None, CodeExecutor.AUTO, CodeExecutor.OTARI])
+def test_interception_claims_whatever_else_the_header_asks(requested: CodeExecutor | None) -> None:
     assert _claims(requested=requested, intercept=True, provider="anthropic")
+
+
+def test_the_header_cannot_undo_interception() -> None:
+    with pytest.raises(WebSearchInterceptedError):
+        _claims(requested=CodeExecutor.PROVIDER, intercept=True, provider="anthropic")
 
 
 def test_otari_claims_even_a_native_search() -> None:

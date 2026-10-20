@@ -972,3 +972,42 @@ def test_one_unusable_id_does_not_fail_a_batch_lookup(
             await engine.dispose()
 
     assert asyncio.run(_lookup()) == {stored}
+
+
+def test_vision_describe_side_call_row_carries_the_request_tags(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    test_config: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The describe side-call's row is tagged like the request's own, so spend by tag includes it."""
+    from any_llm.types.completion import CompletionUsage
+
+    monkeypatch.setattr(test_config, "vision_strategy", "describe")
+    monkeypatch.setattr(test_config, "vision_describe_model", "openai:gpt-4o-mini")
+    client.post(f"{API_ROOT}/users", json={"user_id": "vision-tags-user"}, headers=master_key_header)
+
+    async def fake_describe(config: Any, data_url: str) -> tuple[str | None, CompletionUsage | None]:
+        return "a chart of revenue", CompletionUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
+
+    monkeypatch.setattr("gateway.services.content_normalizer.describe_image", fake_describe)
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        return _make_completion()
+
+    image = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
+    body = {
+        "model": "ollama:llama3",
+        "user": "vision-tags-user",
+        "messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": image}}]}],
+        "metadata": {"purpose": "vision"},
+    }
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=master_key_header, json=body)
+
+    assert resp.status_code == 200, resp.text
+    rows = client.get(f"{API_ROOT}/usage", params={"user_id": "vision-tags-user"}, headers=master_key_header).json()
+    assert sorted(row["model"] for row in rows) == ["gpt-4o-mini", "llama3"]
+    assert all(row["tags"] == {"purpose": "vision"} for row in rows)

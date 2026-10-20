@@ -64,14 +64,14 @@ cannot attach to more than one table, so a shared mixin passes `sa_type` plus
 
 The backend is a modular monolith. [ARCHITECTURE.md](../../../ARCHITECTURE.md#the-modular-monolith)
 names the shape and gives the layer and import rules.
-[docs/domains.md](../../../docs/domains.md#the-target-shape) gives what each layer holds, how a
+[DOMAINS.md](../../../DOMAINS.md#the-target-shape) gives what each layer holds, how a
 domain fits together and the domain test, says what each domain owns, and gives the steps for
 moving one domain into the shape. This section adds the house style for code in those layers.
 
 **New and moved code follows the target shape. Most existing code does not, so never copy the
 module beside yours.** `SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE`, `FLAT_MODULE_BASELINE`,
-`SERVICE_MODE_READ_BASELINE` and the baseline on each `MODEL_ACCESS` entry in
-`scripts/check_architecture.py` name the code still in the old shape. A baseline only shrinks:
+`SERVICE_MODE_READ_BASELINE`, `LISTENER_DEFAULT_BASELINE` and the baseline on each `MODEL_ACCESS`
+entry in `scripts/check_architecture.py` name the code still in the old shape. A baseline only shrinks:
 remove a name when you move its code, and never add one.
 
 - **Routes** return typed schemas, not raw dicts, and use `fastapi.status` constants.
@@ -100,7 +100,7 @@ Catch specific exceptions, not a broad `except Exception`.
 
 ### How a service is built
 
-A domain's service is its Service Layer, and [docs/domains.md](../../../docs/domains.md#the-target-shape)
+A domain's service is its Service Layer, and [DOMAINS.md](../../../DOMAINS.md#the-target-shape)
 gives its shape: one service per domain with a small public API, built by constructor injection,
 from a builder in `api/deps.py`. Two rules add to it:
 
@@ -118,7 +118,8 @@ rolls back.
 - Each request, and each worker job, has one Unit of Work over its one session, and every service
   built in that scope shares it. A request gets it from `get_unit_of_work` in `api/deps.py`. A
   worker job gets it from `create_unit_of_work()`, or from `create_log_unit_of_work()` for work
-  on the metering pool.
+  on the metering pool. A worker whose own reads still take the session gets both from
+  `create_unit_of_work_with_session()`, until those reads move into repositories.
 - A business step is one `async with uow:` block, an async context manager. The block commits
   when it ends, and rolls back and re-raises on an error. Either way the connection goes back to
   the pool.
@@ -138,7 +139,7 @@ rolls back.
 
 Code still in the old shape commits in its services, and some routes still commit. A domain's
 commits move into blocks when the domain moves
-([step 4](../../../docs/domains.md#what-one-domain-change-does)).
+([step 4](../../../DOMAINS.md#what-one-domain-change-does)).
 
 The boundary check refuses a `commit()` or `rollback()` call outside `core/unit_of_work.py`, except
 in the modules on `TRANSACTION_CONTROL_BASELINE`, which names that code. It also refuses an import
@@ -210,6 +211,11 @@ through the config / `otari_env()`.
 - **Never log secrets or user payloads**: no API keys, no `messages`/`input`/completion text,
   no full request bodies. Log opaque ids, token counts, model/provider names, status. (The
   one sanctioned exception is the intentional one-time bootstrap key print.)
+- **Never log a database error's message or traceback**: it carries the statement's bound
+  parameters, and PostgreSQL's DETAIL carries the row. A route answers a failed write with
+  `raise database_error("<operation>", exc)` (`api/routes/_helpers.py`), which logs the error's
+  class, SQLSTATE and constraint; elsewhere, log `describe_database_error(exc)`
+  (`core/database.py`), never `exc_info=True` or `logger.exception`.
 
 ## Before you finish
 

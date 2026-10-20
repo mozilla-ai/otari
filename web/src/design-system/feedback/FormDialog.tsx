@@ -74,6 +74,8 @@ export interface FormDialogProps {
    * gone forever, so the acknowledgement is the only way out.
    */
   isDismissable?: boolean
+  /** For a result screen: the footer's one action acknowledges, so no Cancel. */
+  hideCancel?: boolean
   /**
    * Where focus goes if the frame's own restore has nowhere to land.
    *
@@ -131,6 +133,7 @@ export function FormDialog({
   error,
   isDirty = false,
   isDismissable = true,
+  hideCancel = false,
   returnFocusRef,
   isSubmitDisabled = false,
   footerStart,
@@ -321,7 +324,7 @@ export function FormDialog({
                       {/* Cancel IS the dismiss, so it goes with it: a dialog
                           that cannot be dismissed has one way out and the
                           primary is it. */}
-                      {isDismissable ? (
+                      {isDismissable && !hideCancel ? (
                         <Button isDisabled={isPending} onPress={requestClose}>
                           Cancel
                         </Button>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any, Literal, cast
@@ -26,6 +27,7 @@ from any_llm.types.completion import (
 
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
+from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     _accumulate_tool_call_deltas,
@@ -34,13 +36,12 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.tools import ToolUseBudget
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import OTARI_TOOL_CALLS_FIELD, WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME, ToolUseBudget
 
 
 def _use_budget(max_uses: int) -> ToolUseBudget:
     """A cap on the gateway's own searches, which is the tool these loops run."""
-    return ToolUseBudget(WEB_SEARCH_TOOL_NAME, max_uses)
+    return ToolUseBudget({WEB_SEARCH_TOOL_NAME: max_uses})
 
 
 _FinishReason = Literal["stop", "length", "tool_calls", "content_filter", "function_call"]
@@ -536,6 +537,66 @@ async def test_loop_folds_usage_when_final_completion_has_empty_choices(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_loop_refuses_an_empty_first_completion_before_locking_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing ran yet, so an empty first answer is a provider failure the attempt walker can fall over on."""
+    empty = ChatCompletion(id="cmpl-empty", choices=[], created=0, model="fake", object="chat.completion")
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return empty
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    locked_in: list[bool] = []
+
+    with pytest.raises(EmptyCompletionError):
+        await mcp_tool_loop(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=_FakePool(tool_names=["fetch_url"]),
+            max_iterations=5,
+            on_first_response=lambda: locked_in.append(True),
+        )
+    assert locked_in == []
+
+
+@pytest.mark.asyncio
+async def test_loop_returns_an_empty_completion_after_a_tool_round(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Past lock-in an empty answer is returned, carrying the usage of the rounds before it."""
+    empty = ChatCompletion(
+        id="cmpl-empty",
+        choices=[],
+        created=0,
+        model="fake",
+        object="chat.completion",
+        usage=CompletionUsage(prompt_tokens=7, completion_tokens=0, total_tokens=7),
+    )
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")], prompt=10, completion_tokens=2),
+            empty,
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakePool(tool_names=["fetch_url"])
+    locked_in: list[bool] = []
+
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=5,
+        on_first_response=lambda: locked_in.append(True),
+    )
+
+    assert out.choices == []
+    assert pool.calls == [("fetch_url", {})]
+    assert locked_in == [True]
+    assert out.usage is not None
+    assert (out.usage.prompt_tokens, out.usage.completion_tokens, out.usage.total_tokens) == (17, 2, 19)
+
+
+@pytest.mark.asyncio
 async def test_loop_preserves_cached_tokens_when_final_iteration_lacks_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -754,6 +815,155 @@ async def test_stream_loop_runs_mcp_tool_and_continues(monkeypatch: pytest.Monke
     # `tool_calls` terminal is suppressed.
     assert finishes == ["stop"]
     assert pool.calls == [("fetch_url", {})]
+
+
+def _activity_of(chunks: list[ChatCompletionChunk]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for c in chunks:
+        extra = getattr(c, mcp_loop_module.TOOL_ACTIVITY_FIELD, None)
+        if extra is not None:
+            out.append(extra)
+    return out
+
+
+def _two_round_acompletion(monkeypatch: pytest.MonkeyPatch) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _chunk(tool_calls=[(0, "call_1", "fetch_url", '{"u": 1}')]),
+                _chunk(finish="tool_calls"),
+            ),
+            _async_iter(_chunk(content="all done", finish="stop")),
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_reports_gateway_tool_activity_when_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    _two_round_acompletion(monkeypatch)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    assert _activity_of(chunks) == [
+        {"type": "tool_call", "id": "call_1", "name": "fetch_url", "arguments": '{"u": 1}'},
+        {
+            "type": "tool_result",
+            "id": "call_1",
+            "name": "fetch_url",
+            "content": "ok",
+            "truncated": False,
+            "is_error": False,
+        },
+    ]
+    # Activity chunks carry no text and no finish reason, so the answer is unchanged.
+    assert [c.choices[0].delta.content for c in chunks if c.choices and c.choices[0].delta.content] == ["all done"]
+    assert [c.choices[0].finish_reason for c in chunks if c.choices and c.choices[0].finish_reason] == ["stop"]
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_reports_each_result_before_the_next_call_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _chunk(tool_calls=[(0, "call_1", "fetch_url", "{}"), (1, "call_2", "fetch_url", "{}")]),
+                _chunk(finish="tool_calls"),
+            ),
+            _async_iter(_chunk(content="all done", finish="stop")),
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=_FakePool(tool_names=["fetch_url"]),
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    assert [(a["type"], a["id"]) for a in _activity_of(chunks)] == [
+        ("tool_call", "call_1"),
+        ("tool_result", "call_1"),
+        ("tool_call", "call_2"),
+        ("tool_result", "call_2"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_flags_a_failed_gateway_tool_in_its_activity(monkeypatch: pytest.MonkeyPatch) -> None:
+    _two_round_acompletion(monkeypatch)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "[tool error] boom"})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    assert _activity_of(chunks)[1]["is_error"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_truncates_a_long_tool_result_in_its_activity(monkeypatch: pytest.MonkeyPatch) -> None:
+    _two_round_acompletion(monkeypatch)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "x" * 20_000})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    result = _activity_of(chunks)[1]
+    assert len(result["content"]) == 8_000
+    assert result["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_keeps_gateway_tool_activity_off_the_wire_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _two_round_acompletion(monkeypatch)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+        )
+    ]
+
+    assert _activity_of(chunks) == []
 
 
 def _usage_only_chunk(usage: CompletionUsage) -> ChatCompletionChunk:
@@ -1125,3 +1335,415 @@ async def test_stream_terminal_chunk_does_not_leak_a_gateway_tool_call(
     ]
     assert names == ["user_tool"]
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+# ---------- otari_tool_calls: the gateway's calls reported on Chat Completions ----------
+
+_REPORTED = frozenset({WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME})
+
+
+def _reported(value: ChatCompletion | ChatCompletionChunk) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = (value.model_extra or {}).get(OTARI_TOOL_CALLS_FIELD, [])
+    return entries
+
+
+def _streamed(*rounds: list[ChatCompletionChunk]) -> Any:
+    remaining = iter(rounds)
+
+    async def fake_acompletion(**_kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return _async_iter(*next(remaining))
+
+    return fake_acompletion
+
+
+class _GatedSearchPool(_FakeSearchPool):
+    """A search pool whose call waits until the test releases it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        self.entered.set()
+        await self.release.wait()
+        return await super().call_tool(name, arguments)
+
+
+@pytest.mark.asyncio
+async def test_an_answer_reports_every_rounds_searches_at_its_top_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[_search_call("c1", "first")]),
+            _completion(finish="tool_calls", tool_calls=[_search_call("c2", "second")]),
+            _completion(finish="stop", content="done"),
+        ]
+    )
+
+    async def fake_acompletion(**_kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    result = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, _FakeSearchPool()),
+        max_iterations=5,
+        native_tools=_REPORTED,
+    )
+
+    entries = _reported(result)
+    assert [(entry["query"], entry["status"]) for entry in entries] == [("first", "completed"), ("second", "completed")]
+    assert entries[0]["sources"] == [{"url": "https://a", "title": "A", "published_date": None}]
+    assert entries[0]["id"] != entries[1]["id"]
+    assert OTARI_TOOL_CALLS_FIELD not in (result.choices[0].message.model_extra or {})
+    assert result.choices[0].message.content == "done"
+
+
+@pytest.mark.asyncio
+async def test_an_answer_reports_nothing_unless_the_request_is_owed_a_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[_search_call("c1", "first")]),
+            _completion(finish="stop", content="done"),
+        ]
+    )
+
+    async def fake_acompletion(**_kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    result = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, _FakeSearchPool()),
+        max_iterations=5,
+    )
+
+    assert OTARI_TOOL_CALLS_FIELD not in (result.model_extra or {})
+
+
+@pytest.mark.asyncio
+async def test_a_mixed_batch_answer_reports_the_search_it_ran(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[_search_call("c1", "first"), ("c2", "user_tool", "{}")]),
+        ]
+    )
+
+    async def fake_acompletion(**_kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    result = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, _FakeSearchPool()),
+        max_iterations=5,
+        native_tools=_REPORTED,
+    )
+
+    assert [entry["status"] for entry in _reported(result)] == ["completed"]
+    assert [tc.function.name for tc in result.choices[0].message.tool_calls or [] if hasattr(tc, "function")] == [
+        "user_tool"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_reports_a_search_while_it_runs_and_once_it_ends(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [_chunk(tool_calls=[(0, "c1", "web_search", '{"query": "first"}')]), _chunk(finish="tool_calls")],
+            [_chunk(content="done"), _chunk(finish="stop")],
+        ),
+    )
+    pool = _GatedSearchPool()
+    stream = mcp_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        native_tools=_REPORTED,
+    )
+
+    started = await anext(stream)
+    ending = asyncio.ensure_future(anext(stream))
+    await pool.entered.wait()
+    await asyncio.sleep(0)
+    assert not ending.done(), "the ended entry went out before the search returned"
+    pool.release.set()
+    ended = await ending
+    rest = [chunk async for chunk in stream]
+
+    [started_entry] = _reported(started)
+    [ended_entry] = _reported(ended)
+    assert started_entry == {"id": started_entry["id"], "type": "web_search", "status": "in_progress", "query": "first"}
+    assert ended_entry["id"] == started_entry["id"]
+    assert ended_entry["status"] == "completed"
+    for chunk in (started, ended):
+        assert (chunk.id, chunk.model, chunk.created) == ("cmpl-1", "fake", 0)
+        [choice] = chunk.choices
+        assert choice.finish_reason is None
+        assert choice.delta.content is None
+        assert not choice.delta.tool_calls
+    assert "".join(c.choices[0].delta.content or "" for c in rest if c.choices) == "done"
+    assert not any(_reported(chunk) for chunk in rest)
+
+
+@pytest.mark.asyncio
+async def test_a_stream_ends_each_call_before_the_next_one_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [
+                _chunk(
+                    tool_calls=[
+                        (0, "c1", "web_search", '{"query": "first"}'),
+                        (1, "c2", "web_fetch", '{"url": "https://example.com/a?token=secret"}'),
+                    ]
+                ),
+                _chunk(finish="tool_calls"),
+            ],
+            [_chunk(content="done"), _chunk(finish="stop")],
+        ),
+    )
+    pool = _FakeSearchPool()
+    pool._tool_names.add(WEB_FETCH_TOOL_NAME)
+
+    entries = [
+        entry
+        async for chunk in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            native_tools=_REPORTED,
+        )
+        for entry in _reported(chunk)
+    ]
+
+    assert [(entry["type"], entry["status"]) for entry in entries] == [
+        ("web_search", "in_progress"),
+        ("web_search", "completed"),
+        ("web_fetch", "in_progress"),
+        ("web_fetch", "completed"),
+    ]
+    assert entries[2]["url"] == "https://example.com/a"
+
+
+@pytest.mark.asyncio
+async def test_a_mixed_batch_stream_reports_the_search_before_the_callers_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [
+                _chunk(tool_calls=[(0, "c1", "web_search", '{"query": "first"}'), (1, "c2", "user_tool", "{}")]),
+                _chunk(finish="tool_calls"),
+            ]
+        ),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=cast(Any, _FakeSearchPool()),
+            max_iterations=5,
+            native_tools=_REPORTED,
+        )
+    ]
+
+    reported_at = [index for index, chunk in enumerate(chunks) if _reported(chunk)]
+    terminal_at = next(index for index, chunk in enumerate(chunks) if chunk.choices and chunk.choices[0].finish_reason)
+    assert [_reported(chunks[index])[0]["status"] for index in reported_at] == ["in_progress", "completed"]
+    assert max(reported_at) < terminal_at
+    assert chunks[terminal_at].choices[0].finish_reason == "tool_calls"
+
+
+@pytest.mark.asyncio
+async def test_a_stream_reports_a_refused_search_only_once_it_ended(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [_chunk(tool_calls=[(0, "c1", "web_search", '{"query": "first"}')]), _chunk(finish="tool_calls")],
+            [_chunk(content="done"), _chunk(finish="stop")],
+        ),
+    )
+    pool = _FakeSearchPool()
+
+    entries = [
+        entry
+        async for chunk in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            use_budget=_use_budget(0),
+            native_tools=_REPORTED,
+        )
+        for entry in _reported(chunk)
+    ]
+
+    assert pool.calls == []
+    [entry] = entries
+    assert entry["status"] == "failed"
+    assert entry["error"] == {"provider": None, "status": None, "tag": "call_limit", "retryable": False}
+
+
+@pytest.mark.asyncio
+async def test_a_search_is_marked_failed_from_the_text_it_returned(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[_search_call("c1", "first")]),
+            _completion(finish="stop", content="done"),
+        ]
+    )
+
+    async def fake_acompletion(**_kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakeSearchPool()
+    pool._results["web_search"] = "[tool error] web search failed"
+
+    result = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        native_tools=_REPORTED,
+    )
+
+    [entry] = _reported(result)
+    assert entry["status"] == "failed"
+    assert "sources" not in entry
+    assert "error" not in entry
+
+
+@pytest.mark.asyncio
+async def test_a_search_that_raised_reports_none_of_its_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    sentinel = "sentinel-7f3a https://internal.example/search?key=leak"
+
+    class _RaisingSearchPool(_FakeSearchPool):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            raise RuntimeError(sentinel)
+
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [_chunk(tool_calls=[(0, "c1", "web_search", '{"query": "first"}')]), _chunk(finish="tool_calls")],
+            [_chunk(content="done"), _chunk(finish="stop")],
+        ),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=cast(Any, _RaisingSearchPool()),
+            max_iterations=5,
+            native_tools=_REPORTED,
+        )
+    ]
+
+    entries = [entry for chunk in chunks for entry in _reported(chunk)]
+    assert [entry["status"] for entry in entries] == ["in_progress", "failed"]
+    assert "error" not in entries[1]
+    assert not any("sentinel-7f3a" in chunk.model_dump_json() for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_the_openai_sdks_stream_helper_reads_a_reported_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The helper merges lists in a ``delta`` by index; the entries sit beside ``choices`` so it never sees them."""
+    from openai.lib.streaming.chat import ChatCompletionStreamState
+    from openai.types.chat import ChatCompletionChunk as OpenAIChunk
+
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [
+                _chunk(
+                    tool_calls=[
+                        (0, "c1", "web_search", '{"query": "first"}'),
+                        (1, "c2", "web_search", '{"query": "second"}'),
+                    ]
+                ),
+                _chunk(finish="tool_calls"),
+            ],
+            [_chunk(content="done"), _chunk(finish="stop")],
+        ),
+    )
+    state = ChatCompletionStreamState()
+
+    async for chunk in mcp_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, _FakeSearchPool()),
+        max_iterations=5,
+        native_tools=_REPORTED,
+    ):
+        state.handle_chunk(OpenAIChunk.model_validate_json(chunk.model_dump_json()))
+
+    assert state.get_final_completion().choices[0].message.content == "done"
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_shared_limit_refuses_ends_its_started_entry_before_the_request_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The backend's own search and fetch limit raises inside the call, after the started entry went out."""
+
+    class _LimitedSearchPool(_FakeSearchPool):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            raise MaxToolIterationsExceeded("web retrieval limit reached")
+
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed([_chunk(tool_calls=[(0, "c1", "web_search", '{"query": "first"}')]), _chunk(finish="tool_calls")]),
+    )
+    entries: list[dict[str, Any]] = []
+
+    with pytest.raises(MaxToolIterationsExceeded):
+        async for chunk in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=cast(Any, _LimitedSearchPool()),
+            max_iterations=5,
+            native_tools=_REPORTED,
+        ):
+            entries.extend(_reported(chunk))
+
+    assert [entry["status"] for entry in entries] == ["in_progress", "failed"]
+    assert entries[0]["id"] == entries[1]["id"]
+    assert entries[1]["error"]["tag"] == "call_limit"
+
+
+@pytest.mark.asyncio
+async def test_report_chunks_repeat_the_first_chunk_with_choices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider's preamble chunk with no choices names no response, so the report does not copy it."""
+    preamble = ChatCompletionChunk(id="", choices=[], created=0, model="", object="chat.completion.chunk")
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [preamble, _chunk(tool_calls=[(0, "c1", "web_search", '{"query": "first"}')]), _chunk(finish="tool_calls")],
+            [_chunk(content="done"), _chunk(finish="stop")],
+        ),
+    )
+
+    reports = [
+        chunk
+        async for chunk in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=cast(Any, _FakeSearchPool()),
+            max_iterations=5,
+            native_tools=_REPORTED,
+        )
+        if _reported(chunk)
+    ]
+
+    assert [(chunk.id, chunk.model) for chunk in reports] == [("cmpl-1", "fake"), ("cmpl-1", "fake")]

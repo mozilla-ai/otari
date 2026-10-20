@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
+import type { IconType } from "react-icons"
 import {
   FiArchive,
   FiEdit2,
@@ -56,6 +57,7 @@ import {
   useProviderKeyEncryption,
   useRestoreOrgProviderKey,
   useSetOrgProviderKeyDefault,
+  useUnsetOrgProviderKeyDefault,
   useUpdateOrgProviderKey,
 } from "@/shared/api/organizations"
 import { useOrganizationPricing } from "@/shared/api/pricing"
@@ -64,6 +66,12 @@ import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
+
+// The star filled is the key that is the default, so the glyph shows the state
+// its press toggles.
+const FilledStar: IconType = (props) => (
+  <FiStar {...props} fill="currentColor" />
+)
 
 // Every period one model can carry, which is what the editor reads. Generous
 // rather than tuned: the read is narrowed to a single model, so this bounds the
@@ -83,14 +91,8 @@ const URL_DEFAULTS = {
 // The organization's own upstream credentials: one BYO key per provider that
 // every workspace under the tenant inherits.
 //
-// Not the workspace rail's `/providers`, which manages `provider_credentials`,
-// keyed on an instance name and therefore owned by the process rather than by
-// anyone in particular. The two pages look alike and are not the same thing.
-// A standalone deployment reports both surfaces and shows both pages, under
-// different labels; a hosted one reports `organization_providers` alone, since
-// one `provider_credentials` row would serve every tenant
-// (`STANDALONE_SURFACES` / `HOSTED_SURFACES` in
-// `src/gateway/api/routes/bootstrap.py`).
+// Not the deployment rail's Hosted providers, the keys the process serves
+// every tenant on. The two pages look alike and are not the same thing.
 //
 // The per-workspace half of the same API (`/workspaces/{id}/provider-keys`:
 // pin, disable, restrict to models) is deliberately not here. Those are one
@@ -323,6 +325,7 @@ export function OrganizationProvidersPage() {
   const restore = useRestoreOrgProviderKey()
   const remove = useDeleteOrgProviderKey()
   const setDefault = useSetOrgProviderKeyDefault()
+  const unsetDefault = useUnsetOrgProviderKeyDefault()
 
   const [adding, setAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
@@ -374,6 +377,9 @@ export function OrganizationProvidersPage() {
   const rows = (keys.data ?? []).filter(
     (key) => showArchived || !key.archived_at,
   )
+  // The key whose models are open, if it is on the table: an archived key's
+  // id can sit in the URL while archived rows are hidden.
+  const expandedKey = rows.find((key) => key.id === expandedKeyId)
   // Archived keys are excluded: one that is out of use is not a problem to
   // report, and counting it would keep the banner up after the fix.
   const unreadableCount = (keys.data ?? []).filter(
@@ -425,6 +431,27 @@ export function OrganizationProvidersPage() {
       cell: (row) => (
         <span className="text-muted">{providerDisplayName(row.provider)}</span>
       ),
+    },
+    {
+      id: "serving",
+      header: "Serving",
+      // A key that offers nothing has never been narrowed and reaches whatever
+      // its provider serves, so it has no count to show. One that offers models
+      // and serves none refuses every request through it, which is the state
+      // worth flagging before the first request finds it.
+      cell: (row) =>
+        row.offered_count === 0 ? (
+          <span className="text-subtle">all models</span>
+        ) : row.serving_count === 0 && !row.archived_at ? (
+          <span className="flex items-center gap-2 text-danger">
+            <Dot className="bg-danger" />
+            {`0 of ${row.offered_count} serving`}
+          </span>
+        ) : (
+          <span className="text-muted">
+            {`${row.serving_count} of ${row.offered_count} serving`}
+          </span>
+        ),
     },
     {
       id: "api_key",
@@ -491,10 +518,18 @@ export function OrganizationProvidersPage() {
                 }
               />
               <RowAction
-                icon={FiStar}
-                label="Make default"
-                isDisabled={row.is_org_default || setDefault.isPending}
-                onPress={() => setDefault.mutate(row.id)}
+                icon={row.is_org_default ? FilledStar : FiStar}
+                label={
+                  row.is_org_default
+                    ? "Default provider, click to remove"
+                    : "Make default provider"
+                }
+                isDisabled={setDefault.isPending || unsetDefault.isPending}
+                onPress={() =>
+                  (row.is_org_default ? unsetDefault : setDefault).mutate(
+                    row.id,
+                  )
+                }
               />
               <RowAction
                 icon={FiEdit2}
@@ -559,7 +594,8 @@ export function OrganizationProvidersPage() {
           overrides.error ??
           archive.error ??
           restore.error ??
-          setDefault.error
+          setDefault.error ??
+          unsetDefault.error
         }
       />
 
@@ -644,26 +680,36 @@ export function OrganizationProvidersPage() {
             getRowKey={(row) => row.id}
             isLoading={context.isPending || keys.isLoading}
             emptyContent="No provider keys yet. Add one to let every workspace in this organization call that provider."
-            detailKey={expandedKeyId === "" ? null : expandedKeyId}
-            renderDetail={(row) => (
-              <ProviderModelsPanel
-                providerKey={row}
-                canEdit={canEdit}
-                onEditRate={(model) =>
-                  url.patch({ override: `${row.provider}:${model.model}` })
-                }
-                page={modelsPage}
-                pageSize={modelsSize}
-                onPageChange={(next) =>
-                  url.patch({ models_page: String(next) })
-                }
-                onPageSizeChange={(size) =>
-                  url.patch({ models_size: String(size), models_page: "0" })
-                }
-              />
-            )}
           />
         </TableScrollFrame>
+      ) : null}
+
+      {/* Below the table rather than inside it as a detail row: the key table
+          is wider than its frame on a narrow screen and scrolls sideways, and a
+          row inside it scrolls along and is clipped. Out here the panel takes
+          the page's width and its own table scrolls in its own frame. Keyed by
+          the row so a jump to another key remounts the panel rather than
+          carrying the previous key's state over. */}
+      {expandedKey ? (
+        <section
+          key={expandedKey.id}
+          aria-label={`Models on ${expandedKey.name}`}
+          className="mt-4 rounded-lg border border-border bg-surface"
+        >
+          <ProviderModelsPanel
+            providerKey={expandedKey}
+            canEdit={canEdit}
+            onEditRate={(model) =>
+              url.patch({ override: `${expandedKey.provider}:${model.model}` })
+            }
+            page={modelsPage}
+            pageSize={modelsSize}
+            onPageChange={(next) => url.patch({ models_page: String(next) })}
+            onPageSizeChange={(size) =>
+              url.patch({ models_size: String(size), models_page: "0" })
+            }
+          />
+        </section>
       ) : null}
 
       <ConfirmDialog

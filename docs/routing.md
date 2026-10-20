@@ -25,10 +25,35 @@ Callers send `model: fast`. If the first provider fails before any response is
 sent, Otari tries the fallback. The response keeps the policy name; Activity and
 usage record the models that were attempted.
 
+In the dashboard, choose Create policy on Routing, then Fallback: name it, pick
+the main model, and list at least one backup under "If unavailable, use", each a
+model other than the main one and the other backups. The backups are
+`on_failure`, in the order shown. Create policy offers one kind at a time
+(Fallback, Split traffic, Smart router, Spill over at rate limits, Tier down on
+budget), each with only its own fields. To combine them, open the policy from
+the list once it exists: its page has a section each for the main selection,
+the fallback chain, a budget tier-down and guardrails, and each section saves on
+its own, writing the rest of the policy back unchanged. A policy from
+`config.yml`, or one using options the page cannot show, opens read-only with
+its spec in full.
+
 ## Selection and failure are separate
 
-`select` chooses where a request starts. `on_failure` lists what to try after a
-retryable failure.
+`select` chooses where a request starts. `on_failure` lists what to try when a
+candidate fails before its answer starts, whatever the provider's error: an
+outage, a rate limit, or a request it refuses as invalid (400) all move on.
+A candidate whose provider has no credential configured fails that way too, so
+the policy moves on to the next; a provider nothing declares has none, keyless
+local backends included, and an entry that names no key has none, whatever the
+provider's own environment variable holds. A candidate nothing declares that one of the
+deployment's hosted providers serves is sent on the deployment's own credential, as a single model is
+([modes](modes.md#deployment-paid-credentials-in-standalone)). When no candidate has a credential, the request is
+refused with `424 provider_not_configured`. A candidate whose provider rejects
+the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
+either lacks a credential or had it rejected, and at least one was rejected, the
+request is refused with `424 provider_credential_rejected`.
+A Chat Completions candidate that answers with no choices has failed too, so the
+policy moves on to the next.
 
 ```yaml
 routing:
@@ -54,6 +79,11 @@ conditions are:
 All conditions in one `when` block must match. Numeric comparisons use exactly
 one of `gt`, `gte`, `lt`, or `lte`. A budget condition does not match a
 caller with no finite budget.
+
+In a policy that can fall over, each candidate gets one upstream call unless a
+retry count is configured, so a throttled provider hands over to the next
+candidate at once rather than after its SDK's own retries. See
+[Provider retries](configuration.md#provider-retries).
 
 ## Load balance across providers (weighted routing)
 
@@ -131,9 +161,10 @@ The policy says which is which: `candidates` handles "full", `on_failure`
 handles "broke". `Otari-Router: off` skips the order and starts from the
 default.
 
-In the dashboard, create one from Routing with "Move to the next model when one
-hits its rate limit", order the models with the arrows, and add the limit under
-Settings, Rate limit rules, counted for "Each model".
+In the dashboard, choose Create policy on Routing, then "Spill over at rate
+limits", order the models with the arrows, and add the limit under Settings,
+Rate limit rules, counted for "Each model". On an existing policy, pick "Spill
+over" in its Main selection section.
 
 
 The `knn` router uses scored examples to rank candidates for each user's
@@ -221,12 +252,29 @@ The command shows ordered candidates, filtered candidates and their reasons,
 effective weighted shares, and mandatory guardrails. The API equivalent is
 `POST /api/v1/routing/policies/explain`; it can also validate an unsaved draft.
 
+## Agent model recommendations
+
+A policy decides the model of a request that reaches Otari. A coding agent that
+talks to its provider directly can still ask Otari which model a new subagent
+should run on, through `POST /api/v1/routing/recommend`. A standalone
+deployment puts one choice question to the decision model it configured and
+recommends the candidate it picks; on otari.ai a managed recommender answers
+instead. The harness that asks picks the candidates: Claude Code chooses among
+its own `haiku`, `sonnet` and `opus` aliases, and pi, through
+[pi-otari](https://github.com/mozilla-ai/pi-otari), among the Otari model ids
+it sends with the request.
+Either way the recommendation is billed to the caller, and nothing
+else is dispatched. See
+[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
+
 ## Managing policies at runtime
 
 Config-file policies apply to every workspace. Standalone operators can also
 manage stored policies through the Routing page or `/api/v1/routing/policies`.
 Stored policies belong to one workspace and can optionally be scoped to one
-user.
+user. The operator's list, like `/api/v1/aliases`, shows the stored entries of
+the workspaces in the operator's active organization, and the master key acts in
+the default organization.
 
 An organization's owners and admins manage their own workspaces' policies and
 aliases through `/api/v1/organizations/me/routing-policies` and
@@ -277,20 +325,41 @@ All attempts share a `request_group_id`, which is the request's `Otari-Request-I
 Absorbed rows have no settled model cost and do not increase request or error
 totals; the final row represents the caller-visible request.
 
-Built-in tool charges settle on the final row. Candidate price and remaining
-budget are checked before each attempt, so a fallback cannot silently bypass
-pricing or spend limits.
+Every successful Chat Completions, Messages, and Responses response, routed or
+not, also says how it was served, so a caller's own metrics can see a fallback
+without reading the usage log:
+
+| Header | Value |
+| --- | --- |
+| `Otari-Provider` | The provider instance that served the request, by its configured name (`openai`, `azure-eu`). Never its base URL or credentials. |
+| `Otari-Model` | The model the serving provider was sent, as that provider names it (`gpt-5-mini`, `claude-haiku-4-5`), without the instance prefix. A routing policy, an alias, or a catalog ID keeps its own name in the body's `model`, so this is where a caller sees which model answered. A request naming a model reports that model. Left out when the name is not printable ASCII. |
+| `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
+| `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
+| `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening or its first chunk, since the headers go out then. |
+
+A request naming a model or an alias reports `1` and `false`. Streaming responses
+carry the same values: failover happens before the stream opens, so the serving
+candidate and the attempt count are already known when the headers are sent. A
+failure later in the stream is reported in the stream and changes neither. The
+request's cost is `usage.cost_usd` in the body, as described in the
+[API reference](api-reference.md#request-id-and-inline-cost). These headers are
+sent by a standalone gateway.
+
+Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.
 
 ## Failure behavior
 
-Failover occurs only before response bytes reach the client. A streaming failure
-after the stream begins is returned to the client because switching models
-mid-answer would corrupt the response.
+Failover occurs only before response bytes reach the client. A streamed
+candidate that fails before its first chunk falls over like one that fails to
+open, as long as the failure comes within `streaming_first_chunk_hold_ms`
+(15 seconds by default; `0` limits failover to candidates that fail to open). A
+streaming failure after the stream begins is returned to the client because
+switching models mid-answer would corrupt the response.
 
 A tool loop that has already produced assistant state cannot be replayed on
-another provider. Shared service failures, such as an unavailable mandatory
+another provider. On Chat Completions, a stream that has reported one of Otari's
+web searches or fetches in `otari_tool_calls` has sent response bytes, so it is
+committed from that report on. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
-If every candidate fails, Otari returns a gateway error based on the final
-failure. If caller restrictions remove every candidate, Otari returns 403
-without revealing the hidden targets.
+If every candidate of a plan with more than one candidate fails, Otari returns a gateway error in its own words, never a provider's message. A plan with one candidate answers as naming that model directly would. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.

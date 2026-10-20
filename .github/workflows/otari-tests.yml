@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
@@ -30,6 +32,8 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
@@ -133,6 +137,29 @@ jobs:
         files: ./coverage.xml
         flags: integration
         fail_ci_if_error: false
+
+  # The any-search and any-fetch libraries test apart from the gateway's suite,
+  # one run per library (Makefile, test-libs).
+  test-libs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        python-version: 3.14
+        activate-environment: true
+
+    - name: Install dependencies
+      run: |
+         uv sync --dev --frozen
+
+    - name: Run the any-search and any-fetch tests
+      run: make test-libs
 
   openapi-spec:
     runs-on: ubuntu-latest

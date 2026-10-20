@@ -4,7 +4,9 @@ import {
   FiBarChart2,
   FiBox,
   FiCode,
+  FiCpu,
   FiDollarSign,
+  FiGitBranch,
   FiGlobe,
   FiGrid,
   FiHome,
@@ -61,8 +63,14 @@ const BASE_NAV_SECTIONS = [
     id: "index",
     items: [
       // Ungated on every axis: the index is the deployment's own front page and
-      // reads whatever it is allowed to.
-      { to: "/", label: "Overview", icon: FiHome },
+      // reads whatever it is allowed to. The one row a caller with no
+      // organization keeps, since it is where they are told how to get in.
+      {
+        to: "/",
+        label: "Overview",
+        icon: FiHome,
+        reachableWithoutOrganization: true,
+      },
     ],
   },
   {
@@ -83,6 +91,13 @@ const BASE_NAV_SECTIONS = [
         label: "Activity",
         surface: "usage",
         icon: FiActivity,
+      },
+      // Agent sessions, read from the trace API rather than the usage log.
+      {
+        to: "/sessions",
+        label: "Sessions",
+        surface: "traces",
+        icon: FiGitBranch,
       },
       {
         to: "/usage",
@@ -161,7 +176,12 @@ const BASE_NAV_SECTIONS = [
         // leads with Policies because `/routing` *is* the policies page, not to
         // make a parent reachable.
         children: [
-          { to: "/tools/web-search", label: "Web search", icon: FiGlobe },
+          {
+            to: "/tools/web-search",
+            label: "Web search",
+            icon: FiGlobe,
+            badge: "Beta",
+          },
           {
             to: "/tools/code-execution",
             label: "Code execution",
@@ -212,22 +232,17 @@ const BASE_NAV_SECTIONS = [
  * provisioned for itself. The gate is written anyway because it is the thing
  * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
- * One of the design's rows is **declared and gated on a surface the standalone
- * bootstrap does not report** (`STANDALONE_SURFACES` in
- * `src/gateway/api/routes/bootstrap.py` is that list), so it is absent here and
- * present on a deployment that serves it, and a group whose every row is gated
- * drops entirely, heading included. Usage is that row; its own comment says why.
+ * Every row is gated on a surface both topologies publish (`STANDALONE_SURFACES` and `HOSTED_SURFACES` in
+ * `src/gateway/api/routes/bootstrap.py`), and a group whose every row a
+ * deployment gates off drops entirely, heading included. Gateway holds nothing
+ * in this build and drops; it stays declared for an overlay's Gateways.
  *
- * The organization's guardrails are not such a row: `organization_guardrails`
- * is published by both topologies, because its rows are keyed on the
- * organization. It is in General, under Deployment providers. Gateway holds
- * nothing in this build and drops; it stays declared for an overlay's Gateways.
+ * The organization's guardrails are published by both because their rows are
+ * keyed on the organization. They are in General, under Providers.
  *
- * The organization's own provider credentials are not such a row either:
- * `organization_providers` is published by both topologies, because the page
- * behind it is where an organization's models are offered, priced and switched.
- * It sits under General beside the process-global `providers` row, under a
- * different label; see that pair for why.
+ * The organization's own provider credentials are published by both because
+ * the page behind them is where an organization's models are offered, priced
+ * and switched.
  *
  * The design draws two more, Billing and Gateways, and neither is declared here
  * at all, because neither is this build's to declare: Billing is
@@ -260,12 +275,12 @@ const ORGANIZATION_NAV_SECTIONS = [
       // The organization as a whole, which the workspace rail's Usage page
       // cannot ask for: its scope is the sidebar's selected workspace, and the
       // switcher offers only the caller's own memberships (otari-ai#1963).
-      // Gated on a surface only the hosted bootstrap reports, because on a
-      // standalone deployment the organization is the deployment and `/usage`
-      // already answers it whole. No `operatorOnly` and no role gate here: the
-      // organization rail already opens only to a caller who manages the
-      // organization, and the server scopes a member who lands here by URL to
-      // their own workspaces, the same rows `/usage` shows them.
+      // Both topologies publish it, so on standalone it sits beside that page.
+      // No `operatorOnly`
+      // and no role gate here: the organization rail already opens only to a
+      // caller who manages the organization, and the server scopes a member
+      // who lands here by URL to their own workspaces, the same rows `/usage`
+      // shows them.
       {
         to: "/organization/usage",
         label: "Usage",
@@ -336,37 +351,14 @@ const ORGANIZATION_NAV_SECTIONS = [
     id: "org-general",
     label: "General",
     items: [
-      // Two rows, and on a standalone deployment both render, which is why they
-      // cannot share a label. The organization row is where an organization's
-      // models are offered, priced and switched, a tenant's question on either
-      // topology, so both surfaces are published there; hosted reports only the
-      // organization one.
-      //
-      // The organization's own row keeps the bare noun, because this rail is
-      // already scoped to the organization and the row whose scope is *not* the
-      // rail's is the one that needs qualifying. "Deployment providers" is also
-      // what its `operatorOnly` already says in the gating: those credentials
-      // are keyed on an instance name and belong to the process, so every
-      // organization on the deployment is served them.
+      // Where an organization's models are offered, priced and switched, a
+      // tenant's question on either topology. The deployment's own keys are
+      // Hosted providers, on the deployment rail.
       {
         to: "/organization/provider-keys",
         label: "Providers",
         surface: "organization_providers",
         icon: FiBox,
-      },
-      // `operatorOnly` here rather than on the organization rail's own entry
-      // point is the one exception to the deployment-rail placement the other
-      // two `operatorOnly` rows follow: a deployment operator who is not an
-      // organization owner or admin has no rail path to this row at all. Silent
-      // today, because standalone's one operator always owns the organization
-      // its own gateway provisioned; it stops holding once the rail's own gate
-      // (docblock above) becomes load-bearing at otari-ai#1716.
-      {
-        to: "/providers",
-        label: "Deployment providers",
-        surface: "providers",
-        icon: FiBox,
-        operatorOnly: "refused",
       },
       // The organization's own guardrails and where each one runs. Not the
       // workspace rail's `/tools/guardrails`, which sets the deployment's own
@@ -422,6 +414,23 @@ const DEPLOYMENT_SECTIONS = [
         surface: "admin",
         operatorOnly: "unlisted",
         icon: FiUserCheck,
+      },
+      // The keys the deployment serves inference on for a request that brings
+      // none of its own. Unlisted like Accounts, because its API refuses a
+      // non-operator with the same 404.
+      {
+        to: "/admin/hosted-providers",
+        label: "Hosted providers",
+        surface: "hosted_providers",
+        operatorOnly: "unlisted",
+        icon: FiCpu,
+      },
+      {
+        to: "/health-checks",
+        label: "Health",
+        surface: "health_checks",
+        icon: FiActivity,
+        operatorOnly: "refused",
       },
     ],
   },
@@ -657,6 +666,20 @@ export function navLabelForPath(pathname: string): string | undefined {
     (one) => one.to === pathname,
   )
   return child?.label ?? navItemForPath(pathname)?.label
+}
+
+/** Names for the chrome destinations, which no registry entry declares. */
+const CHROME_PAGE_LABELS: Readonly<Record<string, string | undefined>> = {
+  "/account": "Account",
+  "/invitations": "Invitations",
+}
+
+/**
+ * What to call the page at this pathname, rail or chrome, for the tab title
+ * and the breadcrumb alike, so the two cannot name one page differently.
+ */
+export function pageLabelForPath(pathname: string): string | undefined {
+  return navLabelForPath(pathname) ?? CHROME_PAGE_LABELS[pathname]
 }
 
 /**

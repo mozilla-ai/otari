@@ -1,0 +1,30 @@
+{
+  "status": 200,
+  "body": {
+    "response": {
+      "status": "OK",
+      "head": {
+        "query": "python",
+        "nword": 1,
+        "rankm": 168,
+        "dups": 0,
+        "nph": 0,
+        "more": 0,
+        "words": [
+          {
+            "full": "python",
+            "stem": "python",
+            "plus": 1,
+            "hits": 17280856
+          }
+        ],
+        "timer": 0.07,
+        "start": 1,
+        "return": 0,
+        "exact": true,
+        "results": 0
+      },
+      "results": []
+    }
+  }
+}

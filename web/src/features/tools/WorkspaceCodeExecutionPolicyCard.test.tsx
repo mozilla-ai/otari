@@ -262,9 +262,69 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(toggle).toBeDisabled()
   })
 
+  describe("where a workspace with no policy is off", () => {
+    const optIn = (extra: Partial<WorkspaceCodeExecutionPolicy> = {}) =>
+      workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        default_enabled: false,
+        enabled: false,
+        ...extra,
+      })
+
+    it("reads no policy as off", async () => {
+      mockApi({ policy: optIn() })
+      await renderLoaded()
+
+      expect(screen.getByRole("switch", { name: SWITCH })).not.toBeChecked()
+    })
+
+    it("turns on by storing an enabled policy", async () => {
+      const calls = mockApi({ policy: optIn() })
+      const user = userEvent.setup()
+      await renderLoaded()
+
+      await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+      expect(await putBody(calls)).toMatchObject({ enabled: true })
+      expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+    })
+
+    it("turns off by dropping a policy that narrows nothing else", async () => {
+      const calls = mockApi({
+        policy: optIn({ configured: true, enabled: true }),
+      })
+      const user = userEvent.setup()
+      await renderLoaded()
+
+      expect(screen.getByRole("switch", { name: SWITCH })).toBeChecked()
+      await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+      await waitFor(() =>
+        expect(calls.some((call) => call.method === "DELETE")).toBe(true),
+      )
+      expect(calls.some((call) => call.method === "PUT")).toBe(false)
+    })
+
+    it("turns off by storing a disabled policy where it narrows something", async () => {
+      const calls = mockApi({
+        policy: optIn({ configured: true, enabled: true, max_iterations: 3 }),
+      })
+      const user = userEvent.setup()
+      await renderLoaded()
+
+      await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+      expect(await putBody(calls)).toMatchObject({
+        enabled: false,
+        max_iterations: 3,
+      })
+      expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+    })
+  })
+
   describe("on a hosted control plane", () => {
-    // There a workspace with no policy may not run code, and the sandbox is
-    // the platform's, so this process's `sandbox_configured` decides nothing.
+    // There the sandbox is the platform's, so this process's
+    // `sandbox_configured` decides nothing.
     async function renderHosted() {
       renderCard(undefined, true)
       await waitFor(() =>
@@ -272,7 +332,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
       )
     }
 
-    it("reads no policy as off, and never locks the switch over a sandbox it does not own", async () => {
+    it("never locks the switch over a sandbox it does not own", async () => {
       mockApi({
         policy: workspaceCodeExecutionPolicy({
           workspace_id: ALPHA,
@@ -281,37 +341,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
       })
       await renderHosted()
 
-      expect(screen.getByRole("switch", { name: SWITCH })).not.toBeChecked()
       expect(screen.queryByText(/no sandbox configured/i)).toBeNull()
-    })
-
-    it("turns on by storing an enabled policy, never by deleting one", async () => {
-      const calls = mockApi()
-      const user = userEvent.setup()
-      await renderHosted()
-
-      await user.click(screen.getByRole("switch", { name: SWITCH }))
-
-      expect(await putBody(calls)).toMatchObject({ enabled: true })
-      expect(calls.some((call) => call.method === "DELETE")).toBe(false)
-    })
-
-    it("turns off by storing a disabled policy", async () => {
-      const calls = mockApi({
-        policy: workspaceCodeExecutionPolicy({
-          workspace_id: ALPHA,
-          configured: true,
-          enabled: true,
-        }),
-      })
-      const user = userEvent.setup()
-      await renderHosted()
-
-      expect(screen.getByRole("switch", { name: SWITCH })).toBeChecked()
-      await user.click(screen.getByRole("switch", { name: SWITCH }))
-
-      expect(await putBody(calls)).toMatchObject({ enabled: false })
-      expect(calls.some((call) => call.method === "DELETE")).toBe(false)
     })
 
     it("does not call a pinned image withdrawn against the control plane's own list", async () => {

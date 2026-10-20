@@ -6,6 +6,7 @@ import { useRequestPasswordReset } from "@/shared/api/auth"
 
 import { AuthEmailField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
+import { readSignInAddress, rememberSignInAddress } from "./signInAddress"
 
 /**
  * `#/recover-password`: ask for a password-reset link.
@@ -17,11 +18,12 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
  * page makes the same call for the same reason.
  *
  * Enumeration-safe like its siblings, so the confirmation is written in the
- * conditional and nothing here reads the response.
+ * conditional and nothing here reads the response. The address arrives from
+ * the sign-in screen and goes back to it (`signInAddress.ts`).
  */
 export function RecoverPasswordPage() {
   const request = useRequestPasswordReset()
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState(readSignInAddress)
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to
@@ -38,14 +40,16 @@ export function RecoverPasswordPage() {
     if (email.trim() === "" || request.isPending) {
       return
     }
-    request.mutate(email.trim())
+    request.mutate(email.trim(), {
+      onSuccess: () => rememberSignInAddress(email.trim()),
+    })
   }
 
   if (request.isSuccess) {
     return (
       <PublicAuthLayout
         title="Check your email"
-        description="If that address has a password on this gateway, a reset link is on its way."
+        description="If that address has an account on this gateway, a link to set or reset its password is on its way."
         footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
       >
         <p className="text-center text-caption">
@@ -58,8 +62,9 @@ export function RecoverPasswordPage() {
 
   return (
     <PublicAuthLayout
-      title="Reset your password"
-      description="Enter the address you sign in with and we will mail a link to set a new password."
+      isBusy={request.isPending}
+      title="Set or reset your password"
+      description="Enter your address and we will mail a link to choose a password, whether it is your first or a forgotten one."
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
     >
       <form
@@ -85,7 +90,7 @@ export function RecoverPasswordPage() {
           isPending={request.isPending}
           isDisabled={email.trim() === ""}
         >
-          Send reset link
+          Send link
         </Button>
       </form>
     </PublicAuthLayout>

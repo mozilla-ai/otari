@@ -16,13 +16,15 @@ import {
   OverviewIndex,
   OverviewPage,
 } from "@/features/overview/OverviewPage"
-import { API_ROOT } from "@/shared/api/client"
+import { API_ROOT, defaultQueryRetry } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
   HOSTED_SURFACES,
   organizationContext,
+  pendingOrganizationInvitation,
+  STANDALONE_SURFACES,
   seriesPoint,
   usageTotals,
   workspaceActivation,
@@ -64,6 +66,7 @@ function summary(
     by_endpoint: [],
     by_provider: [],
     by_tool: [],
+    by_tag: [],
     errors_by_status_code: [],
     series,
   }
@@ -100,6 +103,8 @@ function strip(over: Partial<AllocationHealth> = {}): AllocationHealth {
 }
 
 interface Bodies {
+  /** What GET /hosted-providers lists. */
+  hostedProviders?: unknown[]
   today?: Partial<UsageSummary["totals"]>
   period?: Partial<UsageSummary["totals"]>
   prev?: Partial<UsageSummary["totals"]>
@@ -124,6 +129,8 @@ interface Bodies {
   activation?: unknown
   /** Model ids the caller's catalog reports, which is what the guide gates on. */
   models?: string[]
+  /** Answers the catalog with a server error instead of a list. */
+  modelsFail?: boolean
 }
 
 /** The catalog shape `${API_ROOT}/models` answers, which is the setup guide's gate. */
@@ -189,6 +196,10 @@ function mockApi(b: Bodies) {
         b.health ?? { providers: [], healthy: 0, total: 0, checked_at: null },
       )
     }
+    if (url.includes(`${API_ROOT}/hosted-providers`)) {
+      const hosted = b.hostedProviders ?? []
+      return jsonResponse({ data: hosted, count: hosted.length })
+    }
     if (url.includes(`${API_ROOT}/budgets`))
       return jsonResponse(b.budgets ?? [])
     if (url.includes(`${API_ROOT}/keys`)) return jsonResponse(b.keys ?? [])
@@ -228,7 +239,7 @@ function renderPage(
       wrapper: withRouter({
         url: initial,
         routes: [
-          { path: "/providers", element: <LocationProbe /> },
+          { path: "/admin/hosted-providers", element: <LocationProbe /> },
           { path: "/organization/provider-keys", element: <LocationProbe /> },
         ],
       }),
@@ -263,13 +274,17 @@ function renderPageInWorkspace(
       wrapper: withRouter({
         url: "/overview",
         routes: [
-          { path: "/providers", element: <LocationProbe /> },
+          { path: "/admin/hosted-providers", element: <LocationProbe /> },
           { path: "/organization/provider-keys", element: <LocationProbe /> },
         ],
       }),
     },
   )
 }
+
+const WITHOUT_HOSTED_PROVIDERS = STANDALONE_SURFACES.filter(
+  (surface) => surface !== "hosted_providers",
+)
 
 const WORKSPACE_A = "44444444-4444-4444-4444-444444444444"
 const WORKSPACE_B = "55555555-5555-5555-5555-555555555555"
@@ -552,6 +567,74 @@ describe("OverviewPage", () => {
     )
   })
 
+  it("tells budgets that cap no spend apart from no budgets at all", async () => {
+    // A budget limiting only tokens or requests has no spend share to show,
+    // and "no budgets set" beside it would contradict the Budgets page.
+    mockApi({
+      overview: {
+        budgets: strip({ capped_count: 0, total_count: 2, worst: null }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("no budget caps spend")).toBeInTheDocument()
+    expect(screen.queryByText("no budgets set")).not.toBeInTheDocument()
+  })
+
+  it("names an unnamed budget enforced through a scoped budget after what it caps", async () => {
+    // A deployment budget attached to an API key arrives with the scope it
+    // caps and no name of its own; the tile says "An API key" rather than an
+    // id fingerprint, the way the ceilings strip names its rows.
+    mockApi({
+      overview: {
+        budgets: strip({
+          near_count: 1,
+          worst: {
+            budget_id: "b-key-cap",
+            name: null,
+            spent: 9,
+            allocated: 10,
+            scope_type: "api_token",
+            scope_id: "eeecba57-49c3-4e40-b3c1-d170aeed55c8",
+          },
+        }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("90.0%")).toBeInTheDocument()
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Worst budget usage: An API key (eeecba57…)",
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("does not name a deployment budget's organization ceiling after the caller's organization", async () => {
+    // A deployment budget can cap any tenant's organization, so the tile keeps
+    // the label generic instead of claiming the caller's own.
+    mockApi({
+      overview: {
+        budgets: strip({
+          near_count: 1,
+          worst: {
+            budget_id: "b-org-cap",
+            name: null,
+            spent: 9,
+            allocated: 10,
+            scope_type: "organization",
+            scope_id: "4c1f0e2a-7a77-4d0f-9b35-3c1b6f7c2d11",
+          },
+        }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(
+      await screen.findByRole("progressbar", {
+        name: "Worst budget usage: An organization (whole organization)",
+      }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/This organization/)).not.toBeInTheDocument()
+  })
+
   it("summarizes provider health and surfaces problems in the status strip", async () => {
     mockApi({
       health: {
@@ -603,18 +686,16 @@ describe("OverviewPage", () => {
     // log and still look like it worked.
     expect(
       await screen.findByRole("link", { name: "1 provider unreachable" }),
-    ).toHaveAttribute("href", "/providers")
+    ).toHaveAttribute("href", "/admin/hosted-providers")
     expect(screen.getByRole("link", { name: /^error rate/ })).toHaveAttribute(
       "href",
       "/activity?status=error",
     )
   })
 
-  it("states an unreachable provider without a link on a hosted deployment", async () => {
-    // Provider health reports on `config.providers`, the process-global table a
-    // hosted deployment serves no page for, so both candidate destinations are
-    // wrong: `/providers` is answered with "not available here", and the
-    // organization page lists a different table the instance is not on.
+  it("states an unreachable provider without a link where Hosted providers is not served", async () => {
+    // The organization page lists a different table the instance is not on, so
+    // with no Hosted providers page there is nowhere true to link.
     mockApi({
       health: {
         providers: [],
@@ -626,7 +707,7 @@ describe("OverviewPage", () => {
     renderPage(
       <OverviewPage />,
       "/overview",
-      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
+      bootstrap({ surfaces: WITHOUT_HOSTED_PROVIDERS }),
     )
 
     expect(
@@ -741,10 +822,9 @@ describe("OverviewIndex routing", () => {
   })
 
   it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
-    // The deployment's own credentials. Standalone serves both provider pages
-    // now, and this one stays right because only a deployment operator reaches
-    // this strip at all: a caller who is not one gets `OrganizationOverview`,
-    // which does not draw it.
+    // The deployment's own credentials: only a deployment operator is sent to
+    // Hosted providers, since `OrganizationOverview` links to the organization's
+    // provider-key page.
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(<OverviewIndex />)
@@ -756,23 +836,41 @@ describe("OverviewIndex routing", () => {
     await user.click(
       screen.getByRole("button", { name: "Add your first provider" }),
     )
-    expect(await screen.findByTestId("loc")).toHaveTextContent("/providers")
+    expect(await screen.findByTestId("loc")).toHaveTextContent(
+      "/admin/hosted-providers",
+    )
   })
 
-  it("sends a hosted deployment to the same organization page", async () => {
-    // A hosted deployment does not report the `providers` surface at all, so
-    // the shell answers that route with "not available here". Both topologies
-    // land in the same place now, which is the point: the row that moved is the
-    // fallback, not this answer.
+  it("counts a hosted provider as a configured one", async () => {
+    // Hosted providers are not in GET /providers, which lists config.yml
+    // instances only, so a gateway whose one provider is hosted is not empty.
+    const fetchMock = mockApi({
+      providers: [],
+      hostedProviders: [{ name: "openai" }],
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(await screen.findByText("Overview")).toBeInTheDocument()
+    // Settled on the empty-state inputs (the provider lists and the recent
+    // log) before asserting what they decided.
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          /\/api\/v1\/usage(\?|$)/.test(String(input)),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText("Get started with Otari")).toBeNull()
+  })
+
+  it("falls back to the organization page where Hosted providers is not served", async () => {
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(
       <OverviewIndex />,
       "/overview",
-      bootstrap({
-        deployment_type: "hosted",
-        surfaces: HOSTED_SURFACES,
-      }),
+      bootstrap({ surfaces: WITHOUT_HOSTED_PROVIDERS }),
     )
 
     await screen.findByText("Get started with Otari")
@@ -907,6 +1005,7 @@ function mockScopedApi(b: Bodies): string[] {
       return jsonResponse(b.activation ?? workspaceActivation())
     }
     if (url.includes(`${API_ROOT}/models`)) {
+      if (b.modelsFail) return jsonResponse({ detail: "catalog down" }, 500)
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     return jsonResponse({ detail: "forbidden" }, 403)
@@ -1014,7 +1113,17 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     })
     renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
+    const row = (await screen.findByText("gpt-5.6")).closest("tr")!
+    // The Activity log's columns: input and output apart, not one total.
+    expect(
+      screen.getByRole("columnheader", { name: "Input" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("columnheader", { name: "Output" }),
+    ).toBeInTheDocument()
+    expect(within(row).getByText("10")).toBeInTheDocument()
+    expect(within(row).getByText("5")).toBeInTheDocument()
+    expect(within(row).queryByText("15")).not.toBeInTheDocument()
     // Activity serves this caller from the same scoped surface, so the preview
     // may hand them off to it.
     expect(screen.getByRole("link", { name: /view all/i })).toHaveAttribute(
@@ -1283,7 +1392,10 @@ describe("the tenant Overview's chart and rail", () => {
   })
 
   it("offers a member only the destinations that will serve them", async () => {
-    mockScopedApi({ context: { role: "member" }, period: { cost: 200 } })
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "member" },
+      period: { cost: 200 },
+    })
     renderPage(<OverviewIndex />)
     await screen.findByText("$200.00")
 
@@ -1304,7 +1416,10 @@ describe("the tenant Overview's chart and rail", () => {
   })
 
   it("offers an admin all four", async () => {
-    mockScopedApi({ context: { role: "admin" }, period: { cost: 200 } })
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "admin" },
+      period: { cost: 200 },
+    })
     renderPage(<OverviewIndex />)
     await screen.findByText("$200.00")
 
@@ -1313,6 +1428,41 @@ describe("the tenant Overview's chart and rail", () => {
     const inRail = within(rail as HTMLElement)
     expect(inRail.getByRole("link", { name: "Budgets" })).toBeInTheDocument()
     expect(inRail.getByRole("link", { name: "Members" })).toBeInTheDocument()
+  })
+
+  // A member in no workspace used to read "This workspace" over counts for a
+  // workspace they are not in.
+  it("says so, rather than counting, for a member in no workspace", async () => {
+    mockScopedApi({
+      context: { role: "member", workspace_memberships: [] },
+      period: { cost: 200 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    const rail = (await screen.findByText("No workspace yet")).closest(
+      "section",
+    )
+    expect(rail).not.toBeNull()
+    const inRail = within(rail as HTMLElement)
+    expect(
+      inRail.getByText(/You do not belong to a workspace in this organization/),
+    ).toBeInTheDocument()
+    expect(inRail.queryByText("Active keys")).not.toBeInTheDocument()
+    expect(screen.queryByText("This workspace")).not.toBeInTheDocument()
+  })
+
+  it("keeps the counts when the context does not say which workspaces the member is in", async () => {
+    // Undefined is dropped when the mock serializes the body, so the field is absent.
+    mockScopedApi({
+      context: { role: "member", workspace_memberships: undefined },
+      period: { cost: 200 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    expect(await screen.findByText("This workspace")).toBeInTheDocument()
+    expect(screen.queryByText("No workspace yet")).not.toBeInTheDocument()
   })
 })
 
@@ -1494,5 +1644,232 @@ describe("the setup guide on either Overview", () => {
       screen.queryByRole("heading", { name: "Send your first request" }),
     ).not.toBeInTheDocument()
     expect(requested.some((url) => url.includes("/activation"))).toBe(false)
+  })
+})
+
+describe("the first-steps strip on the tenant Overview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  const GET_STARTED = "Get started with Otari"
+
+  it("points an admin of a brand-new organization at adding a provider key", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES, models: [] })
+    const user = userEvent.setup()
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText(GET_STARTED)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Add a provider key" }))
+    expect(await screen.findByTestId("loc")).toHaveTextContent(
+      "/organization/provider-keys",
+    )
+  })
+
+  it("tells a member who to ask, and offers no button they cannot use", async () => {
+    mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "member" },
+      models: [],
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText(GET_STARTED)).toBeInTheDocument()
+    expect(screen.getByText(/Ask an owner or admin/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Add a provider key" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("is absent once there is something to route to, where the guide takes over", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await screen.findByRole("heading", { name: "Send your first request" })
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+
+  it("is absent when the account already has traffic", async () => {
+    mockScopedApi({
+      context: TWO_WORKSPACES,
+      models: [],
+      logs: [
+        {
+          id: "1",
+          user_id: null,
+          api_key_id: null,
+          timestamp: "2026-07-22T00:00:00Z",
+          model: "gpt-5.6",
+          provider: "openai",
+          endpoint: "/v1/chat/completions",
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          cost: 0.5,
+          status: "success",
+          error_message: null,
+          latency_ms: 120,
+        },
+      ],
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+
+  it("stays out of the way when the catalog cannot be read", async () => {
+    mockScopedApi({ context: TWO_WORKSPACES, modelsFail: true })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
+    })
+    expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+})
+
+describe("OverviewIndex for an identity with no organization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function mockWithoutOrganization(
+    invitations: ReturnType<typeof pendingOrganizationInvitation>[] | "fails",
+  ) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
+        return jsonResponse({ detail: "Organization not found" }, 404)
+      }
+      if (url.includes(`${API_ROOT}/organizations/me/pending-memberships`)) {
+        if (invitations === "fails") {
+          // A 404 is the one failure the hook does not retry, which keeps this fast.
+          return jsonResponse({ detail: "Not Found" }, 404)
+        }
+        return jsonResponse({ data: invitations, count: invitations.length })
+      }
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
+        return jsonResponse(summary({}))
+      }
+      if (url.includes(`${API_ROOT}/providers/health`)) {
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
+      }
+      if (url.includes(`${API_ROOT}/providers`)) {
+        return jsonResponse({ providers: [{ provider: "openai" }] })
+      }
+      return jsonResponse([])
+    })
+  }
+
+  function renderHome({
+    openSignup = false,
+    client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    }),
+  } = {}) {
+    return render(
+      <QueryClientProvider client={client}>
+        <DeploymentProvider
+          value={bootstrap({
+            deployment_type: "hosted",
+            surfaces: HOSTED_SURFACES,
+            open_signup: openSignup,
+          })}
+        >
+          <OverviewIndex />
+        </DeploymentProvider>
+      </QueryClientProvider>,
+      {
+        wrapper: withRouter({
+          url: "/",
+          routes: [{ path: "/invitations", element: <LocationProbe /> }],
+        }),
+      },
+    )
+  }
+
+  const EMPTY_STATE = "You're not a member of an organization yet"
+
+  it("sends an invitee who signed up before accepting to their invitations", async () => {
+    mockWithoutOrganization([pendingOrganizationInvitation()])
+
+    renderHome()
+
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/invitations")
+  })
+
+  it("offers the invitations page when they cannot be loaded", async () => {
+    mockWithoutOrganization("fails")
+
+    renderHome()
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Open your invitations" }),
+    ).toHaveAttribute("href", "/invitations")
+    expect(
+      screen.queryByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).not.toBeInTheDocument()
+  })
+
+  it("says how to get in when nothing is waiting, rather than the operator page", async () => {
+    mockWithoutOrganization([])
+
+    renderHome()
+
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    // The deployment-wide page fails open on an unreadable context, and a 404
+    // is not one: it is the server saying there is no organization.
+    expect(
+      screen.queryByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).toBeNull()
+    expect(
+      screen.getByRole("link", { name: /View invitations/ }),
+    ).toHaveAttribute("href", "/invitations")
+    // Signup is closed, so the server would refuse to create one.
+    expect(
+      screen.queryByRole("button", { name: "Create organization" }),
+    ).toBeNull()
+  })
+
+  it("offers to create an organization where signup is open", async () => {
+    mockWithoutOrganization([])
+
+    renderHome({ openSignup: true })
+
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Create organization" }),
+    ).toBeInTheDocument()
+  })
+
+  it("does not retry the 404 that says there is no organization", async () => {
+    mockWithoutOrganization([])
+    // The app's own default, which would retry a 404 twice.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: defaultQueryRetry } },
+    })
+
+    renderHome({ client })
+
+    expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
+    const contextReads = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([input]) =>
+        String(input).endsWith(`${API_ROOT}/organizations/me`),
+      )
+    expect(contextReads).toHaveLength(1)
   })
 })

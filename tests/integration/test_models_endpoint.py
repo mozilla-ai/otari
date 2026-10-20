@@ -3,11 +3,13 @@
 from collections.abc import Generator
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.services import model_catalog_service as mcs
 
 from .conftest import build_test_client
 
@@ -253,3 +255,143 @@ def test_the_catalog_says_which_models_the_deployment_supplies(instance_client: 
     one = instance_client.get(f"{API_ROOT}/models/home_lab:llama-3", headers=headers)
     assert one.status_code == 200, one.text
     assert one.json()["deployment_managed"] is True
+
+
+_QWEN = "nebius:Qwen/Qwen3-30B-A3B-Instruct-2507"
+_GEMINI = "gemini:models/gemini-3.5-flash-lite"
+_UNKNOWN = "nebius:made-up-model-xyz"
+
+# models.dev as the listing reads it: Gemini under ``google`` and keyed by the
+# bare id, where the gateway's selector carries Gemini's own ``models/`` prefix.
+_MODELS_DEV: dict[str, Any] = {
+    "nebius": {
+        "id": "nebius",
+        "name": "Nebius",
+        "models": {
+            "Qwen/Qwen3-30B-A3B-Instruct-2507": {
+                "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+                "name": "Qwen3 30B A3B Instruct 2507",
+                "limit": {"context": 262144, "output": 8192},
+            },
+        },
+    },
+    "google": {
+        "id": "google",
+        "name": "Google",
+        "models": {
+            "gemini-3.5-flash-lite": {
+                "id": "gemini-3.5-flash-lite",
+                "name": "Gemini 3.5 Flash Lite",
+                "limit": {"context": 1048576, "output": 65536},
+            },
+        },
+    },
+}
+
+
+@pytest.fixture
+def limits_config(postgres_url: str) -> GatewayConfig:
+    """Nebius, with a models.dev-only output limit; Gemini, whose ids carry ``models/``; and an alias to Gemini."""
+    return GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        model_discovery=False,
+        providers={"nebius": {"api_key": "sk-fake"}, "gemini": {"api_key": "sk-fake"}},
+        aliases={"house-gemini": _GEMINI},
+    )
+
+
+@pytest.fixture
+def limits_client(limits_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """Each model gets a price row, which is what lists it while discovery is off."""
+    for client in build_test_client(limits_config):
+        for key in (_QWEN, _GEMINI, _UNKNOWN, "openai:gpt-4o"):
+            _price(client, key)
+        yield client
+
+
+def _read(client: TestClient, path: str) -> Any:
+    """GET ``path`` as the master key, with models.dev answering ``_MODELS_DEV``."""
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=_MODELS_DEV)):
+        response = client.get(path, headers={API_KEY_HEADER: "Bearer test-master-key"})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _limits(model: dict[str, Any]) -> tuple[int | None, int | None]:
+    return model["context_window"], model["max_output_tokens"]
+
+
+def test_the_listing_carries_each_models_token_limits(limits_client: TestClient) -> None:
+    """The issue's reproduction: a Nebius model reports both limits."""
+    listed = {model["id"]: _limits(model) for model in _read(limits_client, f"{API_ROOT}/models")["data"]}
+
+    assert listed[_QWEN] == (262144, 8192)
+    assert listed[_UNKNOWN] == (None, None)
+    # An alias reports its target's limits; the listing still withholds the target itself.
+    assert listed["house-gemini"] == (1048576, 65536)
+    assert _GEMINI not in listed
+
+    assert _limits(_read(limits_client, f"{API_ROOT}/models/{_QWEN}")) == (262144, 8192)
+    assert _limits(_read(limits_client, f"{API_ROOT}/models/{_GEMINI}")) == (1048576, 65536)
+    assert _limits(_read(limits_client, f"{API_ROOT}/models/house-gemini")) == (1048576, 65536)
+    assert _limits(_read(limits_client, f"{API_ROOT}/models/{_UNKNOWN}")) == (None, None)
+
+
+def test_the_listing_and_the_catalog_report_the_same_limits(limits_client: TestClient) -> None:
+    """Both surfaces read one merged catalog, so no selector can carry two answers."""
+    listed = {model["id"]: _limits(model) for model in _read(limits_client, f"{API_ROOT}/models")["data"]}
+    offered: dict[str, tuple[int | None, int | None]] = {}
+    for summary in _read(limits_client, f"{API_ROOT}/catalog/models")["models"]:
+        detail = _read(limits_client, f"{API_ROOT}/catalog/models/{summary['id']}")
+        offered.update({offering["selector"]: _limits(offering) for offering in detail["offerings"]})
+
+    shared = listed.keys() & offered.keys()
+    assert {_QWEN, _UNKNOWN, "openai:gpt-4o"} <= shared
+    assert {selector: listed[selector] for selector in shared} == {selector: offered[selector] for selector in shared}
+
+
+def test_without_models_dev_the_window_comes_from_the_snapshot(limits_client: TestClient) -> None:
+    """models.dev unreachable: the pricing snapshot still answers the window, and nothing lists an output limit."""
+    response = limits_client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: "Bearer test-master-key"})
+    assert response.status_code == 200, response.text
+    listed = {model["id"]: _limits(model) for model in response.json()["data"]}
+
+    assert listed["openai:gpt-4o"] == (128000, None)
+    assert listed[_QWEN] == (262144, None)
+    assert listed[_UNKNOWN] == (None, None)
+
+
+def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, clean_database: None) -> None:
+    """Switched off, models.dev is not fetched at all, so only the snapshot's window is listed."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        model_discovery=False,
+        models_dev_metadata=False,
+        providers={"nebius": {"api_key": "sk-fake"}},
+    )
+    fetch = AsyncMock(return_value=_MODELS_DEV)
+    for client in build_test_client(config):
+        _price(client, _QWEN)
+        with patch.object(mcs, "_fetch", new=fetch):
+            response = client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: "Bearer test-master-key"})
+        assert response.status_code == 200, response.text
+        assert {model["id"]: _limits(model) for model in response.json()["data"]}[_QWEN] == (262144, None)
+    fetch.assert_not_called()
+
+
+def test_an_unknown_model_is_refused_without_fetching_models_dev(limits_client: TestClient) -> None:
+    """A 404 has no limits to report, so it never waits on a models.dev fetch."""
+    fetch = AsyncMock(return_value=_MODELS_DEV)
+    with patch.object(mcs, "_fetch", new=fetch):
+        response = limits_client.get(
+            f"{API_ROOT}/models/nebius:not-a-model", headers={API_KEY_HEADER: "Bearer test-master-key"}
+        )
+
+    assert response.status_code == 404, response.text
+    fetch.assert_not_called()

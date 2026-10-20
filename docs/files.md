@@ -128,8 +128,11 @@ for the sandbox only: the model is told the file is there and never sees its
 contents. A `document`, `file`, or `input_file` block with a `file_id` is both
 shown to the model (extracted or passed through as usual) and seeded. A request
 that runs no code execution at all reads a `container_upload` block as a
-document. Where a file goes follows who runs the code, decided once from the
-workspace pin, the header and the deployment default.
+document. Where a file goes follows who runs the code, decided from the
+workspace pin, the header and the deployment default for each attempt: a
+request whose first model runs the code itself and whose fallback runs it on
+the sandbox has the file copied to the provider for the one and seeded into the
+sandbox for the other.
 
 ### A file the provider's own code execution reads
 
@@ -157,7 +160,8 @@ than naming one its account does not hold.
 The copy is made for each candidate as it is dispatched. A routing policy that
 falls over to a model on another key sends that model a copy in its own account.
 A candidate whose provider cannot hold a copy is passed over, in the policy's
-order, and the request is refused when no candidate can.
+order, and the request is refused when no candidate can. A candidate whose code
+runs on Otari's sandbox needs no copy, so it is not passed over for that.
 
 Each copy is recorded before it is uploaded and confirmed once the provider
 holds it. Two requests copying one file at the same moment each make and record
@@ -313,14 +317,27 @@ Otari must know whether the target model is natively multimodal. It uses,
 in order:
 
 1. `model_capabilities` **config override**: authoritative.
-2. **any-llm provider metadata**: trusted only for hosted providers.
-3. **Default: extract**, safe, since a needless extraction still yields a
+2. **Known model exceptions**: a hosted model its provider's flag over-reports
+  and that drops the file silently rather than refusing it. Today that is
+  DeepSeek's `deepseek-v4-pro`, which answers as if no image came, while its
+  provider takes images on `deepseek-flash`; its images are read as text.
+3. **any-llm provider metadata**: trusted only for hosted providers.
+4. **Default: extract**, safe, since a needless extraction still yields a
   correct answer while a wrong passthrough silently drops the file.
 
 > any-llm's capability flags are set per provider *class*, so they over-report
 > for text-only models served behind OpenAI-compatible servers (vLLM, llama.cpp,
 > Ollama). For those, set a `model_capabilities` override to enable native
 > passthrough where the served model truly supports it.
+
+The flags are per provider for hosted providers too, so a text-only model on a
+provider whose flag says images (Fireworks, Cohere) is sent the image, and the
+provider refuses it. Where Otari recognizes the provider's wording for that
+refusal (Cohere's and Fireworks' today), it answers a `400` with the code
+`unsupported_content` and a `detail` saying the model does not accept image
+content (see [Error codes](api-reference.md#error-codes)). A refusal worded
+otherwise stays the provider's own `400` message, with no code. To have such a model read images
+as text instead, set `supports_image: false` for it in `model_capabilities`.
 
 
 

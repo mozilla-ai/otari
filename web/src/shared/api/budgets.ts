@@ -23,6 +23,7 @@ import {
   BUDGETS,
   ORGANIZATION_BUDGETS,
   ORGANIZATION_CONTEXT,
+  ORGANIZATION_MEMBERS,
   ORGANIZATION_SPEND_CEILINGS,
   SCOPED_BUDGETS,
 } from "@/shared/api/queryKeys"
@@ -98,14 +99,60 @@ export function useDeleteBudget() {
 // above rather than a view over them: each row carries its own counters, so one
 // row is a pooled cap over whatever its scope names. See `client/index.ts`.
 //
-const fetchAllScopedBudgets = () =>
-  fetchAllRows<ScopedBudget>("/scoped-budgets")
-
-// Gated for the same reason as `useBudgets` above.
-export function useScopedBudgets(enabled = true) {
+// The ceiling on one API key's own spend across every provider, or undefined
+// when it has none. Other ceilings can cap the same requests (its owner's
+// budget, its workspace's), so this is the key's own allowance and not the one
+// that binds. Gated like `useBudgets` above, and keyed under `SCOPED_BUDGETS`
+// so a write to any ceiling refreshes it.
+export function useApiKeyCeiling(keyId: string, enabled = true) {
   return useQuery({
-    queryKey: [SCOPED_BUDGETS],
-    queryFn: fetchAllScopedBudgets,
+    queryKey: [SCOPED_BUDGETS, "api_token", keyId],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        scope_type: "api_token",
+        scope_id: keyId,
+      })
+      return apiFetch<ScopedBudget[]>(`/scoped-budgets?${params}`)
+    },
+    // A key can also hold ceilings on single providers; the one naming no
+    // provider is the one over all of its spend.
+    select: (rows) => rows.find((row) => row.provider_key_id === null),
+    staleTime: 60_000,
+    enabled: enabled && keyId !== "",
+  })
+}
+
+/**
+ * Every API key's own ceiling over all of its spend, on either budget surface.
+ *
+ * The deployment's list filters by scope on the server; the organization's has
+ * no such filter, so it is walked and narrowed here. Keyed under each surface's
+ * list, so a write to any ceiling refreshes it.
+ */
+export function useApiKeyCeilings(
+  surface: "deployment" | "organization",
+  enabled = true,
+) {
+  const organizationId = useOrganizationContext().data?.organization?.id
+  return useQuery({
+    queryKey:
+      surface === "deployment"
+        ? [SCOPED_BUDGETS, "api_token"]
+        : [ORGANIZATION_SPEND_CEILINGS, organizationId ?? null, "api_token"],
+    queryFn: async (): Promise<(ScopedBudget | OrganizationSpendCeiling)[]> => {
+      const rows =
+        surface === "deployment"
+          ? await fetchAllRows<ScopedBudget>("/scoped-budgets", {
+              scope_type: "api_token",
+            })
+          : await fetchAllPaged<OrganizationSpendCeiling>(
+              "/organizations/me/spend-ceilings",
+            )
+      // As above: the one naming no provider is the one over all of its spend.
+      return rows.filter(
+        (row) => row.scope_type === "api_token" && row.provider_key_id === null,
+      )
+    },
     staleTime: 60_000,
     enabled,
   })
@@ -162,7 +209,7 @@ export function useDeleteScopedBudget() {
 // ---------------------------------------------------------------------------
 // The organization's own budgets and spend ceilings
 //
-// The tenant-scoped counterpart to `useBudgets` / `useScopedBudgets` above,
+// The tenant-scoped counterpart to the budgets and scoped-budget hooks above,
 // which read `/budgets` and `/scoped-budgets` and have answered 403 to
 // anyone who does not operate the deployment since #821. These read the
 // caller's own organization instead, and are owner-or-admin on both halves:
@@ -349,4 +396,91 @@ export function useDeleteOrganizationSpendCeiling() {
       ),
     onSuccess: () => invalidateOrganizationSpend(queryClient),
   })
+}
+
+/** A workspace membership's ceiling, as either surface reports it. */
+export type MemberCeilingRow = Pick<
+  ScopedBudget | OrganizationSpendCeiling,
+  "id" | "budget_id" | "scope_id"
+>
+
+/**
+ * Reads and writes workspace members' ceilings on the surface the caller may
+ * use: the deployment's for an operator, the organization's for its owners and
+ * admins, who get 403 from `/scoped-budgets` (#821). The same rows either way;
+ * the organization's surface only accepts budgets the organization owns.
+ */
+export function useMemberCeilingWriter(surface: "deployment" | "organization") {
+  const queryClient = useQueryClient()
+  const onSuccess = () => {
+    if (surface === "deployment") {
+      void queryClient.invalidateQueries({ queryKey: [SCOPED_BUDGETS] })
+    } else {
+      invalidateOrganizationSpend(queryClient)
+    }
+    // The roster carries each placement's ceiling.
+    void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+  }
+  const base =
+    surface === "deployment"
+      ? "/scoped-budgets"
+      : "/organizations/me/spend-ceilings"
+  const at = (id: string) => `${base}/${encodeURIComponent(id)}`
+
+  const create = useMutation({
+    mutationFn: ({
+      scopeId,
+      budgetId,
+    }: {
+      scopeId: string
+      budgetId: string
+    }) =>
+      apiFetch<MemberCeilingRow>(base, {
+        method: "POST",
+        body: JSON.stringify({
+          scope_type: "workspace_member",
+          scope_id: scopeId,
+          budget_id: budgetId,
+        }),
+      }),
+    onSuccess,
+  })
+  const update = useMutation({
+    mutationFn: ({ id, budgetId }: { id: string; budgetId: string }) =>
+      apiFetch<MemberCeilingRow>(at(id), {
+        method: "PATCH",
+        body: JSON.stringify({ budget_id: budgetId }),
+      }),
+    onSuccess,
+  })
+  const remove = useMutation({
+    mutationFn: (id: string) => apiFetch<unknown>(at(id), { method: "DELETE" }),
+    onSuccess,
+  })
+
+  // Read fresh rather than from a cache: a save calls this after joining
+  // workspaces whose defaults materialize ceilings server-side.
+  const fetchAll = async (): Promise<MemberCeilingRow[]> => {
+    const rows =
+      surface === "deployment"
+        ? await fetchAllRows<ScopedBudget>("/scoped-budgets", {
+            scope_type: "workspace_member",
+          })
+        : await fetchAllPaged<OrganizationSpendCeiling>(
+            "/organizations/me/spend-ceilings",
+          )
+    // The membership's own ceiling is the one naming no provider; a
+    // provider-scoped row on the same membership must not be edited in its place.
+    return rows.filter(
+      (row) =>
+        row.scope_type === "workspace_member" && row.provider_key_id === null,
+    )
+  }
+
+  return {
+    fetchAll,
+    create: create.mutateAsync,
+    update: update.mutateAsync,
+    remove: remove.mutateAsync,
+  }
 }

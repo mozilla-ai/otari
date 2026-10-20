@@ -32,7 +32,7 @@ reviews:
   high_level_summary_in_walkthrough: false
 
   auto_title_placeholder: "@coderabbitai title"
-  auto_title_instructions: "Generate a short, action-oriented PR title. Start with a verb in the imperative form. Focus only on what changed, not why. Keep it concise and specific"
+  auto_title_instructions: "Generate a short PR title in the Conventional Commit form `<type>(<scope>)!: <description>`, where the scope and the `!` are optional. The type is one of build, chore, ci, docs, feat, fix, perf, refactor, revert, security, style or test. When the PR changes a request or response schema, a default that an operator or an API client sees, or what a deployment mode does, use feat, fix, perf, revert or security, because the release notes hide the other types. Add `!` when the change is breaking. Write the description as a verb in the imperative form. Focus only on what changed, not why. Keep it concise and specific"
 
   review_status: true
   # Off to stop CodeRabbit from posting a separate per-commit status check.
@@ -120,9 +120,14 @@ reviews:
       mode: warning
     title:
       mode: warning
+      # The shown and hidden types mirror commit_parsers in cliff.toml.
       requirements: |
-        PR titles should start with a Conventional Commit prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`, `perf:`, or `ci:`.
+        PR titles take the Conventional Commit form `<type>(<scope>)!: <description>`, where the scope and the `!` are optional.
+        The type is one of `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `security`, `style` or `test`.
         Use imperative mood. Keep the title under ~70 chars and let the body carry the detail.
+        The release notes show `feat`, `fix`, `perf`, `revert` and `security`, and hide every other type unless the title marks a breaking change with `!`.
+        Flag a title with a hidden type on a PR that changes a request or response schema, a default that an operator or an API client sees, or what a deployment mode does.
+        Such a PR uses a type the release notes show, with `!` when the change is breaking.
     description:
       mode: warning
 

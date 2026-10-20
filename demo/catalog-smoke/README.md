@@ -39,7 +39,7 @@ The config ships with no providers. Either add a `providers:` block to
 `.state/config.yml` and restart, or sign in as the platform admin and add the
 provider on Deployment providers, which stores the key encrypted with the key in
 `.state/secret-key`. Discovery is on, so a provider's models appear in the
-catalog as soon as its key works, priced from the genai-prices defaults until
+catalog as soon as its key works, priced from the models.dev defaults until
 you set a rate. An organization's own key goes on Providers instead, where its
 models are pulled and priced when the key is added.
 

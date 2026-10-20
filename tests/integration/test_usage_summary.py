@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -67,6 +68,7 @@ def _make_log(
     # Token meters are flat ints; the gateway-run tool meters are nested under the
     # reserved ``tools`` key, so the value type is not int-only.
     billing_meters: dict[str, Any] | None = None,
+    pricing_breakdown: list[dict[str, Any]] | None = None,
     cost: float | None = 0.01,
     status: str = "success",
     latency_ms: int | None = None,
@@ -94,6 +96,7 @@ def _make_log(
             cache_read_tokens=cache_read_tokens,
             cache_write_tokens=cache_write_tokens,
             billing_meters=billing_meters,
+            pricing_breakdown=pricing_breakdown,
             cost=cost,
             status=status,
             error_message="boom" if status == "error" else None,
@@ -1150,6 +1153,46 @@ def test_web_fetch_filter_and_breakdown_cover_list_count_and_summary(
             "cost": pytest.approx(0.04),
         }
     ]
+
+
+def test_a_tool_priced_over_several_labels_reports_the_sum_of_its_lines(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """Settlement stores one rate per tool, its cost over its billed calls, so calls times rate is still its spend.
+
+    The shape settlement writes for a fetch tool served under two labels: two
+    built-in fetches at $0.01 and a Tabstack fetch that reported $0.005.
+    """
+    now = datetime.now(UTC)
+    lines = [
+        {"meter": "web_fetch_calls", "label": "builtin:builtin_fetch", "units": 2, "unit_rate": 0.01, "cost": 0.02},
+        {"meter": "web_fetch_calls", "label": "tabstack:tabstack", "units": 1, "unit_rate": 0.005, "cost": 0.005},
+    ]
+    _make_log(
+        db_session,
+        user_id="labeled-tools",
+        timestamp=now,
+        cost=0.035,
+        billing_meters={
+            "total_input_tokens": 10,
+            "completion_tokens": 5,
+            "tools": {"web_fetch": {"billed": 3, "errors": 0, "unit_rate": float(Decimal("0.025") / 3)}},
+        },
+        pricing_breakdown=lines,
+    )
+    db_session.commit()
+
+    response = client.get(
+        f"{API_ROOT}/usage/summary",
+        params={"dimensions": "tool", "user_id": "labeled-tools"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 200, response.text
+    [row] = response.json()["by_tool"]
+    assert row["tool"] == "web_fetch"
+    assert row["calls"] == 3
+    assert row["cost"] == pytest.approx(sum(line["cost"] for line in lines))
 
 
 def test_tool_breakdown_is_empty_when_only_absorbed_rows_match(

@@ -679,3 +679,20 @@
     animation: none;
   }
 }
+
+/* SidePanel's widths. HeroUI sizes a side drawer's dialog at 24rem with a
+ * class-plus-attribute rule, which is why these are two classes rather than a
+ * utility on the element. 60% of the viewport, floored so a tree and the step
+ * it opens still fit side by side; the whole of it when expanded, or narrow. */
+.drawer__dialog.otari-side-panel {
+  width: max(60vw, 40rem);
+  max-width: 100vw;
+}
+.drawer__dialog.otari-side-panel--expanded {
+  width: 100vw;
+}
+@media (max-width: 767px) {
+  .drawer__dialog.otari-side-panel {
+    width: 100vw;
+  }
+}

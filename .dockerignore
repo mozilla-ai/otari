@@ -10,12 +10,11 @@
 docs/
 *.md
 !README.md
-# The dashboard bundles the operator guide (web/src/features/docs/DocsPage.tsx imports it
-# with Vite's `?raw`), so the web build stage needs this one file from docs/.
-!docs/dashboard.md
 
 # Tests
 tests/
+any-search/tests/
+any-fetch/tests/
 .pytest_cache/
 .coverage
 htmlcov/
@@ -103,6 +102,8 @@ docker-compose*.yml
 # Demo / scripts (not needed in image)
 demo/
 scripts/
+any-search/scripts/
+any-fetch/scripts/
 
 # Config / tooling files
 Makefile

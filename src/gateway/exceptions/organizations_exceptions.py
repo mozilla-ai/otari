@@ -16,6 +16,13 @@ class OrganizationNotFoundError(TenancyNotFoundError):
         super().__init__(f"Organization {organization_id} not found")
 
 
+class NoActiveOrganizationError(TenancyNotFoundError):
+    """The caller is an active member of no organization, so there is no organization for them to act in."""
+
+    def __init__(self) -> None:
+        super().__init__("You are not an active member of any organization")
+
+
 class OrganizationMemberNotFoundError(TenancyNotFoundError):
     def __init__(self, organization_member_id: object):
         super().__init__(f"Organization member {organization_member_id} not found")
@@ -63,6 +70,43 @@ class InvalidRoleError(TenancyValidationError):
 class OrganizationMemberAlreadyExistsError(TenancyConflictError):
     def __init__(self, identifier: object):
         super().__init__(f"{identifier} is already an active member of this organization")
+
+
+class OrganizationMemberDeactivatedError(TenancyConflictError):
+    """An address whose account is deactivated, so a membership would grant nothing it could use.
+
+    The message does not say why: on a deployment with many tenants, the admin
+    asking is not the one who deactivated the account, and the account's state
+    is not theirs to learn.
+    """
+
+    def __init__(self, identifier: object):
+        super().__init__(f"{identifier} cannot be added to or invited into this organization")
+
+
+class OrganizationMemberAddressUnresolvedError(TenancyConflictError):
+    """Another write took and then released an address while it was being added or invited."""
+
+    def __init__(self, identifier: object):
+        super().__init__(f"{identifier} changed while it was being added. Try again.")
+
+
+class OrganizationMemberAddressUnprovenError(TenancyConflictError):
+    """An address another organization vouched for, added or invited by a different one.
+
+    A password chosen through an invitation link is the inviting organization's
+    word for the address, and that organization's admins held the link. Letting a
+    second organization take it as a member would hand them its access.
+
+    The message says what would lift the refusal and nothing about the other
+    organization, which is another tenant's business.
+    """
+
+    def __init__(self, identifier: object):
+        super().__init__(
+            f"{identifier} cannot be added to or invited into this organization until whoever holds it proves "
+            "the address, by signing in with a provider or by resetting its password by email"
+        )
 
 
 class OrganizationDomainNotFoundError(TenancyNotFoundError):
@@ -141,14 +185,13 @@ class InvitationAlreadyPendingError(TenancyConflictError):
 
     Distinct from ``OrganizationMemberAlreadyExistsError``: that message says
     "already an active member", which is false for an address that is only
-    ``invited``. Resending is revoke (which cancels the pending invitation and
-    suspends the membership) followed by a fresh invite; once the existing
-    invitation's own expiry has passed, a fresh invite supersedes it directly
-    instead of raising this.
+    ``invited``. Resending is reissuing that invitation, which the message
+    says; once the existing invitation's own expiry has passed, a fresh invite
+    supersedes it directly instead of raising this.
     """
 
     def __init__(self, identifier: object):
-        super().__init__(f"{identifier} already has a pending invitation")
+        super().__init__(f"{identifier} already has a pending invitation. Reissue it to send a new link.")
 
 
 class WorkspaceNameRequiredError(TenancyValidationError):
@@ -185,6 +228,17 @@ class OrganizationNameRequiredError(TenancyValidationError):
 
     def __init__(self) -> None:
         super().__init__("An organization name is required")
+
+
+class OrganizationNameInvalidError(TenancyValidationError):
+    """An organization name carrying a control character, such as a line break.
+
+    The name travels into invitation emails, where a line break could start a
+    line the inviter wrote rather than the deployment.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("An organization name cannot contain line breaks or other control characters")
 
 
 class OrganizationSlugUnavailableError(TenancyConflictError):
@@ -228,6 +282,36 @@ class LastWorkspaceError(TenancyValidationError):
         super().__init__("An organization keeps at least one workspace; create another before deleting this one")
 
 
+class OrganizationInUseError(TenancyConflictError):
+    """An organization's workspaces still hold request-plane rows, which are ON DELETE RESTRICT.
+
+    ``WorkspaceInUseError``'s rule one level up: only an organization nothing has
+    been recorded against can go.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Only an organization with no usage can be deleted. This one still holds usage, "
+            "API keys, aliases or routing policies."
+        )
+
+
+class LastOrganizationError(TenancyValidationError):
+    """Deleting this organization would leave the caller in none."""
+
+    def __init__(self) -> None:
+        super().__init__("You cannot delete the only organization you belong to")
+
+
+class DefaultOrganizationDeletionError(TenancyValidationError):
+    """The organization first boot provisions is the deployment's own, and stays."""
+
+    def __init__(self) -> None:
+        super().__init__("The deployment's default organization cannot be deleted")
+
+
 class InvitationNotFoundError(TenancyNotFoundError):
     """No invitation matches the token or id given.
 
@@ -237,34 +321,58 @@ class InvitationNotFoundError(TenancyNotFoundError):
     probe for which is true.
     """
 
-    def __init__(self, identifier: object = "invitation") -> None:
-        super().__init__(f"{identifier} not found or already used")
+    def __init__(self, identifier: object | None = None) -> None:
+        if identifier is None:
+            super().__init__(
+                "This invitation link is not valid or has already been used. Ask whoever invited you for a new one."
+            )
+        else:
+            super().__init__(f"{identifier} not found or already used")
 
 
 class InvitationExpiredError(TenancyValidationError):
     """The invitation's ``expires_at`` has passed."""
 
     def __init__(self) -> None:
-        super().__init__("This invitation has expired")
+        super().__init__("This invitation has expired. Ask whoever invited you for a new one.")
 
 
 class InvitationAlreadyUsedError(TenancyValidationError):
     """The invitation is not ``pending`` (already accepted, cancelled, or expired)."""
 
     def __init__(self) -> None:
-        super().__init__("This invitation has already been used or is no longer valid")
+        super().__init__(
+            "This invitation has already been used or is no longer valid. "
+            "Ask whoever invited you for a new one if you still need it."
+        )
+
+
+class InvitationClosedError(TenancyValidationError):
+    """An owner or admin acting on an invitation that was accepted, revoked, declined or replaced.
+
+    The inviter's counterpart to ``InvitationAlreadyUsedError``, whose message
+    speaks to the invitee.
+    """
+
+    def __init__(self, status: str) -> None:
+        what = {
+            "accepted": "was already accepted",
+            "cancelled": "was already revoked or declined",
+        }.get(status, "has been replaced by a newer one")
+        super().__init__(f"This invitation {what}, so it cannot be revoked or reissued.")
 
 
 class InvitationPasswordNotAcceptedError(TenancyValidationError):
-    """A password sent with an accept for an address that already has a way to sign in.
+    """A password sent with an accept for an address the link may not claim.
 
-    Refused rather than applied: an invitation link can be handed over by hand,
-    so letting it replace an existing credential would let whoever holds a
-    forwarded link take over the account it names.
+    Either the address already has a way to sign in, or another organization
+    knows the identity. Refused rather than applied: the inviter holds the link
+    too, so letting it set a credential there would let any admin take over the
+    account it names.
     """
 
-    def __init__(self) -> None:
-        super().__init__("This address can already sign in; accept without a password and sign in as usual")
+    def __init__(self, way_in: str) -> None:
+        super().__init__(f"This link cannot set a password for this address. Accept without one, then {way_in}.")
 
 
 class WorkspaceActivationUnavailableError(TenancyConflictError):
@@ -296,23 +404,32 @@ class SignupRegistrationUnresolvedError(TenancyError):
 
 
 __all__ = [
+    "DefaultOrganizationDeletionError",
     "ForeignTenancyError",
     "InvalidRoleError",
     "InvitationAlreadyPendingError",
     "InvitationAlreadyUsedError",
+    "InvitationClosedError",
     "InvitationExpiredError",
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",
+    "LastOrganizationError",
     "LastWorkspaceError",
     "MembershipUpdateError",
+    "NoActiveOrganizationError",
     "NotAnOrganizationMemberError",
     "NotAuthorizedError",
     "OrganizationDomainAlreadyClaimedError",
     "OrganizationDomainClaimedHereError",
     "OrganizationDomainNotFoundError",
     "OrganizationDomainNotVerifiedError",
+    "OrganizationInUseError",
+    "OrganizationMemberAddressUnprovenError",
+    "OrganizationMemberAddressUnresolvedError",
     "OrganizationMemberAlreadyExistsError",
+    "OrganizationMemberDeactivatedError",
     "OrganizationMemberNotFoundError",
+    "OrganizationNameInvalidError",
     "OrganizationNameRequiredError",
     "OrganizationNotFoundError",
     "OrganizationSlugUnavailableError",

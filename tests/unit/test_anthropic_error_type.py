@@ -13,7 +13,9 @@ from typing import Any, cast
 import anthropic
 import httpx
 import pytest
+from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeoutError
 from fastapi import HTTPException, status
+from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 from gateway.api.routes._pipeline import ErrorKind
 from gateway.api.routes.messages import _ADAPTER, _ERROR_KIND_TO_ANTHROPIC_TYPE, _ensure_anthropic_error
@@ -134,9 +136,36 @@ def test_the_type_survives_an_any_llm_wrapper() -> None:
     assert _stream_error(_Wrapped(_mid_stream_error("overloaded_error")))["error"]["type"] == "overloaded_error"
 
 
-@pytest.mark.parametrize(("upstream_status", "expected"), [(529, "overloaded_error"), (429, "rate_limit_error")])
+@pytest.mark.parametrize(
+    ("upstream_status", "expected"), [(529, "overloaded_error"), (429, "rate_limit_error"), (504, "timeout_error")]
+)
 def test_a_transient_status_without_a_body_is_named_from_the_status(upstream_status: int, expected: str) -> None:
     assert _stream_error(_UpstreamStatusError(upstream_status))["error"]["type"] == expected
+
+
+def _bedrock_read_timeout() -> Urllib3ReadTimeoutError:
+    """What botocore's event stream raises when Bedrock sends nothing for its read timeout."""
+    return Urllib3ReadTimeoutError(None, None, "Read timed out.")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _bedrock_read_timeout(),
+        _Wrapped(_bedrock_read_timeout()),
+        BotocoreReadTimeoutError(endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com"),
+        httpx.ReadTimeout("timed out"),
+    ],
+)
+def test_an_upstream_that_stopped_responding_mid_stream_is_a_timeout(exc: BaseException) -> None:
+    rendered = _stream_error(exc)
+
+    assert rendered["error"]["type"] == "timeout_error"
+    assert "bedrock" not in rendered["error"]["message"].lower()
+
+
+def test_an_upstream_timeout_error_event_keeps_its_type() -> None:
+    assert _stream_error(_mid_stream_error("timeout_error"))["error"]["type"] == "timeout_error"
 
 
 @pytest.mark.parametrize(

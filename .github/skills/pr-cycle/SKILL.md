@@ -78,11 +78,7 @@ Integration tests need PostgreSQL: `TEST_DATABASE_URL` when set, otherwise a Tes
 own on it (`postgres` becomes `postgres_gw0`, and so on) and drops it at the end of the session,
 so the credentials need `CREATE DATABASE` and a `postgres` database to connect through. With no
 Docker, point `TEST_DATABASE_URL` at any reachable instance; SQLite is not a fallback, because
-none of that is available there. Two tests make a real outbound call and report a status mismatch
-with no network egress
-(`test_error_detail_leakage.py::test_provider_error_does_not_leak_details`,
-`test_streaming_error_event.py::test_streaming_creation_error_returns_http_error`): that is
-environment noise, not a regression, so confirm the change against the rest of the suite.
+none of that is available there.
 
 A change to the app, the migrations, or dependency resolution also owes the OSS-edition smoke
 gate: `uv run --frozen --no-dev python scripts/oss_edition_smoke.py`. It defaults to a throwaway

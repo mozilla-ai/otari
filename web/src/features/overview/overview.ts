@@ -51,10 +51,9 @@ export function providerHealthStatus(
 
 // ---------- budget health ----------
 
-// >=80% of allocation amber, >=100% red, for either signal below. What an
-// allocation *is* differs between them, and each says so.
-export const BUDGET_WARN = 0.8
-
+// >=80% of allocation amber, >=100% red, for either signal below; the gateway
+// applies both thresholds. What an allocation *is* differs between them, and
+// each says so.
 export interface BudgetHealth {
   status: Health
   label: string
@@ -98,7 +97,7 @@ export function allocationStrip(
      * after what it caps ("A workspace"), which the id fingerprint below cannot
      * say; a deployment budget has no scope and keeps the fingerprint.
      */
-    nameOf?: (worst: WorstAllocation) => string
+    nameOf?: (worst: WorstAllocation) => string | undefined
   },
 ): BudgetHealth {
   if (!health || health.total_count === 0) return noneToJudge(labels.none)

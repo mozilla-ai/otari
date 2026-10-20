@@ -32,7 +32,7 @@ import type {
   SavePlaygroundConversationRequest,
 } from "@/client"
 import { apiFetch, apiStream } from "@/shared/api/client"
-import { PLAYGROUND } from "@/shared/api/queryKeys"
+import { PLAYGROUND, workspaceMeta } from "@/shared/api/queryKeys"
 
 const ROOT = "/playground"
 
@@ -80,6 +80,7 @@ export function useUpdatePlaygroundConsent() {
 export function usePlaygroundTools(workspaceId: string | undefined) {
   return useQuery({
     queryKey: [PLAYGROUND, workspaceId, "tools"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<PlaygroundTools>(`${ROOT}/tools${scope(workspaceId as string)}`),
     enabled: workspaceId !== undefined,
@@ -104,6 +105,7 @@ export function usePlaygroundFiles(
 ) {
   return useInfiniteQuery({
     queryKey: [PLAYGROUND, workspaceId, "files"],
+    meta: workspaceMeta(workspaceId),
     queryFn: ({ pageParam }) =>
       apiFetch<PlaygroundFiles>(
         `${ROOT}/files${scope(workspaceId as string)}${
@@ -164,6 +166,7 @@ export function useDeletePlaygroundFile(workspaceId: string | undefined) {
 export function usePlaygroundConversations(workspaceId: string | undefined) {
   return useQuery({
     queryKey: [PLAYGROUND, workspaceId, "conversations"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<PlaygroundConversations>(
         `${ROOT}/conversations${scope(workspaceId as string)}`,
@@ -232,6 +235,7 @@ export function useDeletePlaygroundConversation(
 export function usePlaygroundComparisons(workspaceId: string | undefined) {
   return useQuery({
     queryKey: [PLAYGROUND, workspaceId, "comparisons"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<PlaygroundComparisons>(
         `${ROOT}/comparisons${scope(workspaceId as string)}`,
@@ -280,6 +284,7 @@ export function useDeletePlaygroundComparison(workspaceId: string | undefined) {
 export function usePlaygroundFavoriteModels(workspaceId: string | undefined) {
   return useQuery({
     queryKey: [PLAYGROUND, workspaceId, "favorite-models"],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<PlaygroundFavoriteModels>(
         `${ROOT}/favorite-models${scope(workspaceId as string)}`,
@@ -332,10 +337,61 @@ export function useReplacePlaygroundFavoriteModels(
 // The streaming completion
 // ---------------------------------------------------------------------------
 
-/** One streamed fragment: visible answer text, reasoning text, or both. */
+/**
+ * A tool the gateway ran for this reply: the model's call, then its result.
+ *
+ * The gateway consumes its own tool calls and a plain Chat Completions stream
+ * hides them. The Playground's route reports them in an `otari_tool_activity`
+ * field beside a chunk's `choices`, one record when a call starts and one when
+ * it finishes, joined by `id`.
+ */
+export type ToolActivity =
+  | { type: "tool_call"; id: string; name: string; arguments: string }
+  | {
+      type: "tool_result"
+      id: string
+      name: string
+      content: string
+      isTruncated: boolean
+      isError: boolean
+    }
+
+/** One streamed fragment: answer text, reasoning text, or a tool's activity. */
 export interface StreamDelta {
   content?: string
   reasoning?: string
+  toolActivity?: ToolActivity
+}
+
+/** The activity record as the wire spells it. */
+type WireToolActivity =
+  | { type: "tool_call"; id?: string; name?: string; arguments?: string }
+  | {
+      type: "tool_result"
+      id?: string
+      name?: string
+      content?: string
+      truncated?: boolean
+      is_error?: boolean
+    }
+
+function toolActivityOf(wire: WireToolActivity): ToolActivity | undefined {
+  const id = wire.id ?? ""
+  const name = wire.name ?? ""
+  if (wire.type === "tool_call") {
+    return { type: "tool_call", id, name, arguments: wire.arguments ?? "" }
+  }
+  if (wire.type === "tool_result") {
+    return {
+      type: "tool_result",
+      id,
+      name,
+      content: wire.content ?? "",
+      isTruncated: wire.truncated ?? false,
+      isError: wire.is_error ?? false,
+    }
+  }
+  return undefined
 }
 
 /**
@@ -365,7 +421,8 @@ interface StreamChunk {
   error?: string
   // Some models stream chain-of-thought in a field of its own rather than in
   // inline `<think>` tags; both are surfaced.
-  choices?: { delta?: StreamDelta }[]
+  choices?: { delta?: { content?: string; reasoning?: string } }[]
+  otari_tool_activity?: WireToolActivity
   // Present on the final chunk only, because the gateway is asked for it.
   usage?: StreamUsage | null
 }
@@ -469,6 +526,10 @@ export async function streamPlaygroundChat({
         if (delta?.content || delta?.reasoning) {
           onDelta({ content: delta.content, reasoning: delta.reasoning })
         }
+        const toolActivity = chunk.otari_tool_activity
+          ? toolActivityOf(chunk.otari_tool_activity)
+          : undefined
+        if (toolActivity) onDelta({ toolActivity })
       }
     }
   } finally {

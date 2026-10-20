@@ -1,9 +1,11 @@
 import { type ReactNode, useRef } from "react"
-import { FiMonitor, FiMoon, FiSun } from "react-icons/fi"
+import { FiMoon, FiSun } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
+import { AuthShellSlot } from "@/features/auth/overlayAuthShellSlot"
 import { siteHomeHref } from "@/features/models/publicCatalog"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-import { THEME_PREFERENCES, useTheme } from "@/shared/hooks/useTheme"
+import { useTheme } from "@/shared/hooks/useTheme"
+import { authShellPage } from "./authShellSlot"
 import { LoginBackground } from "./background/LoginBackground"
 import savedBackground from "./background/login-background.json"
 
@@ -35,15 +37,18 @@ function BrandMark() {
   )
 }
 
-export function LoginPageShell({ children }: { children: ReactNode }) {
+export function LoginPageShell({
+  children,
+  isBusy = false,
+}: {
+  children: ReactNode
+  /** Whether a request of the page's own is in flight, for the header slot. */
+  isBusy?: boolean
+}) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const { preference, setPreference } = useTheme()
-  const next =
-    THEME_PREFERENCES[
-      (THEME_PREFERENCES.indexOf(preference) + 1) % THEME_PREFERENCES.length
-    ]
-  const ThemeIcon =
-    preference === "system" ? FiMonitor : preference === "dark" ? FiMoon : FiSun
+  const { resolved, toggle } = useTheme()
+  const isDark = resolved === "dark"
+  const ThemeIcon = isDark ? FiMoon : FiSun
 
   return (
     <div className="relative isolate flex min-h-svh flex-col bg-background">
@@ -51,16 +56,25 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
         <BrandMark />
         {/* No `md:` step down: the header is `min-h-14`, so a 44px target fits
             inside it at every width without moving the row. */}
-        <IconButton
-          variant="ghost"
-          isIconOnly
-          label={`Appearance: ${preference}. Switch to ${next}.`}
-          onPress={() => setPreference(next)}
-        >
-          <ThemeIcon aria-hidden />
-        </IconButton>
+        <div className="flex items-center gap-1">
+          <AuthShellSlot
+            page={authShellPage(window.location.hash)}
+            isBusy={isBusy}
+          />
+          <IconButton
+            variant="ghost"
+            isIconOnly
+            label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+            onPress={toggle}
+          >
+            <ThemeIcon aria-hidden />
+          </IconButton>
+        </div>
       </header>
-      <main className="relative isolate flex flex-1 flex-col items-center justify-center px-4 py-4">
+      {/* Pinned to the top rather than centered: the card changes height when a
+            folded form opens or an error appears, and a centered card would
+            move its heading with every change. */}
+      <main className="relative isolate flex flex-1 flex-col items-center px-4 py-4 md:pt-15">
         <LoginBackground panelRef={panelRef} config={savedBackground} />
         <div
           ref={panelRef}

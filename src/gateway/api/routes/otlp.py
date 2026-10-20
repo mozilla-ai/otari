@@ -36,15 +36,17 @@ exporter's endpoint at the Otari root; the exporter appends the signal path
 (``/otlp/v1/traces`` or ``/otlp/v1/logs``) itself.
 """
 
+import base64
 import hashlib
+import json
 import re
 import zlib
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from google.protobuf.json_format import MessageToJson, Parse, ParseError
+from google.protobuf.json_format import MessageToJson, ParseDict, ParseError
 from google.protobuf.message import DecodeError, Message
 from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
     ExportLogsServiceRequest,
@@ -62,7 +64,9 @@ from opentelemetry.proto.metrics.v1.metrics_pb2 import AggregationTemporality
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_api_key_or_master_key
+from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.core.config import GatewayConfig
+from gateway.core.database import release_session
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.ports.telemetry_storage_port import TelemetryRecord
@@ -74,12 +78,16 @@ from gateway.services.agent_telemetry_service import (
 )
 from gateway.services.agent_telemetry_service import ingest as ingest_telemetry
 from gateway.services.external_usage_service import (
+    CLAUDE_SCOPE_PREFIX,
+    CLAUDE_SOURCE,
     MAX_EVENTS_PER_BATCH,
     ExternalEventsRequest,
     ExternalUsageEvent,
+    claude_usage_events,
     ingest_external_events,
     is_reserved_source,
 )
+from gateway.services.traces import OtlpSpan, TraceWriter, record_otlp_export
 
 router = APIRouter(tags=["otel"])
 
@@ -113,6 +121,14 @@ _CODEX_USAGE_EVENTS = ("codex.api_request", "codex.sse_event")
 # the Anthropic shape. Everything else is assumed OpenAI-shaped, where cached
 # tokens are a subset of ``input_tokens`` and must be de-included before pricing.
 _ADDITIVE_CACHE_PROVIDERS = {"anthropic"}
+
+# ``Status.code`` of a span that ended in error (``STATUS_CODE_ERROR`` in the OTLP schema).
+_STATUS_CODE_ERROR = 2
+
+# OTLP/JSON id fields, with their size in bytes. The OTLP spec encodes them as hex,
+# while protobuf's JSON mapping reads every bytes field as base64.
+_JSON_ID_BYTES = {"traceId": 16, "spanId": 8, "parentSpanId": 8}
+_HEX = re.compile(r"[0-9A-Fa-f]+")
 
 
 def _content_type(request: Request) -> str:
@@ -149,8 +165,10 @@ def _parse(body: bytes, content_type: str, message: Message) -> Message:
         return message
     if content_type == _JSON:
         try:
-            Parse(body.decode("utf-8"), message, ignore_unknown_fields=True)
-        except (ParseError, UnicodeDecodeError, ValueError) as exc:
+            document = json.loads(body.decode("utf-8"))
+            _hex_ids_to_base64(document)
+            ParseDict(document, message, ignore_unknown_fields=True)
+        except (ParseError, UnicodeDecodeError, ValueError, TypeError, RecursionError) as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid OTLP/JSON payload") from exc
         return message
     raise HTTPException(
@@ -159,8 +177,42 @@ def _parse(body: bytes, content_type: str, message: Message) -> Message:
     )
 
 
-def _any_value(value: Any) -> Any:
-    """Unwrap an OTLP AnyValue protobuf into a Python scalar (or None)."""
+def _json_items(parent: Any, key: str) -> list[Any]:
+    value = parent.get(key) if isinstance(parent, dict) else None
+    return value if isinstance(value, list) else []
+
+
+def _hex_id_to_base64(item: Any) -> None:
+    if not isinstance(item, dict):
+        return
+    for field, size in _JSON_ID_BYTES.items():
+        value = item.get(field)
+        # Hex of the right length is never a valid base64 id of that size, so an
+        # exporter that sends base64 anyway is still read as it was before.
+        if isinstance(value, str) and len(value) == 2 * size and _HEX.fullmatch(value):
+            item[field] = base64.b64encode(bytes.fromhex(value)).decode()
+
+
+def _hex_ids_to_base64(document: Any) -> None:
+    """Rewrite the hex span and trace ids of an OTLP/JSON body as protobuf's JSON mapping reads them."""
+    for resource in _json_items(document, "resourceSpans"):
+        for scope in _json_items(resource, "scopeSpans"):
+            for span in _json_items(scope, "spans"):
+                _hex_id_to_base64(span)
+                for link in _json_items(span, "links"):
+                    _hex_id_to_base64(link)
+    for resource in _json_items(document, "resourceLogs"):
+        for scope in _json_items(resource, "scopeLogs"):
+            for record in _json_items(scope, "logRecords"):
+                _hex_id_to_base64(record)
+
+
+def _any_value(value: Any, *, arrays: bool = False) -> Any:
+    """Unwrap an OTLP AnyValue protobuf into a Python scalar (or None).
+
+    With ``arrays``, an array becomes a tuple of its elements, each unwrapped the
+    same way, so a nested array or map is a None inside it.
+    """
     kind = value.WhichOneof("value")
     if kind == "string_value":
         return value.string_value
@@ -170,11 +222,16 @@ def _any_value(value: Any) -> Any:
         return value.double_value
     if kind == "bool_value":
         return value.bool_value
+    if kind == "array_value" and arrays:
+        return tuple(_any_value(item) for item in value.array_value.values)
     return None
 
 
-def _attributes(kv_list: Any) -> dict[str, Any]:
-    return {kv.key: _any_value(kv.value) for kv in kv_list}
+def _attributes(kv_list: Any, *, arrays: bool = False) -> dict[str, Any]:
+    # Only a trace asks for arrays. The usage and telemetry readers stringify or
+    # hash what they get (a metric's series key is every attribute's str()), so an
+    # array there would change what they store.
+    return {kv.key: _any_value(kv.value, arrays=arrays) for kv in kv_list}
 
 
 def _int(value: Any) -> int:
@@ -254,16 +311,10 @@ def _build_event(
     """
     provider: Any
     duration: Any
-    # No OTLP shape carries the 5m/1h cache-write split, so every cache write stays in
-    # the base (5m) bucket. Claude Code writes with both TTLs (measured on real session
-    # transcripts, roughly a quarter to a third of creation tokens are 5m and the rest
-    # 1h), so either default is wrong for the other share: 5m undercharges the 1h
-    # tokens, 1h overcharges the 5m ones. Anthropic prices a 1h write at 2x base input
-    # against 1.25x for a 5m one, so booking the base bucket keeps an imported estimate
-    # from ever reading above true cost. Callers holding the real split use
-    # POST /api/v1/usage/external-events, which takes cache_write_1h_tokens directly.
-    # No branch below reassigns this today: it stays a variable rather than a literal at
-    # the construction site as the seam for an emitter that does report the split.
+    # Neither Claude Code's events nor the GenAI attributes read below carry the 5m/1h cache-write split, so
+    # every write books at the cache-write rate. That is below the 2x input a Claude model's 1h write costs,
+    # so an imported estimate never reads above true cost. A caller holding the split sends
+    # cache_write_1h_tokens to POST /api/v1/usage/external-events.
     cache_write_1h = 0
     reasoning = 0
     event_name = attrs.get("event.name")
@@ -350,6 +401,20 @@ def _build_event(
     return source, event
 
 
+def _otlp_span(span: Any) -> OtlpSpan:
+    """Read the fields a trace keeps out of one received span."""
+    return OtlpSpan(
+        trace_id=span.trace_id.hex(),
+        span_id=span.span_id.hex(),
+        parent_span_id=span.parent_span_id.hex() or None,
+        name=span.name,
+        start_time=_nanos_to_dt(span.start_time_unix_nano),
+        end_time=_nanos_to_dt(span.end_time_unix_nano),
+        failed=span.status.code == _STATUS_CODE_ERROR,
+        attributes=_attributes(span.attributes, arrays=True),
+    )
+
+
 def _require_import_key(api_key: APIKey | None) -> APIKey:
     """Reject master-key OTLP exports before any parsing work.
 
@@ -390,6 +455,15 @@ def _point_value(point: Any) -> Any:
     if arm is None:
         return None
     return point.as_double if arm == "as_double" else point.as_int
+
+
+async def _release_after_auth(db: AsyncSession) -> None:
+    """End the transaction the key lookup opened before reading the export.
+
+    Otherwise the connection sits idle in that transaction while the body uploads
+    and parses, so slow exporters alone could take the pool sign-in needs.
+    """
+    await release_session(db)
 
 
 async def _ingest(
@@ -444,18 +518,36 @@ async def receive_traces(
 ) -> Response:
     """Ingest LLM usage from OTLP spans (GenAI semantic conventions)."""
     api_key = _require_import_key(auth_result[0])
+    await _release_after_auth(db)
     content_type = _content_type(request)
     body = _decode_body(await request.body(), request.headers.get("content-encoding"))
     parsed = _parse(body, content_type, ExportTraceServiceRequest())
     assert isinstance(parsed, ExportTraceServiceRequest)
 
     pairs: list[tuple[str, ExternalUsageEvent]] = []
+    received: list[Any] = []
     for resource_spans in parsed.resource_spans:
         for scope_spans in resource_spans.scope_spans:
+            scope = scope_spans.scope.name
+            claude = scope.startswith(CLAUDE_SCOPE_PREFIX)
             for span in scope_spans.spans:
+                received.append(span)
                 duration = None
                 if span.start_time_unix_nano and span.end_time_unix_nano:
                     duration = (span.end_time_unix_nano - span.start_time_unix_nano) / 1_000_000
+                if claude:
+                    attrs = _attributes(span.attributes)
+                    events = claude_usage_events(
+                        span.name,
+                        attrs,
+                        scope=scope,
+                        span_key=f"{span.trace_id.hex()}:{span.span_id.hex()}",
+                        timestamp=_resolve_timestamp(attrs, _nanos_to_dt(span.start_time_unix_nano)),
+                        duration_ms=duration,
+                        failed=span.status.code == _STATUS_CODE_ERROR,
+                    )
+                    pairs.extend((CLAUDE_SOURCE, event) for event in events)
+                    continue
                 mapped = _build_event(
                     _attributes(span.attributes),
                     fallback_event_id=span.span_id.hex() or None,
@@ -467,10 +559,26 @@ async def receive_traces(
 
     response = ExportTraceServiceResponse()
     if pairs:
-        rejected = await _ingest(pairs, api_key=api_key, db=db, config=config)
+        with retryable_on_database_outage("otlp traces ingest"):
+            rejected = await _ingest(pairs, api_key=api_key, db=db, config=config)
         if rejected:
             response.partial_success.rejected_spans = rejected
             response.partial_success.error_message = f"{rejected} usage event(s) rejected (see gateway logs)"
+
+    # Only an export whose usage was taken is recorded, best-effort and off the
+    # request path; the writer is absent where nothing records traces.
+    writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
+    if writer is not None and received:
+        record_otlp_export(
+            writer,
+            (_otlp_span(span) for span in received),
+            total=len(received),
+            budget_exempt=api_key.exclude_from_budget,
+            workspace_id=api_key.workspace_id,
+            user_id=api_key.user_id,
+            api_key_id=api_key.id,
+            retention=timedelta(days=config.trace_retention_days),
+        )
     return _otlp_response(content_type, response)
 
 
@@ -484,6 +592,7 @@ async def receive_logs(
 ) -> Response:
     """Ingest LLM usage from OTLP log events (Claude Code, Codex, or GenAI logs)."""
     api_key = _require_import_key(auth_result[0])
+    await _release_after_auth(db)
     content_type = _content_type(request)
     body = _decode_body(await request.body(), request.headers.get("content-encoding"))
     parsed = _parse(body, content_type, ExportLogsServiceRequest())
@@ -524,9 +633,10 @@ async def receive_logs(
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Too many events in one OTLP export")
 
     response = ExportLogsServiceResponse()
-    rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0
-    if telemetry:
-        rejected += (await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)).rejected
+    with retryable_on_database_outage("otlp logs ingest"):
+        rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0
+        if telemetry:
+            rejected += (await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)).rejected
     if rejected:
         response.partial_success.rejected_log_records = rejected
         response.partial_success.error_message = f"{rejected} log record(s) rejected (see gateway logs)"
@@ -557,6 +667,7 @@ async def receive_metrics(
     with it off, the export still succeeds and simply stores nothing.
     """
     api_key = _require_import_key(auth_result[0])
+    await _release_after_auth(db)
     content_type = _content_type(request)
     body = _decode_body(await request.body(), request.headers.get("content-encoding"))
     parsed = _parse(body, content_type, ExportMetricsServiceRequest())
@@ -611,7 +722,8 @@ async def receive_metrics(
 
     response = ExportMetricsServiceResponse()
     if telemetry:
-        result = await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)
+        with retryable_on_database_outage("otlp metrics ingest"):
+            result = await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)
         logger.info(
             "otlp metrics ingest: accepted=%d duplicate=%d rejected=%d",
             result.accepted,

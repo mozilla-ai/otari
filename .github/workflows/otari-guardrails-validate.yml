@@ -30,7 +30,5 @@ jobs:
       with:
         python-version: "3.14"
 
-    # NOTE: This step does not pass --strict. The judge cap warning cannot be
-    # accepted on purpose, so --strict fails on every run.
     - name: Validate the guardrails
-      run: uv run --frozen --no-dev --package otari-agent otari guardrails validate --repo-only
+      run: uv run --frozen --no-dev --package otari-agent otari guardrails validate --repo-only --strict

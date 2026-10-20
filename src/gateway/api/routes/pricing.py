@@ -6,18 +6,30 @@ from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import distinct, func, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
+from gateway.api.deps import (
+    RequestSessionModelProviderPortDep,
+    get_config,
+    get_db,
+    get_session_identity,
+    require_deployment_operator,
+    verify_catalog_reader,
+)
+from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
+from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float, to_usd, to_usd_or_none
 from gateway.models.pricing import API_ORIGIN, ModelPricing
 from gateway.models.pricing_schemas import PricingTier
+from gateway.models.tenancy import User as TenancyUser
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
+from gateway.services.merged_catalog_service import hosted_providers_withheld_from
 from gateway.services.policy_store import all_policy_names, resolve_effective_policy
 from gateway.services.pricing_refresh_service import (
+    PendingSnapshotChanged,
     PricingRefreshError,
     PricingRefreshPreview,
     confirm_price_refresh,
@@ -33,6 +45,7 @@ from gateway.services.pricing_service import (
     default_pricing_enabled,
     default_pricing_reference,
     normalize_effective_at,
+    pricing_versions_page,
     rates_in_force,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
@@ -56,20 +69,50 @@ catalog_router = APIRouter(
 SURFACE = Surface("pricing")
 
 
+async def _withheld_providers(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: RequestSessionModelProviderPortDep,
+) -> frozenset[str]:
+    """The hosted providers whose rates this reader may not see: those restricted to another organization."""
+    return await hosted_providers_withheld_from(
+        db, config, auth=auth, session_identity=session_identity, model_provider=model_provider
+    )
+
+
+WithheldProviders = Annotated[frozenset[str], Depends(_withheld_providers)]
+
+
+def _refuse_if_withheld(model_key: str, candidates: list[str], withheld: frozenset[str]) -> None:
+    """Answer a withheld provider's key as unknown, the way a key with no price answers."""
+    for candidate in candidates:
+        split = split_selector(candidate)
+        if split is not None and provider_key(split[0]) in withheld:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Pricing for model '{model_key}' not found"
+            )
+
+
+_PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
+
+
 class SetPricingRequest(BaseModel):
     """Create a versioned per-model price, with optional cache and context tiers."""
 
     model_key: str = Field(description="Model identifier in format 'provider:model'")
-    input_price_per_million: float = Field(ge=0, description="Price per 1M input tokens")
-    output_price_per_million: float = Field(ge=0, description="Price per 1M output tokens")
+    input_price_per_million: float = Field(
+        ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
+    )
+    output_price_per_million: float = Field(
+        ge=0, description="Price per 1M output tokens; unused by a rate in requests or images"
+    )
     cache_read_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cached-input tokens"
     )
     cache_write_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cache-write (creation) tokens"
-    )
-    cache_write_1h_price_per_million: float | None = Field(
-        default=None, ge=0, description="Price per 1M Anthropic 1-hour cache-write tokens"
     )
     pricing_tiers: list[PricingTier] | None = Field(
         default=None,
@@ -82,8 +125,9 @@ class SetPricingRequest(BaseModel):
     unit: Literal["tokens", "requests", "images"] = Field(
         default="tokens",
         description=(
-            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a "
-            "moderation call (USD per million requests), 'images' for image generation."
+            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
+            "moderation call, or a completion model billed per call (USD per million requests), "
+            "'images' for image generation (USD per million images)."
         ),
     )
 
@@ -105,7 +149,6 @@ class PricingResponse(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
-    cache_write_1h_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str = Field(description="What the rates are per: tokens, requests, or images.")
     origin: str | None = Field(
@@ -124,7 +167,6 @@ class PricingResponse(BaseModel):
             output_price_per_million=float(pricing.output_price_per_million),
             cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
             cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
             unit=pricing.unit or "tokens",
             origin=pricing.origin,
@@ -141,7 +183,7 @@ class PricingRefreshChangeResponse(BaseModel):
 
 
 class PricingRefreshPreviewResponse(BaseModel):
-    """Reviewable summary of a pending genai-prices refresh."""
+    """Reviewable summary of a pending models.dev refresh."""
 
     fetched_at: datetime
     added_count: int
@@ -150,16 +192,25 @@ class PricingRefreshPreviewResponse(BaseModel):
     protected_model_count: int
     changes: list[PricingRefreshChangeResponse]
     changes_truncated: bool
+    digest: str = Field(
+        default="",
+        description="Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+    )
+    needs_review: bool = Field(
+        default=False,
+        description="True when the update is implausibly large; the scheduled `auto` policy leaves it pending.",
+    )
+    review_reason: str | None = Field(default=None, description="Why the update needs review.")
 
 
 class PricingRefreshConfirmationResponse(BaseModel):
-    """Result of activating a reviewed genai-prices refresh."""
+    """Result of activating a reviewed models.dev refresh."""
 
     applied: bool = True
 
 
 class AcceptedSnapshotResponse(BaseModel):
-    """One accepted genai-prices snapshot in the history."""
+    """One accepted models.dev snapshot in the history."""
 
     id: str
     accepted_at: datetime
@@ -177,10 +228,10 @@ class PricingDriftRow(BaseModel):
     input_price_per_million: float
     output_price_per_million: float
     default_input_price_per_million: float | None = Field(
-        description="What genai-prices would meter this key at today. Null when the dataset does not know it."
+        description="What models.dev would meter this key at today. Null when the dataset does not know it."
     )
     default_output_price_per_million: float | None
-    default_reference: str | None = Field(description="The genai-prices entry the default came from.")
+    default_reference: str | None = Field(description="The models.dev entry the default came from.")
     input_delta_percent: float | None = Field(description="(stored - default) / default, as a percentage.")
     output_delta_percent: float | None
 
@@ -204,6 +255,9 @@ def _preview_response(preview: PricingRefreshPreview, protected_model_count: int
             PricingRefreshChangeResponse(model_key=change.model_key, change=change.change) for change in preview.changes
         ],
         changes_truncated=preview.changes_truncated,
+        digest=preview.digest,
+        needs_review=preview.needs_review,
+        review_reason=preview.review_reason,
     )
 
 
@@ -244,15 +298,16 @@ def _candidate_model_keys(raw_key: str) -> list[str]:
 @operator_router.post("/refresh", response_model=PricingRefreshPreviewResponse)
 async def preview_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> PricingRefreshPreviewResponse:
     """Fetch the latest defaults and hold them for operator review."""
 
     try:
-        preview = await prepare_price_refresh(db)
+        preview = await prepare_price_refresh(db, config)
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to fetch the latest genai-prices data",
+            detail="Unable to fetch the latest models.dev data",
         ) from None
 
     protected_model_count = (await db.execute(select(func.count(distinct(ModelPricing.model_key))))).scalar_one()
@@ -273,10 +328,10 @@ async def get_pending_pricing_refresh(
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The pending genai-prices data is invalid",
+            detail="The pending models.dev data is invalid",
         ) from None
     if preview is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending genai-prices refresh")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending models.dev refresh")
     protected_model_count = (await db.execute(select(func.count(distinct(ModelPricing.model_key))))).scalar_one()
     return _preview_response(preview, protected_model_count)
 
@@ -302,7 +357,7 @@ async def list_pricing_drift(
 ) -> list[PricingDriftRow]:
     """Every stored deployment rate in force today, beside today's default for it.
 
-    A stored row shadows the genai-prices default silently and forever, whether
+    A stored row shadows the models.dev default silently and forever, whether
     it was a deliberate override or a copy of a then-current default. This is
     what makes the difference visible: a row that matches the default is a row
     that could be deleted, and a row far from it is one worth a second look.
@@ -341,36 +396,48 @@ async def list_pricing_drift(
 @operator_router.post("/refresh/confirm", response_model=PricingRefreshConfirmationResponse)
 async def confirm_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
+    digest: Annotated[
+        str | None,
+        Query(description="The `digest` of the previewed snapshot; 409 when the pending one differs."),
+    ] = None,
 ) -> PricingRefreshConfirmationResponse:
     """Activate the latest reviewed default-price snapshot."""
 
     try:
-        applied = await confirm_price_refresh(db)
+        applied = await confirm_price_refresh(db, digest=digest)
+    except PendingSnapshotChanged:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_PENDING_CHANGED_DETAIL) from None
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to save the latest genai-prices data",
+            detail="Unable to save the latest models.dev data",
         ) from None
     if not applied:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to apply")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to apply")
     return PricingRefreshConfirmationResponse()
 
 
 @operator_router.post("/refresh/reject", status_code=status.HTTP_204_NO_CONTENT)
 async def reject_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
+    digest: Annotated[
+        str | None,
+        Query(description="The `digest` of the previewed snapshot; 409 when the pending one differs."),
+    ] = None,
 ) -> None:
     """Discard a reviewed default-price snapshot without applying it."""
 
     try:
-        rejected = await reject_price_refresh(db)
+        rejected = await reject_price_refresh(db, digest=digest)
+    except PendingSnapshotChanged:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_PENDING_CHANGED_DETAIL) from None
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to discard the pending genai-prices data",
+            detail="Unable to discard the pending models.dev data",
         ) from None
     if not rejected:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to reject")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to reject")
 
 
 async def _get_effective_pricing(
@@ -477,10 +544,9 @@ async def set_pricing(
     # explicit null still clears the rate.
     cache_read_set = "cache_read_price_per_million" in request.model_fields_set
     cache_write_set = "cache_write_price_per_million" in request.model_fields_set
-    cache_write_1h_set = "cache_write_1h_price_per_million" in request.model_fields_set
     tiers_set = "pricing_tiers" in request.model_fields_set
     latest: ModelPricing | None = None
-    if not (cache_read_set and cache_write_set and cache_write_1h_set and tiers_set):
+    if not (cache_read_set and cache_write_set and tiers_set):
         latest = (
             await db.execute(
                 select(ModelPricing)
@@ -502,11 +568,6 @@ async def set_pricing(
         if cache_write_set
         else (latest.cache_write_price_per_million if latest else None)
     )
-    cache_write_1h = to_usd_or_none(
-        request.cache_write_1h_price_per_million
-        if cache_write_1h_set
-        else (latest.cache_write_1h_price_per_million if latest else None)
-    )
     pricing_tiers = (
         [tier.model_dump(exclude_none=True) for tier in request.pricing_tiers]
         if request.pricing_tiers is not None
@@ -526,7 +587,6 @@ async def set_pricing(
         pricing.output_price_per_million = to_usd(request.output_price_per_million)
         pricing.cache_read_price_per_million = cache_read
         pricing.cache_write_price_per_million = cache_write
-        pricing.cache_write_1h_price_per_million = cache_write_1h
         pricing.pricing_tiers = pricing_tiers
         pricing.unit = request.unit
         pricing.origin = API_ORIGIN
@@ -538,7 +598,6 @@ async def set_pricing(
             output_price_per_million=to_usd(request.output_price_per_million),
             cache_read_price_per_million=cache_read,
             cache_write_price_per_million=cache_write,
-            cache_write_1h_price_per_million=cache_write_1h,
             pricing_tiers=pricing_tiers,
             unit=request.unit,
             origin=API_ORIGIN,
@@ -547,12 +606,9 @@ async def set_pricing(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("set pricing", exc) from None
     await db.refresh(pricing)
 
     return PricingResponse.from_model(pricing)
@@ -561,19 +617,16 @@ async def set_pricing(
 @catalog_router.get("")
 async def list_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
+    withheld: WithheldProviders,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[PricingResponse]:
-    """List all model pricing."""
-    stmt = (
-        select(ModelPricing)
-        .order_by(ModelPricing.model_key, ModelPricing.effective_at.desc())
-        .offset(skip)
-        .limit(limit)
-    )
-    result = await db.execute(stmt)
-    pricings = result.scalars().all()
+    """List all model pricing.
 
+    A hosted provider restricted to another organization than the caller's is
+    left out, as it is from the catalog.
+    """
+    pricings = await pricing_versions_page(db, skip=skip, limit=limit, hidden_providers=withheld)
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
@@ -589,6 +642,7 @@ class CurrentPricingPage(BaseModel):
 @catalog_router.get("/current")
 async def list_current_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
+    withheld: WithheldProviders,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> CurrentPricingPage:
@@ -599,21 +653,35 @@ async def list_current_pricing(
     answers one row per key: the newest rate that has taken effect, or the
     earliest scheduled rate for a key that has none yet. ``count`` is the number
     of priced models, so a caller can page without reading the collection to
-    learn how long it is.
+    learn how long it is. A hosted provider restricted to another organization
+    than the caller's is left out of both.
     """
 
-    rows, count = await current_rates_page(db, skip=skip, limit=limit)
+    rows, count = await current_rates_page(db, skip=skip, limit=limit, hidden_providers=withheld)
     return CurrentPricingPage(data=[PricingResponse.from_model(row) for row in rows], count=count)
 
 
-@catalog_router.get("/{model_key:path}/history")
+@catalog_router.get(
+    "/{model_key:path}/history",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
+        }
+    },
+)
 async def get_pricing_history(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    withheld: WithheldProviders,
 ) -> list[PricingResponse]:
-    """Return the full pricing history for a model."""
+    """Return the full pricing history for a model.
+
+    A 404 for a model of a hosted provider restricted to another organization
+    than the caller's.
+    """
 
     candidates = _candidate_model_keys(model_key)
+    _refuse_if_withheld(model_key, candidates, withheld)
     pricings = await _get_pricing_history(db, candidates)
     if not pricings:
         raise HTTPException(
@@ -624,15 +692,28 @@ async def get_pricing_history(
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
-@catalog_router.get("/{model_key:path}")
+@catalog_router.get(
+    "/{model_key:path}",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
+        }
+    },
+)
 async def get_pricing(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    withheld: WithheldProviders,
     as_of: Annotated[datetime | None, Query(description="ISO datetime for effective lookup", title="as_of")] = None,
 ) -> PricingResponse:
-    """Get pricing for a specific model as of a timestamp."""
+    """Get pricing for a specific model as of a timestamp.
+
+    A 404 for a model of a hosted provider restricted to another organization
+    than the caller's.
+    """
 
     candidates = _candidate_model_keys(model_key)
+    _refuse_if_withheld(model_key, candidates, withheld)
     pricing = await _get_effective_pricing(db, candidates, normalize_effective_at(as_of))
 
     if not pricing:
@@ -695,9 +776,6 @@ async def delete_pricing(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+        raise database_error("delete pricing", exc) from None

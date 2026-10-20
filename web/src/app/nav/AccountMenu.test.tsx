@@ -115,6 +115,37 @@ afterEach(() => {
 })
 
 describe("AccountMenu", () => {
+  it("ends the appearance row in an empty chevron-width slot, so its value lines up with a row that ends in a chevron", async () => {
+    // A guard on the structure: the row an edition adds under the account (the
+    // data region) ends in a 16px chevron, and the value of this row has to stop
+    // where that one does. jsdom measures nothing, so the slot is what is pinned.
+    mockCaller(OPERATOR)
+    await openMenu()
+
+    const row = await screen.findByRole("button", { name: /^Appearance:/ })
+    const slot = row.lastElementChild
+    expect(slot).toHaveAttribute("aria-hidden", "true")
+    expect(slot).toHaveClass("size-4", "shrink-0", "-ml-0.5")
+    expect(slot).toBeEmptyDOMElement()
+    expect(row).toHaveTextContent(/Light|Dark/)
+  })
+
+  it("draws the icon of the theme the row names, and swaps it with the value", async () => {
+    mockCaller(OPERATOR)
+    await openMenu()
+
+    const row = await screen.findByRole("button", { name: /^Appearance:/ })
+    // Sun is the only one of the two with a circle in it.
+    const isSun = () => row.querySelector("svg circle") !== null
+    const wasLight = /Light/.test(row.textContent ?? "")
+    expect(isSun()).toBe(wasLight)
+
+    await userEvent.setup().click(row)
+    const after = await screen.findByRole("button", { name: /^Appearance:/ })
+    expect(/Light/.test(after.textContent ?? "")).toBe(!wasLight)
+    expect(after.querySelector("svg circle") !== null).toBe(!wasLight)
+  })
+
   it("keeps Playground reachable on mobile before Documentation", async () => {
     mockCaller(OPERATOR)
     await openMenu()
@@ -142,13 +173,13 @@ describe("AccountMenu", () => {
     expect(link).toHaveAttribute("href", "/account")
   })
 
-  it("keeps the bundled guide reachable on a phone when no docs site is configured", async () => {
+  it("points the phone's Documentation row at docs.otari.ai when no docs site is configured", async () => {
     mockCaller(OPERATOR)
     await openMenu()
 
     const link = await screen.findByRole("link", { name: "Documentation" })
-    expect(link).toHaveAttribute("href", "/docs")
-    expect(link).not.toHaveAttribute("target")
+    expect(link).toHaveAttribute("href", "https://docs.otari.ai/")
+    expect(link).toHaveAttribute("target", "_blank")
   })
 
   it("names no legal page a deployment has not published", async () => {
@@ -202,10 +233,10 @@ describe("AccountMenu", () => {
 
   it("retargets the phone's Documentation row at the deployment's own docs site", async () => {
     mockCaller(OPERATOR)
-    await openMenu({ docs_url: "https://docs.otari.ai/en/" })
+    await openMenu({ docs_url: "https://docs.example.com/" })
 
     const link = await screen.findByRole("link", { name: "Documentation" })
-    expect(link).toHaveAttribute("href", "https://docs.otari.ai/en/")
+    expect(link).toHaveAttribute("href", "https://docs.example.com/")
     expect(link).toHaveAttribute("target", "_blank")
     // Still the row the top bar hands off to below `md`, not a second entry
     // point: retargeting it must not make it visible where the cluster already
@@ -321,6 +352,34 @@ describe("AccountMenu", () => {
     await settled()
 
     expect(screen.getByText("Signed in")).toBeInTheDocument()
+  })
+
+  it("names a caller with no organization from their profile", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith("/auth/profile")
+        ? Response.json({
+            ...OPERATOR,
+            email: "ada@example.com",
+            full_name: null,
+          })
+        : Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    await openMenu()
+
+    expect(await screen.findByText("ada@example.com")).toBeInTheDocument()
+    // Playground is workspace-scoped, and this caller has no workspace.
+    expect(screen.queryByRole("link", { name: "Playground" })).toBeNull()
+  })
+
+  it("asks for no profile when the context already names the caller", async () => {
+    mockCaller({ full_name: "Ada Lovelace" })
+    await renderMenu()
+
+    expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument()
+    const profileReads = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([input]) => String(input).endsWith("/auth/profile"))
+    expect(profileReads).toHaveLength(0)
   })
   describe("the Deployment row", () => {
     it("offers one row that opens the deployment rail, with the mark it opens", async () => {

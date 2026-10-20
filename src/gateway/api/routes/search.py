@@ -9,12 +9,18 @@ instead of holding a second provider key of its own.
 
 The request and response follow LiteLLM's ``/v1/search`` (itself shaped after
 Perplexity's Search API), so a caller moving off the LiteLLM proxy keeps its
-request shape; :mod:`gateway.services.search_backend` translates to and from the
-provider's native shape and owns the per-provider adapters. Two Perplexity
-features are deliberately not modeled: ``query`` is a single string rather than
-the multi-query array, and the filters with no field below (recency, context
-size, published-date) are ignored rather than rejected. Both are called out in
-``docs/api-reference.md`` so a migrating caller can check for them.
+request shape; ``include_raw`` and ``provider_options`` are otari's own. Two
+Perplexity features are deliberately not modeled: ``query`` is a single string
+rather than the multi-query array, and the filters with no field below
+(recency, context size, published-date) are ignored rather than rejected. Both
+are called out in ``docs/api-reference.md`` so a migrating caller can check for
+them.
+
+Which tool, which key and which count a request gets, and the call itself, on
+any-search or on an old client until any-search has the provider's adapter, are
+the tools services' (:func:`gateway.services.tools.resolve_direct_search` and
+:func:`gateway.services.tools.run_direct_search`); this module reads the
+request and its dependencies, gates, bills and logs.
 
 Both the body-selected (``POST /api/v1/search``) and path-selected
 (``POST /api/v1/search/{search_tool_name}``) forms log ``endpoint="/v1/search"``,
@@ -22,8 +28,8 @@ a frozen label rather than a path, so one Activity filter covers every search
 regardless of how the tool was named.
 
 A request the gateway itself turns away (an unknown or ambiguous tool name, a
-workspace that has web search switched off, a tool the caller's key may not use)
-writes a usage row too, through the shared
+workspace that has web search switched off, a tool the caller's key may not use,
+an option the provider does not take) writes a usage row too, through the shared
 :func:`gateway.api.routes._pipeline.log_gateway_rejection` the pass-through
 routes use: refused traffic is dropped traffic, and it should be visible in
 Activity and countable as a failure rather than invisible outside the caller's
@@ -31,29 +37,32 @@ own logs.
 
 Billing: search is priced per request, not per token, so a usage row carries
 zero tokens and a cost taken from the provider's own reported charge when it
-reports one. Otherwise the cost is the flat per-request rate configured for
-``<provider>:<tool>`` under the same convention moderations uses
-(:func:`flat_request_cost`). Like moderations and audio, search is exempt from
-``require_pricing``: a provider that reports its own cost is metered whether or
-not a rate is configured, so failing closed would reject calls the gateway can
-bill precisely.
+reports one, else the call's flat per-request rate. A search on an instance is
+priced under ``<provider>:<tool>``, which only the operator's price or override
+sets, since the deployment pays for the call. A search a workspace's
+organization key served is priced under ``otari:web_search``, which the
+organization's own override may set, since a deployment cannot price a tenant's
+key. With ``require_pricing`` on, a search whose row is missing is refused with
+a 402 after the budget checks, even from a provider that reports its own cost;
+a key exempt from budgets is still served.
 """
 
 import time
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
-    WorkspaceSearchKeysDep,
+    WebProviderClientDep,
+    WebSearchPolicyPortDep,
     get_budget_service,
     get_config,
-    get_db,
+    get_db_if_needed,
     get_log_writer,
     verify_api_key_or_master_key,
 )
@@ -69,13 +78,29 @@ from gateway.api.routes._pipeline import (
     rate_limit_headers,
 )
 from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
+from gateway.core.database import release_session
+from gateway.core.error_codes import error_headers
 from gateway.core.metered_pricing import quantize_cost
-from gateway.exceptions.tools_exceptions import WebSearchNotEnabledError, WebSearchPolicyResolutionFailure
+from gateway.exceptions.tools_exceptions import (
+    DirectSearchFailedError,
+    DirectSearchFieldRefusedError,
+    DirectSearchPricingRequiredError,
+    SearchToolMisconfiguredError,
+    SearchToolNotFoundError,
+    SearchToolSelectionError,
+    WebSearchCredentialRefusedError,
+    WebSearchNotEnabledError,
+    WebSearchOptionRefusedError,
+    WebSearchPolicyResolutionFailedError,
+)
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
+from gateway.models.tools import WebTool
 from gateway.models.usage import UsageLog
+from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
+from gateway.schemas.tools import SearchRequest, SearchResponse
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -85,88 +110,23 @@ from gateway.services.budgets import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
-from gateway.services.pricing_service import find_model_pricing, flat_request_cost
-from gateway.services.search_backend import (
-    MAX_RESULTS_CAP,
-    SearchHit,
-    SearchQuery,
-    SearchTool,
-    SearchToolError,
-    resolve_search_tool,
-    run_keyed_search,
-    run_search,
+from gateway.services.pricing_service import resolve_tool_rate
+from gateway.services.tools import (
+    pick_direct_search_instance,
+    refuse_unpriced_direct_search,
+    resolve_direct_search,
+    run_direct_search,
 )
-from gateway.services.tenancy.workspace_web_search_service import (
-    InvalidStoredWebSearchDomainError,
-    resolve_workspace_web_search_config,
-)
-from gateway.services.tools import WorkspaceSearchKeys
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
 
 SEARCH_ENDPOINT = "/v1/search"
 
-# Perplexity's documented ceiling on search_domain_filter, mirrored so an
-# oversized list is rejected here rather than by the upstream provider.
-_MAX_DOMAIN_FILTERS = 20
-
 # Stands in for the usage row's model when the request named no tool that could
 # be resolved (unknown name, or none given with several configured). The column
 # is not nullable, and "unknown" reads better in Activity than an empty string.
 _UNRESOLVED_TOOL = "unknown"
-
-
-class SearchRequest(BaseModel):
-    """A search request, following LiteLLM's ``/v1/search`` body."""
-
-    model_config = ConfigDict(
-        json_schema_extra={"example": {"query": "otari llm gateway", "max_results": 5}},
-    )
-
-    query: str = Field(min_length=1, description="The search query")
-    search_tool_name: str | None = Field(
-        default=None,
-        description=(
-            "Configured search tool to run against. Optional when exactly one tool is "
-            "configured, and ignored on POST /api/v1/search/{search_tool_name}."
-        ),
-    )
-    max_results: int | None = Field(
-        default=None, ge=1, le=MAX_RESULTS_CAP, description="Maximum number of results to return"
-    )
-    search_domain_filter: list[str] | None = Field(
-        default=None,
-        max_length=_MAX_DOMAIN_FILTERS,
-        description="Restrict results to these domains; prefix a domain with '-' to exclude it instead",
-    )
-    country: str | None = Field(
-        default=None,
-        min_length=2,
-        max_length=2,
-        description="Two-letter ISO country code to localize results to",
-    )
-    max_tokens_per_page: int | None = Field(
-        default=None, ge=1, description="Approximate cap on the page content returned per result"
-    )
-    user: str | None = Field(default=None, description="User ID for usage attribution")
-
-
-class SearchResultItem(BaseModel):
-    """One search result."""
-
-    title: str | None = None
-    url: str
-    snippet: str | None = None
-    date: str | None = None
-
-
-class SearchResponse(BaseModel):
-    """A completed search."""
-
-    object: Literal["search"] = "search"
-    search_tool: str = Field(description="The configured search tool that served the request")
-    results: list[SearchResultItem]
 
 
 @router.post("/search")
@@ -175,16 +135,19 @@ async def create_search(
     response: Response,
     request: SearchRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
-    search_keys: WorkspaceSearchKeysDep,
+    web_search_policy: WebSearchPolicyPortDep,
+    web_provider_client: WebProviderClientDep,
 ) -> SearchResponse:
     """Run a search against a configured search tool.
 
-    The tool is taken from ``search_tool_name``, which may be omitted when
-    exactly one tool is configured.
+    The tool is taken from ``search_tool_name``, which may be omitted when the
+    deployment's ``web_search_default_tool`` names one, or when exactly one
+    tool is configured. Such a call runs on the workspace's organization search
+    key when it has one.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
@@ -208,7 +171,8 @@ async def create_search(
         config=config,
         log_writer=log_writer,
         budget_service=budget_service,
-        search_keys=search_keys,
+        web_search_policy=web_search_policy,
+        web_provider_client=web_provider_client,
     )
 
 
@@ -219,11 +183,12 @@ async def create_search_for_tool(
     request: SearchRequest,
     search_tool_name: Annotated[str, Path(description="Configured search tool to run against")],
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
-    search_keys: WorkspaceSearchKeysDep,
+    web_search_policy: WebSearchPolicyPortDep,
+    web_provider_client: WebProviderClientDep,
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
 
@@ -253,7 +218,8 @@ async def create_search_for_tool(
         config=config,
         log_writer=log_writer,
         budget_service=budget_service,
-        search_keys=search_keys,
+        web_search_policy=web_search_policy,
+        web_provider_client=web_provider_client,
     )
 
 
@@ -264,11 +230,12 @@ async def _dispatch_search(
     request: SearchRequest,
     tool_name: str | None,
     auth_result: tuple[APIKey | None, bool],
-    db: AsyncSession,
+    db: AsyncSession | None,
     config: GatewayConfig,
     log_writer: LogWriter,
     budget_service: BudgetService,
-    search_keys: WorkspaceSearchKeys,
+    web_search_policy: WebSearchPolicyPort,
+    web_provider_client: httpx.AsyncClient,
 ) -> SearchResponse:
     """Run the search request scaffold: reserve, call, log, settle.
 
@@ -277,6 +244,10 @@ async def _dispatch_search(
     the any-llm provider instances, and a search tool is neither a model nor an
     any-llm provider.
     """
+    # The session the policy port reads on too, so one release before the provider call
+    # frees the request's one connection. Never None: the endpoint is mounted only where
+    # a process serves both planes, which get_db_if_needed hands a session.
+    assert db is not None
     started_at = time.monotonic()
     api_key, _ = auth_result
     api_key_id = api_key.id if api_key else None
@@ -321,48 +292,46 @@ async def _dispatch_search(
             started_at=started_at,
         )
 
-    # Resolved before any reservation is taken, so an unknown tool costs the
+    # Picked before any reservation is taken, so an unknown tool costs the
     # caller nothing to be told about. The refusal is still logged: a request
     # the gateway turned away is dropped traffic, and it belongs in Activity and
     # in the failure count rather than reaching the operator as a complaint.
     try:
-        tool = resolve_search_tool(config, tool_name)
-    except SearchToolError as exc:
-        tool_error_detail = str(exc)
+        tool = pick_direct_search_instance(config, tool_name)
+    except (SearchToolSelectionError, SearchToolMisconfiguredError) as exc:
         # No tool was resolved, so there is no provider to attribute the row to
         # and the name is whatever the caller asked for, matching how the
         # pass-through routes log a selector that did not resolve.
         await log_rejection(
-            tool_error_detail,
+            exc.message,
             row_model=tool_name or _UNRESOLVED_TOOL,
             row_provider=None,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=tool_error_detail) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
 
     # Resolved before the gates below rather than beside the usage row further
     # down, because the first of them is a question about the workspace.
     usage_workspace_id = await workspace_for_key_id(db, api_key_id)
 
-    # The workspace's own web-search switch, the same row `prepare_gateway_tools`
-    # reads before it will serve `otari_web_search`. Enforced here too because a
-    # workspace that has turned web search off has turned it off: leaving this
-    # endpoint open would leave the switch bypassable by any key in that
-    # workspace, which is a policy that fails open. Only the veto applies; the
-    # row's other fields shape the in-loop backend's own request and have no
-    # counterpart in this endpoint's provider adapters.
+    # The workspace's web search policy, read through the port the in-loop tool
+    # reads it through. A workspace that has turned web search off has turned it
+    # off: leaving this endpoint open would leave the switch bypassable by any key
+    # in that workspace, which is a policy that fails open. Of the rest, only the
+    # result ceiling and the organization key apply here.
     try:
-        workspace_search = await resolve_workspace_web_search_config(db, usage_workspace_id)
-    except InvalidStoredWebSearchDomainError as exc:
-        invalid = WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID
+        policy = await web_search_policy.resolve(
+            WebSearchPolicyScope(workspace_id=usage_workspace_id, user_token=None), [WebTool.SEARCH]
+        )
+    except WebSearchPolicyResolutionFailedError as exc:
         await log_rejection(
-            invalid.message,
+            exc.message,
             row_model=tool.name,
             row_provider=tool.provider,
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=invalid.message) from exc
-    if workspace_search is not None and not workspace_search.enabled:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.message) from exc
+    if policy is not None and not policy.enabled:
         refusal = WebSearchNotEnabledError()
         await log_rejection(
             refusal.message,
@@ -372,20 +341,33 @@ async def _dispatch_search(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal.message)
 
-    # A workspace whose organization brought its own search key searches with it, so
-    # its own account pays. The named tool must still be configured, and is still what
-    # the request is allowlisted, rate-limited and priced as, as the in-loop tool is.
-    search_credential = await search_keys.credential_for(usage_workspace_id)
+    # A workspace whose organization brought its own search key searches with it on a
+    # call that names no tool, so its own account pays. The tool is still what the
+    # request is allowlisted, rate-limited and timed out as.
+    try:
+        search = resolve_direct_search(config, tool, policy, request, named=tool_name is not None)
+    except (
+        WebSearchOptionRefusedError,
+        DirectSearchFieldRefusedError,
+        WebSearchCredentialRefusedError,
+        # The tool was removed or changed by another writer since it was picked.
+        SearchToolNotFoundError,
+        SearchToolMisconfiguredError,
+    ) as exc:
+        await log_rejection(exc.message, row_model=tool.name, row_provider=tool.provider, status_code=exc.status_code)
+        # A 5xx names no credential state to the caller, as the tenancy error handler does.
+        detail = PASSTHROUGH_PROVIDER_ERROR_DETAIL if exc.status_code >= 500 else exc.message
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
 
-    pricing_key = f"{tool.provider}:{tool.name}"
+    tool_key = f"{tool.provider}:{tool.name}"
 
     # Model access control (per-key), keyed on the same <provider>:<tool> string
     # pricing uses. A key with no list of its own inherits its user's default, so
     # an unrestricted key is unaffected; a restricted one must name the search
     # tool, which is the fail-closed side to be on for a brand-new spend surface.
     key_allowlist = await resolve_request_allowlist(db, api_key)
-    if key_allowlist is not None and not is_model_allowed(key_allowlist, pricing_key):
-        not_allowed_detail = model_not_allowed_detail(pricing_key)
+    if key_allowlist is not None and not is_model_allowed(key_allowlist, tool_key):
+        not_allowed_detail = model_not_allowed_detail(tool_key)
         await log_rejection(
             not_allowed_detail,
             row_model=tool.name,
@@ -394,15 +376,15 @@ async def _dispatch_search(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
 
-    # A search tool is not a model, so the community default-pricing dataset can
-    # only produce a false match on the tool's name.
-    pricing = await find_model_pricing(
+    # The rate the reservation holds and the settlement falls back to. The call's
+    # label decides whose overrides count.
+    rate = await resolve_tool_rate(
         db,
-        tool.provider,
-        tool.name,
-        use_defaults=False,
+        search.resolved.rate_keys,
+        label=search.resolved.label,
         organization_id=await organization_for_key_id(db, api_key_id),
     )
+    unit_rate = rate.unit_rate if rate is not None else Decimal(0)
     # After the gates above, so a search they refuse is counted by no rule, and
     # before the reservation, so one the rules refuse holds no budget to refund.
     rate_limit_grant = await admit_rate_limit_rules(
@@ -420,7 +402,7 @@ async def _dispatch_search(
     reservation = await reserve_budget(
         db,
         user_id,
-        flat_request_cost(pricing),
+        unit_rate,
         # Deliberately not the pricing key: ``model`` exists only to drive
         # reserve_budget's free-model shortcut, which splits the string through
         # any-llm. A search tool is not an any-llm model, so passing it logs a
@@ -434,6 +416,18 @@ async def _dispatch_search(
         # so the scope carries the tool's provider as the narrowing axis.
         scope=BudgetScopeRequest(api_key=api_key, provider_instance=tool.provider),
     )
+    # After the budget checks, so a missing or exhausted budget answers first.
+    try:
+        refuse_unpriced_direct_search(
+            search, priced=rate is not None, require_pricing=config.require_pricing, budget_exempt=budget_exempt
+        )
+    except DirectSearchPricingRequiredError as exc:
+        await refund_reservation(db, reservation)
+        # The rejection row shows an operator the searches require_pricing turns away.
+        await log_rejection(exc.message, row_model=tool.name, row_provider=tool.provider, status_code=exc.status_code)
+        raise HTTPException(
+            status_code=exc.status_code, detail=exc.message, headers=error_headers(exc.error_code)
+        ) from exc
 
     def usage_row(**overrides: Any) -> UsageLog:
         """Build the row for a search that reached the provider.
@@ -470,65 +464,50 @@ async def _dispatch_search(
         user_id=user_id,
         api_key_id=api_key_id,
     )
+    # The policy port read on this same session, so this frees the request's one
+    # connection before the provider call; settlement checks one back out.
+    await release_session(db)
 
     try:
-        query = _search_query(request)
-        if search_credential is not None:
-            outcome = await run_keyed_search(search_credential, query, timeout_s=tool.timeout_s)
+        result = await run_direct_search(search, web_provider_client)
+    except Exception as exc:
+        if isinstance(exc, DirectSearchFailedError):
+            # The failure's safe fields ride as headers (decision 67); the detail stays generic.
+            failed, row_status, headers = exc.message, exc.upstream_status or status.HTTP_502_BAD_GATEWAY, exc.headers
         else:
-            outcome = await run_search(tool, query)
-        # The provider's own charge is the true cost; the configured flat rate is
-        # the fallback for a provider that reports none.
-        # Rounded once, here, so the row and the reconciled spend agree.
-        cost = quantize_cost(
-            Decimal(str(outcome.cost_usd)) if outcome.cost_usd is not None else flat_request_cost(pricing)
-        )
-        await log_writer.put(
-            usage_row(
-                status="success",
-                # Search bills per request; there are no tokens to report, and a
-                # zero is truthful where a null would read as "unknown".
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
-                cost=cost,
-            )
-        )
-        await reconcile_reservation(db, reservation, cost)
-    except HTTPException:
+            # Raised by something other than the provider, and named by its type alone,
+            # since an adapter's exception text could carry the query.
+            failed, row_status, headers = type(exc).__name__, failure_status_code(exc), None
+        await log_writer.put(usage_row(status="error", error_message=failed, status_code=row_status))
+        await refund_reservation(db, reservation)
+        logger.error("Search failed for tool '%s' (%s): %s", tool.name, search.resolved.provider, failed)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL, headers=headers
+        ) from exc
+    except BaseException:
+        # A cancelled request, its client gone, is refunded all the same.
         await refund_reservation(db, reservation)
         raise
-    except Exception as exc:
-        await log_writer.put(usage_row(status="error", error_message=str(exc), status_code=failure_status_code(exc)))
-        await refund_reservation(db, reservation)
-        # The raw provider message is kept on the usage log and the gateway log,
-        # never in the response: it can carry upstream internals, and the
-        # pass-through routes hold the same line.
-        logger.error("Search failed for tool '%s' (%s): %s", tool.name, tool.provider, exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL,
-        ) from exc
+
+    # The provider's own charge is the true cost; the configured flat rate is
+    # the fallback for a provider that reports none.
+    # Rounded once, here, so the row and the reconciled spend agree.
+    cost = quantize_cost(result.cost if result.cost is not None else unit_rate)
+    await log_writer.put(
+        usage_row(
+            status="success",
+            # Search bills per request; there are no tokens to report, and a
+            # zero is truthful where a null would read as "unknown".
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            cost=cost,
+        )
+    )
+    await reconcile_reservation(db, reservation, cost)
 
     if rate_limit_info:
         for header, value in rate_limit_headers(rate_limit_info).items():
             response.headers[header] = value
 
-    return _to_response(tool, outcome.results)
-
-
-def _search_query(request: SearchRequest) -> SearchQuery:
-    return SearchQuery(
-        query=request.query,
-        max_results=request.max_results,
-        domain_filter=tuple(request.search_domain_filter or ()),
-        country=request.country,
-        max_tokens_per_page=request.max_tokens_per_page,
-    )
-
-
-def _to_response(tool: SearchTool, hits: list[SearchHit]) -> SearchResponse:
-    return SearchResponse(
-        search_tool=tool.name,
-        results=[SearchResultItem(title=hit.title, url=hit.url, snippet=hit.snippet, date=hit.date) for hit in hits],
-    )
+    return result.response

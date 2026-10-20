@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal, get_args
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Uuid, false, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base, UtcDateTime
@@ -33,6 +33,14 @@ MAX_COUNT_LIMIT = 1_000_000_000_000_000
 
 # rpm_limit and tpm_limit are 32-bit columns, so a larger value fails on commit rather than validation.
 MAX_MINUTE_LIMIT = 2_147_483_647
+
+# An id a caller chooses for a budget: letters, digits, '.', '_' and '-', so it
+# reads the same in a path, a header and a config file.
+BUDGET_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+
+# The ``origin`` of a budget that config.yml declares, which a start writes back
+# when its entry changed. NULL is every other budget, whoever created it.
+BUDGET_ORIGIN_CONFIG = "config"
 
 # An enum changes the published OpenAPI schema, so the two published vocabularies stay `Literal`.
 ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
@@ -123,6 +131,14 @@ class Budget(Base):
     # it is spent over are one product decision, and splitting them let a ceiling
     # reset on a cadence the budget defining it had never heard of.
     reset_alignment: Mapped[str | None] = mapped_column(default=None)
+    # ``config`` while config.yml declares this budget, so the dashboard can say
+    # that an edit made here lasts until config.yml changes the entry. Cleared on
+    # the start after the declaration is removed; the budget itself stays.
+    origin: Mapped[str | None] = mapped_column(String(16), default=None)
+    # A digest of the config.yml entry last written over this budget. A start
+    # writes the entry back only when its digest differs, so a change made
+    # through the API lasts until config.yml changes the entry.
+    declared_digest: Mapped[str | None] = mapped_column(String(64), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -143,6 +159,7 @@ class Budget(Base):
             "request_limit": self.request_limit,
             "budget_duration_sec": self.budget_duration_sec,
             "reset_alignment": self.reset_alignment,
+            "origin": self.origin,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -162,8 +179,8 @@ class BudgetResetLog(Base):
     # a float snapshot of an exact ``users.spend`` would no longer equal the
     # spend it claims to have recorded.
     previous_spend: Mapped[Decimal] = mapped_column(UsdCost())
-    reset_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    next_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reset_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    next_reset_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
     user = relationship("User", back_populates="reset_logs")
     budget = relationship("Budget", back_populates="reset_logs")
@@ -273,8 +290,10 @@ class ScopedBudget(Base):
     reserved_tokens: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
     current_requests: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
     reserved_requests: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
-    period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # ``UtcDateTime`` for the reason ``User.next_budget_reset_at`` is: the gate
+    # compares ``period_end`` to an aware ``now``.
+    period_start: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    period_end: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -291,7 +310,7 @@ class BudgetReservation(Base):
     the two things a counter cannot do (mozilla-ai/otari#742):
 
     * **Release becomes idempotent.** Without an identity, a second release for
-      the same request silently subtracts the hold twice. ``_release_reserved``
+      the same request silently subtracts the hold twice. ``release_reserved_expression``
       clamps at zero, so that shows up not as an error but as an under-count of
       live holds, which weakens the very overspend guarantee the reserve gate
       exists to provide. The status transition here is what makes only the first
@@ -349,7 +368,7 @@ class BudgetReservation(Base):
     # Its values are ``RESERVATION_STATUSES``.
     status: Mapped[str] = mapped_column(default=RESERVATION_ACTIVE, server_default=RESERVATION_ACTIVE, nullable=False)
     # After this instant a still-active row is treated as leaked and reclaimed.
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

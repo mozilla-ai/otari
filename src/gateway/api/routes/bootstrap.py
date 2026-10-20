@@ -32,6 +32,7 @@ from gateway.api.deps import get_config, get_db_if_needed, get_enabled_features
 from gateway.api.routes import (
     admin,
     budgets,
+    hosted_providers,
     keys,
     models,
     org_provider_keys,
@@ -40,7 +41,6 @@ from gateway.api.routes import (
     organizations,
     playground,
     pricing,
-    providers,
     routing,
     settings,
     tools,
@@ -49,6 +49,7 @@ from gateway.api.routes import (
     workspaces,
 )
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.database import describe_database_error
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.log_config import logger
@@ -80,6 +81,7 @@ SignInMethod = Literal["master_key", "password", "passkey"]
 _DECLARED_SURFACES: tuple[Surface, ...] = (
     admin.SURFACE,
     budgets.SURFACE,
+    hosted_providers.SURFACE,
     keys.SURFACE,
     models.SURFACE,
     org_provider_keys.SURFACE,
@@ -88,7 +90,6 @@ _DECLARED_SURFACES: tuple[Surface, ...] = (
     organizations.SURFACE,
     playground.SURFACE,
     pricing.SURFACE,
-    providers.SURFACE,
     routing.SURFACE,
     settings.SURFACE,
     tools.SURFACE,
@@ -182,10 +183,9 @@ class DeploymentBootstrap(BaseModel):
     )
     docs_url: str | None = Field(
         description=(
-            "Where this deployment's documentation lives, when it is not the operator guide "
-            "bundled with the gateway. Set, the dashboard's Documentation links open it in a "
-            "new tab; null, they go to the bundled guide at /#/docs, which stays served either "
-            "way. A link target an operator configured, validated at startup as an absolute "
+            "Where this deployment's documentation lives, when it is not docs.otari.ai. Set, "
+            "the dashboard's Documentation links open it in a new tab; null, they open "
+            "https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute "
             "http(s) URL carrying no credential, since this response is unauthenticated."
         )
     )
@@ -237,6 +237,15 @@ class DeploymentBootstrap(BaseModel):
             "redeploys it. The sign-in screen says so rather than presenting a form whose only "
             "outcome is a 503. Sessions already issued keep working, and the management API and "
             "the data plane are unaffected. False for a hybrid gateway, which issues no session."
+        )
+    )
+    passkeys_enabled: bool = Field(
+        description=(
+            "Whether this deployment offers passkeys at all (the passkeys_enabled setting). False "
+            "means the passkey routes are not mounted and the dashboard hides its passkey page, "
+            "which is a different answer from passkeys_ready: a deployment that merely has not "
+            "configured a relying party is ready for nobody yet but still shows the page that says "
+            "so. False for a hybrid gateway, which issues no session of its own."
         )
     )
     passkeys_ready: bool = Field(
@@ -325,6 +334,7 @@ async def get_bootstrap(
             privacy_url=config.privacy_url,
             site_url=config.site_url,
             maintenance_mode=False,
+            passkeys_enabled=False,
             passkeys_ready=False,
             oauth_providers=[],
             feedback_enabled=False,
@@ -354,6 +364,7 @@ async def get_bootstrap(
         site_url=config.site_url,
         maintenance_mode=await _maintenance_mode(db),
         public_catalog=bool(config.public_catalog) and not config.is_hybrid_mode,
+        passkeys_enabled=config.passkeys_enabled,
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
@@ -403,8 +414,8 @@ async def _sign_in_methods(db: AsyncSession, config: GatewayConfig) -> list[Sign
         claimed = await operator_has_password(db)
         passwords = await password_sign_in_possible(db)
         passkeys = await has_any_credential(db, config)
-    except SQLAlchemyError:
-        logger.warning("Could not read which sign-in methods this deployment offers", exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning("Could not read which sign-in methods this deployment offers: %s", describe_database_error(exc))
         return []
     methods: list[SignInMethod] = []
     if not claimed:
@@ -428,6 +439,8 @@ async def _maintenance_mode(db: AsyncSession) -> bool:
     """
     try:
         return await is_maintenance_mode(db)
-    except SQLAlchemyError:
-        logger.warning("Could not read whether this deployment is in maintenance mode", exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "Could not read whether this deployment is in maintenance mode: %s", describe_database_error(exc)
+        )
         return False

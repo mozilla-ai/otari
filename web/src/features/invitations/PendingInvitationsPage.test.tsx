@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PendingInvitationsPage } from "@/features/invitations/PendingInvitationsPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
-import { pendingOrganizationInvitation } from "@/tests/fixtures"
+import {
+  organization,
+  organizationContext,
+  pendingOrganizationInvitation,
+} from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 // The network boundary, not the hooks: the real query keys, paths and
 // invalidation run, so an empty state or a refusal comes from the hook logic
@@ -55,9 +60,24 @@ function mockApi(
       }
       return { data: waiting, count: waiting.length } as never
     }
+    if (url === "/organizations/me/switch") {
+      const body = JSON.parse(String(init?.body)) as {
+        organization_id: string
+      }
+      return organizationContext({
+        organization: organization({
+          id: body.organization_id,
+          name: "Research",
+        }),
+      }) as never
+    }
     return {} as never
   })
   return requests
+}
+
+function LocationProbe() {
+  return <div>OVERVIEW PAGE</div>
 }
 
 function renderPage() {
@@ -68,6 +88,12 @@ function renderPage() {
     <QueryClientProvider client={client}>
       <PendingInvitationsPage />
     </QueryClientProvider>,
+    {
+      wrapper: withRouter({
+        url: "/invitations",
+        routes: [{ path: "/", element: <LocationProbe /> }],
+      }),
+    },
   )
 }
 
@@ -159,9 +185,38 @@ describe("the invitee's membership inbox", () => {
     )
 
     await waitFor(() => {
-      expect(screen.queryByText("Research")).toBeNull()
+      expect(
+        screen.queryByRole("button", { name: "Accept invitation to Research" }),
+      ).toBeNull()
     })
-    expect(await screen.findByText("No invitations waiting")).toBeVisible()
+    expect(screen.queryByRole("listitem")).toBeNull()
+  })
+
+  it("offers the way into the organization an accept joined", async () => {
+    const requests = mockApi()
+    renderPage()
+
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Accept invitation to Research",
+      }),
+    )
+
+    // Accepting adds the membership without moving the caller into it, and
+    // with nothing else waiting the page has no other next step to offer.
+    expect(await screen.findByText(/You joined/)).toHaveTextContent(
+      "You joined Research.",
+    )
+    expect(screen.queryByText("No invitations waiting")).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Go to Research" }))
+
+    expect(await screen.findByText("OVERVIEW PAGE")).toBeInTheDocument()
+    expect(requests).toContainEqual({
+      url: "/organizations/me/switch",
+      method: "POST",
+    })
   })
 
   it("reports a refusal instead of dropping the row", async () => {

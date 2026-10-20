@@ -95,6 +95,19 @@ class SlidingWindowLog:
         reset_after = window.entries[0][0] + window_sec - now if window.entries else window_sec
         return RateLimitWindow(allowed=handle is not None, count=window.total, reset_after=reset_after, handle=handle)
 
+    def peek(self, key: str, window_sec: float) -> RateLimitWindow:
+        """Report what ``key`` has spent in the window without counting anything."""
+        window = self._requests.get(key)
+        if window is None:
+            return RateLimitWindow(allowed=True, count=0, reset_after=window_sec, handle=None)
+        now = time.monotonic()
+        cutoff = now - window_sec
+        while window.entries and window.entries[0][0] <= cutoff:
+            _, expired = window.entries.popleft()
+            window.total -= window.costs.pop(expired)
+        reset_after = window.entries[0][0] + window_sec - now if window.entries else window_sec
+        return RateLimitWindow(allowed=True, count=window.total, reset_after=reset_after, handle=None)
+
     def settle(self, key: str, handle: str, cost: int) -> None:
         """Make an admitted entry count for ``cost`` instead; a no-op once it has left the window."""
         window = self._requests.get(key)
@@ -144,6 +157,18 @@ class RateLimiter:
 
         """
         return _info_or_raise(self._log.hit(user_id, self._rpm, self._window_sec), self._rpm)
+
+    def require_room(self, key: str) -> None:
+        """Raise the 429 ``check`` would raise once ``key`` has spent its allowance, counting nothing.
+
+        For a limit counted only on failure, checked before the work a failure costs.
+        """
+        window = self._log.peek(key, self._window_sec)
+        if window.count >= self._rpm:
+            _info_or_raise(
+                RateLimitWindow(allowed=False, count=window.count, reset_after=window.reset_after, handle=None),
+                self._rpm,
+            )
 
 
 class UserRateLimiter:
@@ -244,17 +269,19 @@ class RateLimitGrant:
 
     async def settle(self, tokens: int) -> None:
         """Charge every token estimate ``tokens`` instead. Only the first call counts."""
+        estimates = []
         for hold in self._holds:
-            estimates, hold.estimates = hold.estimates, []
-            for key, handle in estimates:
-                await self._store.settle(key, handle, max(tokens, 0))
+            estimates.extend(hold.estimates)
+            hold.estimates = []
+        await asyncio.gather(*(self._store.settle(key, handle, max(tokens, 0)) for key, handle in estimates))
 
     async def release(self) -> None:
         """Give back every concurrency slot. Only the first call counts."""
+        leases = []
         for hold in self._holds:
-            leases, hold.leases = hold.leases, []
-            for key, lease in leases:
-                await self._store.release(key, lease)
+            leases.extend(hold.leases)
+            hold.leases = []
+        await asyncio.gather(*(self._store.release(key, lease) for key, lease in leases))
 
     async def admit_model(self, instance: str, model: str, *, name_model: bool = True) -> ModelHold | None:
         """Count an attempt on ``instance:model`` against every ``per: model`` rule naming it.
@@ -283,6 +310,7 @@ class RateLimitGrant:
             except BaseException as exc:
                 # The hold is not on the grant yet, so nothing else would give back what it took.
                 if isinstance(exc, HTTPException):
+                    RATE_LIMIT_HITS.inc()
                     RATE_LIMIT_MODEL_FULL.labels(rule=rule.name, model=name).inc()
                 await _undo(self._store, hold)
                 raise
@@ -297,7 +325,6 @@ def _count(n: int, noun: str) -> str:
 
 def _refused(detail: str, retry_after: float | None, rule: str) -> HTTPException:
     """A 429 with ``detail``, without ``Retry-After`` when no wait would let the request in."""
-    RATE_LIMIT_HITS.inc()
     headers = error_headers(RATE_LIMITED, rule=rule)
     if retry_after is not None:
         headers["Retry-After"] = str(max(math.ceil(retry_after), 1))
@@ -363,11 +390,11 @@ async def _count_rule(
 async def _undo(store: RateLimitStorePort, hold: _Hold) -> None:
     """Uncount everything ``hold`` took, for a request that was refused."""
     entries, hold.entries, hold.estimates = hold.entries, [], []
-    for key, handle in entries:
-        await store.settle(key, handle, 0)
     leases, hold.leases = hold.leases, []
-    for key, lease in leases:
-        await store.release(key, lease)
+    await asyncio.gather(
+        *(store.settle(key, handle, 0) for key, handle in entries),
+        *(store.release(key, lease) for key, lease in leases),
+    )
 
 
 @dataclass(frozen=True)
@@ -418,26 +445,55 @@ class RateLimitRules:
         # Before any slot is taken, so a request that dies here still gives them back.
         setattr(request.state, _GRANT_STATE, grant)
         subjects = {"deployment": "all", "key": key_id, "user": user_id}
-        hold = _Hold()
-        grant._holds.append(hold)
-        try:
-            for rule in tuple(self._config.rate_limits):
-                subject = subjects.get(rule.per)
-                if subject is None:
-                    continue
-                await _count_rule(self._store, rule, subject, estimated_tokens, hold)
-            if budget_limits is not None and user_id is not None:
-                await _count_rule(
-                    self._store,
-                    _budget_rule(budget_limits),
-                    f"{budget_limits.budget_id}:{user_id}",
-                    estimated_tokens,
-                    hold,
-                )
-        except HTTPException:
-            await _undo(self._store, hold)
-            raise
+        counted = [
+            (rule, subject)
+            for rule in tuple(self._config.rate_limits)
+            if (subject := subjects.get(rule.per)) is not None
+        ]
+        if budget_limits is not None and user_id is not None:
+            counted.append((_budget_rule(budget_limits), f"{budget_limits.budget_id}:{user_id}"))
+        # The rules of one phase are counted at once, one store round trip rather
+        # than one per rule; a refusal by any gives back what all of them took, as
+        # stopping at the first refusal did, and names the first rule in order.
+        # The caller's own rules come first, so a request over its key's or user's
+        # limit never takes a deployment-wide slot another tenant could have had.
+        own = [(rule, subject) for rule, subject in counted if rule.per != "deployment"]
+        shared = [(rule, subject) for rule, subject in counted if rule.per == "deployment"]
+        holds: list[_Hold] = []
+        for phase in (own, shared):
+            if phase:
+                await self._count_phase(grant, phase, estimated_tokens, holds)
         return grant
+
+    async def _count_phase(
+        self,
+        grant: RateLimitGrant,
+        phase: list[tuple["RateLimitRule", str]],
+        estimated_tokens: int,
+        holds: list[_Hold],
+    ) -> None:
+        """Count ``phase`` concurrently, giving back everything ``holds`` and this phase took on a refusal."""
+        phase_holds = [_Hold() for _ in phase]
+        holds.extend(phase_holds)
+        grant._holds.extend(phase_holds)
+        outcomes = await asyncio.gather(
+            *(
+                _count_rule(self._store, rule, subject, estimated_tokens, hold)
+                for (rule, subject), hold in zip(phase, phase_holds, strict=True)
+            ),
+            return_exceptions=True,
+        )
+        failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+        if not failures:
+            return
+        refusal = next((failure for failure in failures if isinstance(failure, HTTPException)), None)
+        if refusal is not None:
+            RATE_LIMIT_HITS.inc()
+        # A store that broke mid-phase gives back what the rest counted, as a
+        # refusal does; the undo can fail on that same store, so the original
+        # failure is the one raised.
+        await asyncio.gather(*(_undo(self._store, hold) for hold in holds), return_exceptions=True)
+        raise refusal if refusal is not None else failures[0]
 
 
 def _budget_rule(limits: BudgetMinuteLimits) -> RateLimitRule:

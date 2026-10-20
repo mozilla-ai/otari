@@ -1,6 +1,8 @@
 import {
   hashKey,
   keepPreviousData,
+  type Query,
+  type QueryClient,
   useMutation,
   useQuery,
   useQueryClient,
@@ -36,7 +38,12 @@ import type {
   UpdateOrgProviderKeyRequest,
   UpdateOrgProviderModelRequest,
 } from "@/client"
-import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
+import {
+  ApiError,
+  apiFetch,
+  longRequestSignal,
+  retryUnlessNotFound,
+} from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   CATALOG,
@@ -63,27 +70,49 @@ const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
 // `enabled` is for the one page that renders ahead of a session: the public
 // catalog has no organization to ask about, and asking would 401 into the
 // sign-out handler.
+//
+// A 404 is not retried: it is an identity with no active membership anywhere
+// (see `isNoOrganizationError`), and asking again only holds every page that
+// waits on this answer behind the backoff. Any other failure keeps the
+// dashboard's own retry policy.
 export function useOrganizationContext(enabled = true) {
   return useQuery({
     queryKey: ORGANIZATION_CONTEXT,
     queryFn: () => apiFetch<OrganizationContext>("/organizations/me"),
     staleTime: 60_000,
+    retry: retryUnlessNotFound(useQueryClient()),
     enabled,
   })
 }
 
 /**
+ * Whether a failed context read means the caller belongs to no organization.
+ *
+ * `/organizations/me` answers 404 for a signed-in identity with no active
+ * membership: somebody who declined their only invitation, or who signed up or
+ * signed in before accepting one.
+ */
+export function isNoOrganizationError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+}
+
+/**
  * What the organization context says about whether the caller operates the
- * deployment, as one of four answers rather than a boolean.
+ * deployment, as one of five answers rather than a boolean.
  *
  * `"unavailable"` is the read having failed with nothing cached to fall back
  * on. It is kept apart from `"not-operator"` because the two call for opposite
  * behavior: a resolved no withholds the operator surface silently, while a
  * failed read cannot say whether anything is being withheld from its owner.
+ *
+ * `"no-organization"` is the one failure that is an answer: the server said
+ * the caller belongs to no organization, so there is nothing to operate and
+ * nothing to fail open onto.
  */
 export type DeploymentOperatorAnswer =
   | "operator"
   | "not-operator"
+  | "no-organization"
   | "pending"
   | "unavailable"
 
@@ -98,12 +127,16 @@ export type DeploymentOperatorAnswer =
  */
 export function deploymentOperatorAnswer(query: {
   data?: OrganizationContext
+  error?: unknown
   isFetched: boolean
 }): DeploymentOperatorAnswer {
   if (query.data) {
     return query.data.deployment_operator === true ? "operator" : "not-operator"
   }
-  return query.isFetched ? "unavailable" : "pending"
+  if (!query.isFetched) {
+    return "pending"
+  }
+  return isNoOrganizationError(query.error) ? "no-organization" : "unavailable"
 }
 
 /**
@@ -203,8 +236,50 @@ export function useCreateOrganization() {
 // step with every future query, and the one it missed would render another
 // organization's rows under this one's name.
 //
-// The context is the exception, and the only one: it is what the switch itself
-// answers with, and what a role gate reads.
+// The context is the exception to the invalidation: it is what the switch (or
+// the delete) answers with, and what a role gate reads. Queries keyed on one of the
+// left organization's workspaces are invalidated without a refetch.
+function enterOrganization(
+  queryClient: QueryClient,
+  context: OrganizationContext,
+) {
+  const leftWorkspaceIds = (
+    queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT)
+      ?.workspace_memberships ?? []
+  ).map((membership) => membership.workspace_id)
+  // A query keyed on a workspace of the organization just left stays
+  // mounted under that id until the selection follows the new context on
+  // the next render, so refetching it here asks for a workspace the caller
+  // no longer acts in and earns a 404. It is only marked stale, and the
+  // page asks for the new workspace once the selection moves. Such a query
+  // is found by the workspace it declares (`workspaceMeta`), not by
+  // searching its key, which also holds ids that are not workspaces.
+  const isKeyedOnLeftWorkspace = (query: Query) => {
+    const workspaceId = query.meta?.workspaceId
+    return (
+      typeof workspaceId === "string" &&
+      workspaceId !== "" &&
+      leftWorkspaceIds.includes(workspaceId)
+    )
+  }
+  // Written, not invalidated, and written first: the invalidation below is
+  // where every query decides whether to refetch, and one gated on the role
+  // in here would decide it against the organization just left, asking for
+  // a read the new one refuses (otari#1300). Refetching the context instead
+  // would hold the caller's new role a round trip behind the reads already
+  // being made in it.
+  queryClient.setQueryData(ORGANIZATION_CONTEXT, context)
+  void queryClient.invalidateQueries({
+    predicate: (query) =>
+      query.queryHash !== ORGANIZATION_CONTEXT_HASH &&
+      !isKeyedOnLeftWorkspace(query),
+  })
+  void queryClient.invalidateQueries({
+    predicate: isKeyedOnLeftWorkspace,
+    refetchType: "none",
+  })
+}
+
 export function useSwitchOrganization() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -220,18 +295,19 @@ export function useSwitchOrganization() {
         body: JSON.stringify(body),
       })
     },
-    onSuccess: (context) => {
-      // Written, not invalidated, and written first: the invalidation below is
-      // where every query decides whether to refetch, and one gated on the role
-      // in here would decide it against the organization just left, asking for
-      // a read the new one refuses (otari#1300). Refetching the context instead
-      // would hold the caller's new role a round trip behind the reads already
-      // being made in it.
-      queryClient.setQueryData(ORGANIZATION_CONTEXT, context)
-      void queryClient.invalidateQueries({
-        predicate: (query) => query.queryHash !== ORGANIZATION_CONTEXT_HASH,
-      })
-    },
+    onSuccess: (context) => enterOrganization(queryClient, context),
+  })
+}
+
+// Deleting the active organization moves the caller into another one on the
+// server, and answers with that one's context, so the cache is left exactly as
+// a switch leaves it.
+export function useDeleteOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<OrganizationContext>("/organizations/me", { method: "DELETE" }),
+    onSuccess: (context) => enterOrganization(queryClient, context),
   })
 }
 
@@ -329,8 +405,8 @@ export function useRemoveOrganizationMember() {
 }
 
 // The dashboard's one write path onto the roster: lands `invited`, and the
-// response always carries `accept_link` (whether or not `mail_sent` is true),
-// so the operator can share it themselves.
+// response carries `accept_link` only when `mail_sent` is false, for the
+// operator to share themselves.
 export function useInviteOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -363,6 +439,22 @@ export function useBulkInviteOrganizationMembers() {
   })
 }
 
+// A new link for a pending or expired invitation: the old one stops working,
+// and the new one is emailed, or comes back to share when it was not.
+export function useReissueOrganizationMemberInvitation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      apiFetch<InviteOrganizationMemberResult>(
+        `/organizations/me/member-invitations/${encodeURIComponent(invitationId)}/reissue`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
+  })
+}
+
 export function useRevokeOrganizationMemberInvitation() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -390,7 +482,7 @@ export function useRevokeOrganizationMemberInvitation() {
 // every `/organizations` path by design. Neither is something a retry
 // fixes, and the entry point that reads the count treats a failure as "nothing
 // waiting" rather than showing an error in the chrome.
-export function usePendingOrganizationInvitations() {
+export function usePendingOrganizationInvitations(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATIONS, "pending-memberships"],
     queryFn: () =>
@@ -400,6 +492,7 @@ export function usePendingOrganizationInvitations() {
     staleTime: 60_000,
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+    enabled,
   })
 }
 
@@ -537,10 +630,8 @@ function invalidateOrgProviderModels(
 }
 
 // The organization's own upstream provider credentials (#670), which every
-// workspace under it inherits. A different table from `/provider-credentials`
-// above: that one is keyed on an instance name and belongs to the process, this
-// one belongs to the tenant. Only a hosted deployment reports the surface these
-// hooks serve (`organization_providers`).
+// workspace under it inherits. A different table from `/hosted-providers`:
+// that one belongs to the process, this one belongs to the tenant.
 //
 // Archived keys are fetched too, and filtered in the page rather than by a
 // second query: archiving is reversible, the list is small, and a toggle that
@@ -645,6 +736,18 @@ export function useSetOrgProviderKeyDefault() {
     onSuccess: () =>
       // Which key dispatches, not which models exist.
       invalidateOrgProviderKeys(queryClient),
+  })
+}
+
+export function useUnsetOrgProviderKeyDefault() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (keyId: string) =>
+      apiFetch<OrgProviderKey>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/default`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
   })
 }
 

@@ -205,7 +205,9 @@ class ProviderEndpointService:
             or trimmed in {provider.value for provider in LLMProvider}
         ):
             raise ProviderEndpointInvalidError(f"'{trimmed}' names a provider, so it cannot name an endpoint")
-        if trimmed in self.config.providers:
+        # The baseline keeps a config.yml entry even when it was dropped for having
+        # no credential, and its name stays reserved either way.
+        if trimmed in self.config.providers or trimmed in (self.config._provider_baseline or {}):
             raise ProviderEndpointInvalidError(
                 f"'{trimmed}' is a configured provider instance, so it cannot name an endpoint"
             )

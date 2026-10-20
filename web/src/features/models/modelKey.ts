@@ -41,3 +41,8 @@ export function isValidModelKey(value: string): boolean {
 export function providerInstanceOf(modelId: string): string | undefined {
   return PREFIXED_SELECTOR.exec(modelId)?.[1]
 }
+
+/** The provider's own model ID, from an `instance:model` selector. */
+export function providerModelId(selector: string): string {
+  return selector.slice(selector.indexOf(":") + 1)
+}
