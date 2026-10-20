@@ -8,6 +8,8 @@ import type {
   TraceDetail,
   TraceList,
   TraceSeries,
+  TraceSortKey,
+  TraceSortOrder,
   TraceSummary,
 } from "@/client"
 import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
@@ -52,16 +54,9 @@ export function traceParams(filters: TraceFilters): URLSearchParams {
 
 // What the session list is ordered by. The server sorts, so the order holds
 // across pages rather than within the one on screen.
-export type TraceSortKey =
-  | "last_activity"
-  | "latency"
-  | "tokens"
-  | "cost"
-  | "errors"
-
 export interface TraceSort {
   key: TraceSortKey
-  direction: "asc" | "desc"
+  direction: TraceSortOrder
 }
 
 export const DEFAULT_TRACE_SORT: TraceSort = {

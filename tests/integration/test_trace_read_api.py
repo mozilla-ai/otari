@@ -351,6 +351,47 @@ def test_the_list_sorts_by_the_column_asked_for_across_pages(
     assert listed("asc") == descending[::-1]
 
 
+@pytest.mark.parametrize("sort", ["latency", "tokens", "cost", "errors"])
+def test_sessions_that_tie_on_the_sort_page_once_each(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    sort: str,
+) -> None:
+    with db_session_factory() as session:
+        workspace = session.scalars(select(Workspace).where(col(Workspace.name) == "One")).one()
+        # Equal on every sort key, and two pairs equal on last activity too, so only the key breaks those ties.
+        for index in range(6):
+            session.add(
+                Trace(
+                    workspace_id=workspace.id,
+                    trace_id=f"s-tie-{index}",
+                    session_source="client",
+                    started_at=_T0,
+                    last_activity_at=_T0 + timedelta(minutes=2 + index // 2),
+                    input_tokens=5,
+                    output_tokens=5,
+                    cost_snapshot=Decimal("0.02"),
+                    error_count=0,
+                )
+            )
+        session.commit()
+        workspace_id = str(workspace.id)
+
+    for order in ("asc", "desc"):
+        seen = [
+            item["trace_id"]
+            for skip in range(7)
+            for item in _operator_get(
+                client,
+                world,
+                "/traces",
+                {"workspace_id": workspace_id, "sort": sort, "order": order, "limit": "1", "skip": str(skip)},
+            ).json()["items"]
+        ]
+        assert sorted(seen) == sorted([*(f"s-tie-{index}" for index in range(6)), "s-one"])
+
+
 def test_the_list_refuses_a_sort_it_does_not_offer(client: TestClient, world: dict[str, str]) -> None:
     for params in ({"sort": "name"}, {"order": "up"}):
         assert _operator_get(client, world, "/traces", params).status_code == status.HTTP_422_UNPROCESSABLE_CONTENT

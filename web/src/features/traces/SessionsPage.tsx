@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
-import type { TraceSummary } from "@/client"
+import type { TraceSortKey, TraceSummary } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
@@ -20,7 +20,6 @@ import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
 import {
   DEFAULT_TRACE_SORT,
   type TraceFilters,
-  type TraceSortKey,
   useTrace,
   useTraceCount,
   useTraceSeries,
@@ -69,14 +68,20 @@ const URL_DEFAULTS = {
 // The panel holds the picked span itself, so picking one need not re-render
 // the list, its chart and its pager.
 const UNTRACKED = ["span"] as const
-// The columns the server can order by, keyed by column id.
-const SORT_KEYS: Partial<Record<string, TraceSortKey>> = {
+// The columns the server can order by: each sort key and the column it heads.
+const SORT_COLUMNS: Record<TraceSortKey, string> = {
   last_activity: "last_activity",
-  levels: "errors",
+  errors: "levels",
   latency: "latency",
   tokens: "tokens",
   cost: "cost",
 }
+const isSortKey = (value: string): value is TraceSortKey =>
+  Object.hasOwn(SORT_COLUMNS, value)
+const sortKeyOf = (column: string) =>
+  (Object.keys(SORT_COLUMNS) as TraceSortKey[]).find(
+    (key) => SORT_COLUMNS[key] === column,
+  )
 const LEVEL_OPTIONS = [
   { value: "", label: "All levels" },
   { value: "failed", label: "Errors" },
@@ -246,23 +251,21 @@ export function SessionsPage() {
 
   // A hand-edited URL naming a column the server cannot sort falls back to
   // the default rather than reaching the API as a value it refuses.
-  const sortColumn =
-    Object.entries(SORT_KEYS).find(([, key]) => key === url.get("sort"))?.[0] ??
-    "last_activity"
-  const sortKey = SORT_KEYS[sortColumn] ?? DEFAULT_TRACE_SORT.key
+  const sortParam = url.get("sort")
+  const sortKey = isSortKey(sortParam) ? sortParam : DEFAULT_TRACE_SORT.key
   const sortDirection = url.get("order") === "asc" ? "asc" : "desc"
   const sort = useMemo(
     () => ({ key: sortKey, direction: sortDirection }) as const,
     [sortKey, sortDirection],
   )
   const sortDescriptor: SortDescriptor = {
-    column: sortColumn,
+    column: SORT_COLUMNS[sortKey],
     direction: sortDirection === "asc" ? "ascending" : "descending",
   }
   // Every sortable column is a time or an amount, so a column's first press
   // puts the largest first; pressing it again flips it.
   const onSortChange = (descriptor: SortDescriptor) => {
-    const key = SORT_KEYS[String(descriptor.column)]
+    const key = sortKeyOf(String(descriptor.column))
     if (!key) return
     url.patch({
       sort: key,

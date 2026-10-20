@@ -1,4 +1,4 @@
-"""The session series on SQLite: which sessions it counts as failed, and how the list sorts by latency.
+"""The session series on SQLite: which sessions it counts as failed.
 
 A tool's error goes back to the model, which carries on, so a session whose only
 errors are its tools' succeeded, MCP tools' included; an error of the session's
@@ -19,7 +19,7 @@ import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.traces import TracesRepositories
 from gateway.services.traces import TraceService
-from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceSort, TraceWrite
+from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
 
 pytestmark = pytest.mark.asyncio
 
@@ -111,25 +111,3 @@ async def test_an_mcp_tool_error_is_a_tools_and_a_failed_mcp_connection_is_not(s
     series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="hour")
 
     assert [(point.succeeded, point.failed) for point in series] == [(1, 1)]
-
-
-async def test_the_list_sorts_by_latency_on_sqlite(store: TraceService) -> None:
-    # SQLite keeps timestamps as text, so latency cannot be a plain subtraction there.
-    def lasting(span_id: str, seconds: int) -> SpanRecord:
-        return SpanRecord(
-            span_id=span_id,
-            kind="step",
-            origin="gateway",
-            name="step",
-            outcome="ok",
-            start_time=_T0,
-            end_time=_T0 + timedelta(seconds=seconds),
-        )
-
-    await store.write(
-        (_write("minute", lasting("a", 60)), _write("hour", lasting("b", 3600)), _write("second", lasting("c", 1)))
-    )
-
-    page = await store.search(TraceScope.deployment(), TraceFilter(), limit=10, offset=0, sort=TraceSort(key="latency"))
-
-    assert [item.trace_id for item in page.items] == ["hour", "minute", "second"]

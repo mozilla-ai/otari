@@ -202,6 +202,11 @@ type SeriesQuery = NonNullable<
   operations["usage-usage_series"]["parameters"]["query"]
 >
 export type UsageGroupBy = NonNullable<SeriesQuery["group_by"]>
+type TraceListQuery = NonNullable<
+  operations["traces-list_traces"]["parameters"]["query"]
+>
+export type TraceSortKey = NonNullable<TraceListQuery["sort"]>
+export type TraceSortOrder = NonNullable<TraceListQuery["order"]>
 
 // `UsageFilters` (`./local`) stays hand-written, because it is a filter set the
 // hooks assemble across five usage endpoints and several of its values go on the
