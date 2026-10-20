@@ -24,6 +24,7 @@ and several search instances with no default between them.
 """
 
 import copy
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -246,6 +247,12 @@ def _validate_tool_entry(kind: ToolKind, name: str, entry: Any) -> str:
     if options is not None and not isinstance(options, dict):
         msg = f"{section}.{name}.options must be a mapping."
         raise ValueError(msg)
+    price = entry.get("price_per_call")
+    if price is not None and (
+        isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price < 0
+    ):
+        msg = f"{section}.{name}.price_per_call must be a finite, non-negative number of USD."
+        raise ValueError(msg)
     return provider
 
 
@@ -355,8 +362,9 @@ class ToolSettings(BaseModel):
             "web_search_default_tool). Each entry may declare a 'provider' (defaults to the name; "
             "GET /api/v1/search-tools/providers lists them), an 'api_key' where the provider needs "
             "one, an 'api_base' (a searxng entry without one inherits web_search_url), a 'timeout' "
-            "in seconds, an 'options' mapping of provider-native defaults, and a 'fetch_tool' naming "
-            "the fetch instance that enriches its results."
+            "in seconds, an 'options' mapping of provider-native defaults, a 'fetch_tool' naming "
+            "the fetch instance that enriches its results, and a 'price_per_call' in USD, the rate a "
+            "search with no reported cost is billed at."
         ),
     )
     fetch_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
@@ -364,9 +372,9 @@ class ToolSettings(BaseModel):
         description=(
             "Named fetch instances, for the otari_web_fetch tool and for enriching search results. "
             "Each entry may declare a 'provider' (defaults to the name), an 'api_key' where the "
-            "provider needs one, an 'api_base', a 'timeout' in seconds and an 'options' mapping. "
-            "'builtin_fetch', the built-in fetcher, always exists and cannot be declared. A name is "
-            "unique across search_tools and fetch_tools."
+            "provider needs one, an 'api_base', a 'timeout' in seconds, an 'options' mapping and a "
+            "'price_per_call' in USD. 'builtin_fetch', the built-in fetcher, always exists and cannot be "
+            "declared. A name is unique across search_tools and fetch_tools."
         ),
     )
     web_fetch_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -535,13 +543,22 @@ class ToolSettings(BaseModel):
         """
         return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
 
-    def fetch_tool_providers(self) -> set[str]:
-        """The distinct providers backing the fetch instances, ``builtin`` among them.
+    def legacy_search_tool_keys(self) -> set[str]:
+        """The ``<provider>:<tool>`` keys the search tools were priced and allow-listed under.
 
-        The prefixes of the ``<provider>:<instance>`` keys a fetch instance's
-        calls are priced under, ``builtin:builtin_fetch`` included.
+        Read only to honor a price row or allow-list entry written before tools
+        had a namespace of their own, and matched whole, never by prefix: a
+        search provider can share its name with a model provider, as DeepSeek
+        does, whose models' keys then carry the same prefix.
         """
-        return {instance.provider for instance in effective_fetch_instances(self).values()}
+        return {f"{entry.get('provider') or name}:{name}" for name, entry in self.search_tools.items()}
+
+    def legacy_fetch_tool_keys(self) -> set[str]:
+        """The ``<provider>:<instance>`` keys the fetch instances were priced under, ``builtin:builtin_fetch`` included.
+
+        Matched whole, for the reason :meth:`legacy_search_tool_keys` gives.
+        """
+        return {f"{instance.provider}:{name}" for name, instance in effective_fetch_instances(self).items()}
 
     def search_tools_without_backend_url(self) -> list[str]:
         """Search tools whose provider needs an ``api_base`` and has none to inherit.

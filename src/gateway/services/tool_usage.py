@@ -34,7 +34,7 @@ from decimal import Decimal
 
 from gateway.core.metered_pricing import to_decimal
 from gateway.models.money import MAX_USD_COST
-from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, provider_web_search_label
+from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, RateKey, provider_web_search_label
 
 # Every tool backend marks a recoverable failure by prefixing the string it hands
 # back to the model. The tool loop's own error path uses the same prefix, so this
@@ -89,7 +89,7 @@ class ToolUsageTally:
 
     def __init__(self) -> None:
         self._counts: dict[str, dict[str, int]] = {}
-        self._labels: dict[tuple[str, str | None, tuple[str, ...] | None, bool | None], _LabelTotals] = {}
+        self._labels: dict[tuple[str, str | None, tuple[RateKey, ...] | None, bool | None], _LabelTotals] = {}
         self._overflowed = False
 
     def record_result(
@@ -98,7 +98,7 @@ class ToolUsageTally:
         text: str,
         *,
         label: str | None = None,
-        rate_keys: tuple[str, ...] | None = None,
+        rate_keys: tuple[RateKey, ...] | None = None,
         cost: Decimal | None = None,
         enrichment_cost: Decimal | None = None,
     ) -> None:

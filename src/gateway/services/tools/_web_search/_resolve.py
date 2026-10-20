@@ -80,7 +80,12 @@ from gateway.models.tools import (
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
-from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, gateway_tool_pricing_key
+from gateway.types.tool_charges import (
+    ORGANIZATION_KEY_LABEL_PREFIX,
+    RateKey,
+    gateway_tool_pricing_key,
+    instance_rate_key,
+)
 
 # What runs a resolved call: one of the libraries, or the old code, which in
 # the loop is the old backend and on the direct endpoint the old SearXNG client
@@ -119,7 +124,7 @@ class _Resolved:
     options: Mapping[str, Any] = field(repr=False, hash=False)
     timeout: float
     label: str | None
-    rate_keys: tuple[str, ...]
+    rate_keys: tuple[RateKey, ...]
     on_credential: bool = False
 
 
@@ -301,7 +306,7 @@ def _search_on_instance(
         timeout=instance.timeout or (IN_LOOP_TIMEOUT_S if in_loop else DIRECT_TIMEOUT_S),
         label=label,
         # On the direct endpoint, the instance's own row alone (contract C5).
-        rate_keys=(label, _SEARCH_FALLBACK_RATE) if in_loop else (label,),
+        rate_keys=_instance_rate_keys("search", instance, _SEARCH_FALLBACK_RATE if in_loop else None),
         fetch_tool=instance.fetch_tool,
     )
 
@@ -395,6 +400,14 @@ def _search_on_credential(
     )
 
 
+def _instance_rate_keys(
+    kind: Literal["search", "fetch"], instance: ToolInstance, fallback: str | None
+) -> tuple[RateKey, ...]:
+    """The instance's rate key, then ``fallback``."""
+    own = instance_rate_key(kind, instance.name, instance.provider)
+    return (own, fallback) if fallback is not None else (own,)
+
+
 def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
     options = _layered(
         "fetch",
@@ -418,7 +431,7 @@ def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
         timeout=instance.timeout
         or (NETWORK_DEADLINE_SECONDS if instance.provider == BUILTIN_FETCH_PROVIDER else IN_LOOP_TIMEOUT_S),
         label=label,
-        rate_keys=(label, _FETCH_FALLBACK_RATE),
+        rate_keys=_instance_rate_keys("fetch", instance, _FETCH_FALLBACK_RATE),
     )
 
 
@@ -481,7 +494,7 @@ def _credential_layer(credential: WebToolCredential) -> str:
     return "the organization's key"
 
 
-def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[str, ...]]:
+def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[RateKey, ...]]:
     """The label and rate keys of a call a credential serves (design L).
 
     A hybrid data plane settles nothing itself, so the control plane's

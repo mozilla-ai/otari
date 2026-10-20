@@ -80,7 +80,7 @@ from gateway.services.web_retrieval_policy import (
     canonicalize_domain_rules,
     canonicalize_web_url,
 )
-from gateway.types.tool_charges import LabelCalls
+from gateway.types.tool_charges import InstanceRateKey, LabelCalls
 
 _URL = "https://example.com/start"
 _FAKE = "fake-fetch"
@@ -304,7 +304,7 @@ async def test_a_fetch_is_recorded_under_its_instances_label_rate_keys_and_repor
         LabelCalls(
             tool=WEB_FETCH_TOOL_NAME,
             label=f"fake:{_FAKE}",
-            rate_keys=(f"fake:{_FAKE}", "otari:web_fetch"),
+            rate_keys=(InstanceRateKey("fetch", _FAKE, f"fake:{_FAKE}"), "otari:web_fetch"),
             calls=2,
             unreported_calls=0,
             reported_cost=Decimal("0.004"),
@@ -323,7 +323,7 @@ async def test_a_built_in_fetch_is_recorded_under_builtin_fetch_for_its_rate(fet
         LabelCalls(
             tool=WEB_FETCH_TOOL_NAME,
             label="builtin:builtin_fetch",
-            rate_keys=("builtin:builtin_fetch", "otari:web_fetch"),
+            rate_keys=(InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"), "otari:web_fetch"),
             calls=1,
             unreported_calls=1,
             reported_cost=Decimal(0),

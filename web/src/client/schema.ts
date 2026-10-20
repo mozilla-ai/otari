@@ -4583,10 +4583,11 @@ export interface paths {
         };
         /**
          * List Pricing
-         * @description List all model pricing.
+         * @description List every stored price version, of every kind.
          *
-         *     A hosted provider restricted to another organization than the caller's is
-         *     left out, as it is from the catalog.
+         *     A row's ``kind`` says whether it prices a model or a search or fetch
+         *     instance. A hosted provider restricted to another organization than the
+         *     caller's is left out, as it is from the catalog.
          */
         get: operations["pricing-list_pricing"];
         put?: never;
@@ -4614,15 +4615,16 @@ export interface paths {
         };
         /**
          * List Current Pricing
-         * @description List the rate each priced model is metered at, one row per model key.
+         * @description List the rate each priced key is metered at, one row per kind and key.
          *
          *     Listing prices answers the stored history, one row per ``effective_at``, so a
-         *     page of that is a page of revisions rather than a page of models. This
+         *     page of that is a page of revisions rather than a page of keys. This
          *     answers one row per key: the newest rate that has taken effect, or the
-         *     earliest scheduled rate for a key that has none yet. ``count`` is the number
-         *     of priced models, so a caller can page without reading the collection to
-         *     learn how long it is. A hosted provider restricted to another organization
-         *     than the caller's is left out of both.
+         *     earliest scheduled rate for a key that has none yet. Every kind is returned,
+         *     a row's ``kind`` telling a model's price from a search or fetch instance's,
+         *     and ``count`` is the number of priced keys of any kind, so a caller can page
+         *     without reading the collection to learn how long it is. A hosted provider
+         *     restricted to another organization than the caller's is left out of both.
          */
         get: operations["pricing-list_current_pricing"];
         put?: never;
@@ -4772,7 +4774,7 @@ export interface paths {
         };
         /**
          * Get Pricing
-         * @description Get pricing for a specific model as of a timestamp.
+         * @description Get pricing for a specific model, or a search or fetch instance, as of a timestamp.
          *
          *     A 404 for a model of a hosted provider restricted to another organization
          *     than the caller's.
@@ -4782,7 +4784,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Pricing
-         * @description Delete pricing entries for a model.
+         * @description Delete pricing entries for a model, or for a search or fetch instance.
          */
         delete: operations["pricing-delete_pricing"];
         options?: never;
@@ -4799,7 +4801,7 @@ export interface paths {
         };
         /**
          * Get Pricing History
-         * @description Return the full pricing history for a model.
+         * @description Return the full pricing history for a model, or for a search or fetch instance.
          *
          *     A 404 for a model of a hosted provider restricted to another organization
          *     than the caller's.
@@ -9549,7 +9551,7 @@ export interface components {
         };
         /**
          * CurrentPricingPage
-         * @description One page of current model prices, with the total number of priced models.
+         * @description One page of current prices, with the total number of priced keys of any kind.
          */
         CurrentPricingPage: {
             /** Count */
@@ -13607,7 +13609,7 @@ export interface components {
         };
         /**
          * OrganizationModelPricingCreate
-         * @description Create one rate override for a model, for a period.
+         * @description Create one rate override for a model, or a search or fetch instance, for a period.
          */
         OrganizationModelPricingCreate: {
             /**
@@ -13636,8 +13638,13 @@ export interface components {
              */
             input_price_per_million: number;
             /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind?: ("model" | "search" | "fetch") | null;
+            /**
              * Model Key
-             * @description Model identifier in 'provider:model' form, matching the key the deployment price list uses. A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to.
+             * @description For a model, 'provider:model', matching the key the deployment price list uses; a provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to. For a search or fetch kind, the instance's name.
              */
             model_key: string;
             /**
@@ -13686,6 +13693,11 @@ export interface components {
             id: string;
             /** Input Price Per Million */
             input_price_per_million: number;
+            /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind: string;
             /** Model Key */
             model_key: string;
             /**
@@ -14621,6 +14633,11 @@ export interface components {
             effective_at: string;
             /** Input Price Per Million */
             input_price_per_million: number;
+            /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind: string;
             /** Model Key */
             model_key: string;
             /**
@@ -16221,8 +16238,13 @@ export interface components {
              */
             input_price_per_million: number;
             /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind?: ("model" | "search" | "fetch") | null;
+            /**
              * Model Key
-             * @description Model identifier in format 'provider:model'
+             * @description Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds
              */
             model_key: string;
             /**
@@ -24125,6 +24147,8 @@ export interface operations {
             query?: {
                 /** @description Return only this model's periods, in the canonical 'provider:model' form. */
                 model_key?: string | null;
+                /** @description Return only overrides of this kind. */
+                kind?: ("model" | "search" | "fetch") | null;
                 /** @description Number of records to skip */
                 skip?: number;
                 /** @description Maximum number of records to return */
@@ -26553,6 +26577,8 @@ export interface operations {
             query?: {
                 /** @description ISO datetime for effective lookup */
                 as_of?: string | null;
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
             };
             header?: never;
             path: {
@@ -26594,6 +26620,8 @@ export interface operations {
             query?: {
                 /** @description ISO datetime identifying a specific pricing row to delete */
                 effective_at?: string | null;
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
             };
             header?: never;
             path: {
@@ -26623,7 +26651,10 @@ export interface operations {
     };
     "pricing-get_pricing_history": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
+            };
             header?: never;
             path: {
                 model_key: string;

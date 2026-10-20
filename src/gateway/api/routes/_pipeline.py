@@ -410,6 +410,7 @@ from gateway.streaming import (
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
+from gateway.types.tool_charges import describe_rate_key
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
@@ -5004,11 +5005,11 @@ async def _apply_tool_charges(
     for unpriced in charges.unpriced:
         logger.warning(
             "Gateway tool '%s' ran %d time(s) as '%s' with no reported cost and no pricing; recorded without cost. "
-            "Price it with POST /api/v1/pricing using model_key '%s'.",
+            "Price it with POST /api/v1/pricing as %s.",
             unpriced.tool,
             unpriced.calls,
             unpriced.label,
-            unpriced.rate_key,
+            describe_rate_key(unpriced.rate_key),
         )
 
 

@@ -6422,6 +6422,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Return only overrides of this kind.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
+                },
+                {
                   "description": "Number of records to skip",
                   "disabled": true,
                   "key": "skip",
@@ -6434,7 +6440,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/pricing?model_key=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pricing?model_key=&kind=&skip=&limit="
             }
           }
         },
@@ -9112,7 +9118,7 @@
         {
           "name": "List Pricing",
           "request": {
-            "description": "List all model pricing.\n\nA hosted provider restricted to another organization than the caller's is\nleft out, as it is from the catalog.",
+            "description": "List every stored price version, of every kind.\n\nA row's ``kind`` says whether it prices a model or a search or fetch\ninstance. A hosted provider restricted to another organization than the\ncaller's is left out, as it is from the catalog.",
             "header": [],
             "method": "GET",
             "url": {
@@ -9178,7 +9184,7 @@
         {
           "name": "List Current Pricing",
           "request": {
-            "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is. A hosted provider restricted to another organization\nthan the caller's is left out of both.",
+            "description": "List the rate each priced key is metered at, one row per kind and key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of keys. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. Every kind is returned,\na row's ``kind`` telling a model's price from a search or fetch instance's,\nand ``count`` is the number of priced keys of any kind, so a caller can page\nwithout reading the collection to learn how long it is. A hosted provider\nrestricted to another organization than the caller's is left out of both.",
             "header": [],
             "method": "GET",
             "url": {
@@ -9367,7 +9373,7 @@
         {
           "name": "Get Pricing",
           "request": {
-            "description": "Get pricing for a specific model as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
+            "description": "Get pricing for a specific model, or a search or fetch instance, as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
             "header": [],
             "method": "GET",
             "url": {
@@ -9386,9 +9392,15 @@
                   "disabled": true,
                   "key": "as_of",
                   "value": ""
+                },
+                {
+                  "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?as_of=",
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?as_of=&kind=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -9402,7 +9414,7 @@
         {
           "name": "Delete Pricing",
           "request": {
-            "description": "Delete pricing entries for a model.",
+            "description": "Delete pricing entries for a model, or for a search or fetch instance.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -9421,9 +9433,15 @@
                   "disabled": true,
                   "key": "effective_at",
                   "value": ""
+                },
+                {
+                  "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?effective_at=",
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?effective_at=&kind=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -9437,7 +9455,7 @@
         {
           "name": "Get Pricing History",
           "request": {
-            "description": "Return the full pricing history for a model.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
+            "description": "Return the full pricing history for a model, or for a search or fetch instance.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
             "header": [],
             "method": "GET",
             "url": {
@@ -9451,7 +9469,15 @@
                 ":model_key",
                 "history"
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/:model_key/history",
+              "query": [
+                {
+                  "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key/history?kind=",
               "variable": [
                 {
                   "description": "path parameter",

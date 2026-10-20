@@ -5488,7 +5488,7 @@
         "type": "object"
       },
       "CurrentPricingPage": {
-        "description": "One page of current model prices, with the total number of priced models.",
+        "description": "One page of current prices, with the total number of priced keys of any kind.",
         "properties": {
           "count": {
             "title": "Count",
@@ -13716,7 +13716,7 @@
         "type": "object"
       },
       "OrganizationModelPricingCreate": {
-        "description": "Create one rate override for a model, for a period.",
+        "description": "Create one rate override for a model, or a search or fetch instance, for a period.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -13776,11 +13776,27 @@
             "title": "Input Price Per Million",
             "type": "number"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "model",
+                  "search",
+                  "fetch"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "title": "Kind"
+          },
           "model_key": {
-            "description": "Model identifier in 'provider:model' form, matching the key the deployment price list uses. A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to.",
+            "description": "For a model, 'provider:model', matching the key the deployment price list uses; a provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to. For a search or fetch kind, the instance's name.",
             "maxLength": 255,
             "minLength": 1,
-            "pattern": "^[^\\s:/]+[:/][^\\s]+$",
             "title": "Model Key",
             "type": "string"
           },
@@ -13881,6 +13897,11 @@
             "title": "Input Price Per Million",
             "type": "number"
           },
+          "kind": {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "title": "Kind",
+            "type": "string"
+          },
           "model_key": {
             "title": "Model Key",
             "type": "string"
@@ -13914,6 +13935,7 @@
         "required": [
           "id",
           "organization_id",
+          "kind",
           "model_key",
           "input_price_per_million",
           "output_price_per_million",
@@ -15709,6 +15731,11 @@
             "title": "Input Price Per Million",
             "type": "number"
           },
+          "kind": {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "title": "Kind",
+            "type": "string"
+          },
           "model_key": {
             "title": "Model Key",
             "type": "string"
@@ -15747,6 +15774,7 @@
           }
         },
         "required": [
+          "kind",
           "model_key",
           "effective_at",
           "input_price_per_million",
@@ -19129,8 +19157,25 @@
             "title": "Input Price Per Million",
             "type": "number"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "model",
+                  "search",
+                  "fetch"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "title": "Kind"
+          },
           "model_key": {
-            "description": "Model identifier in format 'provider:model'",
+            "description": "Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds",
             "title": "Model Key",
             "type": "string"
           },
@@ -35019,6 +35064,29 @@
             }
           },
           {
+            "description": "Return only overrides of this kind.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "model",
+                    "search",
+                    "fetch"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return only overrides of this kind.",
+              "title": "Kind"
+            }
+          },
+          {
             "description": "Number of records to skip",
             "in": "query",
             "name": "skip",
@@ -40443,7 +40511,7 @@
     },
     "/api/v1/pricing": {
       "get": {
-        "description": "List all model pricing.\n\nA hosted provider restricted to another organization than the caller's is\nleft out, as it is from the catalog.",
+        "description": "List every stored price version, of every kind.\n\nA row's ``kind`` says whether it prices a model or a search or fetch\ninstance. A hosted provider restricted to another organization than the\ncaller's is left out, as it is from the catalog.",
         "operationId": "pricing-list_pricing",
         "parameters": [
           {
@@ -40560,7 +40628,7 @@
     },
     "/api/v1/pricing/current": {
       "get": {
-        "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is. A hosted provider restricted to another organization\nthan the caller's is left out of both.",
+        "description": "List the rate each priced key is metered at, one row per kind and key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of keys. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. Every kind is returned,\na row's ``kind`` telling a model's price from a search or fetch instance's,\nand ``count`` is the number of priced keys of any kind, so a caller can page\nwithout reading the collection to learn how long it is. A hosted provider\nrestricted to another organization than the caller's is left out of both.",
         "operationId": "pricing-list_current_pricing",
         "parameters": [
           {
@@ -40914,7 +40982,7 @@
     },
     "/api/v1/pricing/{model_key}": {
       "delete": {
-        "description": "Delete pricing entries for a model.",
+        "description": "Delete pricing entries for a model, or for a search or fetch instance.",
         "operationId": "pricing-delete_pricing",
         "parameters": [
           {
@@ -40943,6 +41011,23 @@
               ],
               "description": "ISO datetime identifying a specific pricing row to delete",
               "title": "Effective At"
+            }
+          },
+          {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+              "enum": [
+                "model",
+                "search",
+                "fetch"
+              ],
+              "title": "Kind",
+              "type": "string"
             }
           }
         ],
@@ -40975,7 +41060,7 @@
         ]
       },
       "get": {
-        "description": "Get pricing for a specific model as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
+        "description": "Get pricing for a specific model, or a search or fetch instance, as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
         "operationId": "pricing-get_pricing",
         "parameters": [
           {
@@ -41004,6 +41089,23 @@
               ],
               "description": "ISO datetime for effective lookup",
               "title": "as_of"
+            }
+          },
+          {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+              "enum": [
+                "model",
+                "search",
+                "fetch"
+              ],
+              "title": "Kind",
+              "type": "string"
             }
           }
         ],
@@ -41048,7 +41150,7 @@
     },
     "/api/v1/pricing/{model_key}/history": {
       "get": {
-        "description": "Return the full pricing history for a model.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
+        "description": "Return the full pricing history for a model, or for a search or fetch instance.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
         "operationId": "pricing-get_pricing_history",
         "parameters": [
           {
@@ -41057,6 +41159,23 @@
             "required": true,
             "schema": {
               "title": "Model Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+              "enum": [
+                "model",
+                "search",
+                "fetch"
+              ],
+              "title": "Kind",
               "type": "string"
             }
           }

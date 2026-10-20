@@ -42,7 +42,7 @@ from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_network import PinnedAsyncHTTPTransport, TrustedProxyAsyncHTTPTransport
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_domain_rules, canonicalize_web_url
-from gateway.types.tool_charges import LabelCalls
+from gateway.types.tool_charges import LabelCalls, instance_rate_key
 
 _SEARCH = "fake-search"
 _FETCH = "fake-fetch"
@@ -588,7 +588,7 @@ async def test_the_search_and_its_enrichment_are_recorded_under_the_instance_wit
         LabelCalls(
             tool=WEB_SEARCH_TOOL_NAME,
             label=_LABEL,
-            rate_keys=(_LABEL, "otari:web_search"),
+            rate_keys=(instance_rate_key("search", _SEARCH, "fake"), "otari:web_search"),
             calls=2,
             unreported_calls=1,
             reported_cost=Decimal("0.005"),

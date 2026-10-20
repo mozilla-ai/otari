@@ -21,7 +21,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.exceptions.control_plane_exceptions import ControlPlaneUnavailableError
 from gateway.models.api_keys import APIKey
-from gateway.models.pricing import ModelPricing
+from gateway.models.pricing import MODEL_KIND, ModelPricing
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog import apply_model_limits, load_catalog_metadata
@@ -363,7 +363,7 @@ async def _find_model(
     # Check the pricing table first.
     stmt = (
         select(ModelPricing)
-        .where(ModelPricing.model_key == model_id)
+        .where(ModelPricing.kind == MODEL_KIND, ModelPricing.model_key == model_id)
         .order_by(ModelPricing.effective_at.desc())
         .limit(1)
     )

@@ -55,6 +55,7 @@ from gateway.services.tools._web_search._litellm import (
 )
 from gateway.services.tools._web_search._resolve import ResolvedSearch, resolve_search
 from gateway.services.tools._web_tool_failure import WebToolFailure, failed_text
+from gateway.types.tool_charges import RateKey, describe_rate_key
 
 
 @dataclass(frozen=True)
@@ -197,8 +198,9 @@ def refuse_unpriced_direct_search(
     """Refuse a direct search that ``require_pricing`` cannot bill.
 
     ``priced`` says one of the call's rate keys found a pricing row. For an
-    instance's ``<provider>:<instance>`` only the operator's price or override
-    counts, since the deployment pays for the call; for ``otari:web_search``,
+    instance's own price, or the ``<provider>:<instance>`` row it was priced
+    under before it had a kind, only the operator's price or override counts,
+    since the deployment pays for the call; for ``otari:web_search``,
     the organization's own override counts too. The search is refused when
     ``require_pricing`` is on and nothing priced it, even if the provider
     reports its own cost; a zero rate is a price. Two calls pass unpriced: one
@@ -215,26 +217,26 @@ def refuse_unpriced_direct_search(
     )
 
 
-def _unpriced_detail(tool: str, rate_key: str, *, organization_key: bool) -> str:
-    """The 402's message: the row ``rate_key`` that prices a search on ``tool``, and where to set it.
+def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
+    """The 402's message: the price ``rate_key`` names for a search on ``tool``, and where to set it.
 
-    Of the two rows, only ``otari:web_search`` can be set on the dashboard (Tools
-    & Guardrails); an instance's row needs the API or the configuration file.
+    Of the two, only ``otari:web_search`` can be set on the dashboard (Tools &
+    Guardrails); an instance's own price needs the configuration file or the API.
     """
+    price = describe_rate_key(rate_key)
     if organization_key:
-        missing = "which has no pricing"
-        where = (
-            f"POST {API_ROOT}/pricing, the pricing section of config.yml, or the dashboard's Tools & Guardrails screen"
+        missing = f"is priced at {price}, which has no pricing"
+        how = (
+            f"Set a per-request rate for it (POST {API_ROOT}/pricing, the pricing section of config.yml, "
+            "or the dashboard's Tools & Guardrails screen)"
         )
     else:
         # The deployment pays for the call, so an organization's own override does not count.
-        missing = "which the deployment's operator has not priced"
-        where = f"POST {API_ROOT}/pricing or the pricing section of config.yml"
+        missing = f"needs {price}, which the deployment's operator has not set"
+        how = f"Set price_per_call on its config.yml entry, or POST {API_ROOT}/pricing with kind 'search'"
     return (
-        f"A search on '{tool}' is priced under '{rate_key}', {missing}, and require_pricing is on, "
-        "so the gateway will not run a search it cannot bill. "
-        f"Set a per-request price for model_key '{rate_key}' ({where}); a zero rate is valid. "
-        "Or set require_pricing to false to serve searches unpriced."
+        f"A search on '{tool}' {missing}, and require_pricing is on, so it is not run. "
+        f"{how}; a zero rate is valid. Or set require_pricing to false to serve searches unpriced."
     )
 
 

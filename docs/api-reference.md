@@ -494,6 +494,14 @@ A service key's `user` field names one of its end users here as it does on chat
 completions: the search is billed to that end user, under the key's end-user
 budget, and counted by `rate_limits`.
 
+**Price.** A search is billed at the provider's reported cost when it reports
+one, else at the tool's own per-call rate: its `price_per_call`, or a price row
+of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
+`kind`, as do the pricing reads and deletes, as a `?kind=` query, and
+`/api/v1/organizations/me/pricing`). A row written under the old
+`<provider>:<tool>` key is read after it, until a later release. See
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool) for the order and the organization key's rate.
+
 **Errors.** Where a refusal carries a stable code, it is in the
 `Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
 

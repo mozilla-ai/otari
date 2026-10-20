@@ -129,6 +129,7 @@ export function pricingResponse(
   overrides: Partial<PricingResponse> & Pick<PricingResponse, "model_key">,
 ): PricingResponse {
   return {
+    kind: "model",
     effective_at: "2026-01-01T00:00:00Z",
     input_price_per_million: 0,
     output_price_per_million: 0,
@@ -712,6 +713,7 @@ export function organizationPricingOverride(
   return {
     id: "99999999-9999-9999-9999-999999999999",
     organization_id: "11111111-1111-1111-1111-111111111111",
+    kind: "model",
     model_key: "openai:gpt-4o",
     input_price_per_million: 2.5,
     output_price_per_million: 10,

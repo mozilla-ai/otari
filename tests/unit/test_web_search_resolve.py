@@ -28,7 +28,7 @@ from gateway.models.tools import (
 from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tools import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search import _resolve
-from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX
+from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, InstanceRateKey
 
 _ORG = WebToolCredentialSource.ORG
 _HYBRID = WebToolCredentialSource.HYBRID
@@ -100,7 +100,7 @@ _SEARCH_CASES = [
             "api_key": "exa-instance-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa",
-            "rate_keys": ("exa:exa", "otari:web_search"),
+            "rate_keys": (InstanceRateKey("search", "exa", "exa:exa"), "otari:web_search"),
             "timeout": 15.0,
         },
     ),
@@ -223,7 +223,7 @@ _SEARCH_CASES = [
             "provider": "exa",
             "api_key": "exa-instance-key",
             "label": "exa:exa",
-            "rate_keys": ("exa:exa",),
+            "rate_keys": (InstanceRateKey("search", "exa", "exa:exa"),),
             "timeout": 30.0,
         },
         policy=_policy(credential=WebSearchCredential(provider="fake", source=_ORG)),
@@ -757,7 +757,7 @@ _FETCH_CASES = [
             "api_key": "",
             "api_base": "",
             "label": "builtin:builtin_fetch",
-            "rate_keys": ("builtin:builtin_fetch", "otari:web_fetch"),
+            "rate_keys": (InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"), "otari:web_fetch"),
             # The built-in fetcher's own deadline.
             "timeout": 5.0,
         },
@@ -771,7 +771,7 @@ _FETCH_CASES = [
             "api_key": "exa-fetch-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa-fetch",
-            "rate_keys": ("exa:exa-fetch", "otari:web_fetch"),
+            "rate_keys": (InstanceRateKey("fetch", "exa-fetch", "exa:exa-fetch"), "otari:web_fetch"),
             "timeout": 15.0,
         },
     ),

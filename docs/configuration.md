@@ -228,8 +228,7 @@ skips a full model and tries its next candidate, and a request is refused with a
 429 only when no candidate has room. A direct call to a full model is refused.
 A candidate that fails before responding gives back its tokens and its slot but
 keeps its request counted, since the provider was sent it.
-A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`),
-the name its pricing uses.
+A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`).
 
 Rules can also be added, changed and removed from the dashboard (Settings, Rate
 limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
@@ -922,24 +921,45 @@ generation, embeddings, rerank and direct search are subject to
 `require_pricing`, which also refuses a rate that cannot price the endpoint,
 such as an `images` rate on embeddings, rather than serving it unpriced.
 
-A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
-`exa-search` backed by `exa`), and its provider needs no entry under
-`providers:`. That rate is what a search reserves against the caller's budget
-before it runs. A successful search settles at the provider's reported charge
-when it reports one, and at the rate otherwise. A search a workspace's
-organization search key served is priced under `otari:web_search` instead, since
-the deployment cannot price the organization's own provider account. With
-`require_pricing` on, a direct search whose row is missing is refused with a
-402 naming it, even on a provider that reports its charge, unless the key is
-exempt from budgets; a zero rate is a valid row. With it off, such a search
-holds no dollars, though it still holds one request against a request-count
-budget.
+A search tool's rate is its `price_per_call`, in USD, on its own entry:
 
-A fetch instance's rate is keyed the same way (`tabstack:tabstack` for an
-instance named `tabstack` backed by `tabstack`), and so is the built-in
-fetcher's, `builtin:builtin_fetch`; their providers need no entry under
-`providers:` either. They price the fetch tool's calls on that instance, ahead
-of `otari:web_fetch`.
+```yaml
+search_tools:
+  exa-search:
+    provider: exa
+    api_key: ${EXA_API_KEY}
+    price_per_call: 0.005
+```
+
+It is stored as a price row of kind `search` keyed by the tool's name, apart
+from every model price, so no provider entry under `providers:` is needed and a
+model price can never be read as the tool's. The same row can be set through
+`POST /api/v1/pricing` with `"kind": "search"` and the tool's name as
+`model_key`; a `price_per_call` in the file adds a new version at startup only
+when it differs from the rate in force, so a rate set through the API for a tool
+that has a `price_per_call` lasts until the next restart, as a `pricing:` entry
+without `effective_at` does for a model. That rate is what a search reserves
+against the caller's budget before it runs. A successful search settles at the
+provider's reported charge when it reports one, and at the rate otherwise. A
+search a workspace's organization search key served is priced under
+`otari:web_search` instead, since the deployment cannot price the
+organization's own provider account. With `require_pricing` on, a direct search
+with no rate is refused with a 402 naming the price to add, even on a provider
+that reports its charge, unless the key is exempt from budgets; a zero rate is
+a valid price. With it off, such a search holds no dollars, though it still
+holds one request against a request-count budget.
+
+A fetch instance's `price_per_call` is stored the same way, as kind `fetch`.
+The built-in fetcher cannot be declared, so its rate is set through the pricing
+API, kind `fetch` and `model_key: builtin_fetch`. Either prices the fetch tool's
+calls on that instance, ahead of `otari:web_fetch`.
+
+A rate written before tools had a kind of their own, under `pricing:` or the
+pricing API as `<provider>:<instance>` (`exa:exa-search`, `builtin:builtin_fetch`),
+still prices its tool, behind the tool's own row, until a later release stops
+reading it; startup names every such row. A key under a tool's provider that
+names no configured tool is a model's like any other and needs its provider
+under `providers:`.
 
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
@@ -1013,6 +1033,7 @@ fetch_tools:
   exa-fetch:
     provider: exa
     api_key: "${EXA_API_KEY}"
+    price_per_call: 0.001   # USD, when Exa reports no cost
 web_search_default_tool: exa
 web_fetch_default_tool: builtin_fetch
 web_search_max_calls: 10

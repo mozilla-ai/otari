@@ -314,6 +314,14 @@ def test_validate_refuses_a_credentialed_searxng_tool_inheriting_http() -> None:
         config.validate_search_tools()
 
 
+@pytest.mark.parametrize("price", [-0.01, float("nan"), float("inf"), "0.005", True])
+def test_validate_refuses_a_price_per_call_that_is_not_a_finite_amount(price: object) -> None:
+    """NaN would bill nothing and add a version on every restart; infinity would stop startup at the write."""
+    config = GatewayConfig(search_tools={"exa": {**_EXA, "price_per_call": price}})
+    with pytest.raises(ValueError, match="price_per_call must be a finite, non-negative number of USD"):
+        config.validate_search_tools()
+
+
 def test_a_searxng_tool_with_no_backend_url_anywhere_is_reported() -> None:
     """Startup warns instead of failing: a dashboard-stored URL lands after load."""
     config = GatewayConfig(search_tools={"local": {"provider": "searxng"}, "exa": {"api_key": "k"}})
@@ -395,14 +403,15 @@ def test_a_fetch_entry_named_like_a_stored_search_tool_is_left_out(caplog: pytes
     )
 
 
-def test_the_fetch_providers_are_the_fetch_instances_own_builtin_included() -> None:
-    """The prefixes of the fetch instances' rate keys, which the configuration's prices may use."""
-    assert GatewayConfig().fetch_tool_providers() == {"builtin"}
+def test_the_legacy_tool_keys_name_each_instance_under_its_provider() -> None:
+    """The keys tool prices and allow-list entries were written under before tools had a namespace."""
+    assert GatewayConfig().legacy_fetch_tool_keys() == {"builtin:builtin_fetch"}
     config = GatewayConfig(
         fetch_tools={"tabstack": {"provider": "tabstack", "api_key": "k"}, "exa-fetch": {"provider": "exa"}},
-        search_tools={"exa": _EXA},
+        search_tools={"exa": _EXA, "exa-search": _EXA},
     )
-    assert config.fetch_tool_providers() == {"builtin", "tabstack", "exa"}
+    assert config.legacy_search_tool_keys() == {"exa:exa", "exa:exa-search"}
+    assert config.legacy_fetch_tool_keys() == {"builtin:builtin_fetch", "tabstack:tabstack", "exa:exa-fetch"}
 
 
 def test_a_search_entry_named_builtin_fetch_loads_beside_the_implicit_instance(

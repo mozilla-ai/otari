@@ -163,8 +163,8 @@ class HostedCatalogSweep:
                 await self.pricing.all_keys(),
                 offered=frozenset(offered_keys),
                 deployment_instances=frozenset(self.config.providers),
-                search_providers=frozenset(self.config.search_tool_providers()),
-                fetch_providers=frozenset(self.config.fetch_tool_providers()),
+                legacy_search_tool_keys=frozenset(self.config.legacy_search_tool_keys()),
+                legacy_fetch_tool_keys=frozenset(self.config.legacy_fetch_tool_keys()),
                 owned_endpoints=frozenset(row.name for row in await self.endpoints.list_all()),
                 unlisted_providers=unlisted,
             )
