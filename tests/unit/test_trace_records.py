@@ -186,6 +186,8 @@ def test_a_span_keeps_the_attributes_it_was_checked_with() -> None:
         "apikey-123456",
         "API_KEY_0123456789abcdef",
         "SK-abc123",
+        "AKIAIOSFODNN7EXAMPLE",
+        "ASIAIOSFODNN7EXAMPLE",
     ],
 )
 def test_a_name_shaped_like_personal_data_or_a_credential_is_refused(value: str) -> None:
