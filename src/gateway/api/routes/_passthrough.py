@@ -472,7 +472,11 @@ async def run_passthrough(
             )
         except InsufficientFundsError as exc:
             raise await _refuse(
-                reservation, served, status.HTTP_402_PAYMENT_REQUIRED, str(exc), **error_headers(INSUFFICIENT_FUNDS)
+                reservation,
+                served,
+                status.HTTP_402_PAYMENT_REQUIRED,
+                exc.public_message,
+                **error_headers(INSUFFICIENT_FUNDS),
             ) from exc
         except Exception as exc:
             logger.error(
@@ -1372,8 +1376,8 @@ async def run_decision(
             await billing.hold(organization_id=funding.organization_id, amount=funding.hold)
         except InsufficientFundsError as exc:
             await refund_reservation(db, reservation)
-            await log_rejection(str(exc), row_model=model, row_provider=provider_name, status_code=402)
-            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)) from exc
+            await log_rejection(exc.public_message, row_model=model, row_provider=provider_name, status_code=402)
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=exc.public_message) from exc
 
     async def undo() -> None:
         """Give back what the request holds: the billing hold, then the budget reservation.

@@ -536,7 +536,9 @@ async def create_batch(
             )
         except InsufficientFundsError as exc:
             raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc), headers=error_headers(INSUFFICIENT_FUNDS)
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=exc.public_message,
+                headers=error_headers(INSUFFICIENT_FUNDS),
             ) from exc
         except Exception as exc:
             logger.error(

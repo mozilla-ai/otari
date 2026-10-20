@@ -35,11 +35,13 @@ class InsufficientFundsError(Exception):
     the funding model that produced it. An adapter may raise a subclass
     carrying its own wording; ``available`` is the amount the decision was made
     against, in USD, and is zero when the organization has no funding record at
-    all.
+    all. ``public_message`` is what the caller is told, and so carries nothing
+    an adapter would not show them.
     """
 
     def __init__(self, available: Decimal, message: str | None = None) -> None:
-        super().__init__(message or f"Insufficient funds (${available:.2f}) to serve this request.")
+        self.public_message = message or f"Insufficient funds (${available:.2f}) to serve this request."
+        super().__init__(self.public_message)
         self.available = available
 
 

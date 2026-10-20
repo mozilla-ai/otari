@@ -1712,7 +1712,7 @@ async def _admit_or_refuse(
             organization_id,
             ctx.request_id,
         )
-        detail = str(exc)
+        detail = exc.public_message
         await release_reservation(ctx)
         await log_gateway_rejection(
             db=ctx.db,
@@ -1930,7 +1930,7 @@ def _hosted_candidate(
             raise CandidateCannotServe(
                 HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail=str(exc),
+                    detail=exc.public_message,
                     headers=error_headers(INSUFFICIENT_FUNDS),
                 )
             ) from exc
