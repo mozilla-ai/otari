@@ -35,7 +35,6 @@ for every other policy.
 """
 
 import asyncio
-import time
 import uuid
 
 from pydantic import ValidationError
@@ -53,7 +52,6 @@ __all__ = [
     "cached_policies",
     "effective_policies",
     "load_policies_at_startup",
-    "policy_cache_is_stale",
     "refresh_policy_cache",
     "reset_policy_cache",
     "resolve_effective_policy",
@@ -72,7 +70,6 @@ _cache: dict[uuid.UUID, dict[str, PolicySpec]] = {}
 _user_cache: dict[uuid.UUID, dict[str, dict[str, PolicySpec]]] = {}
 # Where a lookup that names no workspace reads; see the module docstring.
 _default_workspace: uuid.UUID | None = None
-_cached_at: float | None = None
 
 
 async def list_stored_policies(
@@ -100,11 +97,6 @@ def cached_policies(user_id: str | None = None, *, workspace_id: uuid.UUID | Non
     return dict(_user_cache.get(scope, {}).get(user_id, {}))
 
 
-def policy_cache_is_stale(ttl: float = POLICY_CACHE_TTL_SECONDS) -> bool:
-    """Whether the cache has never been loaded or has outlived ``ttl``."""
-    return _cached_at is None or (time.monotonic() - _cached_at) >= ttl
-
-
 def _parse(row: RoutingPolicy) -> PolicySpec | None:
     try:
         return PolicySpec.model_validate(row.spec)
@@ -129,7 +121,7 @@ async def refresh_policy_cache(db: AsyncSession) -> dict[uuid.UUID, dict[str, Po
     Clear-then-refill would open a window where a request resolves a policy name
     against an empty map and 400s on a model that exists.
     """
-    global _cache, _user_cache, _default_workspace, _cached_at  # noqa: PLW0603
+    global _cache, _user_cache, _default_workspace  # noqa: PLW0603
 
     rows = (await db.execute(select(RoutingPolicy))).scalars().all()
     fresh_global: dict[uuid.UUID, dict[str, PolicySpec]] = {}
@@ -146,17 +138,15 @@ async def refresh_policy_cache(db: AsyncSession) -> dict[uuid.UUID, dict[str, Po
     default_workspace = await lookup_default_workspace_id(db)
 
     _cache, _user_cache, _default_workspace = fresh_global, fresh_scoped, default_workspace
-    _cached_at = time.monotonic()
     return {workspace: dict(specs) for workspace, specs in _cache.items()}
 
 
 def reset_policy_cache() -> None:
     """Drop the cache so the next load starts clean (startup and tests)."""
-    global _cache, _user_cache, _default_workspace, _cached_at  # noqa: PLW0603
+    global _cache, _user_cache, _default_workspace  # noqa: PLW0603
 
     _cache, _user_cache = {}, {}
     _default_workspace = None
-    _cached_at = None
 
 
 def effective_policies(
