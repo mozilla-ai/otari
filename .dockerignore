@@ -12,7 +12,7 @@ docs/
 !README.md
 # The dashboard bundles the operator guide (web/src/features/docs/DocsPage.tsx imports it
 # with Vite's `?raw`), so the web build stage needs this one file from docs/.
-!docs/dashboard.md
+!docs/guides/dashboard.md
 
 # Tests
 tests/

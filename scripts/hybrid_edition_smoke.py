@@ -392,7 +392,7 @@ class ControlPlaneState:
 
 
 class FakeControlPlane(_FakeServer):
-    """Speaks docs/hybrid-mode-protocol.md, keyed on which user token is presented."""
+    """Speaks docs/reference/hybrid-mode-protocol.md, keyed on which user token is presented."""
 
     def __init__(self, state: ControlPlaneState, bind_host: str = LOOPBACK) -> None:
         super().__init__(_ControlPlaneHandler, bind_host)
@@ -887,7 +887,7 @@ class _SearchHandler(_RecordingHandler):
 
 
 class FakeSandbox(_FakeServer):
-    """A backend speaking docs/code-execution-protocol.md.
+    """A backend speaking docs/reference/code-execution-protocol.md.
 
     It serves the three required operations and records each under its contract name.
     """
@@ -1783,7 +1783,7 @@ def run_streaming_tool_loop(base_url: str, fakes: Fakes) -> None:
     """A streamed request whose tool the gateway runs, on one unbroken stream.
 
     Chat Completions has no vocabulary for a server-side tool call, so the
-    gateway's own call is filtered out of the caller's stream (docs/tools.md).
+    gateway's own call is filtered out of the caller's stream (docs/guides/tools.md).
     The caller must therefore see the answer and no tool call at all, which is
     the opposite of what a leaked internal turn would look like.
     """

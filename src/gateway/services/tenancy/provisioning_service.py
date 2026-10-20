@@ -140,7 +140,7 @@ async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
     organization served. An imported identity belongs to several organizations
     and its pointer holds whichever it was last active in, so moving the marker
     alone adopts whatever that happens to be. See "Adopting an existing tenancy"
-    in ``docs/access-control.md``.
+    in ``docs/self-hosting/administration.md``.
 
     Not a startup error either, despite reading like one: the only caller is
     ``ensure_bootstrap_identity``, which runs from the request dependency, so
@@ -173,7 +173,7 @@ async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
         f"Provisioning beside them would make them unreachable, because every route is scoped to "
         f"the organization the operator identity is pointed at. Point the {BOOTSTRAP_IDENTITY_KEY} "
         f"marker at an identity in the organization you mean to serve, and point that identity's "
-        f"active_organization_id at it (both are needed; see docs/access-control.md), or start "
+        f"active_organization_id at it (both are needed; see docs/self-hosting/administration.md), or start "
         f"from an empty database."
     )
 

@@ -56,7 +56,7 @@ path); it is never sent to a standalone or third-party search backend.
 
 ## Grants
 
-> **Status.** Specified, not built. Otari sends and reads none of the fields in this section or in the two sections after it. Each capability adopts them when it ships, starting with files ([#1750](https://github.com/mozilla-ai/otari/issues/1750)). The rules behind them are in [ARCHITECTURE.md](../ARCHITECTURE.md#how-a-data-plane-reaches-what-it-does-not-own).
+> **Status.** Specified, not built. Otari sends and reads none of the fields in this section or in the two sections after it. Each capability adopts them when it ships, starting with files ([#1750](https://github.com/mozilla-ai/otari/issues/1750)). The rules behind them are in [ARCHITECTURE.md](../../ARCHITECTURE.md#how-a-data-plane-reaches-what-it-does-not-own).
 
 The control plane never carries customer traffic. For each resource a request needs, it answers with one of three kinds of authority, and the data plane then goes to the resource directly.
 
@@ -145,7 +145,7 @@ Each front door has its own `aud` and its own `authorization_details` type, and 
 
 ## Try-Confirm/Cancel
 
-Where a capability leaves durable state, such as a stored file or a recorded trace, the exchange is Try-Confirm/Cancel (TCC), as [ARCHITECTURE.md](../ARCHITECTURE.md#durable-state-try-confirmcancel) describes. Each capability keeps its own endpoints (for files, prepare, finalize and abandon), and there is no generic TCC endpoint. The rules below apply to every one of them.
+Where a capability leaves durable state, such as a stored file or a recorded trace, the exchange is Try-Confirm/Cancel (TCC), as [ARCHITECTURE.md](../../ARCHITECTURE.md#durable-state-try-confirmcancel) describes. Each capability keeps its own endpoints (for files, prepare, finalize and abandon), and there is no generic TCC endpoint. The rules below apply to every one of them.
 
 ### Idempotency
 
@@ -514,7 +514,7 @@ or a stored server. Statuses remain meaningful: `401` becomes
 `forbidden`, `404` becomes `mcp_server_not_found`, `421` becomes
 `misdirected_request` (without the host the platform's detail named), and `429`
 keeps its status and `Retry-After` as `rate_limit_exceeded`. Other platform resolution failures become
-`502 mcp_resolution_failed`. See [MCP](mcp.md#caller-orchestrated-mcp).
+`502 mcp_resolution_failed`. See [MCP](../guides/mcp.md#caller-orchestrated-mcp).
 
 ## Model listing
 
@@ -821,7 +821,7 @@ both fields, while unavailable, pending, legacy, unpriced,
 or carrier-less results include neither. Provider token usage is otherwise
 unchanged. Use `GET /request-costs/{request_id}` when a durable value is
 required. A standalone gateway attaches the same fields from its own usage
-record; see [Request ID and inline cost](api-reference.md#request-id-and-inline-cost).
+record; see [Request ID and inline cost](api.md#request-id-and-inline-cost).
 
 `session_label` is an optional caller-supplied label for cost attribution (per
 run, experiment, or conversation). A caller sets it on the request body

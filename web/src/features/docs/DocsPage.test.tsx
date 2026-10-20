@@ -23,7 +23,7 @@ describe("DocsPage", () => {
     renderDocs()
 
     // The page chrome names it as the guide, and the guide content is rendered
-    // inline from the bundled Markdown (docs/dashboard.md), so it is
+    // inline from the bundled Markdown (docs/guides/dashboard.md), so it is
     // discoverable without a docs site.
     expect(
       screen.getByRole("heading", { level: 1, name: "User guide" }),
@@ -124,7 +124,7 @@ describe("DocsPage", () => {
     const [configLink] = screen.getAllByRole("link", { name: /configuration/i })
     expect(configLink).toHaveAttribute(
       "href",
-      "https://github.com/mozilla-ai/otari/blob/main/docs/configuration.md#mail",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/reference/configuration.md#mail",
     )
     expect(configLink).toHaveAttribute("target", "_blank")
     expect(configLink).toHaveAttribute("rel", "noreferrer")
@@ -134,7 +134,7 @@ describe("DocsPage", () => {
 /**
  * The code block's label row, covered here rather than by a page measurement,
  * and the reason is worth recording: the only fenced blocks in
- * `docs/dashboard.md` sit in the first-run walkthrough, which this page
+ * `docs/guides/dashboard.md` sit in the first-run walkthrough, which this page
  * deliberately drops (a reader who reached it is already signed in). The guide
  * as rendered has 72 inline `<code>` elements and no `<pre>` at all, so the row
  * cannot be seen on the running page however far you scroll. What is asserted

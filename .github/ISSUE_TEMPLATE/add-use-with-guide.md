@@ -9,8 +9,8 @@ labels: ["good first issue", "documentation"]
 
 Add a guide at `docs/use-with-<tool>.md` showing how to point **&lt;Tool&gt;** at Otari, following the matching exemplar for its API surface:
 
-- `docs/use-with-claude-code.md` for tools that speak the Anthropic Messages API
-- `docs/use-with-opencode.md` for tools that speak an OpenAI-compatible API
+- `docs/integrations/claude-code.md` for tools that speak the Anthropic Messages API
+- `docs/integrations/opencode.md` for tools that speak an OpenAI-compatible API
 
 ## Why
 
@@ -18,7 +18,7 @@ Coding tools are the most common reason people reach for a gateway. Each one set
 
 ## Steps
 
-1. Copy the matching exemplar (`docs/use-with-claude-code.md` for Anthropic/Messages clients, or `docs/use-with-opencode.md` for OpenAI-compatible clients) to `docs/use-with-<tool>.md`.
+1. Copy the matching exemplar (`docs/integrations/claude-code.md` for Anthropic/Messages clients, or `docs/integrations/opencode.md` for OpenAI-compatible clients) to `docs/use-with-<tool>.md`.
 2. Fill in each section for this tool:
    - [ ] **Intro**: which API surface the tool speaks (OpenAI `/v1/chat/completions`, Anthropic `/v1/messages`, etc.) and which Otari endpoints it hits
    - [ ] **Quick start**: cover both **Connected to otari.ai** and **Standalone**, either as separate subsections or clearly labeled examples, with the exact env vars or config file the tool uses (base URL, auth token, model)
@@ -44,6 +44,6 @@ Cursor, Continue, Aider, Zed, Cline, Windsurf, Codex CLI, and Gemini CLI all sup
 
 ## Resources
 
-- Exemplars: `docs/use-with-claude-code.md`, `docs/use-with-opencode.md`
-- Model format and providers: `docs/models.md`
-- Base config: `docs/quickstart.md`
+- Exemplars: `docs/integrations/claude-code.md`, `docs/integrations/opencode.md`
+- Model format and providers: `docs/guides/models.md`
+- Base config: `docs/get-started/quickstart.md`

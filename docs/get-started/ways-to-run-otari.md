@@ -1,4 +1,4 @@
-# Runtime modes
+# Ways to run Otari
 
 Otari has three deployment modes. Standalone serves both the control plane and
 data plane. Hosted serves only a multi-tenant control plane. Hybrid serves a data
@@ -125,7 +125,7 @@ can be restricted to one organization, and every other organization is then
 served as if it did not exist. Any standalone or hosted deployment configures
 them on the Hosted providers page, through `/api/v1/hosted-providers`, or in the
 `hosted_providers:` block of `config.yml` (see
-[Configuration](configuration.md#hosted-providers-in-configyml)), where a stored
+[Configuration](../reference/configuration.md#hosted-providers-in-configyml)), where a stored
 provider of the same name wins over the configured one.
 
 What a hosted provider contributes to the catalog is its roster: the models
@@ -193,5 +193,5 @@ are accounted.
 
 The gateway and control plane exchange provider resolution, MCP configuration,
 web-search policy, and usage reports. Integrators building a compatible control
-plane should use the normative [hybrid-mode protocol](hybrid-mode-protocol.md)
+plane should use the normative [hybrid-mode protocol](../reference/hybrid-mode-protocol.md)
 rather than this overview.

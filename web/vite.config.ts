@@ -15,7 +15,7 @@ const outDir = fileURLToPath(
   new URL("../src/gateway/static/dashboard", import.meta.url),
 )
 
-// The dashboard bundles the operator user guide (docs/dashboard.md) so the
+// The dashboard bundles the operator user guide (docs/guides/dashboard.md) so the
 // running app ships the guide it matches, rather than pointing at a separate
 // docs site that may describe a different version. The guide lives outside web/,
 // so the dev server and Vitest need read access to it (the production build
@@ -94,7 +94,7 @@ export default defineConfig({
     },
   },
   server: {
-    // Allow reading the bundled user guide (docs/dashboard.md) from docs/;
+    // Allow reading the bundled user guide (docs/guides/dashboard.md) from docs/;
     // web/ stays listed because an explicit allow list replaces the default.
     fs: { allow: [webRoot, docsDir] },
     proxy: {

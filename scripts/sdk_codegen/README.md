@@ -56,7 +56,7 @@ The version is the spec's `info.version` by default; the codegen workflow passes
 the gateway release version (the tag without its leading `v`) via `--spec-version`
 on a release so the stamp is the real release version rather than the `0.0.0-dev`
 placeholder in the committed spec. See
-[`docs/sdk-compatibility.md`](../../docs/sdk-compatibility.md) for the release
+[`docs/reference/sdk-compatibility.md`](../../docs/reference/sdk-compatibility.md) for the release
 policy and the spec-version to minimum-SDK-version matrix.
 
 ## Endpoint-coverage drift gate

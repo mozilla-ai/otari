@@ -29,7 +29,7 @@ print(agent.run_sync("Say hello in one sentence.").output)
 
 Tools, structured output and streaming work unchanged. The full guide, including
 how to do this without the package:
-[Use with Pydantic AI](https://github.com/mozilla-ai/otari/blob/main/docs/use-with-pydantic-ai.md).
+[Pydantic AI](https://github.com/mozilla-ai/otari/blob/main/docs/integrations/pydantic-ai.md).
 
 Developed in [mozilla-ai/otari](https://github.com/mozilla-ai/otari/tree/main/integrations/pydantic-ai-otari),
 where every change is tested against a running Otari.

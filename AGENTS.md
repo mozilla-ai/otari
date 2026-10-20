@@ -55,7 +55,7 @@ Read it before adding a capability, introducing a port, or moving code across a 
 - **Standalone**: provider credentials come from the `providers:` block in `config.yml`; users/keys/budgets/usage live in the local DB. All routers are registered.
 - **Hosted** (`OTARI_MODE=hosted`) is standalone's multi-tenant variant, not a third runtime: same database, same management API, same sign-in, and `is_hybrid_mode` is false. Two things differ. What `GET /api/v1/bootstrap` publishes, `deployment_type: "hosted"` and `HOSTED_SURFACES` rather than `STANDALONE_SURFACES`, which drops the surfaces a control plane with no data plane cannot serve. And the data plane: `deployment_for` (`core/deployment.py`) gives a hosted deployment no data plane, so `_register_core_routers` skips every router `_CORE_ROUTERS` marks `Plane.DATA`, and `api/routes/hosted_mode.py` answers those prefixes with a 404 naming the reason (and the `data_plane_url` to use, where one is set), because inference belongs on a hybrid gateway whose usage report is what debits the wallet (#822). `/api/v1/models` stays mounted, since discovery is not dispatch.
 - **Hybrid**: per-request provider credentials are resolved from the platform service (otari.ai); local DB/user/budget management is skipped and usage is reported upstream. `register_routers()` (`src/gateway/api/main.py`) mounts only the `_CORE_ROUTERS` entries that need no local control plane: `chat`, `messages`, `responses`, the pass-through routes (`embeddings`, `rerank`, `images`, `audio`, `moderations`), `mcp`, `hooks`, `health`, `bootstrap`, and `web_search_backend` where it is configured; management routers (keys/users/budgets/pricing/usage/etc.) are standalone-only. `bootstrap` (`GET /api/v1/bootstrap`) is mounted in both modes and is unauthenticated, because it is how a browser learns which mode it reached; see [web/AGENTS.md](web/AGENTS.md).
-- Hybrid mode spans two trust contexts that this codebase treats identically: a gateway someone self-hosts against otari.ai using a workspace's own (BYO) provider keys, and the gateway mozilla.ai operates as part of otari.ai, which additionally serves mozilla.ai-managed models. The managed-vs-BYO boundary (platform-owned upstream credentials are returned only to mozilla.ai's gateway, never to a self-hosted one) is enforced on the platform side (otari-ai), not here. User-facing explanation lives in `docs/modes.md`; the wire contract in `docs/hybrid-mode-protocol.md`.
+- Hybrid mode spans two trust contexts that this codebase treats identically: a gateway someone self-hosts against otari.ai using a workspace's own (BYO) provider keys, and the gateway mozilla.ai operates as part of otari.ai, which additionally serves mozilla.ai-managed models. The managed-vs-BYO boundary (platform-owned upstream credentials are returned only to mozilla.ai's gateway, never to a self-hosted one) is enforced on the platform side (otari-ai), not here. User-facing explanation lives in `docs/get-started/ways-to-run-otari.md`; the wire contract in `docs/reference/hybrid-mode-protocol.md`.
 
 The per-request flow (auth → budget → dispatch → reconciliation) spans several files and is documented in [src/gateway/AGENTS.md](src/gateway/AGENTS.md). Read it before changing request behavior.
 
@@ -106,7 +106,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   `otari-live-providers.yml` on pushes to `main`, the commit the otari.ai dev
   gateway deploys; it is not a PR gate, because forks carry no secrets and a real
   model is not deterministic enough to block a merge on.
-- `integrations/` holds `pydantic-ai-otari` and `langchain-otari`, published to PyPI on their own versions ([RELEASE.md](RELEASE.md#integration-package-releases)) and not workspace members. `make test-frameworks` runs their tests and every Python block on `docs/use-with-pydantic-ai.md`, `docs/use-with-langchain.md` and `docs/use-with-langgraph.md` against a real Otari, so a block there must run on its own and print. The frameworks are locked in `integrations/e2e/uv.lock`, never `uv.lock`.
+- `integrations/` holds `pydantic-ai-otari` and `langchain-otari`, published to PyPI on their own versions ([RELEASE.md](RELEASE.md#integration-package-releases)) and not workspace members. `make test-frameworks` runs their tests and every Python block on `docs/integrations/pydantic-ai.md`, `docs/integrations/langchain.md` and `docs/integrations/langgraph.md` against a real Otari, so a block there must run on its own and print. The frameworks are locked in `integrations/e2e/uv.lock`, never `uv.lock`.
 - `tests/integration/test_mcp_dependency_ceiling.py::test_mcp_constraint_resolves_to_an_importable_version` needs network egress, to install `mcp` fresh from PyPI into a throwaway venv. A missing egress fails it hard after burning both `@pytest.mark.flaky` reruns. It also skips outright (not fails) when `uv` is not on `PATH`.
 - `tests/unit/test_url_safety.py` and `tests/unit/test_web_search_backend.py` need DNS, which fails with a different signature: the code under test resolves a hostname to an IP to decide whether an address is safe, so with no resolver it gets the hostname back and the failure reads `ValueError: 'example.com' does not appear to be an IPv4 or IPv6 address`. Six tests across the two files, all passing where DNS is available. Nothing about the address checks is wrong; confirm with `python -c "import socket; socket.gethostbyname('example.com')"` before treating one as a regression.
 
@@ -129,7 +129,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 - `docs/public/code-execution-openapi.yaml` is the exception in that directory: it is
   **hand-maintained**, not generated. It specifies a backend Otari calls, so no app here
   serves those paths and `generate_openapi.py` neither reads nor writes it. Edit it
-  together with `docs/code-execution-protocol.md`, which is normative for the semantics a
+  together with `docs/reference/code-execution-protocol.md`, which is normative for the semantics a
   schema cannot carry; `tests/unit/test_code_execution_contract.py` fails when the two
   disagree, and `scripts/check_code_execution_conformance.py` checks a live backend
   against it.
@@ -170,8 +170,10 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   future mcp adds), so the cost is paid here rather than in the response shape.
 
 ## Docs
-`docs/` is the published documentation, and [docs/index.md](docs/index.md) is its map,
-grouped by reader: start here, operators, integrators, platform builders, contributors.
+`docs/` is the published documentation for both otari.ai and a self-hosted Otari, and
+[docs/index.md](docs/index.md) is its map: Get started, Guides, Integrations, Self-hosting,
+otari.ai and Reference. [Writing docs](CONTRIBUTING.md#writing-docs) says which section a
+page goes in and when a page may say otari.ai or self-hosted.
 Read the page covering the area you are changing before you change it, and update that
 page in the same PR when behavior moves. Nothing fails when a docs page goes stale,
 unlike the artifacts above, so a reader finds the drift rather than CI.
@@ -189,8 +191,8 @@ Some pages bind code rather than describe it:
   location, not beside the code it most resembles. A new domain needs a section there
   before it gets a package or a schemas or exceptions module, or the architecture check
   fails.
-- [docs/hybrid-mode-protocol.md](docs/hybrid-mode-protocol.md) and
-  [docs/code-execution-protocol.md](docs/code-execution-protocol.md) are the wire
+- [docs/reference/hybrid-mode-protocol.md](docs/reference/hybrid-mode-protocol.md) and
+  [docs/reference/code-execution-protocol.md](docs/reference/code-execution-protocol.md) are the wire
   contracts a peer implements. They are normative for the semantics a schema cannot
   carry, so a change to the wire is a change to the page first.
 

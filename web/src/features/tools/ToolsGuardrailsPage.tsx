@@ -142,7 +142,7 @@ interface ManagedToolSpec {
   unavailableSummary?: string
   /** What turns the tool on, in the same case. */
   unavailableHelp?: string
-  /** A heading in `docs/tools.md`, when the service's own is not the tool's. */
+  /** A heading in `docs/guides/tools.md`, when the service's own is not the tool's. */
   docsAnchor?: string
   /** A line for people, in place of the description the model is given. */
   help?: string
@@ -151,7 +151,7 @@ interface ManagedToolSpec {
 interface GroupSpec {
   title: string
   blurb: string
-  /** A heading in `docs/tools.md`. */
+  /** A heading in `docs/guides/tools.md`. */
   docsAnchor: string
   keys: string[]
   /** The group the tool's own per-call price belongs in. */
@@ -280,7 +280,7 @@ const SERVICES: ServiceSpec[] = [
   },
 ]
 
-const toolsDocs = (anchor?: string) => docsSourceHref("tools.md", anchor)
+const toolsDocs = (anchor?: string) => docsSourceHref("guides/tools.md", anchor)
 
 /** Which sandbox runs the code. Chosen at startup, so it is stated, not edited. */
 function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {

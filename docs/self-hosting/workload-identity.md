@@ -315,6 +315,6 @@ issuer, for instance, puts `system:serviceaccount:<namespace>:<name>` in `sub`.
 
 ## Related documentation
 
-- [Access control](access-control.md): API keys, service keys and budgets.
-- [Configuration](configuration.md): where `federation_issuers` is set.
-- [Use with Claude Code](use-with-claude-code.md): routing Claude Code through Otari.
+- [API keys](../guides/api-keys.md) and [Budgets](../guides/budgets.md): keys, service keys and spend limits.
+- [Configuration](../reference/configuration.md): where `federation_issuers` is set.
+- [Claude Code](../integrations/claude-code.md): routing Claude Code through Otari.

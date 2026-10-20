@@ -1,5 +1,5 @@
 # Minimal standalone Otari configuration.
-# See docs/configuration.md for sources, precedence, and advanced settings.
+# See docs/reference/configuration.md for sources, precedence, and advanced settings.
 
 # Docker Compose provides this PostgreSQL service. For a local process without
 # Docker, use sqlite:///./otari.db.
@@ -24,7 +24,7 @@ providers:
     api_key: YOUR_OPENAI_API_KEY_HERE
     # api_base: "https://api.openai.com/v1"
     # Retries the SDK makes before Otari sees a failure. Overrides
-    # provider_max_retries. See docs/configuration.md#provider-retries.
+    # provider_max_retries. See docs/reference/configuration.md#provider-retries.
     # max_retries: 0
 
   # A named OpenAI-compatible backend. The optional model list supplies
@@ -49,7 +49,7 @@ providers:
 # aliases:
 #   fast: openai:gpt-5-mini
 
-# Failover and conditional routing. See docs/routing.md.
+# Failover and conditional routing. See docs/guides/routing.md.
 # routing:
 #   enabled: true
 #   policies:
@@ -60,7 +60,7 @@ providers:
 #         - anthropic:claude-haiku-4-5
 
 # Budgets and API keys written to the database at every start. A key's secret is
-# yours to choose ('tk-' plus random characters); see docs/configuration.md.
+# yours to choose ('tk-' plus random characters); see docs/reference/configuration.md.
 # budgets:
 #   per-user-daily: {max_budget: 1.0, reset_alignment: calendar_day}
 #   service-global: {max_budget: 100, reset_alignment: calendar_month}
@@ -88,7 +88,7 @@ providers:
 # OTARI_PROVIDER_ACCOUNT_PEPPER: its own random value of at least 32 characters.
 # Each provider call carries a per-end-user identifier, on by default. Set
 # OTARI_PROVIDER_USER_IDENTIFIER_KEY (32+ random characters) to key it. See
-# docs/configuration.md#end-user-identifiers.
+# docs/reference/configuration.md#end-user-identifiers.
 # provider_user_identifier_enabled: false
 
 # Optional email delivery. public_base_url is also used by passkeys and OAuth.
@@ -113,7 +113,7 @@ providers:
 # webauthn_allowed_origins:
 #   - "https://otari.example.com"
 
-# File and image normalization. See docs/files.md.
+# File and image normalization. See docs/guides/files.md.
 # files_enabled: true
 # files_local_dir: "./otari-files"
 # Any fsspec filesystem instead of a local directory or boto3 S3:
@@ -137,11 +137,11 @@ providers:
 #     supports_pdf: false
 
 # Managed Web Fetch permits model-directed outbound requests to public web
-# destinations. It is disabled by default. See docs/tools.md.
+# destinations. It is disabled by default. See docs/guides/tools.md.
 # web_fetch_enabled: true
 
 # Direct search tools. Model-initiated web search uses web_search_url instead.
-# See docs/tools.md.
+# See docs/guides/tools.md.
 # search_tools:
 #   local:
 #     provider: searxng
@@ -149,7 +149,7 @@ providers:
 
 # What runs code-execution tool calls: "protocol" (the default) talks to the
 # backend at sandbox_url, "e2b" runs them on E2B from this process and needs
-# the e2b extra plus E2B_API_KEY. See docs/tools.md.
+# the e2b extra plus E2B_API_KEY. See docs/guides/tools.md.
 # sandbox_provider: protocol
 # How long a sandbox is held after its request so the next request can resume
 # it by container id, and the longest one may live from its first lease.
@@ -160,6 +160,6 @@ providers:
 # What a workspace with no tool policy of its own gets. false makes web access
 # (search, fetch, POST /api/v1/search) or code execution something a workspace
 # owner or admin turns on. Unset: on, except on a hosted deployment.
-# See docs/configuration.md.
+# See docs/reference/configuration.md.
 # web_search_workspace_default: false
 # code_execution_workspace_default: false

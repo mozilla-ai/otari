@@ -1,4 +1,4 @@
-# Use with a ChatGPT subscription
+# ChatGPT subscription
 
 A ChatGPT subscription is separate from the OpenAI Platform API and does not
 provide a standard API key. Otari can reach subscription-backed models only
@@ -52,7 +52,7 @@ Remove `api_key` when the proxy is intentionally keyless. The `models` list is
 needed only when the proxy has no working model-listing endpoint.
 
 Models use the instance name, for example `chatgpt:gpt-5`. See
-[Named provider instances](models.md#named-provider-instances).
+[Named provider instances](../self-hosting/configure-providers.md#named-provider-instances).
 
 ## Pricing
 
@@ -97,4 +97,4 @@ they do for any other named instance.
 - API pricing attached to the instance is an estimate, not the subscription's
   actual charge.
 
-For the supported API-key path, use the [OpenAI provider guide](providers/openai.md).
+For the supported API-key path, use the [OpenAI provider guide](../self-hosting/providers/openai.md).

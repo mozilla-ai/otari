@@ -1,7 +1,7 @@
 """Core adapter for ``CodeExecutionPort``: the published protocol over HTTP.
 
 Satisfies :class:`gateway.ports.code_execution_port.CodeExecutionPort` by
-speaking `docs/code-execution-protocol.md` to the backend at ``sandbox_url``,
+speaking `docs/reference/code-execution-protocol.md` to the backend at ``sandbox_url``,
 which is what Otari has always done. The calls here moved out of
 ``services/sandbox_backend.py`` unchanged, so a deployment running the
 reference container behaves exactly as it did before the port existed.

@@ -37,7 +37,7 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_PROVIDER_ACCOUNT_PEPPER` | auto-generated (`${{secret(43)}}`) | Names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. |
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so a fresh deploy serves models that have no configured pricing. |
 | `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled models.dev snapshot without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
-| `OTARI_FORWARDED_ALLOW_IPS` | `*` | Pre-set, so the per-IP sign-in and public-catalog limits see the real client, not Railway's ingress. Safe here because the ingress is the only path to the container; see [Behind a reverse proxy](../../docs/deployment.md#behind-a-reverse-proxy). |
+| `OTARI_FORWARDED_ALLOW_IPS` | `*` | Pre-set, so the per-IP sign-in and public-catalog limits see the real client, not Railway's ingress. Safe here because the ingress is the only path to the container; see [Behind a reverse proxy](../../docs/self-hosting/deploy.md#behind-a-reverse-proxy). |
 | `OTARI_PUBLIC_BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` | Pre-wired to the service's Railway domain. OAuth redirect URIs, the passkey relying-party ID and email links are built from it. Change it if you attach a custom domain. |
 | `OTARI_FILES_BACKEND` | `s3` | Pre-set, so uploaded files go to the bucket rather than the container's disk; see [Files](#files). |
 | `OTARI_FILES_S3_BUCKET` | `${{otari-files.BUCKET}}` | Pre-wired to the bucket's S3 name; leave as-is. |
@@ -54,7 +54,7 @@ Notes:
   its models are listed. Any [any-llm provider](https://docs.mozilla.ai/any-llm/providers/)
   works. To keep keys in Railway variables instead, declare the providers
   through `OTARI_CONFIG_YAML` with `api_key: ${ANTHROPIC_API_KEY}` references;
-  see [Full config via environment](../../docs/configuration.md#full-config-via-environment).
+  see [Full config via environment](../../docs/reference/configuration.md#full-config-via-environment).
   Setting a provider's native variable without declaring it is deprecated.
 - Otari normalizes a `postgresql://` URL to the async driver automatically, so
   Railway's `DATABASE_URL` works without edits.
@@ -63,7 +63,7 @@ Notes:
   make a fresh deploy unusable until pricing is added. To serve priced
   models instead, supply `pricing` (and any other structured config like custom
   `api_base` or Vertex settings) through `OTARI_CONFIG_YAML` / `OTARI_CONFIG_B64`;
-  see [Full config via environment](../../docs/configuration.md#full-config-via-environment).
+  see [Full config via environment](../../docs/reference/configuration.md#full-config-via-environment).
 - `OTARI_DEFAULT_PRICING=true` is also pre-set so that, paired with the above,
   common models are metered using community-maintained rates (the bundled
   models.dev snapshot) instead of being served unpriced. These are estimates
@@ -74,7 +74,7 @@ Notes:
 
 ## Files
 
-The [Files API](../../docs/files.md) is on by default, and its bytes need a
+The [Files API](../../docs/guides/files.md) is on by default, and its bytes need a
 home that outlives the container. The image default is the `local` backend
 under `/app/otari-files`, which on Railway is the container's own disk: every
 redeploy, including an image auto-update, starts from a fresh disk, and each
@@ -84,7 +84,7 @@ time. The template therefore sets the `s3` backend and wires it to the
 `otari-files` bucket, a Railway-managed S3-compatible store. File metadata stays
 in Postgres and the bytes live in the bucket, so file storage no longer pins the
 otari service to one replica (an in-memory rate limit still counts per replica;
-see `rate_limit_store`). See [Storage backends](../../docs/files.md#storage-backends).
+see `rate_limit_store`). See [Storage backends](../../docs/guides/files.md#storage-backends).
 
 Three things to know:
 

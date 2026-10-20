@@ -2792,7 +2792,7 @@ def test_pretooluse_submits_no_check_results(monkeypatch: pytest.MonkeyPatch, ch
 
     must be omitted (None), not an empty list, so a required verifier
     gate resolves not_applicable rather than the unknown a genuinely missing
-    verdict would (see docs/agent-guardrails.md).
+    verdict would (see docs/guides/agent-guardrails.md).
     """
     captured: dict[str, Any] = {}
 

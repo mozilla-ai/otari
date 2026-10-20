@@ -1,7 +1,7 @@
 """The two places a workspace's code execution policy comes from.
 
 ``LocalCodeExecutionPolicy`` reads the row this deployment holds.
-``RemoteCodeExecutionPolicy`` asks a peer, speaking `docs/hybrid-mode-protocol.md`.
+``RemoteCodeExecutionPolicy`` asks a peer, speaking `docs/reference/hybrid-mode-protocol.md`.
 """
 
 from __future__ import annotations

@@ -154,7 +154,7 @@ _PROVIDER_NAMES: frozenset[str] = frozenset(
 # Providers authenticating from cloud SDK credentials this gateway cannot see:
 # an EC2 instance profile, an SSO session, or an ambient boto3 chain. They are
 # the same category as Vertex AI's application default credentials, which
-# ``docs/configuration.md`` already groups with Bedrock, and an entry naming one
+# ``docs/reference/configuration.md`` already groups with Bedrock, and an entry naming one
 # with nothing configured is precisely the ambient case. Splitting the
 # category on whether any-llm happens to declare a variable name would be an
 # accident of upstream spelling rather than a difference in kind.

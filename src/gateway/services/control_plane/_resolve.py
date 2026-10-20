@@ -2,7 +2,7 @@
 
 A hybrid gateway serves the data plane and owns no tenancy, so every policy and
 credential question goes to a control plane elsewhere. This is the one place
-that asks, and it speaks `docs/hybrid-mode-protocol.md`.
+that asks, and it speaks `docs/reference/hybrid-mode-protocol.md`.
 
 It asks questions and carries no customer traffic. ``ResolveEndpoint`` is a
 closed set for that reason: a caller cannot supply a path, so nothing here can

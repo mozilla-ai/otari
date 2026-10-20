@@ -27,7 +27,7 @@ import {
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The MCP servers this workspace has registered, which a request reaches by
-// naming their ids in `mcp_server_ids` (see docs/mcp.md).
+// naming their ids in `mcp_server_ids` (see docs/guides/mcp.md).
 //
 // A list, where the two workspace config planes beside it on this page hold one
 // row each, and that difference is the whole shape of this card: nothing here

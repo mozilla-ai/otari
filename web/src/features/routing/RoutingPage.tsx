@@ -307,7 +307,7 @@ export function RoutingPage() {
                 </Link>{" "}
                 or{" "}
                 <DocsLink
-                  href={docsSourceHref("models.md", "catalog-spellings")}
+                  href={docsSourceHref("guides/models.md", "catalog-spellings")}
                 >
                   read how
                 </DocsLink>

@@ -185,7 +185,7 @@ async def set_password(
     address. Both are reachable only through deployment authority, which is what
     the stamp records, and both are what the module docstring promises #650 will
     find already satisfied. It deliberately covers the identity adopted from an
-    existing tenancy (`docs/access-control.md`), which arrives *with* an address,
+    existing tenancy (`docs/self-hosting/administration.md`), which arrives *with* an address,
     so a claim on it supplies no ``email`` and would otherwise leave the column
     NULL and that operator locked out the day #650 turns the gate on. A later
     password change stamps nothing: proving the current password says the caller

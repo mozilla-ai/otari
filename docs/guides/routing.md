@@ -9,6 +9,48 @@ remove. Use an
 Policies are a standalone feature. Hybrid gateways receive their attempt plan
 from the connected control plane.
 
+## Walkthrough: a fallback chain across two providers
+
+This sets up OpenAI as the primary and Anthropic as the backup, and then breaks
+the primary on purpose to watch the fallback serve the request. You need an
+organization owner or admin, and an OpenAI and an Anthropic key.
+
+![Your application sends one request to Otari, which routes it to OpenAI, Anthropic, or another provider.](../assets/routing-overview.webp)
+
+1. **Add both provider keys.** In **Organization** → **Providers**, add the OpenAI
+   key and the Anthropic key, and make sure the workspace you will use can use
+   both ([Provider keys](provider-keys.md)).
+2. **Create an API key** in that workspace's **API Keys** tab and export it as
+   `OTARI_API_KEY` ([API keys](api-keys.md)).
+3. **Create the policy.** In the workspace, open **Routing**, click **Create
+   policy**, choose **Fallback**, name it `production-chat`, pick
+   `openai:gpt-4o` as the main model, and add an Anthropic model under "If
+   unavailable, use".
+4. **Send a request** to the policy name, at your base URL
+   ([Connect to Otari](../get-started/connect.md)):
+
+   ```bash
+   curl "$OTARI_BASE_URL/v1/chat/completions" \
+     -H "Authorization: Bearer $OTARI_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "production-chat",
+       "messages": [{"role": "user", "content": "Explain multi-provider routing in two sentences."}]
+     }'
+   ```
+
+5. **Check Usage.** The workspace's **Usage** tab records the request, the model
+   that served it, and its cost.
+
+![Otari tries OpenAI first and moves to Anthropic when OpenAI returns a retryable error.](../assets/routing-fallback-flow.webp)
+
+To see the fallback work, replace the OpenAI key with an invalid one and send the
+same request. It still succeeds: OpenAI refuses the credential, Otari moves on
+(see [Selection and failure are separate](#selection-and-failure-are-separate)),
+and the `Otari-Provider` response header names the Anthropic instance that
+served it. Usage records the attempt against Anthropic. Restore the real OpenAI
+key when you are done.
+
 ## Failover
 
 ```yaml
@@ -47,7 +89,7 @@ the policy moves on to the next; a provider nothing declares has none, keyless
 local backends included, and an entry that names no key has none, whatever the
 provider's own environment variable holds. A candidate nothing declares that one of the
 deployment's hosted providers serves is sent on the deployment's own credential, as a single model is
-([modes](modes.md#deployment-paid-credentials-in-standalone)). When no candidate has a credential, the request is
+([modes](../get-started/ways-to-run-otari.md#deployment-paid-credentials-in-standalone)). When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
@@ -83,7 +125,7 @@ caller with no finite budget.
 In a policy that can fall over, each candidate gets one upstream call unless a
 retry count is configured, so a throttled provider hands over to the next
 candidate at once rather than after its SDK's own retries. See
-[Provider retries](configuration.md#provider-retries).
+[Provider retries](../reference/configuration.md#provider-retries).
 
 ## Load balance across providers (weighted routing)
 
@@ -122,7 +164,7 @@ Caller allow-lists filter candidates before weights are normalized. Use
 
 The priority router keeps its candidates in the order written. Each request goes
 to the first one that has room under its
-[`per: model` rate limits](configuration.md#rate-limit-rules):
+[`per: model` rate limits](../reference/configuration.md#rate-limit-rules):
 
 ```yaml
 rate_limits:
@@ -265,7 +307,7 @@ its own `haiku`, `sonnet` and `opus` aliases, and pi, through
 it sends with the request.
 Either way the recommendation is billed to the caller, and nothing
 else is dispatched. See
-[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
+[Claude Code](../integrations/claude-code.md#let-otari-choose-a-subagents-model).
 
 ## Managing policies at runtime
 
@@ -342,7 +384,7 @@ carry the same values: failover happens before the stream opens, so the serving
 candidate and the attempt count are already known when the headers are sent. A
 failure later in the stream is reported in the stream and changes neither. The
 request's cost is `usage.cost_usd` in the body, as described in the
-[API reference](api-reference.md#request-id-and-inline-cost). These headers are
+[API reference](../reference/api.md#request-id-and-inline-cost). These headers are
 sent by a standalone gateway.
 
 Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.

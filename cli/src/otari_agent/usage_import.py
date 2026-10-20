@@ -79,7 +79,7 @@ def import_claude_code(
 ) -> None:
     """Backfill historical Claude Code usage from this machine's transcripts.
 
-    The OTLP exporter documented in docs/use-with-claude-code.md only carries
+    The OTLP exporter documented in docs/integrations/claude-code.md only carries
     sessions that run after it is configured. This reads the transcripts Claude
     Code has already written and posts them to /api/v1/usage/external-events, which
     is idempotent on (source, source_event_id): re-running imports only what is

@@ -1,7 +1,7 @@
 name: Otari Guardrails Judges
 
 # Runs the repository's judge gates (.otari/) against every pull request and
-# posts their advisory findings on it. See docs/agent-guardrails.md,
+# posts their advisory findings on it. See docs/guides/agent-guardrails.md,
 # "Checking a pull request in CI".
 #
 # pull_request_target runs this file as it is on the base branch, so a pull

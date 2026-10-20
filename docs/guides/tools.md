@@ -31,11 +31,11 @@ request's `Otari-Web-Search` header says otherwise. Anthropic's web-fetch type
 is forwarded unless the request's [`Otari-Web-Fetch`](#anthropics-web-fetch)
 header says otherwise.
 A provider-native code-execution type is decided by the request's
-[executor](#code-execution-executor). Each is decided for every attempt on its
+[executor](../self-hosting/tool-services.md#code-execution-executor). Each is decided for every attempt on its
 own, so a fallback can run Otari's tool where the first model ran its own.
 Function tools remain the caller's responsibility.
 
-In [hybrid mode](modes.md) each attempt the platform plans is decided the same
+In [hybrid mode](../get-started/ways-to-run-otari.md) each attempt the platform plans is decided the same
 way, except that none is skipped, because the control plane expects a report for
 every attempt it planned: a request one of whose attempts Otari's tool could
 not serve (the workspace has the tool off, say) is decided as a whole, as it was
@@ -289,7 +289,7 @@ its web searches and fetches in a field of its own, `otari_tool_calls`, at the
 top level of the response and of each streamed chunk: a search with its query
 and the sources it found, a fetch with the URL it read, and a failure with what
 may be shown about it. See [Web tool calls on Chat
-Completions](api-reference.md#web-tool-calls-on-chat-completions). Code execution
+Completions](../reference/api.md#web-tool-calls-on-chat-completions). Code execution
 and MCP calls are not reported there, so Chat Completions returns only the final
 assistant message for them. Calls for tools the client must execute are preserved.
 The dashboard Playground's own completion route is the one exception: its stream
@@ -361,7 +361,7 @@ Request it with:
 }
 ```
 
-The sandbox speaks the [code-execution protocol](code-execution-protocol.md),
+The sandbox speaks the [code-execution protocol](../reference/code-execution-protocol.md),
 which is what `sandbox_url` points at. A deployment that would rather not run
 one sets `sandbox_provider: e2b` instead and Otari runs the code on
 [E2B](https://e2b.dev) itself, with no backend of its own and no `sandbox_url`;
@@ -425,7 +425,7 @@ and the response names no container rather than one that is already gone.
 
 `container` is only the gateway's where the gateway runs the code. A request
 whose code execution the provider serves (see
-[Code-execution executor](#code-execution-executor)) keeps the provider's own
+[Code-execution executor](../self-hosting/tool-services.md#code-execution-executor)) keeps the provider's own
 `container` field, forwarded untouched, so an id they minted still resumes their
 container. A value only Otari could have named, `auto` or an `otari_cntr_…` id,
 is refused there rather than forwarded: it would reach the provider as a
@@ -450,109 +450,15 @@ The provider's own timer does the reclaiming: the gateway tells it the idle
 timeout when the request ends, and a periodic sweep only drops the rows that
 named a sandbox nobody can resume any more.
 
-### Code-execution executor
-
-A request written for a provider's own sandbox keeps its provider's vocabulary:
-Anthropic's `{"type": "code_execution_20250825"}` on `/api/v1/messages`, OpenAI's
-`{"type": "code_interpreter"}` on `/api/v1/responses`, or the bare
-`{"type": "code_execution"}`. The **executor** decides who runs the code such a
-declaration asks for:
-
-| Executor | Who runs the code |
-| --- | --- |
-| `auto` (default) | Decided per attempt: the provider, when the model that attempt goes to runs that tool natively in that wire format; otherwise Otari's sandbox. A request naming a container Otari minted runs here, since the sandbox it names is here (see [Reusing a sandbox across requests](#reusing-a-sandbox-across-requests)). |
-| `otari` | Always Otari's sandbox. |
-| `provider` | Always the provider; the declaration is forwarded untouched and Otari's sandbox is never used. On a fallback to a model that cannot run it, that attempt fails like any other. Use `auto` to keep the provider's tool and use the sandbox only on a fallback that needs it. |
-
-`auto` is what makes a model swap transparent. An Anthropic Messages request
-carrying `code_execution_20250825` runs natively against an Anthropic model, and
-the same request against an open model runs on the sandbox, with the same
-`server_tool_use` and `code_execution_tool_result` blocks coming back.
-
-Fallbacks are decided the same way, one attempt at a time. A routing policy or
-catalog ID that falls back from Claude to Claude on Vertex or Bedrock sends
-Anthropic its own tool, and only if Anthropic fails before any output does the
-fallback run the code on the sandbox; a request Anthropic answers never opens
-or pays for one. A fallback that cannot run on the sandbox (code execution off
-for the workspace, no sandbox price under `require_pricing`, or a container id
-from another provider) is skipped rather than refusing the whole request, and
-the request is refused only when no attempt can run. A
-request that also declares `otari_code_execution` decides every attempt alike
-instead, running the code on the sandbox unless every model runs it natively.
-[Hybrid mode](#who-runs-a-tool) skips no attempt.
-
-An `anthropic-beta` header travels only as far as it can be honored: against a
-model its provider serves with no Messages API of its own (any non-Claude model
-on Bedrock, say, or a Bedrock Claude request that sets `output_format`) it is
-dropped rather than refused, and so is a `context_management` field, which
-configures one of those betas, because a beta names an Anthropic feature that
-model was never going to serve, and refusing it would make the request fail
-purely because its model changed. On Responses a claimed `code_interpreter` is answered with a
-`code_interpreter_call` item per run, in the order the calls ran among the
-gateway's other native items (a `web_search_call`, say). Chat Completions has no
-native shape, so a claimed declaration there resolves inside the tool loop and
-only the final message is returned. Nothing runs natively on Chat Completions,
-and the bare `code_execution` form is no provider's, so under `auto` both always
-run on the sandbox.
-
-The executor also decides where an attached file goes. Code running on Otari's
-sandbox is given the file from Otari's own store, and code running in the
-provider's container is given a short-lived copy at that provider, because such
-a container reads only files that provider holds. Either way the file reaches
-the code rather than only the model, and an attempt that falls back to the other
-place is given the file there. See
-[Files and code execution](files.md#files-and-code-execution).
-
-Three layers choose the executor. The workspace pin wins over both of the
-others; the header wins over the deployment default:
-
-1. The deployment default, `code_execution_executor` (`OTARI_CODE_EXECUTION_EXECUTOR`),
-   editable on the Tools page. Unset means `auto`.
-2. A [workspace policy](#per-workspace-code-policy) may pin `executor`. A pin is
-   a decision the request cannot argue with: a header that disagrees is refused
-   with 403.
-3. The `Otari-Code-Execution` header (`auto`, `otari` or `provider`) chooses per
-   request where the workspace has not pinned. A value outside that vocabulary
-   is a 400.
-
-With no sandbox (no `sandbox_url` for the `protocol` provider, and no hosted
-`sandbox_provider` such as `e2b`) there is nothing to bring the code to, so a
-provider
-declaration is always forwarded and no policy is read for it. Asking for `otari`
-without a sandbox is a 400. The explicit `otari_code_execution` type is always
-run by Otari, whatever the executor says. When a claimed declaration runs on the
-sandbox, an `otari_code_execution` entry beside it is folded in rather than
-refused; when the declaration stays with the provider, the two together are
-still refused, because one request cannot address two sandboxes.
-
-A gateway-run execution is described back in the caller's vocabulary with ids
-Otari reserves (`otari_srvtoolu_…`, `otari_ci_…`, `otari_cntr_…`). When a client
-echoes such a turn on its next request, a Messages pair is folded into a text
-block, and a Responses item into an assistant message, so the model keeps the
-code and its output; a provider's own items carry the provider's ids and pass through
-untouched. Uploaded files the request references are seeded into the sandbox and
-files the code produces come back as stored files, announced in Anthropic's
-`code_execution_output` entries by their `file_id`, and on Responses as an
-`image` output naming the URL Otari serves each produced image from (under
-`public_base_url` where it is set, otherwise under the address the request
-arrived on; any other produced file is listed and downloadable by id). A file the *provider's* own sandbox produced is copied
-into Otari's store under the provider's own ID. See
-[Files and code execution](files.md#files-and-code-execution). A `container` id
-the provider issued addresses the provider's container, not the sandbox; to keep
-Otari's sandbox across turns, see
-[Reusing a sandbox across requests](#reusing-a-sandbox-across-requests).
-
-In hybrid mode a workspace the control plane has not enabled still has a
-declaration its provider runs natively served by that provider. A route with a
-fallback that would need the sandbox is decided as a whole, by the first
-attempt (see [Who runs a tool](#who-runs-a-tool)).
-
-**Upgrading from 0.6.** A deployment with `sandbox_url` set that forwarded
-`code_interpreter`, `code_execution_<date>` or `code_execution` to a provider
-with no native tool for the model now runs it on the sandbox and bills it as a
-sandbox tool call. Set `code_execution_executor: provider` to keep forwarding.
-
 ### Per-workspace code policy
+
+In the dashboard, select the workspace and go to **Tools** → **Code execution**.
+Choose whether code execution follows the deployment default, is **Allowed**, or
+is **Blocked** for the workspace, then set a prompt hint, the tool-loop and
+timeout limits, who runs provider code tools, the sandbox image where there is a
+choice, and the code-execution tools the workspace may use. A workspace can only
+narrow what the deployment allows: it cannot turn code execution on where the
+deployment has no sandbox.
 
 A workspace policy can disable code execution or narrow the deployment limits:
 
@@ -562,7 +468,8 @@ A workspace policy can disable code execution or narrow the deployment limits:
 - `default_purpose_hint`
 - allowed tool kinds
 - an allowed sandbox image
-- `executor`, the one field that is a choice rather than a narrowing (see above)
+- `executor`, the one field that is a choice rather than a narrowing (see
+  [Code-execution executor](../self-hosting/tool-services.md#code-execution-executor))
 
 Manage it under
 `/api/v1/workspaces/{workspace_id}/code-execution-policy`. The dashboard's Code
@@ -645,7 +552,7 @@ is unacceptable.
 
 ### Fetch providers
 
-A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
+A fetch instance, under `fetch_tools` (see [Search tools](../reference/configuration.md#search-tools)),
 names a provider for `otari_web_fetch` and for enriching search results.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
 that enriches search results unless the search instance names its own
@@ -686,7 +593,7 @@ one, and never with the provider's own message.
 The in-loop tool searches with the deployment's in-loop default:
 `web_search_default_tool` when it names a search instance, else the legacy
 settings below while they are set, else the only search instance when there is
-exactly one (see [Search tools](configuration.md#search-tools)).
+exactly one (see [Search tools](../reference/configuration.md#search-tools)).
 `web_search_default_tool: none` turns it off. A workspace's
 [organization search key](#organization-search-keys) comes before all of them.
 
@@ -808,6 +715,12 @@ A runnable example lives under `demo/web-search/`.
 
 ### Per-workspace web-access policy
 
+In the dashboard, select the workspace and go to **Tools** → **Web search**.
+Under **Web access**, choose whether web search follows the deployment default,
+is **Allowed**, or is **Blocked** (which blocks search and fetch), then set **Max
+results**, a prompt hint, and allowed or blocked domains. A workspace can make
+the deployment's policy stricter, never looser.
+
 A workspace web-access policy can:
 
 - disable `otari_web_search`, `otari_web_fetch`, and `POST /api/v1/search`
@@ -865,13 +778,13 @@ A key changes who pays for a search, not whether search is available: the
 deployment must still have web search configured, and the workspace's
 web-access policy still applies. In hybrid mode the control plane chooses the
 key and returns it with the workspace's policy; see
-[Web Access resolution](hybrid-mode-protocol.md#web-access-resolution).
+[Web Access resolution](../reference/hybrid-mode-protocol.md#web-access-resolution).
 
 ## Direct search
 
 In standalone mode, `POST /api/v1/search` lets the caller submit a query directly
 instead of waiting for a model to request one. Configure its named providers
-through [`search_tools`](configuration.md#search-tools) or the Search tools API.
+through [`search_tools`](../reference/configuration.md#search-tools) or the Search tools API.
 
 A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
 search can share one backend. They remain distinct surfaces with separate
@@ -887,7 +800,7 @@ Brave key localizes results to the request's `country`; Tavily takes a country b
 its full name, so a Tavily key does not.
 
 The request, the response and the errors are in the
-[API reference](api-reference.md#search).
+[API reference](../reference/api.md#search).
 
 ### Search providers
 

@@ -10,7 +10,7 @@ native pairings, and DeepSeek runs either on the matching API, the Responses one
 with deepseek-v4-pro only), ``otari`` always, ``provider`` never, and none of them can
 undo interception. Interception is off by default because turning it on
 silently takes a search away from a provider that would have run it (see
-``docs/tools.md``). An OpenAI ``function`` named ``web_search`` is deliberately
+``docs/guides/tools.md``). An OpenAI ``function`` named ``web_search`` is deliberately
 *not* claimed even then: that is a caller's own tool, and hijacking it means the
 caller's handler never fires and it never gets back a ``tool_call`` it can
 dispatch.

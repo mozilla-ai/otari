@@ -42,7 +42,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // deployment by setting an operator password. Once something does, the
     // gateway answers ["password"] instead and the master key stops being a
     // sign-in credential while staying the API one; see
-    // docs/access-control.md#dashboard-sessions-and-identity.
+    // docs/self-hosting/administration.md#dashboard-sessions-and-identity.
     sign_in_methods: ["master_key"],
     management_url: null,
     // Null because this gateway is its own data plane, which is what makes the
@@ -51,13 +51,13 @@ test("the deployment bootstrap is served unauthenticated", async ({
     data_plane_url: null,
     // No docs_url in this e2e environment, so the dashboard's Documentation
     // links stay on the operator guide bundled with this gateway; see
-    // docs/configuration.md#documentation-links.
+    // docs/reference/configuration.md#documentation-links.
     docs_url: null,
-    // No legal pages configured here; see docs/configuration.md#legal-pages.
+    // No legal pages configured here; see docs/reference/configuration.md#legal-pages.
     terms_url: null,
     privacy_url: null,
     // No site of its own here, so the public catalog's logo links to the
-    // catalog; see docs/configuration.md#the-public-site.
+    // catalog; see docs/reference/configuration.md#the-public-site.
     site_url: null,
     // Sign-ins are open, which is the resting state: maintenance mode is a
     // stored row an operator sets to freeze them during a redeploy, and
@@ -66,16 +66,16 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // No public_base_url in this e2e environment, so the gateway can derive no
     // WebAuthn relying-party ID and the account page offers no passkey form.
     // Distinct from `passkey` in sign_in_methods above, which additionally
-    // needs a registered passkey; see docs/access-control.md.
+    // needs a registered passkey; see docs/self-hosting/administration.md.
     passkeys_enabled: true,
     passkeys_ready: false,
     oauth_providers: [],
     feedback_enabled: true,
     // No SMTP configured in this e2e environment, so invitations are
-    // creatable but not emailed; see docs/configuration.md#mail.
+    // creatable but not emailed; see docs/reference/configuration.md#mail.
     mail_ready: false,
     // The catalog stays behind the sign-in screen unless an operator opens it
-    // with public_catalog; see docs/configuration.md#a-public-catalog.
+    // with public_catalog; see docs/reference/configuration.md#a-public-catalog.
     public_catalog: false,
     // Closed, which is the default and is what mail_ready above would force
     // anyway: signup sends a verification link, so a deployment that cannot

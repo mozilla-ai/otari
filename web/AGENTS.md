@@ -177,7 +177,7 @@ and publishes it to Pages from `main`. `STORYBOOK_BASE_PATH` is what makes the
 published build resolve its assets under `/<repo>/`, since the merged
 `vite.config.ts` carries the app's own `base: "/"`.
 
-The bundled dashboard guide imports `docs/dashboard.md`. It remains available
+The bundled dashboard guide imports `docs/guides/dashboard.md`. It remains available
 at `/#/docs` even when `docs_url` points the visible links elsewhere.
 
 The PWA manifest is generated at build time by `web/pwaManifest.ts`, which

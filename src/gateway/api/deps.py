@@ -878,7 +878,7 @@ async def verify_catalog_reader_or_public(
     scraper.
 
     Two things that throttle is not, both documented beside the setting in
-    ``docs/configuration.md``. The address is the socket's, and the CLI starts
+    ``docs/reference/configuration.md``. The address is the socket's, and the CLI starts
     uvicorn without proxy headers, so behind a reverse proxy every visitor
     shares one bucket; a deployment that terminates TLS elsewhere throttles
     there. And the counter is per process, so N workers serve N times the

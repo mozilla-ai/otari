@@ -13,7 +13,7 @@ request shape; ``include_raw`` and ``provider_options`` are otari's own. Two
 Perplexity features are deliberately not modeled: ``query`` is a single string
 rather than the multi-query array, and the filters with no field below
 (recency, context size, published-date) are ignored rather than rejected. Both
-are called out in ``docs/api-reference.md`` so a migrating caller can check for
+are called out in ``docs/reference/api.md`` so a migrating caller can check for
 them.
 
 Which tool, which key and which count a request gets, and the call itself, on

@@ -230,7 +230,7 @@ export function AutomaticFallbacks({
       title="Automatic fallback"
       count={isLoading || error ? undefined : fallbacks.length}
       description="Models used in the last 30 days. Sent by catalog ID, they move to the next provider when one fails, no policy needed."
-      docsHref={docsSourceHref("models.md", "catalog-spellings")}
+      docsHref={docsSourceHref("guides/models.md", "catalog-spellings")}
     >
       {toolsNote ? (
         <p className="py-3 text-caption">

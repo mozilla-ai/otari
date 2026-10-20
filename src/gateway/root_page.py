@@ -8,7 +8,7 @@ injects the canonical quickstart URL.
 
 from importlib import resources
 
-QUICKSTART_URL = "https://github.com/mozilla-ai/otari/blob/main/docs/quickstart.md"
+QUICKSTART_URL = "https://github.com/mozilla-ai/otari/blob/main/docs/get-started/quickstart.md"
 
 
 def _load_root_tutorial_html() -> str:

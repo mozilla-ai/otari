@@ -1,38 +1,39 @@
-# Use with Claude Code
+# Claude Code
 
-Claude Code speaks the Anthropic Messages API. Otari serves
-`POST /api/v1/messages` and `POST /api/v1/messages/count_tokens` in standalone and
-hybrid modes.
+Claude Code speaks the Anthropic Messages API, and Otari serves it
+(`POST /api/v1/messages` and `POST /api/v1/messages/count_tokens`), so pointing
+Claude Code at Otari gives its traffic budgets, usage tracking and traces with no
+other change to how you work.
 
 ## Route Claude Code through Otari
 
-Claude Code appends `/v1/messages` itself, so `ANTHROPIC_BASE_URL` ends in
-`/api`, not `/api/v1`.
+Claude Code appends `/v1/messages` itself, so `ANTHROPIC_BASE_URL` is your base
+URL as [Connect to Otari](../get-started/connect.md) gives it, ending in `/api`
+and not `/api/v1`.
 
-### On otari.ai
-
+{% tabs %}
+{% tab title="otari.ai" %}
 ```bash
-export ANTHROPIC_BASE_URL="https://api.otari.ai/api"
-export ANTHROPIC_AUTH_TOKEN="<your-otari-key>"   # an API key from otari.ai
+export ANTHROPIC_BASE_URL="https://api.otari.ai/api"   # https://eu.api.otari.ai/api for an EU account
+export ANTHROPIC_AUTH_TOKEN="otk_..."                  # an API key from your workspace
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
-Claude Code puts a telemetry value in `metadata.user_id`. An otari.ai key
-needs no setting for it, because a hybrid gateway does not check that field
-against the key's owner.
+Claude Code puts a telemetry value in `metadata.user_id`. An otari.ai key needs
+no setting for it, because otari.ai does not check that field against the key's
+owner.
+{% endtab %}
 
-### Standalone
-
-Claude Code sends a telemetry value in `metadata.user_id`. It is not an
-Otari user ID, so create or update its API key with
-`reject_user_mismatch: false`, or pick **Always accept** for "Mismatched `user`
-field" under the dashboard key form's **Advanced** section. Spend still binds
-to the key's user; see
-[Mismatched `user` fields](access-control.md#mismatched-user-fields).
+{% tab title="Self-hosted" %}
+Claude Code sends a telemetry value in `metadata.user_id`. It is not an Otari
+user ID, so create or update its API key with `reject_user_mismatch: false`, or
+pick **Always accept** for "Mismatched `user` field" under the dashboard key
+form's **Advanced** section. Spend still binds to the key's user; see
+[Mismatched `user` fields](../guides/api-keys.md#mismatched-user-fields).
 
 ```bash
-curl "$OTARI_URL/api/v1/keys" \
+curl "$OTARI_BASE_URL/v1/keys" \
   -H "Authorization: Bearer $OTARI_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -42,7 +43,7 @@ curl "$OTARI_URL/api/v1/keys" \
   }'
 ```
 
-Then point Claude Code at the standalone gateway:
+Then point Claude Code at the gateway:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:8000/api"
@@ -50,12 +51,17 @@ export ANTHROPIC_AUTH_TOKEN="tk-your-otari-key"
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
+{% endtab %}
+{% endtabs %}
+
+If Claude Code answers `Failed to authenticate. API Error: 403 Forbidden` with a
+key you know is valid, check that `ANTHROPIC_BASE_URL` ends in `/api`.
 
 Use `ANTHROPIC_AUTH_TOKEN`, which sends an Authorization bearer token and works
-in both modes. `ANTHROPIC_API_KEY` uses `x-api-key`; standalone Otari accepts
-it, but hybrid authentication does not.
+everywhere. `ANTHROPIC_API_KEY` sends `x-api-key` instead.
 
-The same values can go in the `env` block of Claude Code's settings file.
+The same values can go in the `env` block of Claude Code's settings file
+(`~/.claude/settings.json`).
 
 A workload on Google Cloud, or behind another OpenID Connect issuer, can skip
 the key altogether: Claude Code's own workload identity
@@ -64,7 +70,7 @@ the key altogether: Claude Code's own workload identity
 the issuer. Unset `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` when you switch:
 either one, when set, takes precedence and the federation variables are
 ignored. See
-[Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks).
+[Claude Code and the Anthropic SDKs](../self-hosting/workload-identity.md#claude-code-and-the-anthropic-sdks).
 
 ## Tag Claude Code traffic
 
@@ -81,7 +87,7 @@ Every request the session makes is then recorded with those tags, and the usage
 endpoints filter and group by them (`GET /api/v1/usage?tag=run:1234`), so one
 key can split its cost by agent, run or requester. Percent-encode a `,` or `=`
 inside a value. Tags are recorded in standalone mode only. See
-[Request tags](api-reference.md#request-tags) for the format and limits.
+[Request tags](../reference/api.md#request-tags) for the format and limits.
 
 A headless run that should read as one session of its own sends a run id too,
 which the dashboard's Sessions list then shows and searches by:
@@ -91,7 +97,7 @@ export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Conversation-Id: bug-fix-1234\nOtari-Tag
 ```
 
 It takes the place of Claude Code's own session id for grouping. See
-[Sessions from your own agent](traces.md#sessions-from-your-own-agent).
+[Sessions from your own agent](../guides/traces.md#sessions-from-your-own-agent).
 
 ## Budgets
 
@@ -115,9 +121,20 @@ small.
 
 ## Choosing a model
 
-Otari can translate Messages requests to non-Anthropic providers. Set Claude
-Code's default Opus, Sonnet, and Haiku variables when its built-in aliases do not
-exist on your deployment.
+Otari can translate Messages requests to non-Anthropic providers, so the model
+is a selector for any model your organization can use, not only Claude. Set
+Claude Code's per-tier variables so both the main agent and its background model
+resolve to models you can use:
+
+```bash
+export ANTHROPIC_DEFAULT_OPUS_MODEL=moonshotai/kimi-k3
+export ANTHROPIC_DEFAULT_SONNET_MODEL=moonshotai/kimi-k3
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash
+```
+
+A catalog id such as `moonshotai/kimi-k3` lets Otari pick the provider and fail
+over between them; `provider:vendor/model` pins one provider. See
+[Models](../guides/models.md#model-format).
 
 Non-Claude models may lose Anthropic-specific behavior such as extended thinking,
 prompt caching, or tool semantics. Claude Code's beta flags and its
@@ -143,7 +160,7 @@ providers:
 
 Claude Code then receives the model's reasoning as thinking blocks and sends them
 back on the next turn, which is what lets the reasoning carry over. See
-[Messages through the Responses API](configuration.md#messages-through-the-responses-api)
+[Messages through the Responses API](../reference/configuration.md#messages-through-the-responses-api)
 for how fields translate.
 
 ## Let Otari choose a subagent's model
@@ -170,7 +187,7 @@ behind the same route, which you never configure, at the price of one
 recommendation.
 
 A standalone deployment needs a
-[decision provider](configuration.md#decision-providers) the
+[decision provider](../reference/configuration.md#decision-providers) the
 `agent_recommender_model` selector resolves to, `typesafe` with an API key by
 default. Without one, the route answers 400 and the plugin falls back to the
 model the subagent would have had anyway.
@@ -205,7 +222,7 @@ subagent's requests to Anthropic itself and resolves the alias on its side.
 `harness` is `claude-code` or `pi`, and it picks the list: a pi request
 sends its own `candidates`, Otari model ids with what each is for, and a
 Claude Code request may not send any (see
-[Agent model recommendations](configuration.md#agent-model-recommendations)).
+[Agent model recommendations](../reference/configuration.md#agent-model-recommendations)).
 The caller's own `requested_model` is received as a fact but kept out of the
 question, so the orchestrator's guess cannot pull the answer toward itself.
 The task reaches the decision model shortened to its first 32,000 characters.
@@ -227,7 +244,7 @@ travels in a header, and it must point at a standalone gateway: a hybrid one
 does not serve the route, so every spawn would fall back. The plugin is
 active from then on, in that session and
 every one after. The
-[plugin's README](../plugins/otari-router/README.md) has the options, the
+[plugin's README](../../plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 The plugin hooks `agent.spawn`, sends the request above, and passes the
@@ -265,7 +282,7 @@ gRPC.
 
 Imported events are priced for analytics and never count toward budgets. Do not
 both route and export one session, or its cost will appear twice. See
-[Importing external usage](external-usage.md) for attribution, privacy,
+[Importing external usage](../guides/external-usage.md) for attribution, privacy,
 idempotency, and pricing behavior.
 
 ## Backfill history from local transcripts

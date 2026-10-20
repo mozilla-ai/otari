@@ -12,7 +12,7 @@ The call goes through the decisions scaffold, so it is metered and recorded
 in usage like a ``POST /api/v1/decisions`` call: priced from this deployment's
 own rows, or held and charged at the price the recommender quotes. Nothing
 else is dispatched here, which is why any active API key may ask rather than
-only an operator. See ``docs/use-with-claude-code.md``.
+only an operator. See ``docs/integrations/claude-code.md``.
 """
 
 from collections.abc import Mapping

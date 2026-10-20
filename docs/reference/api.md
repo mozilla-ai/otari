@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](public/openapi.json) and
-[Postman collection](public/otari.postman_collection.json). Those generated
+[OpenAPI specification](../public/openapi.json) and
+[Postman collection](../public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 The default server address is `http://localhost:8000`. The API is mounted at
@@ -53,7 +53,7 @@ caller's key, so it needs the platform's model-listing endpoint (see the
 [Hybrid mode protocol](hybrid-mode-protocol.md#model-listing)).
 
 Hosted mode is a control plane. Its inference paths return a descriptive `404`
-and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
+and, when configured, the data-plane URL to use instead. See [Ways to run Otari](../get-started/ways-to-run-otari.md).
 
 ## Core inference APIs
 
@@ -119,7 +119,7 @@ request; a standalone gateway mints its own. A standalone gateway also names the
 provider instance and model that served the request, whether a fallback did, and
 how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
 `Otari-Fallback` and `Otari-Response-Duration-Ms`; see
-[What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
+[What is billed and what the caller sees](../guides/routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
@@ -155,7 +155,7 @@ decided on its own. `auto` keeps the provider's own tool on an attempt whose
 model runs it natively and runs Otari's on one that does not. `otari` always
 runs Otari's. `provider` always forwards the provider's own tool and never uses
 Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
-use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
+use `auto` for fallback cover. See [Who runs a tool](../guides/tools.md#who-runs-a-tool).
 
 ### Web tool calls on Chat Completions
 
@@ -210,7 +210,7 @@ The entries are not in the `delta`, where the OpenAI Python SDK's stream helper
 them, so read the raw chunks to see them. A stream that has sent an entry has
 sent response bytes, so a provider failure after it ends the stream with an
 error event rather than falling over to another candidate (see [Failure
-behavior](routing.md#failure-behavior)).
+behavior](../guides/routing.md#failure-behavior)).
 
 A client may keep the entries on the assistant message it sends back: Otari
 removes `otari_tool_calls` from every assistant message before calling the
@@ -244,7 +244,7 @@ and anything else is refused with a 422. Tags are stored without redaction, so
 never put a secret in one.
 
 A client that can add a header but not a body field, such as Claude Code (see
-[Use with Claude Code](use-with-claude-code.md#tag-claude-code-traffic)), sends
+[Claude Code](../integrations/claude-code.md#tag-claude-code-traffic)), sends
 the same tags in an `Otari-Tags` header, on the same three surfaces:
 
 ```
@@ -290,10 +290,10 @@ often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
 user: any other value is refused with
 `403 'user' field does not match the authenticated API key's user`. A key's
-`reject_user_mismatch` (see [Mismatched `user` fields](access-control.md#mismatched-user-fields)), or the
+`reject_user_mismatch` (see [Mismatched `user` fields](../guides/api-keys.md#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
-[service key](access-control.md#service-keys-and-end-users) may name its own end
+[service key](../guides/api-keys.md#service-keys-and-end-users) may name its own end
 users, and a master-key request must name the user to bill. Chat Completions
 and Responses never send `user` to the provider.
 
@@ -435,7 +435,7 @@ How a rerank model is priced, per search unit or per input token, is described i
 `POST /api/v1/search` and `POST /api/v1/search/{search_tool_name}` run a configured
 search tool directly. This is separate from `otari_web_search`, which lets a
 model request searches during a completion. Both are described in
-[Built-in tools](tools.md).
+[Built-in tools](../guides/tools.md).
 
 The request and the response follow LiteLLM's `/v1/search`, so a client written
 for it works against Otari with its base URL changed. `include_raw` and
@@ -444,7 +444,7 @@ for it works against Otari with its base URL changed. `include_raw` and
 **Which tool.** The path names the tool. On `POST /api/v1/search`, the body's
 `search_tool_name` does, else the deployment's `web_search_default_tool`, else
 the only configured tool. A call that names no tool runs on the workspace's
-[organization search key](tools.md#organization-search-keys) when it has a usable
+[organization search key](../guides/tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
 the key allow-list entry (`<provider>:<tool>`), the `rate_limits` rules, the
 timeout and the usage row's model and provider.
@@ -583,7 +583,7 @@ and any other failure returns 502.
 
 Routing-policy management lives under `/api/v1/routing/policies`; learned-routing
 examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`.
-See [Routing policies](routing.md) for configuration and behavior, and OpenAPI for
+See [Routing policies](../guides/routing.md) for configuration and behavior, and OpenAPI for
 the request schemas.
 
 ## Provider error details
@@ -696,9 +696,9 @@ reworded.
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
-cost of $Y`); see [Budgets](access-control.md#budgets). Its `Retry-After` is
+cost of $Y`); see [Budgets](../guides/budgets.md). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
-[Refusals and `Retry-After`](access-control.md#refusals-and-retry-after).
+[Refusals and `Retry-After`](../guides/budgets.md#refusals-and-retry-after).
 
 ### Provider failures
 
@@ -784,7 +784,7 @@ safety, and its own execution bounds.
 
 `POST /api/v1/mcp/execute` must never be retried automatically, including by a
 reverse proxy or service mesh: an `outcome_unknown` response means the tool may
-already have run. See [MCP](mcp.md#caller-orchestrated-mcp) for the request
+already have run. See [MCP](../guides/mcp.md#caller-orchestrated-mcp) for the request
 shapes, the error and execution-state contract, and the limits.
 
 ## Keeping generated clients current

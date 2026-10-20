@@ -28,7 +28,7 @@ Contents:
 - [Status and known gaps](#status-and-known-gaps)
 
 Every field and gate type is specified in the
-[Agent Guardrails reference](agent-guardrails-reference.md).
+[Agent Guardrails reference](../reference/agent-guardrails.md).
 
 ## Install
 
@@ -46,7 +46,7 @@ uv tool install https://github.com/mozilla-ai/otari/releases/download/vX.Y.Z/ota
 ```
 
 A source checkout's virtualenv carries the same command. See
-[cli/README.md](../cli/README.md) for the rest of that distribution.
+[cli/README.md](../../cli/README.md) for the rest of that distribution.
 
 Five commands apply here:
 
@@ -184,7 +184,7 @@ A `command` gate catches the spellings it names and nothing a script does
 internally. It is a footgun-catcher for a cooperative agent, not a boundary
 against one working around it. The matching rules and a measured table of what
 matches are under
-[`command`](agent-guardrails-reference.md#command).
+[`command`](../reference/agent-guardrails.md#command).
 
 ### Reads have no second moment
 
@@ -210,13 +210,13 @@ Every gate declares an `id` unique across the whole guardrail, a `type`, an
 call is refused, or the turn does not end. An `advisory` gate warns and the work
 continues. A `judge` gate's warning also reaches the agent, not only you, since
 `advisory` is the only enforcement it is allowed; see
-[Who hears an advisory finding](agent-guardrails-reference.md#who-hears-an-advisory-finding).
+[Who hears an advisory finding](../reference/agent-guardrails.md#who-hears-an-advisory-finding).
 
 `runs` says when the gate fires and what it can see there. The two moments a
 write rule uses are covered in
 [Why a write rule names both moments](#why-a-write-rule-names-both-moments);
 every legal value is specified in
-[When a gate runs](agent-guardrails-reference.md#when-a-gate-runs-runs).
+[When a gate runs](../reference/agent-guardrails.md#when-a-gate-runs-runs).
 
 Five gate types are available:
 
@@ -235,7 +235,7 @@ that calls a model, and its `enforcement` must be `advisory`: a model verdict is
 not reproducible, and the diff it reads is attacker-influenceable content.
 
 Each type's fields are specified under
-[Gate types](agent-guardrails-reference.md#gate-types).
+[Gate types](../reference/agent-guardrails.md#gate-types).
 
 ## Where the files live
 
@@ -279,7 +279,7 @@ Every file parses on its own, a gate id is unique across the whole set, and one
 unparseable file yields none of the repository's gates rather than a partial set.
 Your own files in `~/.otari/` are the exception, as the next section explains. The rules that
 apply once there is more than one file are under
-[Composing several files](agent-guardrails-reference.md#composing-several-files).
+[Composing several files](../reference/agent-guardrails.md#composing-several-files).
 
 `.otari/verifiers/` is a sibling of both shapes rather than a child of either,
 so no non-guardrail file sits under the scanned directory. A `verifier` gate
@@ -303,11 +303,11 @@ Some rules belong to a person, not to a repository: no `git reset --hard`, no re
     lint-before-stop.sh
 ```
 
-`otari hook` composes these files with the repository's own, under the rules in [Composing several files](agent-guardrails-reference.md#composing-several-files). Your gates apply in every repository where the hook runs, and nobody else gets them.
+`otari hook` composes these files with the repository's own, under the rules in [Composing several files](../reference/agent-guardrails.md#composing-several-files). Your gates apply in every repository where the hook runs, and nobody else gets them.
 
 - The hook puts `user:` in front of every gate ID from `~/.otari/`, so `no-force-push` in your file is `user:no-force-push` in every message and in `otari guardrails validate`. A repository gate can therefore use the same ID as yours without a clash. A repository gate whose ID itself starts with `user:` can still clash, and the clash is an error that names both files.
 - A repository cannot turn off your gates. When the combined set cannot load, because of a clash, a broken file, or too many files, the hook enforces your gates alone and says that the repository's gates are off each time it reports anything. When your own files are the broken ones, it enforces the repository's gates alone. Only when neither side loads does it enforce no gate.
-- A `verifier` gate in a file under `~/.otari/` names its script relative to your home directory, for example `verifier: .otari/verifiers/lint-before-stop.sh`. The script must be inside `~/.otari/verifiers/`, and can be a symlink to a script you own that group and others cannot write ([the rule](agent-guardrails-reference.md#verifier)). It runs with the repository root as its working directory, so it checks the repository the session changed.
+- A `verifier` gate in a file under `~/.otari/` names its script relative to your home directory, for example `verifier: .otari/verifiers/lint-before-stop.sh`. The script must be inside `~/.otari/verifiers/`, and can be a symlink to a script you own that group and others cannot write ([the rule](../reference/agent-guardrails.md#verifier)). It runs with the repository root as its working directory, so it checks the repository the session changed.
 - When a gate from `~/.otari/` fails, the message shows its `user:` ID. When more than one file composes, it also names the file, for example `[~/.otari/guardrails/git-safety.yml]`.
 - `otari guardrails validate` checks your files with the repository's, and lists which gates come from `~/.otari/` and which come from the repository. `--repo-only` checks the repository's files alone, so a warning in one of your own files cannot fail `--strict`.
 
@@ -315,7 +315,7 @@ A repository checked out at your home directory owns `~/.otari/` itself, so its 
 
 ### Running your guardrail in every repository
 
-`otari hook setup` registers the hook in one repository only. To make your own gates apply in every repository, register the hook once in your user-level Claude Code settings, `~/.claude/settings.json`, with the same entries `setup` writes (see [Registering it by hand](agent-guardrails-reference.md#registering-it-by-hand)). Use the widest `PreToolUse` matcher, `Edit|Write|NotebookEdit|Read|Bash`, because one entry now serves the gates of every repository.
+`otari hook setup` registers the hook in one repository only. To make your own gates apply in every repository, register the hook once in your user-level Claude Code settings, `~/.claude/settings.json`, with the same entries `setup` writes (see [Registering it by hand](../reference/agent-guardrails.md#registering-it-by-hand)). Use the widest `PreToolUse` matcher, `Edit|Write|NotebookEdit|Read|Bash`, because one entry now serves the gates of every repository.
 
 Register the hook in one place only. A repository that also has the hook in its own `.claude/settings.local.json` can run it twice for each event. Remove the per-repository entry, or skip the user-level one for that machine.
 
@@ -368,7 +368,7 @@ Stop, the finished turn: 1 changed path(s), 1 command(s)
 
 Nothing is contacted and no model is called, so a `judge` gate reports
 `would run` rather than running. The full output is documented under
-[Checking a guardrail before it runs](agent-guardrails-reference.md#checking-a-guardrail-before-it-runs).
+[Checking a guardrail before it runs](../reference/agent-guardrails.md#checking-a-guardrail-before-it-runs).
 
 ## Checking a pull request in CI
 
@@ -430,7 +430,7 @@ runs.
 It is a one-shot proposal tool rather than a sync: rerunning it after AGENTS.md
 changes proposes from scratch and asks about every candidate again, including
 ones a prior run declined. Flags are documented under
-[Generating gates from AGENTS.md/CLAUDE.md](agent-guardrails-reference.md#generating-gates-from-agentsmdclaudemd).
+[Generating gates from AGENTS.md/CLAUDE.md](../reference/agent-guardrails.md#generating-gates-from-agentsmdclaudemd).
 
 ## Recommendations
 
@@ -480,7 +480,7 @@ Run `otari guardrails validate --strict` in CI. A gate that has stopped matching
 reports the same as a gate that passed. A guardrail with more judge gates than
 one Stop event evaluates always carries the judge cap warning. `validate` reads
 the same `--max-judges` and `OTARI_HOOK_MAX_JUDGES` the hook does, so
-give it the value the hook runs with. When a guardrail has more judge gates than even that value by design, name `judge-gate-cap` in the `accept_warnings` of every judge gate, and `--strict` then passes. See [`accept_warnings`](agent-guardrails-reference.md#accept_warnings-on-any-gate).
+give it the value the hook runs with. When a guardrail has more judge gates than even that value by design, name `judge-gate-cap` in the `accept_warnings` of every judge gate, and `--strict` then passes. See [`accept_warnings`](../reference/agent-guardrails.md#accept_warnings-on-any-gate).
 
 Run `otari guardrails check` on every pull request, with the gates and verifiers taken from the base commit, so a change made without the hook still meets them. See [Checking a pull request in CI](#checking-a-pull-request-in-ci).
 

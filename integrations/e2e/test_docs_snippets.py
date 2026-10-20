@@ -19,7 +19,7 @@ import pytest
 
 from conftest import MASTER_KEY, REPO_ROOT, Gateway
 
-PAGES = ["use-with-pydantic-ai.md", "use-with-langchain.md", "use-with-langgraph.md"]
+PAGES = ["integrations/pydantic-ai.md", "integrations/langchain.md", "integrations/langgraph.md"]
 BLOCK = re.compile(r"^```python\n(.*?)^```", re.DOTALL | re.MULTILINE)
 SNIPPET_TIMEOUT_SECONDS = 120
 

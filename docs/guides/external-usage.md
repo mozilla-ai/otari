@@ -37,7 +37,7 @@ keeps the master key out of collectors.
 For Claude Code specifically, the bundled `otari import claude-code` reads the
 transcripts already on disk and posts them here, which is how history from before
 any exporter was configured gets in. See
-[Use with Claude Code](use-with-claude-code.md#backfill-history-from-local-transcripts).
+[Claude Code](../integrations/claude-code.md#backfill-history-from-local-transcripts).
 
 ## Import normalized events
 
@@ -158,7 +158,7 @@ token is booked once even though a request repeats its usage on several spans:
   keyed by the response id, at the model that served it, with its cache reads
   and cache writes, and a second row for its compactions' tokens. The 1-hour
   share of its cache writes is kept as its own count and bills at twice the
-  input rate ([Cache and tiered pricing](configuration.md#cache-and-tiered-pricing)),
+  input rate ([Cache and tiered pricing](../reference/configuration.md#cache-and-tiered-pricing)),
   except from a streamed request's SDK span, which splits out only the writes
   made before the first output token, so all of its writes bill at the
   cache-write rate. When the SDK and the API both export the request, the
@@ -176,8 +176,8 @@ tool behavior and outcome counters can also populate content-free agent
 telemetry when `capture_agent_telemetry` is enabled. See the client-specific
 setup:
 
-- [Use with Claude Code](use-with-claude-code.md)
-- [Use with Codex](use-with-codex.md)
+- [Claude Code](../integrations/claude-code.md)
+- [Codex](../integrations/codex.md)
 
 ## Pricing
 
@@ -209,6 +209,6 @@ read the enforcement ledger.
 
 ## Related documentation
 
-- [API reference](api-reference.md)
-- [Configuration](configuration.md)
-- [Access control](access-control.md)
+- [API reference](../reference/api.md)
+- [Configuration](../reference/configuration.md)
+- [API keys](api-keys.md)

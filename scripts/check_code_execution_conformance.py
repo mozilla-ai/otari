@@ -2,7 +2,7 @@
 
     uv run python scripts/check_code_execution_conformance.py --base-url http://localhost:8080
 
-The contract is `docs/code-execution-protocol.md`, with the schemas in
+The contract is `docs/reference/code-execution-protocol.md`, with the schemas in
 `docs/public/code-execution-openapi.yaml`; this drives a live backend through it.
 Two implementations exist (`otari-sandbox-container` as the OSS reference, a
 pool-backed one behind otari.ai), and Otari cannot tell which one answered, so
@@ -46,7 +46,7 @@ _DEFAULT_TIMEOUT_SECONDS = 30
 _MODEST_BUDGET_SECONDS = 10
 # The contract's rule for a client's own budget: allow more wall-clock than the
 # execution budget granted, since transport and the backend's teardown come on
-# top of it. See "Execute" in docs/code-execution-protocol.md.
+# top of it. See "Execute" in docs/reference/code-execution-protocol.md.
 _TIMEOUT_BUFFER_SECONDS = 10.0
 # A file operation the backend does not serve answers on the route, not on the
 # session: the session was just used successfully, so these statuses mean "not

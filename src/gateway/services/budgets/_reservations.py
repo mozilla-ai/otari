@@ -1076,7 +1076,7 @@ async def record_external_spend(db: AsyncSession, user_id: str, cost: Decimal | 
     Dollars only, for the same reason: the handle is unreserved, so the window
     counters are not its to move (see :func:`reconcile_reservation`), and a batch
     of ten thousand prompts therefore contributes nothing to a token cap however
-    many tokens it used. ``docs/access-control.md`` says so, and says to cap
+    many tokens it used. ``docs/guides/budgets.md`` says so, and says to cap
     batch-heavy workloads in dollars. Moving that boundary means giving this path
     a window to count over, not passing a token count through it.
     """

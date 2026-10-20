@@ -43,7 +43,7 @@ curl "https://YOUR_DOMAIN/api/v1/chat/completions" \
 | `AWS_SECRET_ACCESS_KEY` | `${{otari-files.SECRET_ACCESS_KEY}}` | Pre-wired to the bucket's secret key. |
 | `PORT` | `8000` | The port Railway's healthcheck probes. Keep it equal to the target port. |
 
-To keep provider keys in Railway variables instead of the dashboard, declare the providers through `OTARI_CONFIG_YAML`; see [Full config via environment](https://github.com/mozilla-ai/otari/blob/main/docs/configuration.md#full-config-via-environment).
+To keep provider keys in Railway variables instead of the dashboard, declare the providers through `OTARI_CONFIG_YAML`; see [Full config via environment](https://github.com/mozilla-ai/otari/blob/main/docs/reference/configuration.md#full-config-via-environment).
 
 ### Upgrading
 

@@ -11,5 +11,5 @@ evidence passed in.
 It lives in the otari-agent distribution rather than in the gateway so that
 `otari hook` can be installed without the server. Evaluation results are
 ``client_reported``: Otari did not observe the repository itself, only what the
-caller claims about it. See docs/agent-guardrails.md for the contract.
+caller claims about it. See docs/guides/agent-guardrails.md for the contract.
 """

@@ -16,7 +16,7 @@ An opaque token, deliberately, rather than the platform's JWT ``Token``: this
 session is revocable server-side, which a bearer JWT is not, and the cookie,
 HTTPS and rate-limit machinery around it already works. otari-ai#1716 settled
 that sessions are the steady-state dashboard login, so the platform's JWT does
-not survive the rehome (see ``docs/access-control.md``).
+not survive the rehome (see ``docs/self-hosting/administration.md``).
 
 Sessions live in the database, not process memory, so every worker and replica
 accepts them and a revocation is seen everywhere. They expire on a TTL

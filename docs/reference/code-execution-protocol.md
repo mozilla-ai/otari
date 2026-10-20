@@ -15,7 +15,7 @@ second, pool-backed backend for [otari.ai](https://otari.ai). Both implement thi
 contract, and Otari cannot tell which one answered.
 
 The contract is HTTP/JSON, described by OpenAPI. Its machine-readable form is
-[`public/code-execution-openapi.yaml`](public/code-execution-openapi.yaml),
+[`public/code-execution-openapi.yaml`](../public/code-execution-openapi.yaml),
 which a backend implementer can generate a server stub or a client from
 directly. The two are normative in different registers, and neither is
 redundant: the OpenAPI document is normative for shapes, paths, and status
@@ -151,7 +151,7 @@ not an error worth distinguishing: it is already in the desired state.
 ### Sessions held across requests
 
 Otari may hold a session past the request that created it, so a later request
-can resume the same workspace (see [Built-in tools](tools.md#reusing-a-sandbox-across-requests)).
+can resume the same workspace (see [Built-in tools](../guides/tools.md#reusing-a-sandbox-across-requests)).
 It does so only for a request that asked, by sending `container: "auto"` or an
 id; a request that asks for nothing gets `DestroySession` at the end of it, as
 every request did before this existed.
@@ -406,7 +406,7 @@ with the reference one rather than merely similar to it.
 | `sandbox_provider` | `OTARI_SANDBOX_PROVIDER` | What runs the code: `protocol` (the default) speaks this contract to `sandbox_url`; `e2b` drives [E2B](https://e2b.dev)'s hosted sandboxes from the gateway process and needs no backend of your own. |
 | `sandbox_url` | `OTARI_SANDBOX_URL` | Base URL of the backend, for the `protocol` provider. Unset, `otari_code_execution` requests are rejected. |
 | `sandbox_purpose_hint` | `OTARI_SANDBOX_PURPOSE_HINT` | Default purpose hint for the tool, when a request supplies none. |
-| `code_execution_executor` | `OTARI_CODE_EXECUTION_EXECUTOR` | Who runs a provider-native code-execution declaration: `auto` (default), `otari` or `provider`. See [Built-in tools](tools.md#code-execution-executor). |
+| `code_execution_executor` | `OTARI_CODE_EXECUTION_EXECUTOR` | Who runs a provider-native code-execution declaration: `auto` (default), `otari` or `provider`. See [Built-in tools](../self-hosting/tool-services.md#code-execution-executor). |
 
 ### Running code without a backend of your own
 
@@ -419,7 +419,7 @@ this contract. `e2b` ships in the core (`uv sync --extra e2b`, then
 `E2B_API_KEY`). Everything above the seam is the same either way, including the
 per-workspace policy, the usage tally, and seeding and collecting files, so the
 choice is about what you run, not about what a request can do. The seam itself
-is `CodeExecutionPort` (see [ARCHITECTURE.md](../ARCHITECTURE.md)); a provider
+is `CodeExecutionPort` (see [ARCHITECTURE.md](../../ARCHITECTURE.md)); a provider
 Otari does not ship is an adapter, and `scripts/check_code_execution_conformance.py`
 certifies a backend rather than an adapter.
 
@@ -440,4 +440,4 @@ provider's account rather than in Otari's settings. A deployment handling data
 that must not leave should confine it there before choosing this provider.
 
 See [Configuration](configuration.md) for the full settings reference and
-[Built-in tools](tools.md) for the user-facing view of the tool.
+[Built-in tools](../guides/tools.md) for the user-facing view of the tool.

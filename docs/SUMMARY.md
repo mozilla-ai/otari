@@ -2,46 +2,63 @@
 
 * [Otari](index.md)
 
-## Start here
+## Get started
 
-* [Quickstart](quickstart.md)
-* [Modes](modes.md)
+* [Quickstart](get-started/quickstart.md)
+* [Connect to Otari](get-started/connect.md)
+* [Ways to run Otari](get-started/ways-to-run-otari.md)
 
-## For operators
+## Guides
 
-* [Deployment](deployment.md)
-* [Configuration](configuration.md)
-* [Admin dashboard](dashboard.md)
-* [Access control](access-control.md)
-* [Workload identity](workload-identity.md)
-* [Models](models.md)
-* [Provider endpoints](provider-endpoints.md)
-* [Routing policies](routing.md)
-* [Health checks](health-checks.md)
-* [OpenAI provider guide](providers/openai.md)
-* [Gemini provider guide](providers/gemini.md)
+* [Organizations and workspaces](guides/organizations-and-workspaces.md)
+* [Members and invitations](guides/members.md)
+* [API keys](guides/api-keys.md)
+* [Provider keys](guides/provider-keys.md)
+* [Models](guides/models.md)
+* [Budgets](guides/budgets.md)
+* [Routing policies](guides/routing.md)
+* [Inference Guardrails](guides/guardrails.md)
+* [Built-in tools](guides/tools.md)
+* [MCP](guides/mcp.md)
+* [Files](guides/files.md)
+* [Playground](guides/playground.md)
+* [Agent traces](guides/traces.md)
+* [Importing external usage](guides/external-usage.md)
+* [Agent Guardrails](guides/agent-guardrails.md)
+* [Admin dashboard](guides/dashboard.md)
 
-## For integrators
+## Integrations
 
-* [API reference](api-reference.md)
-* [Built-in tools](tools.md)
-* [MCP](mcp.md)
-* [Files](files.md)
-* [Inference Guardrails](guardrails.md)
-* [Agent Guardrails](agent-guardrails.md)
-* [Agent Guardrails reference](agent-guardrails-reference.md)
-* [Use with Claude Code](use-with-claude-code.md)
-* [Use with Codex](use-with-codex.md)
-* [Use with opencode](use-with-opencode.md)
-* [Use with Pydantic AI](use-with-pydantic-ai.md)
-* [Use with LangChain](use-with-langchain.md)
-* [Use with LangGraph](use-with-langgraph.md)
-* [Use with a ChatGPT subscription](chatgpt-subscription.md)
-* [Agent traces](traces.md)
-* [Importing external usage](external-usage.md)
-* [SDK compatibility](sdk-compatibility.md)
+* [Claude Code](integrations/claude-code.md)
+* [Codex](integrations/codex.md)
+* [OpenCode](integrations/opencode.md)
+* [Pydantic AI](integrations/pydantic-ai.md)
+* [LangChain](integrations/langchain.md)
+* [LangGraph](integrations/langgraph.md)
+* [ChatGPT subscription](integrations/chatgpt-subscription.md)
 
-## For platform builders
+## Self-hosting
 
-* [Hybrid-mode protocol](hybrid-mode-protocol.md)
-* [Code-execution protocol](code-execution-protocol.md)
+* [Deployment](self-hosting/deploy.md)
+* [Configure providers](self-hosting/configure-providers.md)
+  * [OpenAI](self-hosting/providers/openai.md)
+  * [Gemini](self-hosting/providers/gemini.md)
+* [Operator administration](self-hosting/administration.md)
+* [Tool services](self-hosting/tool-services.md)
+* [Provider endpoints](self-hosting/provider-endpoints.md)
+* [Health checks](self-hosting/health-checks.md)
+* [Workload identity](self-hosting/workload-identity.md)
+
+## otari.ai
+
+* [otari.ai](otari-ai/overview.md)
+* [Billing](otari-ai/billing.md)
+
+## Reference
+
+* [API reference](reference/api.md)
+* [Configuration](reference/configuration.md)
+* [Agent Guardrails reference](reference/agent-guardrails.md)
+* [SDK compatibility](reference/sdk-compatibility.md)
+* [Hybrid-mode protocol](reference/hybrid-mode-protocol.md)
+* [Code-execution protocol](reference/code-execution-protocol.md)

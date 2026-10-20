@@ -24,7 +24,7 @@ to the browser (otari-ai#1598). This does not, and that is the one deliberate
 departure from what otari#663 wrote down: a credential in JavaScript is strictly
 worse than no credential in JavaScript, and the constraint the issue was
 protecting, that the browser never holds a durable key, is honored more strongly
-by holding none at all. `docs/access-control.md` already says sessions are the
+by holding none at all. `docs/self-hosting/administration.md` already says sessions are the
 dashboard's credential.
 
 **Everything else here is the page's memory, and it is per identity.** Consent,

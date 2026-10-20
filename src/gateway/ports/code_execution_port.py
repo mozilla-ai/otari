@@ -2,7 +2,7 @@
 
 The seam between the gateway's code-execution tool and whatever actually runs
 the code. Two implementations ship in the core: the published
-`code-execution protocol <../../docs/code-execution-protocol.md>`_ spoken over
+`code-execution protocol <../../docs/reference/code-execution-protocol.md>`_ spoken over
 HTTP to a backend the operator runs, and a hosted provider driven through its
 own SDK in this process. That second one is what the port exists for
 (``ARCHITECTURE.md``, rule 7): a deployment that cannot run the reference

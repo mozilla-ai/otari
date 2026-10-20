@@ -1,4 +1,4 @@
-# Use with Pydantic AI
+# Pydantic AI
 
 [Pydantic AI](https://ai.pydantic.dev) agents run through Otari with
 `pydantic-ai-otari`, a model class that points Pydantic AI at Otari's
@@ -129,14 +129,14 @@ agent code works across providers: every example on this page runs unchanged on
   with, for example `openai:gpt-4o` or `mistral:mistral-large-latest`.
 - **A routing policy or alias:** its name, for example `OtariModel("support-agent")`.
   Otari picks the candidate and falls over to the next on failure, so the agent
-  code does not change when the policy does. See [Routing](routing.md).
+  code does not change when the policy does. See [Routing](../guides/routing.md).
 
 ## One key per project
 
 Give each project (or each client) its own Otari key. Its usage and spend are
 then reported apart, a budget ceiling on the key caps that project alone, and
-revoking the key stops only that project. See [Access control](access-control.md)
-and [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+revoking the key stops only that project. See [API keys](../guides/api-keys.md)
+and [Budgets and API keys in config](../reference/configuration.md#budgets-and-api-keys-in-config).
 
 ## Without the package
 
@@ -164,6 +164,6 @@ model is described to Pydantic AI as an OpenAI one.
 
 ## See also
 
-- [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md):
+- [LangChain](langchain.md) and [LangGraph](langgraph.md):
   the same gateway from LangChain's chat models.
-- [Agent traces](traces.md): what Otari records about an agent's runs.
+- [Agent traces](../guides/traces.md): what Otari records about an agent's runs.

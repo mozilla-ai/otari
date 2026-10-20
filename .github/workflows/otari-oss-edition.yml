@@ -139,7 +139,7 @@ jobs:
   # The other edition the same build ships: a gateway attached to a control
   # plane. The dev gateway at otari.ai deploys from main on every merge against
   # a control plane pinned to an older release, so this is the one place a
-  # change to what the gateway *sends* over docs/hybrid-mode-protocol.md is
+  # change to what the gateway *sends* over docs/reference/hybrid-mode-protocol.md is
   # checked before it is live. scripts/hybrid_edition_smoke.py boots the
   # packaged CLI with a platform token against standard-library fakes of the
   # control plane, an OpenAI/Anthropic provider and an MCP server, and asserts

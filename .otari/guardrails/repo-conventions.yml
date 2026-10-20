@@ -39,10 +39,10 @@ gates:
     type: command_if_changed
     runs: [stop.session]
     enforcement: required
-    when_changed: ["docs/public/code-execution-openapi.yaml", "docs/code-execution-protocol.md"]
+    when_changed: ["docs/public/code-execution-openapi.yaml", "docs/reference/code-execution-protocol.md"]
     require: ["tests/unit/test_code_execution_contract.py", "make test-unit"]
     message: >-
       docs/public/code-execution-openapi.yaml (hand-maintained) and
-      docs/code-execution-protocol.md must stay in sync; run
+      docs/reference/code-execution-protocol.md must stay in sync; run
       tests/unit/test_code_execution_contract.py (see AGENTS.md, "Generated
       Artifacts").

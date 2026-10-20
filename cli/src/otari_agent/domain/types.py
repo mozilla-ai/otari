@@ -73,7 +73,7 @@ GATE_TYPES: tuple[GateType, ...] = get_args(GateType)
 # Gate results that mean "no objection". Every other outcome blocks a required
 # gate: unknown and error are deliberately on the blocking side, not the
 # passing one, so a check that could not run is never mistaken for one that
-# passed. See docs/agent-guardrails.md.
+# passed. See docs/guides/agent-guardrails.md.
 _NON_BLOCKING = frozenset({"pass", "not_applicable"})
 
 
@@ -280,7 +280,7 @@ class JudgeGate:
     construction is outside what Otari can see or verify. Advisory
     enforcement is what keeps that from ever mattering: at worst, a
     compromised verdict suppresses a warning, never a block. See
-    docs/agent-guardrails.md.
+    docs/guides/agent-guardrails.md.
 
     ``when_changed`` is optional and, like ``CommandIfChangedGate``'s own
     field of the same name, the same repo-relative POSIX glob grammar
@@ -362,7 +362,7 @@ class VerifierGate:
     diff under check, and no sandboxing: a "must predate this diff" rule was
     considered and rejected because it breaks the primary workflow this gate
     type is for, someone writing a new verifier and using it in the same
-    change. See docs/agent-guardrails.md, which records what that boundary does
+    change. See docs/guides/agent-guardrails.md, which records what that boundary does
     not cover.
 
     ``when_changed`` is optional and, like ``JudgeGate``'s own field of the

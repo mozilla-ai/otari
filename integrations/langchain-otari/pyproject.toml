@@ -18,7 +18,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/mozilla-ai/otari/tree/main/integrations/langchain-otari"
-Documentation = "https://github.com/mozilla-ai/otari/blob/main/docs/use-with-langchain.md"
+Documentation = "https://github.com/mozilla-ai/otari/blob/main/docs/integrations/langchain.md"
 Repository = "https://github.com/mozilla-ai/otari"
 Issues = "https://github.com/mozilla-ai/otari/issues"
 

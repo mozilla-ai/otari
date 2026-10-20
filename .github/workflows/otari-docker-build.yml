@@ -33,7 +33,7 @@ on:
       - 'Dockerfile'
       - '.dockerignore'
       - 'web/**'
-      - 'docs/dashboard.md'
+      - 'docs/guides/dashboard.md'
       - 'pyproject.toml'
       - 'cli/pyproject.toml'
       - 'cli/src/**'

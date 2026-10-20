@@ -46,7 +46,7 @@ class HostedCredential:
 
     ``response_provider`` is the upstream name usage and telemetry key on, which
     may differ from the public managed name the caller asked for, matching
-    ``provider`` on a resolve attempt (``docs/hybrid-mode-protocol.md``).
+    ``provider`` on a resolve attempt (``docs/reference/hybrid-mode-protocol.md``).
 
     Returned only when the credential is actually usable. A build that cannot
     serve a candidate (its own credential for it is absent, disabled, or

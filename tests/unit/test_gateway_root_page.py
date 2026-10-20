@@ -41,7 +41,7 @@ def test_welcome_tutorial_page_is_available(tmp_path: Path) -> None:
     assert "bootstrap API key" in response.text
     assert "from otari import OtariClient" in response.text
     assert "YOUR_BOOTSTRAP_OTARI_KEY" in response.text
-    assert "https://github.com/mozilla-ai/otari/blob/main/docs/quickstart.md" in response.text
+    assert "https://github.com/mozilla-ai/otari/blob/main/docs/get-started/quickstart.md" in response.text
     assert "mozilla-ai.github.io/otari/gateway/quickstart" not in response.text
     assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />' in response.text
 
@@ -377,7 +377,7 @@ def test_hybrid_mode_also_reports_a_missing_dashboard(
     """
     monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
     # The platform token alone selects hybrid, which is how a hybrid deployment is
-    # configured (see docs/modes.md). It is resolved once at config-load time, so
+    # configured (see docs/get-started/ways-to-run-otari.md). It is resolved once at config-load time, so
     # it has to be set before the config is built.
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
     config = GatewayConfig(

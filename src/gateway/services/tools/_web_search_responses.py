@@ -26,7 +26,7 @@ class ResponsesWebSearchRendering:
     This is the one place the gateway's own tool work is expressible in a provider's
     native vocabulary without forging provider-signed content: the item needs only an
     id, an action and a status, all of which the gateway legitimately knows. The
-    Anthropic equivalent needs a signed ``encrypted_content`` blob (see docs/tools.md).
+    Anthropic equivalent needs a signed ``encrypted_content`` blob (see docs/guides/tools.md).
     """
 
     def declared(self, tool_entry: Mapping[str, Any] | None) -> bool:

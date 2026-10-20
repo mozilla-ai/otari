@@ -747,7 +747,7 @@ def evaluate_command(
     if not evidence.commands:
         # Call-scoped and empty: a PreToolUse call for an edit tool rather
         # than Bash, which never collects command evidence at all (see
-        # docs/agent-guardrails.md). Reporting PASS would read as a check that ran
+        # docs/guides/agent-guardrails.md). Reporting PASS would read as a check that ran
         # and found nothing, when this gate never had anything to check.
         return GateResult(
             gate_id=gate.id,
@@ -814,7 +814,7 @@ def evaluate_command_if_changed(
     forever, the edit being the very thing blocked. ``call`` scope
     therefore resolves ``not_applicable``, deferring the gate to the
     ``Stop`` event where `otari hook` submits the session's real command
-    history (see docs/agent-guardrails.md).
+    history (see docs/guides/agent-guardrails.md).
 
     Under ``session`` scope an empty command list is a real answer rather
     than a missing one, and resolves ``fail``: a session that changed a
@@ -1084,7 +1084,7 @@ def evaluate_verifier(
     ``evidence is None`` (this event never runs verifier gates, resolves
     ``not_applicable``) vs. "ran verifier gates but is missing this
     one's verdict" (resolves ``unknown``) distinction; see that function's
-    own docstring and docs/agent-guardrails.md for why both matter here too.
+    own docstring and docs/guides/agent-guardrails.md for why both matter here too.
 
     Unlike a judge gate, this gate's outcome can genuinely block a required
     gate: a verifier's exit code is reproducible, not a model's opinion, so

@@ -1,6 +1,6 @@
 # OpenAI
 
-Route requests to OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) through Otari. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the current provider list and [Models](../models.md) for Otari's model-name format.
+Route requests to OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) through Otari. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the current provider list and [Models](../../guides/models.md) for Otari's model-name format.
 
 ## What you'll set up
 
@@ -8,7 +8,7 @@ An OpenAI provider entry in your `config.yml` that reads your key from `OPENAI_A
 
 ## Prerequisites
 
-- Otari running locally (see the [Quickstart](../quickstart.md))
+- Otari running locally (see the [Quickstart](../../get-started/quickstart.md))
 - An OpenAI account and an API key from <https://platform.openai.com/api-keys>
 
 ## Configure
@@ -66,7 +66,7 @@ Everything after the colon is passed straight to OpenAI, so any model your key c
 
 ## Verify
 
-If you have not already started Otari and created a client key, follow the [Quickstart](../quickstart.md) through step 3 first.
+If you have not already started Otari and created a client key, follow the [Quickstart](../../get-started/quickstart.md) through step 3 first.
 
 Then make a request with the Otari Python SDK (`pip install otari`; any
 OpenAI-compatible client also works), using an `openai:<model>` selector:
@@ -110,4 +110,4 @@ pricing:
     output_price_per_million: 0.60
 ```
 
-See [Configuration](../configuration.md) for all options.
+See [Configuration](../../reference/configuration.md) for all options.

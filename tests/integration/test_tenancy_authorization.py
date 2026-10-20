@@ -115,7 +115,7 @@ async def test_the_served_organization_follows_the_identity_not_its_memberships(
 ) -> None:
     """Two rows decide the adopted tenant, and the docs have to say both.
 
-    `docs/access-control.md` tells an operator to adopt an imported tenancy by
+    `docs/self-hosting/administration.md` tells an operator to adopt an imported tenancy by
     pointing the bootstrap marker at an owner of the organization they want. The
     marker only names the *identity*; the organization served is that identity's
     ``active_organization_id``. An imported platform identity belongs to several

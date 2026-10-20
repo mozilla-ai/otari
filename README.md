@@ -92,8 +92,8 @@ The command a developer runs next to a coding agent (`otari hook`,
 brew install mozilla-ai/tap/otari
 ```
 
-See [Agent Guardrails](docs/agent-guardrails.md) and
-[Use with Claude Code](docs/use-with-claude-code.md).
+See [Agent Guardrails](docs/guides/agent-guardrails.md) and
+[Claude Code](docs/integrations/claude-code.md).
 
 ## Run the full stack
 
@@ -133,7 +133,7 @@ A one-click deployment template is available for
 When `OTARI_MODE` is unset, `OTARI_AI_TOKEN` selects hybrid mode; otherwise
 Otari defaults to standalone. A mode says what a process serves, not who runs it,
 so "hosted" is not the opposite of "self-hosted". See
-[Runtime modes](docs/modes.md#mode-and-who-runs-it).
+[Runtime modes](docs/get-started/ways-to-run-otari.md#mode-and-who-runs-it).
 
 ## API and dashboard
 
@@ -145,11 +145,11 @@ The core completion routes are:
 
 Standalone also serves the broader OpenAI-compatible and management APIs. The
 running server publishes Swagger UI at `/api/v1/docs` and OpenAPI at
-`/api/v1/openapi.json`. See [API reference](docs/api-reference.md).
+`/api/v1/openapi.json`. See [API reference](docs/reference/api.md).
 
 The dashboard manages providers, models, routing, tools, keys, members, budgets,
 settings, activity, and usage. Its navigation adapts to the deployment mode and
-the signed-in person's authority. See [Admin dashboard](docs/dashboard.md).
+the signed-in person's authority. See [Admin dashboard](docs/guides/dashboard.md).
 
 ## Development
 
@@ -176,15 +176,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## Documentation
 
-- [Quickstart](docs/quickstart.md)
-- [Deployment](docs/deployment.md)
-- [Configuration](docs/configuration.md)
-- [Models](docs/models.md)
-- [Routing](docs/routing.md)
-- [Access control](docs/access-control.md)
-- [Built-in tools](docs/tools.md)
-- [Agent Guardrails](docs/agent-guardrails.md)
-- [SDK and agent integrations](docs/index.md#for-integrators)
+The documentation is published at [docs.otari.ai](https://docs.otari.ai), from
+[`docs/`](docs/index.md).
+
+- [Quickstart](docs/get-started/quickstart.md)
+- [Connect to Otari](docs/get-started/connect.md)
+- [Deployment](docs/self-hosting/deploy.md)
+- [Configuration](docs/reference/configuration.md)
+- [Models](docs/guides/models.md)
+- [Routing](docs/guides/routing.md)
+- [API keys](docs/guides/api-keys.md) and [Budgets](docs/guides/budgets.md)
+- [Built-in tools](docs/guides/tools.md)
+- [Agent Guardrails](docs/guides/agent-guardrails.md)
+- [Integrations](docs/index.md#browse-the-docs), such as [Claude Code](docs/integrations/claude-code.md)
 - [Architecture](ARCHITECTURE.md)
 
 ## License

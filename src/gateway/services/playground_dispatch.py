@@ -17,7 +17,7 @@ usage upstream, and that report is what debits the wallet. The billing path is
 the one every other request on this deployment already takes.
 
 **Why it has to be a real API key.** The wire between a control plane and its
-gateway carries one (``docs/hybrid-mode-protocol.md``): the gateway forwards it
+gateway carries one (``docs/reference/hybrid-mode-protocol.md``): the gateway forwards it
 as ``X-User-Token`` and the control plane authenticates it on the way back. There
 is no channel on which this deployment can simply assert who to bill, so the
 credential has to be something the resolve path already accepts. The key carries

@@ -24,7 +24,7 @@ must be free.
   `web/node_modules`).
 - A built dashboard bundle in `src/gateway/static/dashboard` (gitignored, so a
   fresh clone has none): `make dashboard`. Rebuild after any change under
-  `web/src` or to `docs/dashboard.md` (bundled into the app), otherwise the
+  `web/src` or to `docs/guides/dashboard.md` (bundled into the app), otherwise the
   recording shows the previous build.
 - Network access: the Models page reads model metadata (vendor, context length,
   modalities) from models.dev at runtime, and shows bare ids without it.

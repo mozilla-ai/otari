@@ -1,4 +1,4 @@
-# Use with Codex
+# Codex
 
 Codex can call Otari as a custom model provider over the Responses API. Otari
 serves `POST /api/v1/responses` in standalone and hybrid modes.
@@ -56,7 +56,7 @@ served by the Otari deployment.
 A provider with its own Responses API is called natively. Any other provider is
 served by translating each request into a chat completion, which refuses a few
 Responses features Codex may use, such as tool types other than `function`; see
-[Responses on providers without a Responses API](api-reference.md#responses-on-providers-without-a-responses-api).
+[Responses on providers without a Responses API](../reference/api.md#responses-on-providers-without-a-responses-api).
 Codex works best on a provider with a native Responses API.
 
 `GET /api/v1/models` lists the models a key can use, both on otari.ai and on a
@@ -106,10 +106,10 @@ does not persist it in either case.
 
 Imported events are priced for analytics and never count toward budgets. Do not
 both route and export one session, or its cost will appear twice. See
-[Importing external usage](external-usage.md).
+[Importing external usage](../guides/external-usage.md).
 
 ## Related documentation
 
-- [Models](models.md)
+- [Models](../guides/models.md)
 - [Use with a ChatGPT subscription](chatgpt-subscription.md)
-- [API reference](api-reference.md)
+- [API reference](../reference/api.md)

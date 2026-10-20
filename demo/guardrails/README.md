@@ -61,7 +61,7 @@ commands are unchanged.
 `Otari-Guardrails` header for non-streaming responses. Streaming responses do
 not currently propagate this header. `block` still returns 403 before calling
 the model, including for streaming requests.
-See [Guardrails](../../docs/guardrails.md) for organization policy, failure
+See [Guardrails](../../docs/guides/guardrails.md) for organization policy, failure
 behavior, and all request fields.
 
 ## Files

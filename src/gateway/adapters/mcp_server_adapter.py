@@ -1,7 +1,7 @@
 """The two places a deployment's MCP servers come from.
 
 ``LocalMcpServers`` reads the rows this deployment holds.
-``RemoteMcpServers`` asks a peer, speaking `docs/hybrid-mode-protocol.md`.
+``RemoteMcpServers`` asks a peer, speaking `docs/reference/hybrid-mode-protocol.md`.
 
 Both return a server a caller connects to directly.
 Neither proxies MCP traffic.

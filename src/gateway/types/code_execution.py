@@ -1,7 +1,7 @@
 """The code-execution wire contract, as the gateway consumes it.
 
 Otari does not run code itself: it drives a code-execution backend over the
-contract specified in ``docs/code-execution-protocol.md``. These are the
+contract specified in ``docs/reference/code-execution-protocol.md``. These are the
 response shapes the gateway reads, so ``SandboxBackend`` parses a validated
 object instead of walking untyped dicts.
 

@@ -1,7 +1,7 @@
 """Keep the code-execution contract's three faces in agreement.
 
 The contract is published in three places, each load-bearing for a different
-reader: `docs/code-execution-protocol.md` is prose for someone building a
+reader: `docs/reference/code-execution-protocol.md` is prose for someone building a
 backend, `docs/public/code-execution-openapi.yaml` is the IDL they generate from,
 and `gateway.types.code_execution` is what this gateway actually parses. Nothing
 but a test stops those drifting apart, and drift is exactly what publishing the
@@ -27,7 +27,7 @@ from jsonschema import Draft202012Validator
 from gateway.types.code_execution import ExecResponse, ResultBlock, SessionHandle
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DOC_PATH = _REPO_ROOT / "docs" / "code-execution-protocol.md"
+_DOC_PATH = _REPO_ROOT / "docs" / "reference" / "code-execution-protocol.md"
 _SPEC_PATH = _REPO_ROOT / "docs" / "public" / "code-execution-openapi.yaml"
 
 _CORE_OPERATIONS = {"CreateSession", "Execute", "DestroySession"}

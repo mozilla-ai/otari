@@ -71,7 +71,7 @@ ROUTER_HEADER = "Otari-Router"
 # Stable per-conversation id for trace-sticky routing. When set, it is the trace
 # identity (namespaced per user); absent, the router falls back to hashing the
 # conversation's opening messages, which cannot tell apart two conversations that
-# open identically. See docs/routing.md#per-request-control.
+# open identically. See docs/guides/routing.md#per-request-control.
 CONVERSATION_HEADER = "Otari-Conversation-Id"
 # Routing-memory partition (use case / category) for this request. When set, the
 # router votes only over records carrying the same task label and stays in
@@ -91,7 +91,7 @@ ATTEMPT_ID_HEADER = "Otari-Attempt-ID"
 # provider instance that answered (its name, never its base URL), the model it
 # was sent, how many candidates were sent the request, whether a candidate other
 # than the plan's first served it, and how long the gateway took to answer. See
-# docs/routing.md#what-is-billed-and-what-the-caller-sees.
+# docs/guides/routing.md#what-is-billed-and-what-the-caller-sees.
 PROVIDER_HEADER = "Otari-Provider"
 MODEL_HEADER = "Otari-Model"
 ATTEMPT_COUNT_HEADER = "Otari-Attempt-Count"
@@ -1786,7 +1786,7 @@ class GatewayConfig(
         nature, and an ID that moves silently orphans every passkey registered
         under the previous one. So it is configured (``webauthn_rp_id``) or
         derived once from a configured address (``public_base_url``), and
-        `docs/access-control.md` documents which.
+        `docs/self-hosting/administration.md` documents which.
 
         The derivation drops the port along with the scheme: a relying-party ID
         is a bare domain, so 'https://localhost:8000' yields 'localhost', which

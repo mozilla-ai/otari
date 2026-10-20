@@ -397,7 +397,10 @@ export function RateLimitsCard() {
         title="Rate limit rules"
         count={rules.data ? all.length : undefined}
         description="Requests per minute, tokens per minute and requests in flight, per API key, per user, per model or for the whole deployment. A change applies on this replica at once and on every replica within 30 seconds."
-        docsHref={docsSourceHref("configuration.md", "rate-limit-rules")}
+        docsHref={docsSourceHref(
+          "reference/configuration.md",
+          "rate-limit-rules",
+        )}
         action={
           <Button variant="primary" onPress={() => open(undefined)}>
             Add rule

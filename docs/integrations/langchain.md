@@ -1,10 +1,10 @@
-# Use with LangChain
+# LangChain
 
 LangChain chains and agents run through Otari with `langchain-otari`, whose
 `ChatOtari` is LangChain's `ChatOpenAI` pointed at Otari's OpenAI-compatible API
 (`POST /api/v1/chat/completions`). Every call then gets Otari's budgets, usage
 tracking, fallback routing and guardrails. For graphs, see
-[Use with LangGraph](use-with-langgraph.md).
+[LangGraph](langgraph.md).
 
 ## Quick start
 
@@ -48,7 +48,7 @@ token usage on streams too.
 routes to: Otari translates the Chat Completions request for Anthropic, Mistral,
 Gemini and the rest, so the same chain switches provider by changing only
 `model`. The names it accepts are listed under
-[Choosing a model](use-with-pydantic-ai.md#choosing-a-model).
+[Choosing a model](pydantic-ai.md#choosing-a-model).
 
 ## Agents and tools
 
@@ -104,8 +104,8 @@ print()
 
 Give each project (or each client) its own Otari key. Its usage and spend are
 then reported apart, a budget ceiling on the key caps that project alone, and
-revoking the key stops only that project. See [Access control](access-control.md)
-and [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+revoking the key stops only that project. See [API keys](../guides/api-keys.md)
+and [Budgets and API keys in config](../reference/configuration.md#budgets-and-api-keys-in-config).
 
 ## Without the package
 
@@ -129,5 +129,5 @@ print(llm.invoke("Say hello in one sentence.").content)
 
 ## See also
 
-- [Use with LangGraph](use-with-langgraph.md): the same model inside your own graph.
-- [Use with Pydantic AI](use-with-pydantic-ai.md).
+- [LangGraph](langgraph.md): the same model inside your own graph.
+- [Pydantic AI](pydantic-ai.md).

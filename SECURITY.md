@@ -44,7 +44,7 @@ otari is a self-hosted LLM gateway; several controls are configuration-dependent
 - **Budgeted inference uses atomic reservations.** Concurrent token-priced and
   image requests reserve estimated cost before dispatch. Retrospective imports,
   batches, and currently unreserved flat-price paths are not hard real-time
-  caps; see [Access control](docs/access-control.md#budgets).
+  caps; see [Budgets](docs/guides/budgets.md).
 - **The client `user` field is not trusted for non-master keys.** Spend is bound
   to the API key's own user; only the master key may bill on behalf of an
   arbitrary user. By default a non-master key naming a different user is rejected

@@ -495,7 +495,7 @@ class ToolSettings(BaseModel):
         description=(
             "How many search and fetch tool calls one request may make, together. A call past it "
             "gets a tool error the model can recover from. When unset: 10. Requests the old search "
-            "backend serves keep a fixed limit of 10: see docs/configuration.md."
+            "backend serves keep a fixed limit of 10: see docs/reference/configuration.md."
         ),
     )
 

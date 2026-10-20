@@ -849,7 +849,10 @@ describe("ToolsGuardrailsPage tool status", () => {
     // Fetch's own docs heading, not the Web search one its card sits under.
     expect(
       screen.getByRole("link", { name: /Developer docs/ }),
-    ).toHaveAttribute("href", expect.stringContaining("tools.md#web-fetch"))
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining("guides/tools.md#web-fetch"),
+    )
   })
 
   it("renders and saves a separate Fetch per-call price", async () => {

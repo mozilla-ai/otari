@@ -1,7 +1,7 @@
 """The two places a workspace's web search policy comes from.
 
 ``LocalWebSearchPolicy`` reads the rows this deployment holds.
-``RemoteWebSearchPolicy`` asks a peer, speaking `docs/hybrid-mode-protocol.md`.
+``RemoteWebSearchPolicy`` asks a peer, speaking `docs/reference/hybrid-mode-protocol.md`.
 Either answer carries the workspace's own search key, where its organization has one it may use.
 """
 

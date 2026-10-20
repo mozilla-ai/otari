@@ -28,8 +28,8 @@ print(llm.invoke("Say hello in one sentence.").content)
 - `OPENAI_API_KEY` is never used as a fallback, so an OpenAI key is not sent to
   the gateway by mistake. Token usage is requested on streams too.
 
-Full guides: [Use with LangChain](https://github.com/mozilla-ai/otari/blob/main/docs/use-with-langchain.md)
-and [Use with LangGraph](https://github.com/mozilla-ai/otari/blob/main/docs/use-with-langgraph.md).
+Full guides: [LangChain](https://github.com/mozilla-ai/otari/blob/main/docs/integrations/langchain.md)
+and [LangGraph](https://github.com/mozilla-ai/otari/blob/main/docs/integrations/langgraph.md).
 
 Developed in [mozilla-ai/otari](https://github.com/mozilla-ai/otari/tree/main/integrations/langchain-otari),
 where every change is tested against a running Otari.

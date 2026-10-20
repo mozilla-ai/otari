@@ -7,7 +7,7 @@ on:
       - 'web/**'
       # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a change
       # to it changes the built app; build and test it.
-      - 'docs/dashboard.md'
+      - 'docs/guides/dashboard.md'
       # The committed API client is generated from the spec, so a spec change is a
       # client change even when no file under web/ moved. Without this trigger the
       # drift check below cannot fire on the PR it exists to catch: a backend PR
@@ -29,7 +29,7 @@ on:
       - 'web/**'
       # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a change
       # to it changes the built app; build and test it.
-      - 'docs/dashboard.md'
+      - 'docs/guides/dashboard.md'
       # The committed API client is generated from the spec, so a spec change is a
       # client change even when no file under web/ moved. Without this trigger the
       # drift check below cannot fire on the PR it exists to catch: a backend PR

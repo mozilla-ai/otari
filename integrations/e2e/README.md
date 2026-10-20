@@ -1,9 +1,9 @@
 # Agent framework end-to-end tests
 
 Tests `pydantic-ai-otari` and `langchain-otari` (the two packages beside this
-directory) from this checkout, and runs every Python block on [Use with Pydantic AI](../../docs/use-with-pydantic-ai.md),
-[Use with LangChain](../../docs/use-with-langchain.md) and
-[Use with LangGraph](../../docs/use-with-langgraph.md) against a real Otari.
+directory) from this checkout, and runs every Python block on [Pydantic AI](../../docs/integrations/pydantic-ai.md),
+[LangChain](../../docs/integrations/langchain.md) and
+[LangGraph](../../docs/integrations/langgraph.md) against a real Otari.
 
 `conftest.py` boots `otari serve` from the repository's environment on a throwaway
 SQLite database, in front of `mock_provider.py`, a scripted OpenAI-compatible

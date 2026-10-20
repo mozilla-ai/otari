@@ -475,7 +475,7 @@ async def test_call_tool_span_error_status_on_tool_error_result(monkeypatch: pyt
     assert spans[0].status.status_code == StatusCode.ERROR
 
 
-# ----- contract conformance (docs/code-execution-protocol.md) -----
+# ----- contract conformance (docs/reference/code-execution-protocol.md) -----
 
 
 def _exec_handlers(result_block: Any, monkeypatch: pytest.MonkeyPatch) -> _MockTransport:
@@ -609,7 +609,7 @@ async def test_enter_raises_when_session_handle_lacks_id(monkeypatch: pytest.Mon
 
 @pytest.mark.asyncio
 async def test_documented_exec_response_shape_parses(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The full response documented in docs/code-execution-protocol.md.
+    """The full response documented in docs/reference/code-execution-protocol.md.
 
     Pinned verbatim against the spec's example, envelope included, so the
     published contract and this client cannot drift apart silently.
@@ -798,7 +798,7 @@ async def test_structured_values_in_render_only_fields_keep_the_signal(
     `stderr` would leave a stderr-only run with nothing to render, so it would
     come back `(no output)` with no `[tool error]` marker and bill as a
     successful call, which is the failure the error-variant exclusion in
-    docs/code-execution-protocol.md exists to prevent.
+    docs/reference/code-execution-protocol.md exists to prevent.
 
     The second case pins the surrounding semantics: stderr *alongside* stdout at
     `return_code: 0` is not error-shaped either way, so only the stderr-only

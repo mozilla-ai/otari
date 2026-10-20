@@ -189,6 +189,40 @@ uv run --frozen --no-dev python scripts/oss_edition_smoke.py
   create and drop databases. Never use production, and do not run concurrent
   suites against the same server URL because their worker database names collide.
 
+## Writing docs
+
+`docs/` is the one source for the documentation at [docs.otari.ai](https://docs.otari.ai),
+for otari.ai and for a self-hosted Otari alike. It publishes with each release.
+
+Each page goes in the section that matches what its reader is doing:
+
+| Section | Folder | For |
+| --- | --- | --- |
+| Get started | `docs/get-started/` | A first request, base URLs and keys, and what Otari is |
+| Guides | `docs/guides/` | Doing something with Otari: workspaces, keys, budgets, routing, tools |
+| Integrations | `docs/integrations/` | Pointing one tool or framework at Otari |
+| Self-hosting | `docs/self-hosting/` | Deploying and operating your own gateway |
+| otari.ai | `docs/otari-ai/` | What only the service has, such as billing |
+| Reference | `docs/reference/` | Lookup material: the API, configuration, file formats, protocols |
+
+Say otari.ai or self-hosted only where it changes something:
+
+1. **Write for the product, not the deployment.** If a sentence is true on both, mention
+   neither.
+2. **Base URLs live in one place.** [Connect to Otari](docs/get-started/connect.md) gives
+   them; elsewhere, use `$OTARI_BASE_URL` or link there. A copied URL is how a page drifts.
+3. **A step that differs goes in tabs; a procedure that differs goes in its section.** Tabs
+   are GitBook's `{% tabs %}` / `{% tab title="otari.ai" %}` / `{% tab title="Self-hosted" %}`
+   blocks, as on the [Quickstart](docs/get-started/quickstart.md). Deploying, configuring
+   and operating a gateway belongs in Self-hosting, and the service's own features in
+   otari.ai.
+4. **A guide for something one side lacks says so first**, in a line under its title:
+   `Available on: self-hosted.`
+
+A new page owes an entry in `docs/SUMMARY.md` and a link from `docs/index.md`; tests fail
+without either. Images go in `docs/assets/`, which publishes as it is. Spell in US English
+and avoid em dashes, as [AGENTS.md](AGENTS.md#writing-style) says.
+
 ## Pull requests
 
 - PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/); CI enforces this.

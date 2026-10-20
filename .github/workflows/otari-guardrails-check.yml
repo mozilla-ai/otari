@@ -3,7 +3,7 @@ name: Otari Guardrails Check
 # Runs the repository's path and verifier gates (.otari/) against every pull
 # request, so a change made without `otari hook` registered still meets them.
 # otari-guardrails-judges.yml runs the judge gates. See
-# docs/agent-guardrails.md, "Checking a pull request in CI".
+# docs/guides/agent-guardrails.md, "Checking a pull request in CI".
 #
 # The CLI, the gates and the verifier scripts come from the base commit, so a
 # pull request's edits to them do not change what checks it. This file is not

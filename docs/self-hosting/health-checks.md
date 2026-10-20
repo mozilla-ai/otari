@@ -81,7 +81,7 @@ So an outage sends two emails however many runs it lasts. One run's changes
 share one email, grouped by provider, and its subject names the deployment's
 host, so mail from several deployments says which one it is about.
 
-Alerts need outgoing mail; see [Configuration](configuration.md) for the
+Alerts need outgoing mail; see [Configuration](../reference/configuration.md) for the
 `smtp_*` settings, `mail_from_email` and `public_base_url`. When no address
 receives an alert, the next run sends it again. A failure found while the list
 is empty is remembered, so an address added later hears about the next change
@@ -93,4 +93,4 @@ The page is built on five operator endpoints under `/api/v1/health-checks`:
 `GET` for the status, `POST /run` to start a run, `POST /disable-failing` to
 switch off every failing model (what **Disable all** calls), and `GET` and
 `PATCH /settings`.
-See the [API reference](api-reference.md).
+See the [API reference](../reference/api.md).

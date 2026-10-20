@@ -1,4 +1,4 @@
-"""Structural checks for the admin dashboard operator guide (docs/dashboard.md).
+"""Structural checks for the admin dashboard operator guide (docs/guides/dashboard.md).
 
 The guide is hand-written prose, so these tests guard the contract that matters:
 the file exists, is linked from the docs index, covers sign-in and daily
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 _DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
-_DASHBOARD_DOC = _DOCS_DIR / "dashboard.md"
+_DASHBOARD_DOC = _DOCS_DIR / "guides" / "dashboard.md"
 _INDEX_DOC = _DOCS_DIR / "index.md"
 
 # Markdown links to other docs, e.g. [text](configuration.md#anchor).
@@ -25,7 +25,7 @@ def dashboard_text() -> str:
 
 
 def test_dashboard_doc_exists() -> None:
-    assert _DASHBOARD_DOC.is_file(), "docs/dashboard.md is missing"
+    assert _DASHBOARD_DOC.is_file(), "docs/guides/dashboard.md is missing"
 
 
 def test_dashboard_doc_has_single_top_level_heading(dashboard_text: str) -> None:
@@ -63,12 +63,12 @@ def test_dashboard_doc_internal_links_resolve(dashboard_text: str) -> None:
 
 def test_dashboard_doc_is_linked_from_index() -> None:
     index_text = _INDEX_DOC.read_text(encoding="utf-8")
-    assert "(dashboard.md)" in index_text, "docs/index.md does not link to dashboard.md"
+    assert "(guides/dashboard.md)" in index_text, "docs/index.md does not link to dashboard.md"
 
 
 def test_dashboard_doc_avoids_em_dash_prose(dashboard_text: str) -> None:
     # Project writing convention (AGENTS.md): no em dashes or `--` separators in
     # doc prose. En-dash numeric ranges and code are out of scope, and this doc
     # has none, so a plain scan is enough.
-    assert "—" not in dashboard_text, "docs/dashboard.md contains an em dash (—); use commas/colons/periods"
-    assert " -- " not in dashboard_text, "docs/dashboard.md uses ' -- ' as a separator; rephrase"
+    assert "—" not in dashboard_text, "docs/guides/dashboard.md contains an em dash (—); use commas/colons/periods"
+    assert " -- " not in dashboard_text, "docs/guides/dashboard.md uses ' -- ' as a separator; rephrase"

@@ -46,7 +46,7 @@ the master key. The master key remains valid for management API calls and can
 reset the operator password. It resets the operator's password only: to help a
 member who forgot theirs, send them a password link from Accounts, which emails
 it where mail is configured and otherwise gives you the link to share (see
-[Access control](access-control.md#deployment-wide-account-administration)).
+[Operator administration](../self-hosting/administration.md#deployment-wide-account-administration)).
 
 The sign-in page offers the email and password form as soon as any identity holds
 a password, which can be before the operator claims the deployment: a member
@@ -73,7 +73,7 @@ organization, so the account menu names you even before you join one.
 6. Create an API key from the setup guide or the Keys page.
 7. Send a request and confirm it appears under Activity.
 
-The [Quickstart](quickstart.md) includes a complete request example.
+The [Quickstart](../get-started/quickstart.md) includes a complete request example.
 
 ## The setup guide
 
@@ -229,50 +229,9 @@ activity table, rather than shown workspace counts.
 
 ## Playground
 
-The Playground is the in-product chat page: pick a model the gateway serves and
-talk to it, or put two side by side and record which answered better. Requests
-run through the same path as any other completion, so routing policies,
-guardrails, budgets and the tool loop all apply, and every request appears in
-Activity and Usage.
-
-A question can carry files. Attach them with the paperclip in the composer or
-drop them anywhere on the page; each uploads at once and shows as a chip with
-its name and size until the question is sent. The model reads them the way an
-API request's [uploaded files](files.md) are read, so a text-only local model is
-given their extracted text. When comparing, both models get the same files. A
-saved conversation remembers which files each question carried. Removing a
-chip takes the file off that question and keeps the upload: the Files dialog
-lists everything you uploaded in the workspace, to attach again or to delete.
-These controls appear only where the deployment stores files: not when file
-uploads are off, and not on a hosted control plane.
-
-The Tools menu attaches web search, code execution and any number of MCP
-servers to the next message, in any mix: the model is offered all of them in one
-tool loop. A tool the gateway runs shows in the transcript above the reply as a
-collapsed row with its status, opening to the arguments the model sent and what
-the tool returned (a long result is shortened for display). This activity is
-shown in the Playground only (not on a hosted control plane, whose requests run
-on the data plane) and is not saved with a conversation; a request
-made through the API still returns just the final message, as
-[What clients receive](tools.md#what-clients-receive) describes.
-
-Two things are worth knowing about how it is billed and what it stores.
-
-A Playground request carries no API key. It is authorized by the dashboard
-session and billed to whoever sent it, in the workspace the switcher has
-selected, against that person's own budget and rate limit; its usage row
-therefore has no key attached. Picking a different model changes which provider
-credential the gateway resolves, never who pays. A request made here also does
-not count as the workspace's first request, so the setup guide keeps waiting for
-one from outside the product, which is the milestone it exists to mark.
-
-Nothing is stored until asked for. Saving a conversation or recording a
-comparison prompts once for content retention, and the flags are per person and
-revocable; withdrawing one blocks new saves and deletes nothing. Saved
-transcripts, recorded comparisons and pinned models are visible only to the
-person who created them, even to colleagues in the same workspace, and each can
-be deleted from the page. Hosted control planes serve no inference, so they do
-not offer the page at all.
+The Playground is the in-product chat page: pick a model and talk to it, or put
+two side by side and record which answered better. How to use it, how its
+requests are billed, and what it stores are in [Playground](playground.md).
 
 ## Observability
 
@@ -307,7 +266,8 @@ organization section manages resources shared across those workspaces.
 
 What a signed-in person can see or change is enforced by their organization and
 workspace roles. Deployment-wide operations require an operator. See
-[Access control](access-control.md).
+[Organizations and workspaces](organizations-and-workspaces.md#roles-scoping-and-deleting-an-organization)
+and [Operator administration](../self-hosting/administration.md).
 
 Invitations waiting on you are listed under Invitations, reached from the
 organization switcher. After you accept one, the page offers to take you into
@@ -346,12 +306,12 @@ proven the email domain that the identity's verified address belongs to, the
 sign-in joins them to that organization at the role the claim names, whichever of
 the three credentials they used. It is the only path that grants membership
 without somebody deciding about the person, and it is fenced accordingly: see
-[Email-domain auto-join](access-control.md#email-domain-auto-join).
+[Email-domain auto-join](members.md#email-domain-auto-join).
 
 Mail is optional. When an invitation email does not go out (no mail, a failed send, or the
 daily invitation mail limit), you get the accept link to share,
 and an invitee new to the deployment chooses a password on the page it opens,
-so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
+so a deployment without SMTP can still bring people in. See [Configuration](../reference/configuration.md#mail).
 
 ## Bundled guide and custom documentation
 
@@ -363,10 +323,10 @@ remains available.
 
 `terms_url` and `privacy_url` name where this deployment's terms of service and
 privacy notice live. The account menu links each row it has an address for; see
-[Configuration](configuration.md#legal-pages).
+[Configuration](../reference/configuration.md#legal-pages).
 
 ## Development
 
 The dashboard source is under `web/`. The published Docker image includes the
 bundle. A source checkout needs `make dashboard` for the gateway to serve it, or
-`pnpm --dir web dev` for frontend development. See [web/README.md](../web/README.md).
+`pnpm --dir web dev` for frontend development. See [web/README.md](../../web/README.md).

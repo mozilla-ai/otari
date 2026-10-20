@@ -25,7 +25,7 @@ RUN pnpm install --frozen-lockfile
 COPY web ./
 # DocsPage.tsx imports the operator guide with Vite's `?raw`, so the build reads
 # it from outside web/. .dockerignore excludes docs/ but re-includes this file.
-COPY docs/dashboard.md /app/docs/dashboard.md
+COPY docs/guides/dashboard.md /app/docs/guides/dashboard.md
 
 # web/vite.config.ts writes to ../src/gateway/static/dashboard, so the bundle
 # lands at /app/src/gateway/static/dashboard for the runtime stage to copy.

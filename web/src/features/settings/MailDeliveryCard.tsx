@@ -46,7 +46,7 @@ function MissingSettings({ missing }: { missing: string[] }) {
  *
  * Reports the settings that would turn mail on when it is off, and disables the
  * test send in that state rather than offering one that would fail. Why mail is
- * optional at all is in docs/configuration.md#mail.
+ * optional at all is in docs/reference/configuration.md#mail.
  */
 export function MailDeliveryCard() {
   const mail = useMailSettings()

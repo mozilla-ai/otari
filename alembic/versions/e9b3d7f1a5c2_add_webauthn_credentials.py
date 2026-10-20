@@ -11,7 +11,7 @@ passkey from one orphaned by a configuration change, instead of offering both
 and failing in the browser. It is also where mozilla-ai/otari-ai#1716's standing
 constraint lands: migrating otari.ai users import their credentials rather than
 claiming new accounts, and an imported row asserts only while that origin stays
-``otari.ai``. See ``docs/access-control.md``.
+``otari.ai``. See ``docs/self-hosting/administration.md``.
 
 ``webauthn_challenge`` holds one single-use nonce per ceremony in flight. It is
 a table and not a signed cookie because a challenge has to be *retired*, not

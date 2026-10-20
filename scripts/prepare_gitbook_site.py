@@ -3,6 +3,7 @@
 The site holds the pages that docs/SUMMARY.md lists, and every page under docs/ must be on that menu.
 A relative link to any other file in the repository becomes a GitHub link at the published ref.
 The pages keep their paths under docs/, so links between published pages need no rewriting.
+Images and other files under docs/assets/ are published as they are, so a page can show them.
 The site also carries the OpenAPI specification and a generated endpoint page per tag under the API reference.
 GitBook renders each operation on those pages from the specification registered in it under SPEC_NAME.
 
@@ -33,7 +34,11 @@ SPEC_NAME = "otari-openapi-spec"
 SPEC_SITE_PATH = "api/openapi.json"
 SPEC_URL = f"https://raw.githubusercontent.com/{REPO}/gitbook-docs/{SPEC_SITE_PATH}"
 ENDPOINTS_DIR = "api-endpoints"
-ENDPOINTS_PARENT = "api-reference.md"
+ENDPOINTS_PARENT = "reference/api.md"
+ASSETS_DIR = "assets"
+# Where the endpoint pages used to be, before the docs restructure; each prefix gets a redirect per page.
+ENDPOINT_REDIRECTS = ("for-integrators/api-reference", "otari/for-integrators/api-reference")
+GITBOOK_CONFIG = ".gitbook.yaml"
 
 # Repository-root files copied to the root of the site, keyed by their name in the repository.
 BRANCH_FILES = {
@@ -118,6 +123,17 @@ def nest_endpoint_pages(summary: str, pages: list[str]) -> str:
     raise ValueError(f"{SUMMARY} lists no {ENDPOINTS_PARENT!r} to nest the endpoint pages under")
 
 
+def add_endpoint_redirects(config: str, pages: list[str]) -> str:
+    """Return a GitBook config with a redirect from each old endpoint page address to its page.
+
+    The entries go at the end of the file, so the config's `redirects` mapping has to be its last key.
+    """
+    if not re.search(r"^redirects:\s*$", config, re.MULTILINE):
+        config = config.rstrip("\n") + "\n\nredirects:\n"
+    entries = [f"  {prefix}/{page}: {ENDPOINTS_DIR}/{page}.md" for page in pages for prefix in ENDPOINT_REDIRECTS]
+    return config.rstrip("\n") + "\n" + "\n".join(entries) + "\n"
+
+
 @dataclass(frozen=True)
 class Site:
     """The pages of one GitBook site build and the ref its outbound links point at."""
@@ -165,7 +181,8 @@ class Site:
         if not resolved.exists():
             raise ValueError(f"{page}: link {target!r} names no file")
         if resolved.is_relative_to(self.docs_dir.resolve()):
-            if resolved.relative_to(self.docs_dir.resolve()).as_posix() in self.published:
+            in_docs = resolved.relative_to(self.docs_dir.resolve())
+            if in_docs.as_posix() in self.published or in_docs.parts[:1] == (ASSETS_DIR,):
                 return match.group(0)
         kind = "tree" if resolved.is_dir() else "blob"
         url = f"{REPO_URL}/{kind}/{self.ref}/{PurePosixPath(resolved.relative_to(repo_root))}"
@@ -184,6 +201,8 @@ class Site:
             dest = out_dir / page
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(self.rewrite_links(source.read_text(encoding="utf-8"), page), encoding="utf-8")
+        if (assets := self.docs_dir / ASSETS_DIR).is_dir():
+            shutil.copytree(assets, out_dir / ASSETS_DIR)
         for name, dest_name in BRANCH_FILES.items():
             shutil.copyfile(self.docs_dir.parent / name, out_dir / dest_name)
         self._build_endpoint_reference(out_dir)
@@ -204,6 +223,8 @@ class Site:
             (out_dir / ENDPOINTS_DIR / f"{page}.md").write_text(endpoint_page(page, operations), encoding="utf-8")
         summary = out_dir / SUMMARY
         summary.write_text(nest_endpoint_pages(summary.read_text(encoding="utf-8"), list(by_page)), encoding="utf-8")
+        config = out_dir / GITBOOK_CONFIG
+        config.write_text(add_endpoint_redirects(config.read_text(encoding="utf-8"), list(by_page)), encoding="utf-8")
 
 
 def main() -> int:

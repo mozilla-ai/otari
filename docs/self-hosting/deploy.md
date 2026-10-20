@@ -1,7 +1,7 @@
 # Deployment
 
 Otari publishes `mzdotai/otari` on Docker Hub. Use the
-[Quickstart](quickstart.md) for local setup; this page covers production choices
+[Quickstart](../get-started/quickstart.md) for local setup; this page covers production choices
 and hybrid gateways.
 
 ## Standalone checklist
@@ -80,7 +80,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 ## Managed deployment templates
 
-- [Railway](../deploy/railway/README.md)
+- [Railway](../../deploy/railway/README.md)
 
 That page owns its current image tag, variables, platform limits, and
 maintenance instructions.
@@ -121,7 +121,7 @@ curl http://localhost:8000/api/v1/health
 curl http://localhost:8000/api/v1/health/readiness
 ```
 
-See [Runtime modes](modes.md) for the trust and credential model.
+See [Runtime modes](../get-started/ways-to-run-otari.md) for the trust and credential model.
 
 ## Optional services
 
@@ -135,7 +135,7 @@ docker compose --profile object-storage up -d
 ```
 
 The `object-storage` profile runs an S3-compatible store for uploaded files;
-[Object storage with Docker Compose](files.md#object-storage-with-docker-compose)
+[Object storage with Docker Compose](../guides/files.md#object-storage-with-docker-compose)
 has the settings that use it.
 
 Web search needs no container when `web_search_provider` names a licensed API
@@ -143,10 +143,10 @@ Web search needs no container when `web_search_provider` names a licensed API
 services are optional; requests that require an unconfigured backend fail
 without affecting ordinary inference.
 
-See [Built-in tools](tools.md) and [Guardrails](guardrails.md).
+See [Built-in tools](../guides/tools.md) and [Guardrails](../guides/guardrails.md).
 
 ## Configuration
 
 Otari accepts a mounted YAML file, scalar environment variables, or a complete
 YAML document in `OTARI_CONFIG_YAML` or `OTARI_CONFIG_B64`. See
-[Configuration](configuration.md) for precedence and security notes.
+[Configuration](../reference/configuration.md) for precedence and security notes.

@@ -61,7 +61,7 @@ context and calls the adapter.
 4. **Try it from the CLI** against the real account, and note anything surprising. Check that
    `--describe <name>` prints the metadata and options as the documentation gives them.
 5. **In the gateway**, nothing in code, since the catalog routes and the settings validation read
-   the libraries' metadata. Add the provider's pricing note to `docs/tools.md`, under "Search
+   the libraries' metadata. Add the provider's pricing note to `docs/guides/tools.md`, under "Search
    providers" or "Fetch providers", and a compose or `.env.example` line where a key is expected.
 6. **Update the learnings** below with what the provider taught, and this procedure if a step
    changed.
@@ -196,6 +196,6 @@ The first search provider with the key in the URL and errors inside a 200.
   instance's `timeout`. The live tests keep the default, which is what hosts use. A slow fixture
   can be recorded with a faster option (`effort: min` for the empty page).
 - A provider may report no cost in any answer: Tabstack shows spend only in its console. The
-  pricing note in `docs/tools.md` then says what it charges, and no more.
+  pricing note in `docs/guides/tools.md` then says what it charges, and no more.
 - Fixture recipes: `https://example.com/` for a normal page small enough to keep whole, and the
   key variable set to a made-up key for the error.

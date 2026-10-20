@@ -56,7 +56,7 @@ function Warmth({
  *  indistinguishable from a broken router: the operator sees the strong model in
  *  Activity every time and concludes the feature does not work. This is the
  *  surface that answers it, and it is the whole answer the dashboard owes for now,
- *  because recording examples is an API job (see `docs/routing.md`).
+ *  because recording examples is an API job (see `docs/guides/routing.md`).
  *
  *  Warmth is per *user*, not per policy: the examples are one user's own prompts,
  *  so a policy every caller resolves warms once per caller. That is why there is a

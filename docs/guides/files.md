@@ -81,7 +81,7 @@ its other SDKs, send that header from `client.beta.files`, so call
 Mind the base URL: Anthropic's SDK appends `/v1` itself, so it takes
 `http://localhost:8000/api`, while an OpenAI-compatible client takes
 `http://localhost:8000/api/v1` (see the
-[API reference](api-reference.md)).
+[API reference](../reference/api.md)).
 
 ```python
 from anthropic import Anthropic
@@ -117,7 +117,7 @@ not read a file stored on the control plane.
 
 When a request's code runs on Otari's sandbox, because it declared the
 `otari_code_execution` tool or because the
-[executor](tools.md#code-execution-executor) brought a provider's own
+[executor](../self-hosting/tool-services.md#code-execution-executor) brought a provider's own
 declaration here, every uploaded file it references is also seeded into the
 sandbox session's working directory, so the code the model writes can open it.
 The file keeps its own filename, reduced to its last path segment; a second
@@ -136,7 +136,7 @@ sandbox for the other.
 
 ### A file the provider's own code execution reads
 
-A declaration the [executor](tools.md#code-execution-executor) leaves with the
+A declaration the [executor](../self-hosting/tool-services.md#code-execution-executor) leaves with the
 provider runs in the provider's container, which reads only files that provider
 holds. So Otari uploads a copy of the attached file to the provider, and the
 `container_upload` block carries the provider's ID for that copy rather than
@@ -232,7 +232,7 @@ while an output that cannot be fetched is named without an id and the run stands
 
 ### A file the provider's own sandbox produced
 
-A declaration the [executor](tools.md#code-execution-executor) leaves with the
+A declaration the [executor](../self-hosting/tool-services.md#code-execution-executor) leaves with the
 provider runs in the provider's container, and the provider names each file the
 code writes by an ID of its own. When the reply arrives, Otari copies each of
 those files into its store and keeps the provider's ID as the file's ID. The
@@ -335,7 +335,7 @@ provider whose flag says images (Fireworks, Cohere) is sent the image, and the
 provider refuses it. Where Otari recognizes the provider's wording for that
 refusal (Cohere's and Fireworks' today), it answers a `400` with the code
 `unsupported_content` and a `detail` saying the model does not accept image
-content (see [Error codes](api-reference.md#error-codes)). A refusal worded
+content (see [Error codes](../reference/api.md#error-codes)). A refusal worded
 otherwise stays the provider's own `400` message, with no code. To have such a model read images
 as text instead, set `supports_image: false` for it in `model_capabilities`.
 
@@ -343,7 +343,7 @@ as text instead, set `supports_image: false` for it in `model_capabilities`.
 
 ## Configuration
 
-See [config.example.yml](../config.example.yml) for the full list. Key knobs:
+See [config.example.yml](../../config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
 upload storage (see [Storage backends](#storage-backends)). With `files_enabled`
@@ -363,7 +363,7 @@ code, and how long that copy lives (see
 [A file the provider's own code execution reads](#a-file-the-providers-own-code-execution-reads)).
 - `OTARI_PROVIDER_ACCOUNT_PEPPER`: the key for the digest that names the provider
 account a copy is in. Required while `files_provider_upload_enabled` is on (see
-[Provider copies](configuration.md#provider-copies)).
+[Provider copies](../reference/configuration.md#provider-copies)).
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local

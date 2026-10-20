@@ -75,7 +75,7 @@ describe("RoutingPage empty state", () => {
       within(empty).getByRole("link", { name: /read how/ }),
     ).toHaveAttribute(
       "href",
-      expect.stringContaining("docs/models.md#catalog-spellings"),
+      expect.stringContaining("docs/guides/models.md#catalog-spellings"),
     )
 
     await user.click(

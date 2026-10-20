@@ -1,77 +1,79 @@
 # Otari
 
-Otari is an OpenAI-compatible LLM gateway. It routes to 40+ providers, manages
-API keys, enforces budgets, and records usage. It is also the gateway at the
-heart of [otari.ai](https://otari.ai).
+Otari is an open-source, OpenAI-compatible LLM gateway. Your applications send
+requests to one endpoint with one key, and Otari routes them to 40+ providers,
+enforces budgets, applies guardrails, runs tools, and records usage and traces.
 
-## Runtime modes
+You can use it two ways, and these docs cover both:
 
-- **Standalone** serves management and inference with local storage.
-- **Hosted** serves a multi-tenant control plane while inference runs elsewhere.
-- **Hybrid** serves inference using a connected control plane such as otari.ai.
+- **[otari.ai](otari-ai/overview.md)**: Otari run by Mozilla.ai as a service.
+  Sign up and send a request; there is nothing to deploy.
+- **Self-hosted**: run the same gateway and dashboard on your own
+  infrastructure, as the [Self-hosting](self-hosting/deploy.md) section describes.
 
-See [Modes](modes.md) for the full comparison.
+Everything else, from workspaces and budgets to routing, tools and integrations,
+works the same on both. Where a step differs, the page says so in place.
 
 ## New here?
 
-Start with the [Quickstart](quickstart.md).
+Start with the [Quickstart](get-started/quickstart.md), which has an otari.ai
+path and a self-hosted one, then [Connect to Otari](get-started/connect.md) for
+base URLs, keys and SDKs.
 
 ## Browse the docs
 
-The docs are grouped by what you are trying to do.
+- **Get started**: [Quickstart](get-started/quickstart.md),
+  [Connect to Otari](get-started/connect.md), and
+  [Ways to run Otari](get-started/ways-to-run-otari.md).
+- **Guides**, for what you do with Otari:
+  [Organizations and workspaces](guides/organizations-and-workspaces.md),
+  [Members and invitations](guides/members.md),
+  [API keys](guides/api-keys.md),
+  [Provider keys](guides/provider-keys.md),
+  [Models](guides/models.md),
+  [Budgets](guides/budgets.md),
+  [Routing policies](guides/routing.md),
+  [Inference Guardrails](guides/guardrails.md),
+  [Built-in tools](guides/tools.md),
+  [MCP](guides/mcp.md),
+  [Files](guides/files.md),
+  [Playground](guides/playground.md),
+  [Agent traces](guides/traces.md),
+  [Importing external usage](guides/external-usage.md),
+  [Agent Guardrails](guides/agent-guardrails.md), and the
+  [Admin dashboard](guides/dashboard.md) tour.
+- **Integrations**, for pointing a tool or framework at Otari:
+  [Claude Code](integrations/claude-code.md),
+  [Codex](integrations/codex.md),
+  [OpenCode](integrations/opencode.md),
+  [Pydantic AI](integrations/pydantic-ai.md),
+  [LangChain](integrations/langchain.md),
+  [LangGraph](integrations/langgraph.md), and a
+  [ChatGPT subscription](integrations/chatgpt-subscription.md).
+- **Self-hosting**, for running your own:
+  [Deployment](self-hosting/deploy.md),
+  [Configure providers](self-hosting/configure-providers.md) (with step-by-step
+  guides for [OpenAI](self-hosting/providers/openai.md) and
+  [Gemini](self-hosting/providers/gemini.md)),
+  [Operator administration](self-hosting/administration.md),
+  [Tool services](self-hosting/tool-services.md),
+  [Provider endpoints](self-hosting/provider-endpoints.md),
+  [Health checks](self-hosting/health-checks.md), and
+  [Workload identity](self-hosting/workload-identity.md).
+- **otari.ai**, for what only the service has:
+  [Overview](otari-ai/overview.md) and [Billing](otari-ai/billing.md).
+- **Reference**:
+  [API reference](reference/api.md),
+  [Configuration](reference/configuration.md),
+  [Agent Guardrails reference](reference/agent-guardrails.md),
+  [SDK compatibility](reference/sdk-compatibility.md), and the
+  [Hybrid-mode](reference/hybrid-mode-protocol.md) and
+  [Code-execution](reference/code-execution-protocol.md) protocols, whose
+  machine-readable form is [`public/code-execution-openapi.yaml`](public/code-execution-openapi.yaml).
 
-### Start here
-
-- [Quickstart](quickstart.md): get running and make your first request.
-- [Modes](modes.md): standalone, hosted, and hybrid deployments.
-
-### For operators
-
-Running and managing a gateway.
-
-- [Deployment](deployment.md): Docker, Railway, hybrid mode, and optional services.
-- [Configuration](configuration.md): configuration sources, precedence, and common settings.
-- [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
-- [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
-- [Workload identity](workload-identity.md): a backend on Google Cloud authenticates with its platform identity token instead of a key's secret.
-- [Models](models.md): selectors, providers, discovery, aliases, and capabilities.
-- [Provider endpoints](provider-endpoints.md): model servers a workspace or a user brings, reached by name and kept out of budgets.
-- [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
-- [Health checks](health-checks.md): a scheduled check of every model the deployment serves, and email when one stops answering.
-- [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
-- [Gemini provider guide](providers/gemini.md): configure Gemini and route your first request through Otari.
-
-### For integrators
-
-Calling the gateway from your own code.
-
-- [API reference](api-reference.md): authentication, mode availability, and links to generated schemas.
-- [Built-in tools](tools.md): sandboxed code execution and web search Otari runs itself.
-- [MCP](mcp.md): connect MCP servers to chat, messages, and responses requests,
-  or drive them from your own application through the caller-orchestrated endpoints.
-- [Files](files.md): file uploads and document understanding for local models.
-- [Inference Guardrails](guardrails.md): request-level checks like prompt-injection detection.
-- [Agent Guardrails](agent-guardrails.md): repository-owned rules checked against what a
-  coding agent actually did to the working tree. `otari hook` runs beside Claude Code or
-  Codex and evaluates them locally, with no server and no credential.
-- [Agent Guardrails reference](agent-guardrails-reference.md): every gate type and field,
-  and what each harness can see at each event.
-- [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
-- [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API, or import its usage without routing.
-- [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
-- [Use with Pydantic AI](use-with-pydantic-ai.md), [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md): point an agent framework's model at Otari, with tools, structured output and streaming.
-- [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
-- [Agent traces](traces.md): see each agent session as turns, LLM calls and tool calls, with their timing and cost.
-- [Importing external usage](external-usage.md): bring subscription-backed usage (Claude Code, Codex, any OTLP app) into your analytics.
-- [SDK compatibility](sdk-compatibility.md): how the language SDKs are released and which SDK version works with which Otari version.
-
-### For platform builders
-
-- [Hybrid-mode protocol](hybrid-mode-protocol.md): the Otari/platform wire contract, for building a platform that Otari connects to.
-- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](public/code-execution-openapi.yaml).
-
-### For contributors
+## For contributors
 
 - [Architecture](../ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
 - [Backend domains](../DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
 - [Load test](../loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.
+- [Writing docs](../CONTRIBUTING.md#writing-docs): how these pages are organized, and when a page says otari.ai or self-hosted.

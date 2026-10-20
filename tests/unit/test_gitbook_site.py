@@ -39,14 +39,17 @@ gitbook = _load()
 def repo(tmp_path: Path) -> Path:
     docs = tmp_path / "docs"
     (docs / "providers").mkdir(parents=True)
+    (docs / "reference").mkdir()
+    (docs / "assets").mkdir()
     (docs / "public").mkdir()
     (tmp_path / "deploy").mkdir()
-    pages = ("index.md", "guide.md", "internal.md", "api-reference.md", "providers/openai.md")
+    pages = ("index.md", "guide.md", "internal.md", "reference/api.md", "providers/openai.md")
     for path in (*(f"docs/{page}" for page in pages), "ARCHITECTURE.md"):
         (tmp_path / path).write_text("# Page\n", encoding="utf-8")
+    (docs / "assets" / "diagram.webp").write_bytes(b"RIFF")
     (docs / "public" / "openapi.json").write_text(json.dumps(_SPEC), encoding="utf-8")
     (docs / "SUMMARY.md").write_text(
-        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [API](api-reference.md)\n"
+        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [API](reference/api.md)\n"
         "* [OpenAI](providers/openai.md)\n",
         encoding="utf-8",
     )
@@ -87,6 +90,11 @@ def test_link_to_a_non_markdown_file_points_at_github(site: Any) -> None:
     assert site.rewrite_links("[Spec](public/openapi.json)", "index.md") == (
         f"[Spec]({_URL}/blob/v1.2.3/docs/public/openapi.json)"
     )
+
+
+def test_link_to_an_asset_is_kept(site: Any) -> None:
+    text = "![Diagram](../assets/diagram.webp)"
+    assert site.rewrite_links(text, "providers/openai.md") == text
 
 
 def test_external_and_anchor_links_are_kept(site: Any) -> None:
@@ -130,11 +138,12 @@ def test_build_writes_only_the_published_pages(repo: Path, site: Any) -> None:
         "SUMMARY.md",
         "api-endpoints/chat.md",
         "api-endpoints/keys.md",
-        "api-reference.md",
         "api/openapi.json",
+        "assets/diagram.webp",
         "guide.md",
         "index.md",
         "providers/openai.md",
+        "reference/api.md",
     ]
 
 
@@ -142,8 +151,29 @@ def test_build_nests_a_page_per_tag_under_the_api_reference(repo: Path, site: An
     site.build(repo / "site")
 
     assert (repo / "site" / "SUMMARY.md").read_text(encoding="utf-8") == (
-        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [API](api-reference.md)\n"
+        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [API](reference/api.md)\n"
         "  * [Chat](api-endpoints/chat.md)\n  * [Keys](api-endpoints/keys.md)\n* [OpenAI](providers/openai.md)\n"
+    )
+
+
+def test_build_redirects_the_old_endpoint_page_addresses(repo: Path, site: Any) -> None:
+    site.build(repo / "site")
+
+    assert (repo / "site" / ".gitbook.yaml").read_text(encoding="utf-8") == (
+        "root: ./\n\nredirects:\n"
+        "  for-integrators/api-reference/chat: api-endpoints/chat.md\n"
+        "  otari/for-integrators/api-reference/chat: api-endpoints/chat.md\n"
+        "  for-integrators/api-reference/keys: api-endpoints/keys.md\n"
+        "  otari/for-integrators/api-reference/keys: api-endpoints/keys.md\n"
+    )
+
+
+def test_endpoint_redirects_extend_an_existing_redirects_mapping() -> None:
+    config = "root: ./\n\nredirects:\n  old: new.md\n"
+    assert gitbook.add_endpoint_redirects(config, ["chat"]) == (
+        "root: ./\n\nredirects:\n  old: new.md\n"
+        "  for-integrators/api-reference/chat: api-endpoints/chat.md\n"
+        "  otari/for-integrators/api-reference/chat: api-endpoints/chat.md\n"
     )
 
 
@@ -204,9 +234,9 @@ def test_operations_on_a_page_list_reads_before_writes() -> None:
 
 
 def test_endpoint_pages_follow_the_api_reference_children() -> None:
-    summary = "* [API](api-reference.md)\n  * [Errors](errors.md)\n    * [Codes](codes.md)\n* [Guide](guide.md)"
+    summary = "* [API](reference/api.md)\n  * [Errors](errors.md)\n    * [Codes](codes.md)\n* [Guide](guide.md)"
     assert gitbook.nest_endpoint_pages(summary, ["chat"]) == (
-        "* [API](api-reference.md)\n  * [Errors](errors.md)\n    * [Codes](codes.md)\n"
+        "* [API](reference/api.md)\n  * [Errors](errors.md)\n    * [Codes](codes.md)\n"
         "  * [Chat](api-endpoints/chat.md)\n* [Guide](guide.md)"
     )
 
@@ -224,7 +254,7 @@ def test_build_fails_when_a_docs_page_is_in_the_endpoint_pages_directory(repo: P
 def test_build_fails_when_the_menu_has_no_api_reference(repo: Path) -> None:
     (repo / "docs" / "SUMMARY.md").write_text("* [Guide](guide.md)\n", encoding="utf-8")
     site = gitbook.Site.from_summary(repo / "docs", "main")
-    with pytest.raises(ValueError, match="api-reference.md"):
+    with pytest.raises(ValueError, match="reference/api.md"):
         site.build(repo / "site")
 
 

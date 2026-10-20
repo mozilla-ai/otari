@@ -292,7 +292,7 @@ class SandboxBackend:
         self._auth_token = auth_token
         # The sandbox image this session asks for: the workspace's pinned image,
         # else the deployment's, else nothing. Sent as an additive field on
-        # ``CreateSession`` (see ``docs/code-execution-protocol.md``), so a
+        # ``CreateSession`` (see ``docs/reference/code-execution-protocol.md``), so a
         # backend that leases from a fixed pre-baked pool ignores it and the
         # request is byte-for-byte what it was before this existed.
         self._image = image

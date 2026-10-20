@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](../config.example.yml);
+the management API. Start with [`config.example.yml`](../../config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -48,7 +48,7 @@ Provider credentials come from the environment through `${VAR}` references
 in the `providers` map (see [Provider configuration](#provider-configuration)).
 A provider's native variable, such as `OPENAI_API_KEY`, is never read on its
 own: name it in the entry (`api_key: ${OPENAI_API_KEY}`); see
-[Models](models.md#configuring-a-provider).
+[Models](../self-hosting/configure-providers.md#configuring-a-provider).
 
 Booleans accept `true`, `false`, `1`, `0`, `yes`, `no`, `on`, and
 `off`, without regard to case.
@@ -87,7 +87,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
-| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone only. See [Health checks](health-checks.md). |
+| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone only. See [Health checks](../self-hosting/health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -96,18 +96,18 @@ the corresponding startup value after the database is available.
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
-| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
+| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](../self-hosting/workload-identity.md). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
-| `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
+| `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](../self-hosting/workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
-| `streaming_first_chunk_hold_ms` | How long a standalone gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
-| `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
+| `streaming_first_chunk_hold_ms` | How long a standalone gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api.md#error-codes). |
+| `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
-| `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |
+| `mode` | `standalone`, `hosted`, or `hybrid`. See [Ways to run Otari](../get-started/ways-to-run-otari.md). |
 
 For every field, its current default, validation, and description live on
 `GatewayConfig` in `src/gateway/core/config.py`, or in the per-domain module
@@ -222,7 +222,7 @@ provider instance it is called through, then the model). One count is kept per
 model and shared by every policy, alias and direct call that reaches it, so it
 can stand for a provider's quota. It is checked when an attempt is about to call
 the model, after any policy has picked its candidates, rather than at admission:
-a [routing policy](routing.md#spill-over-when-a-model-is-full-priority-routing)
+a [routing policy](../guides/routing.md#spill-over-when-a-model-is-full-priority-routing)
 skips a full model and tries its next candidate, and a request is refused with a
 429 only when no candidate has room. A direct call to a full model is refused.
 A candidate that fails before responding gives back its tokens and its slot but
@@ -302,7 +302,7 @@ the next start. It takes:
 | `secret` | Required. The secret requests present, interpolated from the environment. |
 | `key_name` | Display name. Defaults to the key's name in config. |
 | `user_id` | The user the key bills to, created when missing. Unset uses the shared `default` user. |
-| `is_service_key` | Lets requests name end users. See [Service keys and end users](access-control.md#service-keys-and-end-users). |
+| `is_service_key` | Lets requests name end users. See [Service keys and end users](../guides/api-keys.md#service-keys-and-end-users). |
 | `end_user_budget_ids` | Budgets a request may start a new end user on with `Otari-End-User-Budget`. |
 | `end_user_budget_id` | Budget a new end user starts on when the request names none. Must be on `end_user_budget_ids` when both are set. |
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
@@ -430,7 +430,7 @@ providers:
 ```
 
 Call it as `home_lab:qwen3-32b`. The optional `models` list supplies discovery
-for backends without a model-listing endpoint. See [Models](models.md).
+for backends without a model-listing endpoint. See [Models](../guides/models.md).
 
 ### Provider retries
 
@@ -466,7 +466,7 @@ providers (Bedrock, Mistral, Cohere, Ollama and the rest) keep their SDK's own
 retry behavior, which `client_args` can still configure where the SDK allows
 it. A retry setting in an instance's `client_args` (`max_retries`, or
 `http_options.retry_options` for Google) wins over both values. Neither value
-reaches an [owned provider endpoint](provider-endpoints.md), which keeps its
+reaches an [owned provider endpoint](../self-hosting/provider-endpoints.md), which keeps its
 SDK's default outside a policy that can fall over.
 
 ### Messages through the Responses API
@@ -590,7 +590,7 @@ used to override the configured one.
 ### Hosted providers in config.yml
 
 A hosted provider is a credential the deployment serves requests on when
-nothing else credentials them (see [Modes](modes.md#hosted-providers-and-byo-credentials)).
+nothing else credentials them (see [Ways to run Otari](../get-started/ways-to-run-otari.md#hosted-providers-and-byo-credentials)).
 Besides the Hosted providers page, a standalone or hosted deployment can declare
 them in a `hosted_providers:` block, keyed by name, with the fields the
 `/api/v1/hosted-providers` body takes:
@@ -681,7 +681,7 @@ gateway ignores the block.
 
 A request that asks a provider's own code execution to run over an attached file
 gets a short-lived copy of that file in the provider's account (see
-[Files](files.md#a-file-the-providers-own-code-execution-reads)). The account a
+[Files](../guides/files.md#a-file-the-providers-own-code-execution-reads)). The account a
 copy is in is named by a keyed digest of the credential that made it, so the
 digest needs a key of its own: `OTARI_PROVIDER_ACCOUNT_PEPPER`.
 
@@ -787,7 +787,7 @@ cost unless the request also ran priced gateway tools, whose charges are still
 recorded. The same setting governs an organization's own provider keys: a model
 a key offers that nothing prices is switched on and served at no cost, where
 `require_pricing: true` keeps it switched off until it has a rate (see
-[Who is shown which models](models.md#who-is-shown-which-models)). The gateway logs a warning for each unpriced model at most once an
+[Who is shown which models](../guides/models.md#who-is-shown-which-models)). The gateway logs a warning for each unpriced model at most once an
 hour per process, and the dashboard shows operators a banner naming the models
 that served unpriced traffic in the selected workspace in the last 24 hours
 and still have no stored price, linked to those requests in Activity, where
@@ -856,7 +856,7 @@ Two limits of that throttle are worth knowing before a catalog is put on the
 open internet. Behind a reverse proxy every visitor shares the proxy's
 address, and one scraper exhausts the budget for everyone, unless
 `forwarded_allow_ips` trusts that proxy; see
-[Behind a reverse proxy](deployment.md#behind-a-reverse-proxy). And the counter
+[Behind a reverse proxy](../self-hosting/deploy.md#behind-a-reverse-proxy). And the counter
 is per worker, so a deployment running N workers serves up to N times the
 configured number.
 
@@ -1023,7 +1023,7 @@ and with `?kind=fetch` the fetch providers: whether each requires an `api_key` o
 API key can read it. Only the deployment's operator also sees which of the
 deployment's instances use each provider, and the `api_base` a `searxng`
 instance inherits from `web_search_url`. Provider options and request filters
-are covered in [Built-in tools](tools.md).
+are covered in [Built-in tools](../guides/tools.md).
 
 An instance takes its key only from its own `api_key`, such as
 `"${EXA_API_KEY}"` above, as an LLM provider's `providers:` entry does. An entry
@@ -1126,7 +1126,7 @@ standalone-mode only.
 
 `POST /api/v1/routing/recommend` asks a decision model which of a few
 candidate models a coding agent's subagent should run on (see
-[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model)).
+[Claude Code](../integrations/claude-code.md#let-otari-choose-a-subagents-model)).
 Two settings shape the question:
 
 ```yaml
@@ -1183,7 +1183,7 @@ invitation_mail_limit_per_organization: 250   # default
 invitation_mail_limit_per_address: 5          # default, from every organization together
 ```
 
-See [Invitations](access-control.md#invitations).
+See [Invitations](../guides/members.md#invitations).
 
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
@@ -1198,7 +1198,7 @@ Signup is closed by default: only an address an owner or admin already added or 
 open_signup: true
 ```
 
-The signup form needs mail configured in either case, because it sends a verification link. A Google or GitHub sign-in needs no mail, because the provider has already verified the address. See [Access control](access-control.md) for what each value does with an address nobody has added.
+The signup form needs mail configured in either case, because it sends a verification link. A Google or GitHub sign-in needs no mail, because the provider has already verified the address. See [Signup](../self-hosting/administration.md#signup) for what each value does with an address nobody has added.
 
 ## Built-in tools and guardrails variables
 
@@ -1217,12 +1217,12 @@ and guardrail configuration. Common startup settings are:
 - `mcp_allow_loopback` and `mcp_allow_private_hosts`
 - `web_search_allow_private_hosts`
 - `provider_allow_private_hosts`
-- `provider_endpoints_enabled` (see [Provider endpoints](provider-endpoints.md))
+- `provider_endpoints_enabled` (see [Provider endpoints](../self-hosting/provider-endpoints.md))
 - `web_search_workspace_default` and `code_execution_workspace_default`
   (below)
 
-See [Built-in tools](tools.md), [MCP](mcp.md), and
-[Guardrails](guardrails.md) for behavior and security boundaries.
+See [Built-in tools](../guides/tools.md), [MCP](../guides/mcp.md), and
+[Guardrails](../guides/guardrails.md) for behavior and security boundaries.
 
 ### What a workspace with no tool policy gets
 
@@ -1239,7 +1239,7 @@ Each decides only for a workspace with no stored policy: `false` refuses the
 tool there as a stored disabled policy would, and a workspace owner or admin
 turns it on from the Tools pages or the workspace policy API. A stored policy
 always wins. Unset, the tools are on, except on a hosted deployment, where they
-are off. See [Built-in tools](tools.md#per-workspace-web-access-policy) for what
+are off. See [Built-in tools](../guides/tools.md#per-workspace-web-access-policy) for what
 each policy covers.
 
 ## Documentation links
@@ -1306,7 +1306,7 @@ refused.
 Left unset on a split deployment, an OAuth callback lands the browser on an
 origin holding none of the sign-in state it started with, and the sign-in fails
 with the authorization code unspent. Passkeys need their own settings there; see
-[Access control](access-control.md#passkeys).
+[Passkeys](../self-hosting/administration.md#passkeys).
 
 ## The data-plane address
 
@@ -1326,7 +1326,7 @@ this value without authentication.
 Hybrid mode requires `OTARI_AI_TOKEN`. Optional platform settings control the
 platform API URL, management URL, health-probe path, resolution timeout,
 usage-report timeout and retries, and first-chunk fallback timeout. See
-[Modes](modes.md) and the normative
+[Ways to run Otari](../get-started/ways-to-run-otari.md) and the normative
 [hybrid-mode protocol](hybrid-mode-protocol.md).
 
 ## Extending Otari with a bootstrap module
@@ -1337,7 +1337,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](../ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](../../ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

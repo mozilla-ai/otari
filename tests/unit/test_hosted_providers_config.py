@@ -126,7 +126,7 @@ def test_a_bare_keyed_entry_is_refused() -> None:
         _validated({"anthropic": None})
 
 
-# The providers docs/configuration.md lists as taking no ``api_key``; keep the two in step.
+# The providers docs/reference/configuration.md lists as taking no ``api_key``; keep the two in step.
 DOCUMENTED_KEYLESS = {
     "cascadia",
     "llamacpp",

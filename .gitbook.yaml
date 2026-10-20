@@ -12,3 +12,92 @@ root: ./
 structure:
   readme: index.md
   summary: SUMMARY.md
+
+# Old addresses of pages that moved, so links and bookmarks keep working. Keys are
+# paths on the site; values are pages in this tree. The builder appends one entry per
+# generated API endpoint page (prepare_gitbook_site.py, ENDPOINT_REDIRECTS).
+redirects:
+  # The otari.ai user guide's pages, merged into this site.
+  getting-started/quickstart: get-started/quickstart.md
+  learn/workspaces: guides/organizations-and-workspaces.md
+  learn/provider-keys: guides/provider-keys.md
+  learn/budgets: guides/budgets.md
+  learn/billing: otari-ai/billing.md
+  how-to-guides/manage-workspaces: guides/organizations-and-workspaces.md
+  how-to-guides/invite-and-manage-organization-members: guides/members.md
+  how-to-guides/manage-provider-keys: guides/provider-keys.md
+  how-to-guides/rotate-a-provider-key: guides/provider-keys.md
+  how-to-guides/set-a-budget-and-ceiling: guides/budgets.md
+  how-to-guides/create-a-multi-provider-routing: guides/routing.md
+  how-to-guides/manage-guardrails: guides/guardrails.md
+  tools/configure-web-search: guides/tools.md
+  tools/configure-code-execution: guides/tools.md
+  tools/add-an-mcp-server: guides/mcp.md
+  playground/playground: guides/playground.md
+
+  # The pages this site served under /otari/, by their old path in either form.
+  otari: index.md
+  start-here/quickstart: get-started/quickstart.md
+  otari/start-here/quickstart: get-started/quickstart.md
+  start-here/modes: get-started/ways-to-run-otari.md
+  otari/start-here/modes: get-started/ways-to-run-otari.md
+  for-operators/deployment: self-hosting/deploy.md
+  otari/for-operators/deployment: self-hosting/deploy.md
+  for-operators/configuration: reference/configuration.md
+  otari/for-operators/configuration: reference/configuration.md
+  for-operators/dashboard: guides/dashboard.md
+  otari/for-operators/dashboard: guides/dashboard.md
+  for-operators/access-control: guides/api-keys.md
+  otari/for-operators/access-control: guides/api-keys.md
+  for-operators/workload-identity: self-hosting/workload-identity.md
+  otari/for-operators/workload-identity: self-hosting/workload-identity.md
+  for-operators/models: guides/models.md
+  otari/for-operators/models: guides/models.md
+  for-operators/provider-endpoints: self-hosting/provider-endpoints.md
+  otari/for-operators/provider-endpoints: self-hosting/provider-endpoints.md
+  for-operators/routing: guides/routing.md
+  otari/for-operators/routing: guides/routing.md
+  for-operators/health-checks: self-hosting/health-checks.md
+  otari/for-operators/health-checks: self-hosting/health-checks.md
+  for-operators/openai: self-hosting/providers/openai.md
+  otari/for-operators/openai: self-hosting/providers/openai.md
+  for-operators/gemini: self-hosting/providers/gemini.md
+  otari/for-operators/gemini: self-hosting/providers/gemini.md
+  for-integrators/api-reference: reference/api.md
+  otari/for-integrators/api-reference: reference/api.md
+  for-integrators/tools: guides/tools.md
+  otari/for-integrators/tools: guides/tools.md
+  for-integrators/mcp: guides/mcp.md
+  otari/for-integrators/mcp: guides/mcp.md
+  for-integrators/files: guides/files.md
+  otari/for-integrators/files: guides/files.md
+  for-integrators/guardrails: guides/guardrails.md
+  otari/for-integrators/guardrails: guides/guardrails.md
+  for-integrators/agent-guardrails: guides/agent-guardrails.md
+  otari/for-integrators/agent-guardrails: guides/agent-guardrails.md
+  for-integrators/agent-guardrails-reference: reference/agent-guardrails.md
+  otari/for-integrators/agent-guardrails-reference: reference/agent-guardrails.md
+  for-integrators/use-with-claude-code: integrations/claude-code.md
+  otari/for-integrators/use-with-claude-code: integrations/claude-code.md
+  for-integrators/use-with-codex: integrations/codex.md
+  otari/for-integrators/use-with-codex: integrations/codex.md
+  for-integrators/use-with-opencode: integrations/opencode.md
+  otari/for-integrators/use-with-opencode: integrations/opencode.md
+  for-integrators/use-with-pydantic-ai: integrations/pydantic-ai.md
+  otari/for-integrators/use-with-pydantic-ai: integrations/pydantic-ai.md
+  for-integrators/use-with-langchain: integrations/langchain.md
+  otari/for-integrators/use-with-langchain: integrations/langchain.md
+  for-integrators/use-with-langgraph: integrations/langgraph.md
+  otari/for-integrators/use-with-langgraph: integrations/langgraph.md
+  for-integrators/chatgpt-subscription: integrations/chatgpt-subscription.md
+  otari/for-integrators/chatgpt-subscription: integrations/chatgpt-subscription.md
+  for-integrators/traces: guides/traces.md
+  otari/for-integrators/traces: guides/traces.md
+  for-integrators/external-usage: guides/external-usage.md
+  otari/for-integrators/external-usage: guides/external-usage.md
+  for-integrators/sdk-compatibility: reference/sdk-compatibility.md
+  otari/for-integrators/sdk-compatibility: reference/sdk-compatibility.md
+  for-platform-builders/hybrid-mode-protocol: reference/hybrid-mode-protocol.md
+  otari/for-platform-builders/hybrid-mode-protocol: reference/hybrid-mode-protocol.md
+  for-platform-builders/code-execution-protocol: reference/code-execution-protocol.md
+  otari/for-platform-builders/code-execution-protocol: reference/code-execution-protocol.md

@@ -1,6 +1,6 @@
 # Gemini
 
-Route requests to Google's Gemini models through Otari, using a Gemini API key from Google AI Studio. For Gemini on Google Cloud, use the `vertex` provider instead. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the current provider list and [Models](../models.md) for Otari's model-name format.
+Route requests to Google's Gemini models through Otari, using a Gemini API key from Google AI Studio. For Gemini on Google Cloud, use the `vertex` provider instead. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the current provider list and [Models](../../guides/models.md) for Otari's model-name format.
 
 ## What you'll set up
 
@@ -8,7 +8,7 @@ A Gemini provider entry in your `config.yml` that reads your key from `GEMINI_AP
 
 ## Prerequisites
 
-- Otari running locally (see the [Quickstart](../quickstart.md))
+- Otari running locally (see the [Quickstart](../../get-started/quickstart.md))
 - A Gemini API key from <https://aistudio.google.com/apikey>
 
 ## Configure
@@ -48,11 +48,11 @@ gemini:gemini-3.1-flash-lite
 
 Everything after the colon is passed straight to Gemini, so any model your key can access works. Google retires older models for new keys, so check the [model list](https://ai.google.dev/gemini-api/docs/models) if a name is rejected.
 
-Chat completions take only text-generation models. Embedding models such as `gemini-embedding-001` do not work there; send them to `POST /api/v1/embeddings` instead (see the [API reference](../api-reference.md)).
+Chat completions take only text-generation models. Embedding models such as `gemini-embedding-001` do not work there; send them to `POST /api/v1/embeddings` instead (see the [API reference](../../reference/api.md)).
 
 ## Verify
 
-If you have not already started Otari and created a client key, follow the [Quickstart](../quickstart.md) first.
+If you have not already started Otari and created a client key, follow the [Quickstart](../../get-started/quickstart.md) first.
 
 Then make a request with the Otari Python SDK (`pip install otari`; any
 OpenAI-compatible client also works), using a `gemini:<model>` selector:

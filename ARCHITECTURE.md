@@ -4,7 +4,7 @@ Otari is an OpenAI-compatible LLM gateway, built to be extended. Its core define
 
 An **overlay** is a build that layers its own adapters (and its own routers and pages) on top of Otari through these extension points. otari.ai's edition is one such overlay, but it is one among possible many, and nothing in this document is specific to it. This is the open-core shape: Otari is the Apache-2.0 base that stands on its own, and an overlay adds capabilities along a published boundary.
 
-This document is for contributors changing the *shape* of the system. It explains where that boundary is, what Otari's core provides versus what an overlay supplies, and how to add a capability without crossing the line. For the request-level, user-facing picture, start with [docs/index.md](docs/index.md) and [docs/modes.md](docs/modes.md).
+This document is for contributors changing the *shape* of the system. It explains where that boundary is, what Otari's core provides versus what an overlay supplies, and how to add a capability without crossing the line. For the request-level, user-facing picture, start with [docs/index.md](docs/index.md) and [docs/get-started/ways-to-run-otari.md](docs/get-started/ways-to-run-otari.md).
 
 ## Status: this is a north-star document
 
@@ -31,13 +31,13 @@ On the request hot path the two meet through the **resolve protocol**. Before a 
 POST /gateway/provider-keys/resolve  ->  attempts[]
 ```
 
-Each attempt carries `provider`, `model`, `api_key`, `api_base`, and `managed`. The gateway walks the list in order (retrying the next attempt on a retryable failure, committing on success) and makes **zero routing decisions of its own**. The full wire contract is in [docs/hybrid-mode-protocol.md](docs/hybrid-mode-protocol.md).
+Each attempt carries `provider`, `model`, `api_key`, `api_base`, and `managed`. The gateway walks the list in order (retrying the next attempt on a retryable failure, committing on success) and makes **zero routing decisions of its own**. The full wire contract is in [docs/reference/hybrid-mode-protocol.md](docs/reference/hybrid-mode-protocol.md).
 
 The resolve protocol is the seam made concrete on a live boundary: a simple control plane returns a plain ordered list; a richer one could return a smartly selected list; and the gateway cannot tell which answered. The decision-making sits behind the protocol, on the control-plane side, and the gateway stays identical no matter what answers.
 
 Provider resolution is the seam on the request hot path, but it is not the only one. Other capabilities (authorization, identity, entitlements, billing, code execution) sit behind their own ports; several of them back admin-facing and control-plane surfaces rather than the LLM call path.
 
-Today the control plane resolves two ways, selected by [mode](docs/modes.md):
+Today the control plane resolves two ways, selected by [mode](docs/get-started/ways-to-run-otari.md):
 
 - **Standalone** (default): the gateway resolves against its own local database (users, keys, budgets, usage in `src/gateway/models/`). This is the open-source control plane in its simplest form.
 - **Hybrid** (`OTARI_AI_TOKEN` set): the gateway delegates resolution to a peer over HTTP (`src/gateway/api/routes/_platform.py`). Any service that implements the protocol can answer; otari.ai is the reference peer.
@@ -95,7 +95,7 @@ The budget path already runs this inside one database (`services/budgets/`). `re
 
 TCC is the wrong tool where one transaction already covers the work. There, use a listener that runs inside the caller's transaction, as `services/tenancy/membership_listener.py` does. Work that leaves nothing durable, such as a web search, needs only the authorization and the direct call.
 
-> **Where this stands.** The rules are decided, and the grant is not built yet. The grant object, the token a front door verifies, the Try-Confirm/Cancel rules and content encryption are specified in [docs/hybrid-mode-protocol.md](docs/hybrid-mode-protocol.md#grants). Files is the first capability to implement them ([#1750](https://github.com/mozilla-ai/otari/issues/1750)), and the code execution front door follows ([docs/code-execution-protocol.md](docs/code-execution-protocol.md)). Web search and code execution can still be configured to send traffic through the control plane, and [#1688](https://github.com/mozilla-ai/otari/issues/1688) removes that. Each capability's wire contract is written in [docs/hybrid-mode-protocol.md](docs/hybrid-mode-protocol.md) before its code.
+> **Where this stands.** The rules are decided, and the grant is not built yet. The grant object, the token a front door verifies, the Try-Confirm/Cancel rules and content encryption are specified in [docs/reference/hybrid-mode-protocol.md](docs/reference/hybrid-mode-protocol.md#grants). Files is the first capability to implement them ([#1750](https://github.com/mozilla-ai/otari/issues/1750)), and the code execution front door follows ([docs/reference/code-execution-protocol.md](docs/reference/code-execution-protocol.md)). Web search and code execution can still be configured to send traffic through the control plane, and [#1688](https://github.com/mozilla-ai/otari/issues/1688) removes that. Each capability's wire contract is written in [docs/reference/hybrid-mode-protocol.md](docs/reference/hybrid-mode-protocol.md) before its code.
 
 ## The extension seam: ports and adapters
 
@@ -227,14 +227,14 @@ This is the open-core line: for each capability, what Otari's core ships and wha
 | RBAC | **Core base + overlay adapter** *(provisional)* | Base roles and org scoping in the core; deeper roles, fine-grained permissions, and audit from an overlay adapter. Split pending an open decision. |
 | SSO | **Core base + overlay adapter** *(provisional)* | Social sign-in and passkeys in the core; enterprise SSO (for example SAML, enterprise OIDC, directory provisioning) from an overlay adapter. Split pending an open decision. |
 | Routing | **Core base + overlay adapter** *(provisional)* | Ordered fallback and policies in the core; a richer model-selection strategy from an overlay adapter. Split pending an open decision. |
-| Model inference | **Core port + core adapter** | Self-hosting your own backends is a first-class path in the core, upstream of the port. The core adapter serves a request that brings no key of its own on the deployment's hosted providers, the credentials an operator configures for it. An overlay rebinds the port to decide differently, for example per organization. See the managed-models section of [docs/modes.md](docs/modes.md). |
+| Model inference | **Core port + core adapter** | Self-hosting your own backends is a first-class path in the core, upstream of the port. The core adapter serves a request that brings no key of its own on the deployment's hosted providers, the credentials an operator configures for it. An overlay rebinds the port to decide differently, for example per organization. See the managed-models section of [docs/get-started/ways-to-run-otari.md](docs/get-started/ways-to-run-otari.md). |
 | Code execution | **Core port and adapters, managed service from an overlay** *(provisional)* | The core adapters reach a sandbox backend through the published protocol or E2B. A hardened, managed sandbox is a service an overlay runs behind the published protocol, and the data plane reaches it with a platform grant. An overlay binds no adapter here, because the adapter sees the code. Interface still provisional. |
 | Telemetry storage | **Core port, store from an overlay** | Captured telemetry is content, so the data plane writes it: to this deployment's own database in the core, or with a platform grant to a store that an overlay runs for many tenants' retention and query volume. A person reads it back through the control plane. |
 | Billing (wallet/payments) | **Overlay-only** | A Null Object (no-op) adapter in the core; real billing exists only in an overlay. |
 
 The **provisional** rows (RBAC, SSO, routing) share one open question: how deep the core base goes before an overlay adapter takes over. That is an open design decision for the project maintainers, not settled yet and not a contributor's to assume; treat those lines as a working assumption until it is decided and recorded here.
 
-The inference and code-execution ports share a shape: a compute-heavy backend behind a port, chosen by the control plane, executed in the data plane. Self-hosting is a first-class path in the core, not a degraded one. In the resolve protocol this seam is already latent: `managed: false` with an `api_base` is the self-hosted path, and `managed: true` is a hosted, metered backend (see [docs/modes.md](docs/modes.md)).
+The inference and code-execution ports share a shape: a compute-heavy backend behind a port, chosen by the control plane, executed in the data plane. Self-hosting is a first-class path in the core, not a degraded one. In the resolve protocol this seam is already latent: `managed: false` with an `api_base` is the self-hosted path, and `managed: true` is a hosted, metered backend (see [docs/get-started/ways-to-run-otari.md](docs/get-started/ways-to-run-otari.md)).
 
 ## Deployment and entitlements
 
@@ -305,10 +305,10 @@ A service imports its own domain's repositories, the services of other domains, 
 Split a feature into its pieces of work before you choose a mechanism. One feature often has a piece in each plane, or a core piece beside an overlay piece. Ask these questions of each piece.
 
 1. **Does Otari need it to stand alone?** Yes: the core. No: an overlay.
-2. **Does it see customer content while it serves a caller's request?** Yes: the data plane. No: the control plane. Customer content is what a caller sends and receives: prompts, completions, tool inputs and outputs, search queries, sandbox code, file bytes and captured agent telemetry. A person who reads stored content is the one exception: the control plane decrypts it for them after an access check and an audit record, as [the protocol](docs/hybrid-mode-protocol.md#content-encryption) says.
+2. **Does it see customer content while it serves a caller's request?** Yes: the data plane. No: the control plane. Customer content is what a caller sends and receives: prompts, completions, tool inputs and outputs, search queries, sandbox code, file bytes and captured agent telemetry. A person who reads stored content is the one exception: the control plane decrypts it for them after an access check and an audit record, as [the protocol](docs/reference/hybrid-mode-protocol.md#content-encryption) says.
 3. **Is it an overlay piece that sees content?** Then it is a service, not an adapter. An overlay loads into a control plane, and a data plane runs the core alone. So the adapter that sees the content is in the core and speaks a published protocol. The overlay runs a service behind that protocol, and its control-plane piece mints the grant that the data plane presents to it. The data plane goes direct to the service.
 
-Code execution is this shape. `CodeExecutionPort`'s core adapter speaks [the code execution protocol](docs/code-execution-protocol.md), and a platform runs a front door behind it. [How a data plane reaches what it does not own](#how-a-data-plane-reaches-what-it-does-not-own) gives the authority the control plane returns.
+Code execution is this shape. `CodeExecutionPort`'s core adapter speaks [the code execution protocol](docs/reference/code-execution-protocol.md), and a platform runs a front door behind it. [How a data plane reaches what it does not own](#how-a-data-plane-reaches-what-it-does-not-own) gives the authority the control plane returns.
 
 A data-plane piece that reaches a remote resource takes one of the three authority cases, and one that leaves durable state uses [Try-Confirm/Cancel](#durable-state-try-confirmcancel).
 

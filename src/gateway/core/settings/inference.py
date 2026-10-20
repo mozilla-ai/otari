@@ -26,7 +26,7 @@ class InferenceSettings(BaseModel):
         description=(
             "Whether each provider call carries an opaque identifier of the end user behind it. A startup "
             "setting: the dashboard shows it but cannot change it. See "
-            "docs/configuration.md#end-user-identifiers."
+            "docs/reference/configuration.md#end-user-identifiers."
         ),
     )
     provider_user_identifier_key: Annotated[str | None, SECRET] = Field(

@@ -132,7 +132,7 @@ class ResolvedRoute(BaseModel):
     fallback_enabled: bool
     attempts: list[ResolvedAttempt]
     # The platform identity that owns the presented X-User-Token, when the peer
-    # supplies one (see docs/hybrid-mode-protocol.md's Extension policy). An
+    # supplies one (see docs/reference/hybrid-mode-protocol.md's Extension policy). An
     # opaque string, never parsed; absent for peers that predate the field or
     # simply don't send it. This is the only per-caller identity hybrid mode
     # has, so it is what gateway-side survivals (aliases, routing memory,
@@ -141,7 +141,7 @@ class ResolvedRoute(BaseModel):
     # The tenant that owns this resolution: the workspace the presented
     # X-User-Token belongs to, and the organization above it. Both opaque
     # strings, never parsed. The platform has carried them on its resolve
-    # response all along (see docs/hybrid-mode-protocol.md); keeping them here
+    # response all along (see docs/reference/hybrid-mode-protocol.md); keeping them here
     # is the only way anything downstream can attribute a record to a tenant,
     # because the gateway token that authenticates the call to the platform
     # carries no tenant of its own. Absent on a peer that does not send them,

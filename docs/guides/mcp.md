@@ -370,11 +370,23 @@ differently, and deliberately: the loop above resolves a list and skips one
 entry, while an endpoint asked about exactly that server answers `404` rather
 than returning nothing.
 
-### Configuring them (standalone)
+### Configuring them
 
-The dashboard manages them under **Tools → MCP servers**, which acts on the
-workspace the switcher has selected. Everything below is the same thing over the
-API.
+In the dashboard:
+
+1. Select the workspace in the top-left corner.
+2. Go to **Tools** → **MCP servers** and click **Add MCP server**.
+3. Enter a **Name**, unique within the workspace, which identifies the server's tools.
+4. Enter the server's **URL**. It must be reachable from the gateway.
+5. If the server needs one, enter an **Authorization token**.
+6. Optionally add a **Purpose hint** saying when the model should use the server,
+   such as "Use for repository and issue lookups".
+7. Under **Allowed tools**, list the tools the model may use, separated by commas,
+   or leave it blank to allow every tool the server offers.
+8. Leave **Enabled** on, or turn it off to keep the configuration without serving it.
+9. Click **Add MCP server**.
+
+Everything below is the same thing over the API.
 
 Manage a workspace's servers with the master key, under
 `/api/v1/workspaces/{workspace_id}/mcp-servers`:
@@ -427,4 +439,4 @@ are managed there.
 - `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
 
 For the hybrid platform contract behind `mcp_server_ids`, see
-[Hybrid-mode protocol](hybrid-mode-protocol.md).
+[Hybrid-mode protocol](../reference/hybrid-mode-protocol.md).

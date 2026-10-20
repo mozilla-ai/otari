@@ -12,12 +12,13 @@ import { Section } from "@/design-system/layout/Section"
 // after editing the guide is what keeps them aligned (see AGENTS.md).
 import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-import dashboardGuide from "../../../../docs/dashboard.md?raw"
+import dashboardGuide from "../../../../docs/guides/dashboard.md?raw"
 
-// The bundled guide lives among sibling docs (configuration.md, quickstart.md,
-// ...) that are not bundled here, so its relative links cannot resolve inside
-// the SPA. Point them at the rendered source on GitHub instead.
-const DOCS_SOURCE_BASE = "https://github.com/mozilla-ai/otari/blob/main/docs/"
+// The bundled guide links to other docs pages that are not bundled here, so its
+// relative links cannot resolve inside the SPA. Point them at the rendered
+// source on GitHub instead, resolved from the guide's own directory.
+const DOCS_SOURCE_BASE =
+  "https://github.com/mozilla-ai/otari/blob/main/docs/guides/"
 // The bundled guide is dashboard.md, so an in-page "#frag" link targets a
 // heading in that same file's source.
 const SELF_DOC = "dashboard.md"
@@ -35,7 +36,7 @@ function resolveDocHref(href: string | undefined): string | undefined {
   if (href.startsWith("#")) {
     return DOCS_SOURCE_BASE + SELF_DOC + href
   }
-  return DOCS_SOURCE_BASE + href.replace(/^\.\//, "")
+  return new URL(href, DOCS_SOURCE_BASE).toString()
 }
 
 function isExternal(href: string | undefined): boolean {
@@ -74,7 +75,7 @@ function dropSection(md: string, title: string): string {
 //      starts with `#` is left alone.
 //   2. The reader reached this page through a running, signed-in dashboard, so
 //      the first-run walkthrough (start the gateway, find the master key, sign
-//      in) is circular here. Drop it; it stays in docs/dashboard.md for readers
+//      in) is circular here. Drop it; it stays in docs/guides/dashboard.md for readers
 //      on GitHub and the /welcome tutorial. The remaining sections cover setup,
 //      navigation, and operating the dashboard after sign-in.
 const guideBody = dropSection(

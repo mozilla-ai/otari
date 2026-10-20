@@ -2,7 +2,7 @@
 
 Claude Code speaks the Anthropic Messages API, but a subscription-backed session
 never routes through Otari, so its spend is invisible here. `Importing external
-usage <../../docs/external-usage.md>`_ closes that gap going forward: point the
+usage <../../docs/guides/external-usage.md>`_ closes that gap going forward: point the
 OTLP exporter at a gateway and new sessions arrive. What the exporter cannot
 reach is the history already on disk from before it was configured, which for a
 daily Claude Code user is most of the usage there has ever been. This module
