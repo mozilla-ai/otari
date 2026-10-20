@@ -556,6 +556,65 @@ async def pricing_versions_page(
     return list((await db.execute(stmt)).scalars())
 
 
+async def priced_model_count(db: AsyncSession) -> int:
+    """How many model keys have a stored rate; a search or fetch instance's rate is not a model's."""
+    stmt = select(func.count(distinct(ModelPricing.model_key))).where(ModelPricing.kind == MODEL_KIND)
+    return (await db.execute(stmt)).scalar_one()
+
+
+async def price_in_effect(
+    db: AsyncSession, keys: Sequence[str], as_of: datetime, kind: PricingKind = MODEL_KIND
+) -> ModelPricing | None:
+    """The newest ``kind`` version in effect at ``as_of``, under the first of ``keys`` that has one."""
+    for key in keys:
+        stmt = (
+            select(ModelPricing)
+            .where(ModelPricing.kind == kind, ModelPricing.model_key == key, ModelPricing.effective_at <= as_of)
+            .order_by(ModelPricing.effective_at.desc())
+            .limit(1)
+        )
+        if pricing := (await db.execute(stmt)).scalar_one_or_none():
+            return pricing
+    return None
+
+
+async def price_history(db: AsyncSession, keys: Sequence[str], kind: PricingKind = MODEL_KIND) -> list[ModelPricing]:
+    """Every ``kind`` version, newest first, under the first of ``keys`` that has any."""
+    for key in keys:
+        stmt = (
+            select(ModelPricing)
+            .where(ModelPricing.kind == kind, ModelPricing.model_key == key)
+            .order_by(ModelPricing.effective_at.desc())
+        )
+        if pricings := list((await db.execute(stmt)).scalars()):
+            return pricings
+    return []
+
+
+async def latest_price_version(db: AsyncSession, key: str, kind: PricingKind = MODEL_KIND) -> ModelPricing | None:
+    """The newest stored ``kind`` version of ``key``, whatever date it takes effect."""
+    stmt = (
+        select(ModelPricing)
+        .where(ModelPricing.kind == kind, ModelPricing.model_key == key)
+        .order_by(ModelPricing.effective_at.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def price_version_at(
+    db: AsyncSession, keys: Sequence[str], effective_at: datetime, kind: PricingKind = MODEL_KIND
+) -> ModelPricing | None:
+    """The ``kind`` version that takes effect exactly at ``effective_at``, under the first of ``keys`` that has one."""
+    for key in keys:
+        stmt = select(ModelPricing).where(
+            ModelPricing.kind == kind, ModelPricing.model_key == key, ModelPricing.effective_at == effective_at
+        )
+        if pricing := (await db.execute(stmt)).scalar_one_or_none():
+            return pricing
+    return None
+
+
 async def current_rates_page(
     db: AsyncSession,
     *,
@@ -564,7 +623,7 @@ async def current_rates_page(
     as_of: datetime | None = None,
     hidden_providers: Collection[str] = (),
 ) -> tuple[list[ModelPricing], int]:
-    """One page of each priced model's current rate, with the total model count.
+    """One page of each priced key's current rate, of every kind, with the total key count.
 
     :func:`rates_in_force` answers what settlement would pick, so a key whose
     only row is scheduled for later has none. The catalog needs the wider view:

@@ -5,7 +5,6 @@ from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -44,7 +43,12 @@ from gateway.services.pricing_service import (
     default_model_pricing,
     default_pricing_enabled,
     default_pricing_reference,
+    latest_price_version,
     normalize_effective_at,
+    price_history,
+    price_in_effect,
+    price_version_at,
+    priced_model_count,
     pricing_versions_page,
     rates_in_force,
 )
@@ -326,10 +330,7 @@ async def preview_pricing_refresh(
             detail="Unable to fetch the latest models.dev data",
         ) from None
 
-    protected_model_count = (
-        await db.execute(select(func.count(distinct(ModelPricing.model_key))).where(ModelPricing.kind == MODEL_KIND))
-    ).scalar_one()
-    return _preview_response(preview, protected_model_count)
+    return _preview_response(preview, await priced_model_count(db))
 
 
 @operator_router.get("/refresh/pending", response_model=PricingRefreshPreviewResponse)
@@ -350,10 +351,7 @@ async def get_pending_pricing_refresh(
         ) from None
     if preview is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending models.dev refresh")
-    protected_model_count = (
-        await db.execute(select(func.count(distinct(ModelPricing.model_key))).where(ModelPricing.kind == MODEL_KIND))
-    ).scalar_one()
-    return _preview_response(preview, protected_model_count)
+    return _preview_response(preview, await priced_model_count(db))
 
 
 @operator_router.get("/snapshots", response_model=list[AcceptedSnapshotResponse])
@@ -460,44 +458,6 @@ async def reject_pricing_refresh(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to reject")
 
 
-async def _get_effective_pricing(
-    db: AsyncSession,
-    model_keys: list[str],
-    as_of: datetime,
-    kind: PricingKind = MODEL_KIND,
-) -> ModelPricing | None:
-    for key in model_keys:
-        stmt = (
-            select(ModelPricing)
-            .where(
-                ModelPricing.kind == kind,
-                ModelPricing.model_key == key,
-                ModelPricing.effective_at <= as_of,
-            )
-            .order_by(ModelPricing.effective_at.desc())
-            .limit(1)
-        )
-        pricing = (await db.execute(stmt)).scalar_one_or_none()
-        if pricing:
-            return pricing
-    return None
-
-
-async def _get_pricing_history(
-    db: AsyncSession, model_keys: list[str], kind: PricingKind = MODEL_KIND
-) -> list[ModelPricing]:
-    for key in model_keys:
-        stmt = (
-            select(ModelPricing)
-            .where(ModelPricing.kind == kind, ModelPricing.model_key == key)
-            .order_by(ModelPricing.effective_at.desc())
-        )
-        pricings = list((await db.execute(stmt)).scalars().all())
-        if pricings:
-            return pricings
-    return []
-
-
 def _policy_pricing_detail(config: GatewayConfig, request: SetPricingRequest) -> str:
     """400 detail for a price aimed at a routing policy name.
 
@@ -578,14 +538,7 @@ async def set_pricing(
     tiers_set = "pricing_tiers" in request.model_fields_set
     latest: ModelPricing | None = None
     if not (cache_read_set and cache_write_set and tiers_set):
-        latest = (
-            await db.execute(
-                select(ModelPricing)
-                .where(ModelPricing.kind == request.row_kind, ModelPricing.model_key == normalized_key)
-                .order_by(ModelPricing.effective_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        latest = await latest_price_version(db, normalized_key, request.row_kind)
     # ``to_usd`` on the way in: the request carries JSON numbers (floats) and
     # the columns are exact, so the conversion is spelled here rather than left
     # to happen invisibly at flush.
@@ -605,14 +558,7 @@ async def set_pricing(
         else ([] if tiers_set else (latest.pricing_tiers if latest else []))
     )
 
-    result = await db.execute(
-        select(ModelPricing).where(
-            ModelPricing.kind == request.row_kind,
-            ModelPricing.model_key == normalized_key,
-            ModelPricing.effective_at == effective_at,
-        )
-    )
-    pricing = result.scalar_one_or_none()
+    pricing = await price_version_at(db, [normalized_key], effective_at, request.row_kind)
 
     if pricing:
         pricing.input_price_per_million = to_usd(request.input_price_per_million)
@@ -717,7 +663,7 @@ async def get_pricing_history(
     """
 
     candidates = _candidates(model_key, kind, withheld)
-    pricings = await _get_pricing_history(db, candidates, kind)
+    pricings = await price_history(db, candidates, kind)
     if not pricings:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -749,7 +695,7 @@ async def get_pricing(
     """
 
     candidates = _candidates(model_key, kind, withheld)
-    pricing = await _get_effective_pricing(db, candidates, normalize_effective_at(as_of), kind)
+    pricing = await price_in_effect(db, candidates, normalize_effective_at(as_of), kind)
 
     if not pricing:
         raise HTTPException(
@@ -779,20 +725,8 @@ async def delete_pricing(
 
     if effective_at is not None:
         normalized_effective_at = normalize_effective_at(effective_at)
-        for key in candidates:
-            stmt = (
-                select(ModelPricing)
-                .where(
-                    ModelPricing.kind == kind,
-                    ModelPricing.model_key == key,
-                    ModelPricing.effective_at == normalized_effective_at,
-                )
-                .limit(1)
-            )
-            pricing = (await db.execute(stmt)).scalar_one_or_none()
-            if pricing:
-                targets = [pricing]
-                break
+        if version := await price_version_at(db, candidates, normalized_effective_at, kind):
+            targets = [version]
         if not targets:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -801,7 +735,7 @@ async def delete_pricing(
                 ),
             )
     else:
-        targets = await _get_pricing_history(db, candidates, kind)
+        targets = await price_history(db, candidates, kind)
         if not targets:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
