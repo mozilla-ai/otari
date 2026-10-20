@@ -6,7 +6,7 @@ series counts a trace as failed only for an error other than a tool's.
 backfilled from the spans each trace already holds.
 
 Revision ID: a8c2e4f6b0d1
-Revises: c7e1a3f5b9d2
+Revises: f0f9d05dafc6
 Create Date: 2026-10-19
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a8c2e4f6b0d1"
-down_revision: str | Sequence[str] | None = "c7e1a3f5b9d2"
+down_revision: str | Sequence[str] | None = "f0f9d05dafc6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -15,7 +15,7 @@ from sqlalchemy import Engine, create_engine, inspect, text
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "a8c2e4f6b0d1"
-_BEFORE = "c7e1a3f5b9d2"
+_BEFORE = "f0f9d05dafc6"
 _WORKSPACE = "00000000000000000000000000000001"
 
 _INSERT_TRACE = text(
