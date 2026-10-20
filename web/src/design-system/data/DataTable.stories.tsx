@@ -5,6 +5,8 @@ import { CopyableValue } from "../actions/CopyField"
 import { EmptyState } from "../feedback/EmptyState"
 import type { DataTableColumn, DataTableProps } from "./DataTable"
 import { DataTable } from "./DataTable"
+import { TablePagination } from "./TablePagination"
+import { useClientPagination } from "./useClientPagination"
 
 interface KeyRow {
   id: string
@@ -235,13 +237,20 @@ const MANY_ROWS: KeyRow[] = Array.from({ length: 40 }, (_, index) => ({
 
 /**
  * Taller than the screen can hold, the table scrolls inside itself under a
- * pinned header, so the controls above it and whatever sits below stay in
- * reach. Desk width only.
+ * pinned header, and the pager sits directly below it, outside the scroll.
+ * `scrollResetKey` takes the page, so each page opens at its first row. Desk
+ * width only.
  */
 export const LongTable: Story = {
-  // `scrollResetKey` takes a paginated table's page, so each page opens at
-  // its first row.
-  args: { rows: MANY_ROWS, scrollResetKey: 0 },
+  render: (args) => {
+    const { pageRows, pagination } = useClientPagination(MANY_ROWS)
+    return (
+      <div className="flex flex-col gap-2">
+        <DataTable {...args} rows={pageRows} scrollResetKey={pagination.page} />
+        <TablePagination {...pagination} />
+      </div>
+    )
+  },
 }
 
 /**

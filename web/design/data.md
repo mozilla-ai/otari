@@ -159,7 +159,8 @@ from a URL through `snapPageSize`. A page past the end moves to the last page
 that holds rows once the total is known. The controls hide while every row fits
 one page at the smallest size and nothing promises more, so a short table has
 no pager to explain; the range stays as an unseen live region, which is what a
-screen reader hears a result count from. There is no rule
+screen reader hears a result count from. A table whose endpoint returns every
+row pages it through `useClientPagination`. There is no rule
 under it, because the page ends there.
 
 Known cost, accepted: with the boxes gone, "which arrow can I press" rests on
