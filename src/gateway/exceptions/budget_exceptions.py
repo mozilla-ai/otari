@@ -240,7 +240,7 @@ class EndUserBudgetNotAllowedError(TenancyForbiddenError):
 
 
 class EndUserLimitReachedError(TenancyForbiddenError):
-    """A service key already has as many end users as its ``max_end_users`` allows."""
+    """Only a new or revived end user is refused; ones the key already has keep being served."""
 
     error_code = END_USER_LIMIT_REACHED
 
