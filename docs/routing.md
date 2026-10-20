@@ -268,6 +268,22 @@ Either way the recommendation is billed to the caller, and nothing
 else is dispatched. See
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
 
+The decision model is set in one of two places. A deployment operator adds
+routers on the dashboard's Subagent router page, in the deployment view, or
+through `/api/v1/routing/recommenders`: each is a decision provider
+(`typesafe`, `openrouter` or `llamacpp`), a model, an optional API base, the
+deployment's own API key for it, and a price per million input and output
+tokens. One router is switched on at a time, and it answers every
+recommendation: the most one call can cost (65,536 input and 1,024 output
+tokens at those prices) is held before the call, and the tokens the call used
+are charged after it. The key is stored encrypted with `OTARI_SECRET_KEY` and
+never returned; a listing shows only its last four characters. While no router
+has been added, `agent_recommender_model` in the configuration answers instead,
+priced from the deployment's own rows (see
+[Agent model recommendations](configuration.md#agent-model-recommendations)).
+Once one has been added, with every router switched off, nothing answers and the
+route says so.
+
 ## Managing policies at runtime
 
 Config-file policies apply to every workspace. Standalone operators can also

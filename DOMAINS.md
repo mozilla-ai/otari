@@ -159,6 +159,13 @@ hosted build binds a recommender of its own, so the composition root binds
 the implementation and no caller reads a mode. Neither implementation meters
 the call; the decisions scaffold does.
 
+It owns `agent_recommenders`, the decision models an operator adds for those
+recommendations, each with the deployment's key for it and a price per
+million tokens. At most one is switched on, and while none is added
+`agent_recommender_model` answers. `RoutingService` manages them, and a
+snapshot in `services/routing/` holds them for the recommender's quote, which
+reads no database.
+
 ### files
 
 Uploaded files: the Files API, the `file_objects` table, and a file's

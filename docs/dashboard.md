@@ -149,8 +149,15 @@ gateway process rather than to any organization on it:
   them here under the same names, listing what each becomes before anything
   moves.
 
-Accounts and Hosted providers are listed only for a deployment operator, and
-answer anyone else that they are not available to them.
+- Subagent router, the decision models that pick the model a coding agent's
+  subagent starts on, through `POST /api/v1/routing/recommend`. Each router is
+  a decision provider, a model, an optional API base, the deployment's key for
+  it, and a price per million input and output tokens. One is switched on at a
+  time, and a new router lands switched off unless none is on. While none has
+  been added, `agent_recommender_model` in `config.yml` answers instead.
+
+Accounts, Hosted providers and Subagent router are listed only for a
+deployment operator, and answer anyone else that they are not available to them.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the

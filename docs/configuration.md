@@ -1105,6 +1105,12 @@ These are a standalone deployment's settings. On otari.ai a managed
 recommender answers behind the same route, so neither applies there.
 `agent_recommender_model` is a `decision_providers` selector, resolved per
 request, so a deployment that never asks need not configure the provider.
+A router added on the dashboard's Subagent router page (or through
+`/api/v1/routing/recommenders`) overrides it: once the database holds one, the
+router switched on answers at its own price, and with every router switched off
+nothing does. Remove them all to go back to `agent_recommender_model`. Another
+replica picks up a change within 30 seconds. See
+[Agent model recommendations](routing.md#agent-model-recommendations).
 `agent_recommender_candidates` maps each model name, as Claude Code spells it,
 to what it is for; `null` is allowed when the name says enough. At least two
 are required, and at most 255, the limit a choice question has. The defaults
