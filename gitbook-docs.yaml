@@ -1,0 +1,11 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+site:
+  title: Otari docs preview
+  structure:
+    - type: space
+      key: otari
+      title: Otari
+      path: otari
+      default: true
+      content:
+        directory: ./otari

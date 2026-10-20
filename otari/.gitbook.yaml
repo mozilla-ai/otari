@@ -1,0 +1,115 @@
+# GitBook Git Sync configuration for the gitbook-docs branch.
+#
+# scripts/prepare_gitbook_site.py copies this file to the root of the built
+# site, so `root` is that root and not this repository's docs/ directory.
+#
+# `readme` stays index.md rather than the conventional README.md: the file is
+# linked from the project README and from code comments, and renaming it would
+# break those references for no gain here.
+
+root: ./
+
+structure:
+  readme: index.md
+  summary: SUMMARY.md
+
+# The menu groups pages by kind (Getting started, How-to guides, Integrations,
+# Reference, Learn), and GitBook builds a page's URL from its group, so these
+# keep the URLs of the earlier reader-based groups working. otari-ai's
+# frontend links several of them (docsRedirectMap.ts).
+redirects:
+  start-here/quickstart: quickstart.md
+  start-here/modes: modes.md
+  for-operators/deployment: deployment.md
+  for-operators/configuration: configuration.md
+  for-operators/dashboard: dashboard.md
+  for-operators/access-control: access-control.md
+  for-operators/workload-identity: workload-identity.md
+  for-operators/models: models.md
+  for-operators/provider-endpoints: provider-endpoints.md
+  for-operators/routing: routing.md
+  for-operators/health-checks: health-checks.md
+  for-operators/openai: providers/openai.md
+  for-operators/gemini: providers/gemini.md
+  for-integrators/api-reference: api-reference.md
+  for-integrators/tools: tools.md
+  for-integrators/mcp: mcp.md
+  for-integrators/files: files.md
+  for-integrators/guardrails: guardrails.md
+  for-integrators/agent-guardrails: agent-guardrails.md
+  for-integrators/agent-guardrails-reference: agent-guardrails-reference.md
+  for-integrators/use-with-claude-code: use-with-claude-code.md
+  for-integrators/use-with-codex: use-with-codex.md
+  for-integrators/use-with-opencode: use-with-opencode.md
+  for-integrators/use-with-pydantic-ai: use-with-pydantic-ai.md
+  for-integrators/use-with-langchain: use-with-langchain.md
+  for-integrators/use-with-langgraph: use-with-langgraph.md
+  for-integrators/chatgpt-subscription: chatgpt-subscription.md
+  for-integrators/traces: traces.md
+  for-integrators/external-usage: external-usage.md
+  for-integrators/sdk-compatibility: sdk-compatibility.md
+  for-platform-builders/hybrid-mode-protocol: hybrid-mode-protocol.md
+  for-platform-builders/code-execution-protocol: code-execution-protocol.md
+  for-integrators/api-reference/admin: api-endpoints/admin.md
+  for-integrators/api-reference/agent-telemetry: api-endpoints/agent-telemetry.md
+  for-integrators/api-reference/aliases: api-endpoints/aliases.md
+  for-integrators/api-reference/audio: api-endpoints/audio.md
+  for-integrators/api-reference/auth: api-endpoints/auth.md
+  for-integrators/api-reference/batches: api-endpoints/batches.md
+  for-integrators/api-reference/bootstrap: api-endpoints/bootstrap.md
+  for-integrators/api-reference/budgets: api-endpoints/budgets.md
+  for-integrators/api-reference/catalog: api-endpoints/catalog.md
+  for-integrators/api-reference/chat: api-endpoints/chat.md
+  for-integrators/api-reference/decisions: api-endpoints/decisions.md
+  for-integrators/api-reference/embeddings: api-endpoints/embeddings.md
+  for-integrators/api-reference/end-users: api-endpoints/end-users.md
+  for-integrators/api-reference/feedback: api-endpoints/feedback.md
+  for-integrators/api-reference/files: api-endpoints/files.md
+  for-integrators/api-reference/health: api-endpoints/health.md
+  for-integrators/api-reference/health-checks: api-endpoints/health-checks.md
+  for-integrators/api-reference/hooks: api-endpoints/hooks.md
+  for-integrators/api-reference/hosted-providers: api-endpoints/hosted-providers.md
+  for-integrators/api-reference/images: api-endpoints/images.md
+  for-integrators/api-reference/invitations: api-endpoints/invitations.md
+  for-integrators/api-reference/keys: api-endpoints/keys.md
+  for-integrators/api-reference/mcp: api-endpoints/mcp.md
+  for-integrators/api-reference/mcp-servers: api-endpoints/mcp-servers.md
+  for-integrators/api-reference/messages: api-endpoints/messages.md
+  for-integrators/api-reference/models: api-endpoints/models.md
+  for-integrators/api-reference/moderations: api-endpoints/moderations.md
+  for-integrators/api-reference/oauth: api-endpoints/oauth.md
+  for-integrators/api-reference/organization-budgets: api-endpoints/organization-budgets.md
+  for-integrators/api-reference/organization-guardrail-definitions: api-endpoints/organization-guardrail-definitions.md
+  for-integrators/api-reference/organization-guardrails: api-endpoints/organization-guardrails.md
+  for-integrators/api-reference/organization-keys: api-endpoints/organization-keys.md
+  for-integrators/api-reference/organization-pricing: api-endpoints/organization-pricing.md
+  for-integrators/api-reference/organization-traces: api-endpoints/organization-traces.md
+  for-integrators/api-reference/organization-usage: api-endpoints/organization-usage.md
+  for-integrators/api-reference/organizations: api-endpoints/organizations.md
+  for-integrators/api-reference/otel: api-endpoints/otel.md
+  for-integrators/api-reference/overview: api-endpoints/overview.md
+  for-integrators/api-reference/playground: api-endpoints/playground.md
+  for-integrators/api-reference/pricing: api-endpoints/pricing.md
+  for-integrators/api-reference/provider-endpoints: api-endpoints/provider-endpoints.md
+  for-integrators/api-reference/provider-keys: api-endpoints/provider-keys.md
+  for-integrators/api-reference/providers: api-endpoints/providers.md
+  for-integrators/api-reference/rate-limits: api-endpoints/rate-limits.md
+  for-integrators/api-reference/rerank: api-endpoints/rerank.md
+  for-integrators/api-reference/responses: api-endpoints/responses.md
+  for-integrators/api-reference/routing: api-endpoints/routing.md
+  for-integrators/api-reference/scoped-budgets: api-endpoints/scoped-budgets.md
+  for-integrators/api-reference/search: api-endpoints/search.md
+  for-integrators/api-reference/search-tools: api-endpoints/search-tools.md
+  for-integrators/api-reference/settings: api-endpoints/settings.md
+  for-integrators/api-reference/tool-settings: api-endpoints/tool-settings.md
+  for-integrators/api-reference/tools: api-endpoints/tools.md
+  for-integrators/api-reference/traces: api-endpoints/traces.md
+  for-integrators/api-reference/usage: api-endpoints/usage.md
+  for-integrators/api-reference/users: api-endpoints/users.md
+  for-integrators/api-reference/web-search: api-endpoints/web-search.md
+  for-integrators/api-reference/web-search-keys: api-endpoints/web-search-keys.md
+  for-integrators/api-reference/workspace-activation: api-endpoints/workspace-activation.md
+  for-integrators/api-reference/workspace-code-execution-policy: api-endpoints/workspace-code-execution-policy.md
+  for-integrators/api-reference/workspace-member-budget-policies: api-endpoints/workspace-member-budget-policies.md
+  for-integrators/api-reference/workspace-web-search: api-endpoints/workspace-web-search.md
+  for-integrators/api-reference/workspaces: api-endpoints/workspaces.md

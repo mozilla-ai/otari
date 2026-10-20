@@ -1,0 +1,63 @@
+# SDK compatibility
+
+Which SDK version works with which Otari version. SDKs and Otari release on
+separate tracks, linked by the spec version stamped into each SDK rather than by
+matching package numbers.
+
+## At a glance
+
+- SDK versions do not match Otari versions.
+- Each SDK has its own semver and release cycle.
+- Compatibility is based on the Otari/OpenAPI spec version stamped into the
+  SDK's generated core.
+- A change to `docs/public/openapi.json` triggers SDK regeneration PRs. It does
+  not publish SDKs by itself.
+
+## Compatibility rule
+
+Each SDK reports the Otari/spec version its generated core was built from.
+
+| Language   | Accessor                 |
+|------------|--------------------------|
+| python     | `otari.__spec_version__` |
+| typescript | `SPEC_VERSION`           |
+| go         | `otari.SpecVersion`      |
+| rust       | `otari::SPEC_VERSION`    |
+
+- An SDK generated from spec version `X` should work with any Otari whose spec
+  version is greater than or equal to `X`, as long as Otari has not removed an
+  endpoint or field that SDK uses.
+- New endpoints are additive. An older SDK simply does not expose them.
+
+To find the running gateway version, check `/api/v1/health/readiness`, or
+`/api/v1/openapi.json` (`info.version`) when docs are enabled.
+
+## Compatibility matrix
+
+Use the row for the Otari/spec version you run, then choose at least that SDK
+version for your language.
+
+| Otari / spec version       | otari-sdk-python | otari-sdk-ts | otari-sdk-go | otari-sdk-rust |
+|----------------------------|------------------|--------------|--------------|----------------|
+| `0.0.0-dev` (unreleased)   | unreleased       | unreleased   | unreleased   | unreleased     |
+
+Until tagged SDK releases land, the SDKs report `0.0.0-dev`.
+
+## Why releases are independent
+
+The SDKs ship as a generated typed core plus a hand-written shell. The shell
+covers behavior the generator does not provide, including:
+
+- streaming support
+- typed error mapping
+- ergonomic methods and auth helpers
+
+Because of that split, an SDK may need shell work after a spec change, and an
+SDK may also ship shell-only fixes with no Otari release.
+
+## Related
+
+- [Releasing](https://github.com/mozilla-ai/otari/blob/main/RELEASE.md#sdk-releases)
+  for how SDK regeneration and releases run (maintainers)
+- [`scripts/sdk_codegen/README.md`](https://github.com/mozilla-ai/otari/blob/main/scripts/sdk_codegen/README.md)
+  for codegen details and spec version stamping
