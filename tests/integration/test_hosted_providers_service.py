@@ -139,6 +139,12 @@ async def _offered(db: AsyncSession, provider: str) -> dict[str, bool]:
     return {row.model: row.enabled for row in rows}
 
 
+async def _reasons(db: AsyncSession, provider: str) -> dict[str, str | None]:
+    """Why each offered row is off, or None for one that is on."""
+    rows = (await db.execute(select(HostedProviderModel).where(HostedProviderModel.provider == provider))).scalars()
+    return {row.model: row.disabled_reason for row in rows}
+
+
 async def _versions(db: AsyncSession, model_key: str) -> list[ModelPricing]:
     result = await db.execute(
         select(ModelPricing).where(ModelPricing.model_key == model_key).order_by(ModelPricing.effective_at)
@@ -747,7 +753,6 @@ async def test_refresh_prices_a_model_whose_rates_were_deleted_or_switches_it_of
 async def test_a_model_the_operator_switched_off_stays_off_when_a_refresh_prices_it_again(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A row does not record why it is off, so a refresh only ever turns the switch off."""
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
     service = _service(async_db)
     await _provider(service, monkeypatch, "gpt-4o")
@@ -756,11 +761,85 @@ async def test_a_model_the_operator_switched_off_stays_off_when_a_refresh_prices
     await async_db.execute(delete(ModelPricing).where(ModelPricing.model_key == "openai:gpt-4o"))
     await async_db.commit()
 
+    _defaults(monkeypatch, {})
+    await service.refresh_models("openai")
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
     outcome = await service.refresh_models("openai")
 
     assert outcome.repriced == ["gpt-4o"]
-    assert await _offered(async_db, "openai") == {"gpt-4o": False}
+    assert await _reasons(async_db, "openai") == {"gpt-4o": "operator"}
     assert await service.resolve("openai", "gpt-4o", organization_id=None) is None
+
+
+async def test_a_model_offered_before_the_dataset_priced_it_is_served_once_a_refresh_prices_it(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o", "gpt-5-1017")
+    assert await _reasons(async_db, "openai") == {"gpt-4o": None, "gpt-5-1017": "unpriced"}
+    assert await service.resolve("openai", "gpt-5-1017", organization_id=None) is None
+
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-5-1017": ("3", "12")})
+    outcome = await service.refresh_models("openai")
+
+    assert outcome.repriced == ["gpt-5-1017"]
+    assert await _offered(async_db, "openai") == {"gpt-4o": True, "gpt-5-1017": True}
+    assert await _reasons(async_db, "openai") == {"gpt-4o": None, "gpt-5-1017": None}
+    assert await service.resolve("openai", "gpt-5-1017", organization_id=None) is not None
+
+
+async def test_a_model_that_loses_its_rates_comes_back_once_a_refresh_prices_it(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+    await async_db.execute(delete(ModelPricing).where(ModelPricing.model_key == "openai:gpt-4o"))
+    await async_db.commit()
+
+    _defaults(monkeypatch, {})
+    await service.refresh_models("openai")
+    assert await _reasons(async_db, "openai") == {"gpt-4o": "unpriced"}
+
+    _defaults(monkeypatch, {"gpt-4o": ("2", "8")})
+    await service.refresh_models("openai")
+
+    assert await _offered(async_db, "openai") == {"gpt-4o": True}
+
+
+async def test_pricing_a_held_model_by_hand_serves_it_unless_the_same_request_switches_it_off(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "brand-new", "also-new")
+    models = {model.model: model.id for model in (await service.list_models("openai")).data}
+
+    served = await service.update_model(
+        "openai", models["brand-new"], HostedModelUpdateRequest(input_price_per_million=1, output_price_per_million=2)
+    )
+    refused = await service.update_model(
+        "openai",
+        models["also-new"],
+        HostedModelUpdateRequest(input_price_per_million=1, output_price_per_million=2, enabled=False),
+    )
+
+    assert (served.enabled, refused.enabled) == (True, False)
+    assert await _reasons(async_db, "openai") == {"brand-new": None, "also-new": "operator"}
+
+
+async def test_switching_a_model_on_by_hand_clears_its_reason(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "brand-new")
+    [model] = (await service.list_models("openai")).data
+
+    await service.update_model("openai", model.id, HostedModelUpdateRequest(enabled=True))
+
+    assert await _reasons(async_db, "openai") == {"brand-new": None}
 
 
 async def test_two_refreshes_racing_leave_the_loser_with_a_conflict_not_a_crash(
@@ -1349,3 +1428,18 @@ async def test_a_change_to_a_provider_drops_its_cached_listing(
     cache.set("openai", [Model(id="stale", object="model", created=0, owned_by="openai")])
     await service.delete_provider("openai")
     assert cache.stale("openai") is None
+
+
+async def test_a_model_switched_off_in_bulk_stays_off_through_a_refresh(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the health checks' switch-off calls: an operator's choice, so a priced refresh leaves it off."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+
+    assert await service.switch_off_models({"openai": ["gpt-4o"]}) == 1
+    await service.refresh_models("openai")
+
+    assert await _offered(async_db, "openai") == {"gpt-4o": False}
+    assert await _reasons(async_db, "openai") == {"gpt-4o": "operator"}

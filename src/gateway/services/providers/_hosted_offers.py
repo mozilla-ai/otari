@@ -11,7 +11,7 @@ version carrying ``SEED_ORIGIN``, while the deployment consults that dataset at
 all. A refresh moves a seeded version with the dataset and leaves every other
 origin alone, because those are rates somebody chose. A model nothing prices
 is offered but not served, so a model the dataset has not caught up with
-cannot be billed at nothing.
+cannot be billed at nothing; a refresh serves it once the dataset prices it.
 
 Every method that writes runs inside a block the caller opened. The dataset
 walk runs off the loop and outside any block.
@@ -21,7 +21,12 @@ from collections.abc import Collection, Mapping, Sequence
 
 from gateway.exceptions.providers_exceptions import HostedModelAlreadyOfferedError
 from gateway.models.pricing import SEED_ORIGIN, ModelPricing, PriceSource
-from gateway.models.providers import HostedProviderModel
+from gateway.models.providers import (
+    DISABLED_BY_OPERATOR,
+    DISABLED_UNPRICED,
+    HostedModelDisabledReason,
+    HostedProviderModel,
+)
 from gateway.repositories.providers import HostedModelConflict, HostedProviderModelRepository
 from gateway.schemas.providers import HostedModelCreateRequest, HostedModelRates, HostedModelUpdateRequest
 from gateway.services.pricing import DeploymentPricingService
@@ -38,6 +43,20 @@ _CACHE_RATE_FIELDS = (
 
 def _key(provider: str, model: str) -> str:
     return f"{provider}:{model}"
+
+
+def _hold_for_a_price(row: HostedProviderModel) -> None:
+    """Switch a row off for want of a rate, unless an operator already switched it off."""
+    if row.disabled_reason != DISABLED_BY_OPERATOR:
+        row.enabled = False
+        row.disabled_reason = DISABLED_UNPRICED
+
+
+def _serve_once_priced(row: HostedProviderModel) -> None:
+    """Switch back on a row that was off only for want of a rate."""
+    if row.disabled_reason == DISABLED_UNPRICED:
+        row.enabled = True
+        row.disabled_reason = None
 
 
 class HostedOffers:
@@ -86,25 +105,42 @@ class HostedOffers:
             keys[name]: default for name, default in defaults.items() if name in keys and keys[name] not in stored
         }
         await self.pricing.store_defaults(seeded, now)
-        enabled = {name: serves_unlisted or keys[name] in stored or keys[name] in seeded for name in names}
+        disabled: dict[str, HostedModelDisabledReason] = (
+            {}
+            if serves_unlisted
+            else {name: DISABLED_UNPRICED for name in names if keys[name] not in stored and keys[name] not in seeded}
+        )
         try:
-            return await self.models.create_many(provider, names, enabled=enabled)
+            return await self.models.create_many(provider, names, disabled=disabled)
         except HostedModelConflict as conflict:
             raise HostedModelAlreadyOfferedError(provider, conflict.model) from conflict
+
+    def serve_once_priced(self, row: HostedProviderModel) -> None:
+        """Switch back on a row that was off only for want of a rate, as a rate just given for it allows."""
+        _serve_once_priced(row)
+
+    def switch_by_operator(self, row: HostedProviderModel, enabled: bool) -> None:
+        """Set the switch as an operator chose it: off stays off until an operator switches it on."""
+        row.enabled = enabled
+        row.disabled_reason = None if enabled else DISABLED_BY_OPERATOR
+
+    async def switch_off_by_operator(self, provider: str, models: Collection[str]) -> int:
+        """Switch these models off under ``provider`` as an operator's choice. Returns how many were on."""
+        return await self.models.switch_off(provider, models, reason=DISABLED_BY_OPERATOR)
 
     async def reseed(
         self, provider: str, defaults: Mapping[str, ModelPricing], *, serves_unlisted: bool = False
     ) -> list[str]:
-        """Move every seeded rate to today's default, and price what nothing prices any more.
+        """Move every seeded rate to today's default, price what nothing prices, and serve what is now priced.
 
-        A version somebody chose is left alone. A model whose rates are gone,
-        because they were deleted since the offer, is seeded again where the
-        dataset prices it and switched off where it does not, so the offer rule
-        holds after the fact as well as at the offer. The switch is only ever
-        turned off here: a row does not record why it is off, and a model the
-        operator refused must not come back because a rate appeared. A
-        provider that ``serves_unlisted`` models serves them unpriced, so none
-        is switched off. Returns the models whose rate moved.
+        A version somebody chose is left alone. A model with no rate, because
+        nothing priced it at the offer or its rates were deleted since, is
+        seeded where the dataset prices it and held off where it does not, so
+        the offer rule holds after the fact as well as at the offer. A row held
+        off for want of a rate comes back on once it has one; a row an operator
+        switched off stays off. A provider that ``serves_unlisted`` models
+        serves them unpriced, so none is held. Returns the models whose rate
+        moved.
         """
         rows = await self.models.list_all_for_provider(provider)
         if not rows:
@@ -120,11 +156,13 @@ class HostedOffers:
             if version is None:
                 if default is None:
                     if not serves_unlisted:
-                        row.enabled = False
+                        _hold_for_a_price(row)
                     continue
                 moved[keys[row.model]] = default
                 repriced.append(row.model)
+                _serve_once_priced(row)
                 continue
+            _serve_once_priced(row)
             if version.origin != SEED_ORIGIN or default is None or self.pricing.rates_match(version, default):
                 continue
             moved[keys[row.model]] = default
