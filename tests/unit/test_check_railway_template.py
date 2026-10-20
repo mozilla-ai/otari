@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import io
 import json
 import sys
 from pathlib import Path
@@ -349,3 +350,11 @@ def test_main_refuses_to_publish_without_a_token(
 
     assert check.main(["--publish-readme"]) == 2
     assert "RAILWAY_API_TOKEN" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("payload", [b"null", b"[]", b'"error"'])
+def test_a_body_that_is_not_an_object_is_a_fetch_error(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> None:
+    monkeypatch.setattr(check.urllib.request, "urlopen", lambda request, timeout: io.BytesIO(payload))
+
+    with pytest.raises(check.FetchError, match="not a JSON object"):
+        check.fetch_template("otari")

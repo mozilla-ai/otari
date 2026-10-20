@@ -77,6 +77,8 @@ def _graphql(query: str, variables: dict[str, Any], token: str | None = None) ->
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise FetchError(f"could not reach Railway: {exc}") from exc
 
+    if not isinstance(body, dict):
+        raise FetchError("Railway answered with a body that is not a JSON object")
     if body.get("errors"):
         raise FetchError("; ".join(error.get("message", str(error)) for error in body["errors"]))
     data: dict[str, Any] = body.get("data") or {}
