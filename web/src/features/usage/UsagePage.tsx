@@ -14,6 +14,8 @@ import type {
 import { IconButton } from "@/design-system/actions/IconButton"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { TablePagination } from "@/design-system/data/TablePagination"
+import { useClientPagination } from "@/design-system/data/useClientPagination"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -111,8 +113,6 @@ const DEFAULT_PRESET = findPreset(
   USAGE_PRESETS,
   USAGE_DEFAULT_KEY,
 ) as RangePreset
-
-const TABLE_TOP_N = 15
 
 // ---------- the analytics chart: metric × group-by ----------
 //
@@ -217,6 +217,8 @@ interface BreakdownProps {
   // subset of what the row counted.
   onDrill?: (key: string) => void
   loading: boolean
+  /** Returns the table to its first page; the page's filters, not the rows. */
+  resetKey: unknown
 }
 
 // One breakdown dimension. Rows are spend-ranked with an inline share-of-total
@@ -245,10 +247,9 @@ function BreakdownTable({
   rowName = serverRowName,
   onDrill,
   loading,
+  resetKey,
 }: BreakdownProps) {
-  const [showAll, setShowAll] = useState(false)
-  const visible = showAll ? rows : rows.slice(0, TABLE_TOP_N)
-  const hidden = rows.length - visible.length
+  const { pageRows, pagination } = useClientPagination(rows, resetKey)
 
   // Fold and deleted-user rows both carry a null key and are not drill targets;
   // give them stable sentinel keys so the collection stays unique.
@@ -332,10 +333,11 @@ function BreakdownTable({
       <DataTable
         ariaLabel={`Spend by ${dimensionLabel.toLowerCase()}`}
         columns={columns}
-        rows={visible}
+        rows={pageRows}
         getRowKey={rowKey}
         isLoading={loading}
         emptyContent={emptyLabel}
+        scrollResetKey={pagination.page}
         onRowAction={
           onDrill
             ? (key) => {
@@ -347,16 +349,10 @@ function BreakdownTable({
             : undefined
         }
       />
-      {!loading && hidden > 0 ? (
-        <Button size="sm" variant="ghost" onPress={() => setShowAll(true)}>
-          Show all {rows.length}
-        </Button>
-      ) : null}
-      {!loading && showAll && rows.length > TABLE_TOP_N ? (
-        <Button size="sm" variant="ghost" onPress={() => setShowAll(false)}>
-          Show top {TABLE_TOP_N}
-        </Button>
-      ) : null}
+      <TablePagination
+        {...pagination}
+        label={`spend by ${dimensionLabel.toLowerCase()}`}
+      />
     </TableScrollFrame>
   )
 }
@@ -370,13 +366,16 @@ function ToolBreakdownTable({
   totalCost,
   onDrill,
   loading,
+  resetKey,
 }: {
   rows: UsageSummary["by_tool"]
   totalCost: number
   // Optional for the reason BreakdownTable's is.
   onDrill?: (tool: string) => void
   loading: boolean
+  resetKey: unknown
 }) {
+  const { pageRows, pagination } = useClientPagination(rows, resetKey)
   const columns: DataTableColumn<UsageSummary["by_tool"][number]>[] = [
     {
       id: "tool",
@@ -443,11 +442,12 @@ function ToolBreakdownTable({
     },
   ]
   return (
-    <TableScrollFrame className="otari-breakdown">
+    <TableScrollFrame className="otari-breakdown flex flex-col gap-2">
       <DataTable
         ariaLabel="Spend by gateway-run tool"
         columns={columns}
-        rows={rows}
+        rows={pageRows}
+        scrollResetKey={pagination.page}
         getRowKey={(row) => row.tool}
         isLoading={loading}
         emptyContent="No gateway-run tool calls in this range."
@@ -456,6 +456,7 @@ function ToolBreakdownTable({
         // nothing is worse than one that never claimed to be.
         onRowAction={onDrill ? (key) => onDrill(String(key)) : undefined}
       />
+      <TablePagination {...pagination} label="spend by tool" />
     </TableScrollFrame>
   )
 }
@@ -1546,6 +1547,8 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 </TabRow>
               </div>
               <BreakdownTable
+                key={primaryDim}
+                resetKey={filters}
                 dimensionLabel={activePrimary.label}
                 rows={activePrimary.rows}
                 totalCost={totals?.cost ?? 0}
@@ -1578,6 +1581,8 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 </TabRow>
               </div>
               <BreakdownTable
+                key={secondaryDim}
+                resetKey={filters}
                 dimensionLabel={activeSecondary.label}
                 rows={activeSecondary.rows}
                 totalCost={totals?.cost ?? 0}
@@ -1612,6 +1617,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 </p>
               </div>
               <ToolBreakdownTable
+                resetKey={filters}
                 rows={toolRows}
                 totalCost={totals?.cost ?? 0}
                 onDrill={orgWide ? undefined : (tool) => drillTo({ tool })}
